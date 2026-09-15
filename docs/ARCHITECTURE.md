@@ -1,230 +1,244 @@
-# Nexus — Architecture
+# Nexus — Architecture (Updated)
 
-## 1. System Overview
+## System Overview
 
-Nexus is a **decentralized multi-agent orchestration system** where specialized AI agents collaborate autonomously through a shared graph database (the "Lattice"). Instead of one central boss, agents vote on decisions, score each other's work, and govern themselves.
-
-**Core Philosophy**: A self-organizing team of expert AI agents that improve themselves over time.
+Nexus is a **decentralized multi-agent orchestration system** where specialized AI agents collaborate autonomously through a shared graph database (the "Lattice"). Agents vote, score each other, and govern themselves.
 
 ---
 
-## 2. Core Components
+## Core Components
 
 | Component | Purpose |
 |-----------|---------|
 | **Lattice** | Shared graph DB (Neo4j + Qdrant) for coordination & memory |
 | **Gateway/Butler** | Message relay from interfaces → agents (3 modes) |
-| **Domain Agents** | Specialized AI agents (finance, coding, research, etc.) |
-| **Buddy** | UI rendering service (forked Space-Agent) |
+| **Domain Agents** | 8 specialized managers (Finance, Personal, Health, etc.) |
+| **Sub-Agents** | Dynamically spawned specialists via template factory |
+| **Buddy** | UI rendering agent (forked Space-Agent) |
 | **Governance** | Voting, proposals, reputation, access control |
 | **SMS** | Semantic Memory Store (retrieval, secrets, spawn, dream, librarian) |
-| **External Coordinator** | Router for external agents |
-| **Bridges** | Adapters for external coding agents (12 bridges) |
-| **Skills** | Modular capabilities (LLM harness, prompt architecture, etc.) |
-| **Addons** | Optional modules (sandbox, simulation, adversarial) |
+| **QA Critic** | Quality enforcement with parallel rule execution |
+| **Sandbox** | Isolated code execution (Clean Room + Nexus Mirror) |
 
 ---
 
-## 3. Gateway System (The Butler)
+## Gateway System (Butler)
 
-### 3.1 Three Gateway Modes
-
+### Three Modes
 | Mode | Butler | Buddy | Use Case |
 |------|--------|-------|----------|
-| **Butler Only** | ✓ routes directly | ✗ | Headless, API-only, lightweight |
+| **Butler Only** | ✓ routes directly | ✗ | Headless, API-only |
 | **Separate** (RECOMMENDED) | ✓ routes to Buddy | ✓ separate process | Production |
-| **Merged** | ✓ in-process | ✓ same process | Dev/demo/single-container |
+| **Merged** | ✓ in-process | ✓ same process | Dev/demo |
 
-### 3.2 Gateway Responsibilities
-- Receives messages from interfaces (Telegram, Discord, CLI, VS Code)
-- Routes to correct agent(s) in the Lattice
-- Handles governance — votes, escalations, system healing
-- Monitors health (CPU, memory, disk, agent count, lattice status)
+### How the Butler Routes
 
-### 3.3 What the Butler Does NOT Do
-- ❌ No intelligence of its own ("dumb relay")
-- ❌ No local state (except config)
-- ❌ Doesn't make decisions — agents in the Lattice do that
-- ❌ Doesn't store memory — the Lattice does
+When you text: "Show my budget pie chart"
 
-### 3.4 Gateway Advantages
-1. **Separation of Concerns** — Agents: domain expertise; Butler: interface plumbing + governance
-2. **Unified Multi-Interface** — One gateway supports all interfaces simultaneously
-3. **Centralized Governance & Safety** — Gatekeeper handles rate limiting, auth, risk scoring once
-4. **Observability** — All traffic passes through one point → complete audit trail
-5. **Simplified Agent Code** — Agents focus on domain tasks, not interfaces
-6. **Security Boundary** — Butler is the only external attack surface
-7. **Graceful Degradation** — If one interface fails, others keep working
+1. **Parse**: Extract keywords, intent, entities
+2. **Consult Agent Registry**: Query Lattice for agent capabilities
+3. **Match & Score**: Keyword overlap + semantic similarity + peer score + load + history
+4. **Pick Winner**: Highest score wins
+5. **Delegate**: Route to domain agent
 
-### 3.5 Butler vs Buddy Trade-off
-
-**Merged Mode**: Butler IS Buddy (single process)
-- Simpler deployment, lower latency
-- Couples interface to coordination layer
-
-**Separate Mode**: Butler + Buddy as two processes
-- Butler stays pure (auth, rate-limit, route only)
-- Buddy is a full Nexus node with UI capabilities
-- Clean separation: swap UI without touching gateway
-- Can scale Buddy independently
-
----
-
-## 4. Buddy — UI Agent
-
-### 4.1 What It Is
-Buddy is a fork of [agent0ai/space-agent](https://github.com/agent0ai/space-agent), adapted as a Nexus node. When upstream updates → Buddy merges/rebase. If upstream stops → Nexus continues independently.
-
-### 4.2 Architecture
-- `SpaceAgentNode(BaseAgent)` — inherits from Nexus BaseAgent
-- `BuddyAdapter(NodeInterface)` — registers Buddy with capabilities: ui_rendering, user_interface, visualization, agent_control
-- `MessageRouter` — routes user queries to domain agents via coordinator
-- `WebSocket server` — connects browser UI to Buddy's inbox/outbox
-- `personality.md` — Buddy's system prompt/personality
-
-### 4.3 Two-Page Mission Control UI
-1. **Mission Control** (default page) — domain agent summaries, charts, etc.
-2. **Buddy Page** — accessed via floating icon; Buddy renders complex visualizations here
-
-### 4.4 Domain Agent → Buddy Rendering
-Domain agents can request Buddy rendering by setting `render_via: "buddy"` in responses:
+### Routing Decision Tree (Separate Mode)
 ```python
-{
-    "text": "Spending breakdown",
-    "render_via": "buddy",
-    "component": "chart_bar",
-    "data": {"labels": [...], "values": [...]}
-}
+if message.target == "buddy" or message.command.startswith("/buddy"):
+    → Route to Buddy conversation
+elif message.target and message.target.startswith("@"):
+    → Route to mentioned domain agent
+else:
+    → Route to Buddy (default, Buddy decides)
 ```
 
-### 4.5 Buddy Fork Sync Strategy
-Use **Git subtree** — own the repo, pull upstream regularly:
-```bash
-git remote add buddy-upstream https://github.com/agent0ai/space-agent.git
-git subtree pull --prefix=gateways/buddy buddy-upstream main --squash
-```
+### Butler Does NOT Do
+- ❌ No intelligence ("dumb relay")
+- ❌ No decisions — agents decide
+- ❌ No memory storage — Lattice stores
+- ❌ No local state (except config)
+
+### Resilience Features (Downside Fixes)
+1. **Circuit Breaker** — Auto-opens after failures, half-open for recovery
+2. **Health Monitoring** — Per-agent health scores (0-1)
+3. **Confidence Classifier** — Keyword-based domain classification with context
+4. **Response Validator** — Auto-detects `render_via="buddy"` flag
+5. **Buddy Fallback** — Falls back to Mission Control when Buddy down
+6. **Session Context** — Tracks last 10 queries per user
+7. **Retry Logic** — 2 retries with exponential backoff (1s, 2s)
+8. **Clarification** — Asks user when confidence < threshold
 
 ---
 
-## 5. Sandbox Addon
+## Buddy — UI Agent
 
-### 5.1 Purpose
-Isolated execution environments where agents can safely run potentially breaking code. Multiple agents can use sandboxes concurrently.
+### What It Is
+Buddy is a fork of [agent0ai/space-agent](https://github.com/agent0ai/space-agent), adapted as a Nexus node. It renders visualizations in the browser.
 
-### 5.2 Two Modes
+### Two Pages
+1. **Mission Control** (default) — Domain agent summaries
+2. **Buddy Page** (floating icon) — Complex visualizations
 
-**Mode 1: Clean Room** (EPHEMERAL)
-- Empty Python environment + minimal OS
-- For pure algorithm testing, math, data processing
-- No Nexus system access
+### Rendering Flow
+```
+Domain Agent → returns {render_via: "buddy", component: "chart_pie", data: {...}}
+    → Butler sees render_via flag → routes to Buddy
+    → Buddy renders via ComponentRegistry → returns HTML
+    → User sees chart in browser
+```
 
-**Mode 2: Nexus Mirror** (SNAPSHOT — "Sandbox Gemini")
-- Full Nexus codebase inside sandbox
-- For testing system changes before mainstream rollout
-- Used by self-rectification nodes to validate upgrades
-- Isolated Lattice DB instance
-- Auto-test execution (pytest)
+### Built-in Components
+- chart_bar (vertical/horizontal SVG bars)
+- chart_line (SVG polyline)
+- chart_pie (CSS conic-gradient)
+- table (sortable grids)
+- card (key-value displays)
+- form (interactive inputs)
 
-### 5.3 Backend Options
+### Buddy Personality
+Defined in `buddy/personality.md` — injected as system prompt. Proactive, concise, uses emojis sparingly.
 
-| Backend | Isolation | Startup | Use Case |
-|---------|-----------|---------|----------|
-| **Docker** (Primary) | Strong (namespaces + cgroups) | ~50-200ms | Production, untrusted code |
-| **Process** (Fallback) | Medium (RLIMIT) | ~5-20ms | Trusted code, fast iteration |
-| **RestrictedPython** (Optional) | Weak | ~1ms | Development only |
+---
 
-### 5.4 Why Docker as Primary
-1. Strong isolation: Linux namespaces (PID, network, mount, IPC, UTS) + cgroups
-2. Filesystem isolation: Read-only root, writable tmpfs, volume mounts
-3. Network isolation: Can disable network entirely (--network none)
-4. Security: seccomp filters, AppArmor, --cap-drop ALL, no-new-privileges
-5. Snapshotting: Docker commit for instant state restore
+## Hierarchical Domain Agent System
 
-### 5.5 Why NOT RestrictedPython
-- Dependency missing (not in pyproject.toml)
-- In-process: Buggy code can segfault interpreter
-- Known escape techniques exist
-- No filesystem/resource/network isolation
-- Unmaintained (last release 2018)
+### Architecture (Not Flat Parallel)
+```
+Domain Agent (PersonalAgent)
+    ↓ analyzes query
+    ↓ determines specializations needed
+    ↓ spawns ONLY relevant children
+    ↓ runs them in parallel
+    ↓ synthesizes results
+    → returns response
+```
 
-### 5.6 Security Model
-Docker backend guarantees:
-- ✗ Host filesystem access (mount namespace, read-only root)
-- ✗ Network access (network namespace = none)
-- ✗ Resource exhaustion (cgroups: CPU, memory, disk, PIDs)
-- ✗ Privilege escalation (drop capabilities, no-new-privileges)
-- ✗ Host process visibility (PID namespace)
-- ✗ Device access (no /dev mounts)
+### Key Difference: Dynamic, Not Fixed
+**Old (Flat)**: Always spawn all 6 sub-agents
+**New (Hierarchical)**: Analyze query → spawn only 1-3 relevant specialists
 
-### 5.7 Concurrency
-- Per-subject `asyncio.Semaphore` (configurable limit per agent, default 5)
-- Global registry: `dict[sandbox_id, (backend, config)]`
+Example: "headache" → only spawns `personal_doctor` (not all 6)
+
+### Template-Driven
+- Specializations are YAML templates, not code
+- Non-developers can create new agent types
+- Hot-swappable without redeployment
+
+### AgentBuilder Utility
+Fluent API for constructing child agents:
+```python
+AgentBuilder(factory)
+    .with_template('doctor', 'personal')
+    .with_override('model.temperature', 0.2)
+    .build()
+```
+
+### 8 Domain Agents
+| Domain | Sub-Agent Specializations |
+|--------|--------------------------|
+| **Personal** | habits, scheduling, relationships, life_coordination, health, fitness |
+| **Finance** | market_analysis, portfolio, risk, news |
+| **Work** | (template-ready) |
+| **Coding** | (template-ready) |
+| **Social** | (template-ready) |
+| **Learning** | (template-ready) |
+| **Research** | (template-ready) |
+| **Business** | (template-ready) |
+
+### Factory Pattern
+```python
+agent = factory.create(
+    template_name="market_analyst",
+    domain="finance",
+    instance_id="market_analyst_001"
+)
+```
+
+### Self-Extending Meta-System (Future)
+The system watches for expertise gaps and designs new agents:
+
+1. **ExpertiseGapDetector** — Monitors queries, extracts skills, finds gaps
+2. **AgentDesigner** — Generates template proposals from gap clusters
+3. **Approval UI** — "You seem to need a Database Engineer. Create?"
+4. **TemplateInstaller** — Saves approved template, registers with system
+
+Example growth:
+- Week 1: Personal domain only
+- Week 2: User asks database questions → System suggests Database Engineer
+- Week 3: User asks crypto DB questions → System suggests Crypto DB Specialist
+
+---
+
+## Sandbox Addon
+
+### Two Modes
+**Mode 1: Clean Room** — Empty Python environment
+**Mode 2: Nexus Mirror (Gemini)** — Full Nexus codebase clone for testing changes
+
+### Backends
+| Backend | Isolation | Use Case |
+|---------|-----------|----------|
+| Docker (Primary) | Strong (namespaces + cgroups) | Production, untrusted code |
+| Process (Fallback) | Medium (RLIMIT) | Trusted code, fast iteration |
+| RestrictedPython (Optional) | Weak | Development only |
+
+### Why Docker
+- Filesystem, network, process isolation
+- Resource limits (CPU, memory, PIDs)
+- seccomp/AppArmor security
+- Snapshot/restore via docker commit
+
+### Concurrency
+- Per-subject asyncio.Semaphore (default 5)
 - FIFO wait queue when limit reached
-- Background cleanup: removes aged sandboxes (>1h default)
+- Background cleanup of aged sandboxes
 
-### 5.8 Lifecycle
-```
-CREATING → READY → RUNNING → (COMPLETED | ERROR) → DESTROYED
-                     ↓
-                (PAUSED / SNAPSHOT)
-```
-
-### 5.9 Rollout Stages (Canary Pattern)
-After sandbox validates a change:
-1. **Phase 1**: Canary (1 node)
-2. **Phase 2**: Staging (10% of nodes)
-3. **Phase 3**: Gradual (33% → 66% → 100%)
-4. **Phase 4**: Mainstream (merge to main)
+### Security Guarantees
+- ✗ Host filesystem access
+- ✗ Network access (default none)
+- ✗ Resource exhaustion
+- ✗ Privilege escalation
+- ✗ Host process visibility
 
 ---
 
-## 6. Adversarial/QA Critic Addon
+## QA Critic Addon
 
-### 6.1 Purpose
-A **quality enforcement system** (NOT red teaming) that simultaneously reviews every agent's work and finds loopholes. Enforces strict QA rules to ensure quality even in autonomy.
+### Purpose
+Quality enforcement system (NOT red teaming). Simultaneously reviews every agent's work.
 
-### 6.2 Architecture Components
-
-| Component | Purpose |
-|-----------|---------|
-| **QACritic** | Core review engine with parallel rule execution |
-| **QARuleRegistry** | Global rule manager with YAML template loading |
-| **QAEnforcer** | Decision engine (ALLOW/BLOCK/REQUIRE_APPROVAL/etc.) |
-| **Scenarios** | Adversarial test suites (jailbreak, prompt injection, etc.) |
-| **Canary** | Lightweight smoke tests that run on every commit |
-
-### 6.3 Quality Dimensions (10)
+### Quality Dimensions (10)
 Correctness, Security, Completeness, Consistency, Safety, Performance, Usability, Maintainability, Compliance, Robustness
 
-### 6.4 Enforcement Actions
-ALLOW, ALLOW_WITH_WARNING, REQUIRE_APPROVAL, BLOCK, RETRY, ESCALATE, QUARANTINE
-
-### 6.5 Built-in Rules
-| Rule | Severity | Purpose |
-|------|----------|---------|
-| `output_not_empty` | HIGH | Ensures agent produces output |
-| `no_sensitive_leak` | CRITICAL | Detects API keys, passwords, tokens |
-| `execution_within_limits` | MEDIUM | Validates time/memory bounds |
-| `error_free_execution` | HIGH | Checks for unhandled exceptions |
-
-### 6.6 Scoring System
+### Scoring
 Severity-weighted: Critical=4×, High=3×, Medium=2×, Low=1×, Info=0.5×
 
 Quality Levels: excellent (≥0.9), good (≥0.7), fair (≥0.5), poor (≥0.3), failing (<0.3)
 
-### 6.7 Policy Packs
+### Enforcement Actions
+ALLOW, ALLOW_WITH_WARNING, REQUIRE_APPROVAL, BLOCK, RETRY, ESCALATE, QUARANTINE
+
+### Built-in Rules
+| Rule | Severity | Dimension |
+|------|----------|-----------|
+| output_not_empty | HIGH | Completeness |
+| no_sensitive_leak | CRITICAL | Security |
+| execution_within_limits | MEDIUM | Performance |
+| error_free_execution | HIGH | Robustness |
+
+### Policy Packs
 - **strict**: fail_on [CRITICAL, HIGH], min_score 0.9
-- **balanced** (default): fail_on [CRITICAL], min_score 0.7
+- **balanced**: fail_on [CRITICAL], min_score 0.7
 - **permissive**: fail_on [CRITICAL], allow_warnings, min_score 0.3
 
-### 6.8 Research Patterns Integrated
-1. **Sparfuchs QA** — Multi-layer adapter pattern, preflight gating, coverage babysitting, gap healing, canary suite, cross-provider audit
-2. **Cisco Skill Scanner** — Pack-based composition pipeline, policy knobs, signature/YARA rules, SARIF reporting
-3. **Giskard OSS** — Scenario-based testing, LLM-based checks with Jinja2 templates, hierarchical scoring
+### Scenario Testing
+Jailbreak, PromptInjection, DataExfiltration, ToolMisuse, Boundary scenarios
+
+### Canary Suite
+Lightweight smoke tests: output_not_empty, uses_at_least_one_tool, finishes_within_timeout, no_critical_violations
 
 ---
 
-## 7. Integration Architecture
+## Integration Architecture
 
 ```
 User (Telegram/Discord/CLI/VS Code)
@@ -234,121 +248,122 @@ User (Telegram/Discord/CLI/VS Code)
    ┌─────────────────────────────────────────┐
    │              Lattice (Graph DB)          │
    │  ┌───────────────────────────────────┐  │
-   │  │  Domain Agents                    │  │
-   │  │  (finance, coding, research...)   │  │
+   │  │  Domain Agents (8)                │  │
+   │  │  (dynamically spawn children)     │  │
    │  └───────────────────────────────────┘  │
    │  ┌───────────────────────────────────┐  │
-   │  │  Buddy (UI Agent)                 │  │
+   │  │  Buddy (UI Renderer)              │  │
    │  │  (charts, tables, cards, forms)   │  │
    │  └───────────────────────────────────┘  │
    └─────────────────────────────────────────┘
         ↓
    [Addons]
    ├── Sandbox (isolated execution)
-   ├── Adversarial (QA Critic)
+   ├── QA Critic (quality review)
    └── Simulation (social simulation)
 ```
 
----
-
-## 8. Directory Structure
-
+### Cross-Component Flow
 ```
-nexus/
-├── docs/
-│   ├── ARCHITECTURE.md          (this file)
-│   └── SPECIFICATION.md
-├── spec/
-│   └── (detailed specs per component)
-├── athena/
-│   ├── gateways/
-│   │   ├── launcher.py
-│   │   ├── butler_only.py
-│   │   ├── butler_separate.py
-│   │   ├── butler_merged.py
-│   │   ├── gateway_agent.py
-│   │   ├── adapters/
-│   │   │   ├── telegram_adapter.py
-│   │   │   ├── cli_adapter.py
-│   │   │   ├── vscode_adapter.py
-│   │   │   └── discord_adapter.py
-│   │   ├── buddy/
-│   │   │   ├── node.py
-│   │   │   ├── personality.md
-│   │   │   ├── components/
-│   │   │   │   ├── registry.py
-│   │   │   │   └── renderers.py
-│   │   │   └── backend/
-│   │   │       └── websocket_server.py
-│   │   └── CONFIG/
-│   │       └── gateway_modes.yaml
-│   ├── CORE/
-│   │   ├── helpers/
-│   │   │   └── buddy_client.py
-│   │   ├── orchestrator/
-│   │   ├── gatekeeper/
-│   │   ├── safety/
-│   │   └── sms/
-│   ├── bridges/
-│   ├── skills/
-│   └── EXTERNAL_COORDINATOR/
-├── addons/
-│   ├── adversarial/
-│   │   ├── __init__.py
-│   │   ├── config.py
-│   │   ├── critic.py
-│   │   ├── enforcer.py
-│   │   ├── registry.py
-│   │   ├── scenarios.py
-│   │   ├── canary.py
-│   │   ├── cli.py
-│   │   ├── README.md
-│   │   ├── SKILL.md
-│   │   ├── templates/
-│   │   ├── examples/
-│   │   └── tests/
-│   ├── sandbox/
-│   │   ├── __init__.py
-│   │   ├── config.py
-│   │   ├── sandbox_manager.py
-│   │   ├── sandbox_api.py
-│   │   ├── sandbox_addon.py
-│   │   ├── sandbox_service.py
-│   │   ├── sandbox_client.py
-│   │   ├── Dockerfile.base
-│   │   ├── backends/
-│   │   │   ├── base.py
-│   │   │   ├── docker_backend.py
-│   │   │   ├── process_backend.py
-│   │   │   └── restricted_backend.py
-│   │   ├── scripts/
-│   │   ├── examples/
-│   │   └── tests/
-│   └── simulation/
-├── tests/
-├── config/
-├── vendor/
-└── README.md
+User → Gateway → Lattice → Domain Agent
+                  ↓
+                Buddy (rendering)
+                  ↓
+        ┌─────────┴─────────┐
+        ↓                   ↓
+   Sandbox              QA Critic
+   (execution)          (quality review)
+        ↓                   ↓
+   Metrics ──────────→ Enforcement Decision
+   (exit code,         (ALLOW/BLOCK/
+    memory, time)       RETRY/ESCALATE)
 ```
 
 ---
 
-## 9. Key Design Decisions
+## Work Tracking System (Jack's Golden Rule)
 
-### 9.1 Decentralized Coordination
-No single boss agent. Agents vote, score each other, and govern themselves through proposals.
+### The Golden Rule
+> **If it's not in the wing, it doesn't exist.**
 
-### 9.2 Graph Database (Lattice)
-Neo4j + Qdrant for coordination & memory. Provides shared state without centralization.
+### After Every Git Commit
+- [ ] Does commit message reference a task ID? (TASK-123)
+- [ ] Update tasks/<id>.json → status = "completed"
+- [ ] Set completed_at = now (ISO8601)
+- [ ] Add commit hash to task.result.commit
+- [ ] If work item done → move to completed/<year>/<month>/
+- [ ] Log to metrics/throughput.jsonl
+- [ ] Sync to MemPalace
 
-### 9.3 Pluggable Backends
-All critical components (sandbox, gateway) support multiple backends with clean abstraction layers.
+### When Starting New Work
+- [ ] Create tasks/<uuid>.json with status = "in_progress"
+- [ ] Set actual_effort.started_at = now
+- [ ] Add task_id to work/<work_id>.json.tasks[]
+- [ ] Update state.json current_activity
 
-### 9.4 Async-First
-All components use `async/await` for scalability to hundreds of concurrent agents.
+### Directory Structure
+```
+~/.athena/wings/wing_<agent>/
+├── tasks/<task_id>.json
+├── work/<work_id>.json
+├── testing/<test_run_id>.json
+├── completed/<year>/<month>/
+├── metrics/throughput.jsonl
+└── state.json
+```
 
-### 9.5 Fork-and-Adapt
-Buddy is forked from Space-Agent. When upstream updates, merge/rebase. If upstream stops, continue independently.
+---
 
-### 9.6 Canary Rollout
-Changes to Nexus core are validated in Mirror-mode sandboxes before staged rollout (1 → 10% → 100% of nodes).
+## Design Decisions
+
+### Why Decentralized Coordination
+No single boss agent. Agents vote, score each other, govern themselves.
+
+### Why Hierarchical Agents (Not Flat)
+1. **Efficiency** — Only spawn needed agents
+2. **Cost** — Fewer LLM calls
+3. **Latency** — Parallel execution of relevant agents only
+4. **Maintainability** — Children isolated
+5. **Extensibility** — New capabilities = new YAML file
+
+### Why Template-Driven
+- Specializations are data, not code
+- Non-developers can create new agent types
+- Hot-swappable without redeployment
+
+### Why Template Inheritance
+- Children inherit parent context (tools, memory)
+- Automatic context continuity
+- Parent's tools/memory available to child
+
+### Why Factory Pattern
+- All agent creation through factory ensuring consistency
+- AgentBuilder for complex constructions
+- Simple factory.create() for simple cases
+
+### Why Fork-and-Adapt
+Buddy forked from Space-Agent. Merge upstream updates. Continue independently if upstream stops.
+
+### Why Canary Rollout
+Changes validated in Nexus Mirror sandboxes before staged rollout (1 → 10% → 100%).
+
+---
+
+## Glossary
+
+| Term | Definition |
+|------|------------|
+| **Lattice** | Shared graph database (Neo4j + Qdrant) |
+| **Butler** | Gateway agent — dumb message relay |
+| **Buddy** | UI rendering agent — forked Space-Agent |
+| **Clean Room** | Sandbox Mode 1 — empty Python environment |
+| **Nexus Mirror** | Sandbox Mode 2 — full Nexus codebase clone |
+| **QA Critic** | Quality enforcement system |
+| **Canary** | Lightweight smoke test for monitoring |
+| **Gap Healing** | Auto-retry for prior failures |
+| **Preflight** | Pre-execution cost/time estimation |
+| **Pack** | Group of related rules (core, security, etc.) |
+| **Scenario** | Multi-step adversarial test |
+| **AgentBuilder** | Fluent utility for child agent construction |
+| **Self-Extending** | System creates new agents based on usage |
+| **Jack's Golden Rule** | "If it's not in the wing, it doesn't exist" |
