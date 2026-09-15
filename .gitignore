@@ -47,3 +47,4 @@ sandbox-workspaces/
 # OS
 .DS_Store
 Thumbs.db
+.athena/
