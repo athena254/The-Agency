@@ -1,351 +1,417 @@
-# The Agency — Architecture (Updated)
+# The Agency — Architecture (Final)
 
 ## System Overview
 
-The Agency is a **decentralized multi-agent orchestration system** where specialized AI agents collaborate autonomously through a shared graph database (the "Lattice"). Agents vote, score each other, and govern themselves.
+**The Agency** is a decentralized multi-agent orchestration system. Three integrated layers:
+
+| Layer | Technology | Purpose |
+|-------|------------|---------|
+| **Athena Core** | Python | Domain agents, bridges, MemPalace, coordination |
+| **Paperclip** | Node.js + React | Business Agent UI (companies, org chart, tasks) |
+| **Mission Control** | Python Textual TUI | Unified UI for all agents (embeds Paperclip for Business) |
 
 ---
 
-## Core Components
+## Architecture Diagram
 
-| Component | Purpose |
-|-----------|---------|
-| **Lattice** | Shared graph DB (Neo4j + Qdrant) for coordination & memory |
-| **Gateway/Butler** | Message relay from interfaces → agents (3 modes) |
-| **Domain Agents** | 8 specialized managers (Finance, Personal, Health, etc.) |
-| **Sub-Agents** | Dynamically spawned specialists via template factory |
-| **Buddy** | UI rendering agent (forked Space-Agent) |
-| **Governance** | Voting, proposals, reputation, access control |
-| **SMS** | Semantic Memory Store (retrieval, secrets, spawn, dream, librarian) |
-| **QA Critic** | Quality enforcement with parallel rule execution |
-| **Sandbox** | Isolated code execution (Clean Room + The Agency Mirror) |
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    MISSION CONTROL (Textual TUI)                     │
+│  ┌─────────────────────────────────────────────────────────────────┐│
+│  │ [Dashboard] [IDE] [Memories] [Calendar] [Tasks]                ││
+│  │ [Personal] [Work] [Finance] [Learning] [Technology]           ││
+│  │ [Social] [Research] [BUSINESS]                                ││
+│  │                                                                 ││
+│  │  ═══════════════════════════════════════════════════════════   ││
+│  │  Business Tab = WebView (Paperclip React UI on :5173)         ││
+│  │  All other tabs = Native Textual widgets                       ││
+│  └─────────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────────┘
+                                  │ Direct filesystem + HTTP
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    ATHENA BRIDGE HTTP API (FastAPI)                   │
+│                    http://localhost:8000                              │
+│  POST /execute/{bridge}   → execute task via bridge                 │
+│  GET  /bridges            → list available bridges                  │
+│  GET  /agents/domain      → list domain agents                     │
+│  POST /bridges/{b}/start  → start bridge daemon                     │
+│  POST /bridges/{b}/stop   → stop bridge daemon                      │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    ATHENA CORE (Python)                              │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │ Domain Agents: Personal, Work, Finance, Business, Learning,   │ │
+│  │                Technology, Social, Research                    │ │
+│  ├────────────────────────────────────────────────────────────────┤ │
+│  │ Bridges: Codex, Claude, Hermes, Gemini, OpenClaw,            │ │
+│  │          AgentZero, DeerFlow 2.0, Pi, OpenCode, Goose        │ │
+│  ├────────────────────────────────────────────────────────────────┤ │
+│  │ MemPalace (ChromaDB)  │  Wings (filesystem)                   │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │ HTTP (Paperclip)
+                                  │ Shared PostgreSQL
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    PAPERCLIP (Forked, Node.js + React)                │
+│  ┌─────────────────────────────────────────────────────────────────┐│
+│  │  Companies (Holding)      Org Chart        Tasks (company)     ││
+│  │  Dashboard: MRR, Headcount, Runway, Costs, Metrics            ││
+│  └─────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────┐│
+│  │  BUILT-IN ADAPTER: "Athena"                                     ││
+│  │  Maps: Paperclip "Software Engineer" → Work Agent (Codex)      ││
+│  │         Paperclip "CFO" → Finance Agent (Claude)               ││
+│  │         Paperclip "CEO" → Business Agent (Claude)              ││
+│  │  Routes tasks → Athena HTTP API (:8000)                        ││
+│  │  Streams results ← Bridge output                               ││
+│  └─────────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## Gateway System (Butler)
+## Mission Control Pages (Textual TUI)
 
-### Three Modes
-| Mode | Butler | Buddy | Use Case |
-|------|--------|-------|----------|
-| **Butler Only** | ✓ routes directly | ✗ | Headless, API-only |
-| **Separate** (RECOMMENDED) | ✓ routes to Buddy | ✓ separate process | Production |
-| **Merged** | ✓ in-process | ✓ same process | Dev/demo |
+| Page | Technology | Content |
+|------|------------|---------|
+| **Main Dashboard** | Textual widgets | All 8 domain agents + bridges status, activity feed, system health |
+| **IDE** | Textual Terminal | PTY-attached bridges, chat, file browser, logs |
+| **Memories** | Textual widgets | MemPalace explorer, search, delta reports |
+| **Calendar** | Textual widgets | Schedule view, events, agent availability |
+| **Tasks** | Textual widgets | Kanban board, drag-drop, filter by agent |
+| **Personal** | Textual widgets | Habits, health, relationships |
+| **Work** | Textual widgets | Projects, sprints, deliverables |
+| **Finance** | Textual widgets | Budget, accounts, investments |
+| **Learning** | Textual widgets | Courses, skills, growth |
+| **Technology** | Textual widgets | Systems, infrastructure, tools |
+| **Social** | Textual widgets | Network, community, events |
+| **Research** | Textual widgets | Papers, experiments, knowledge gaps |
+| **Business** | **WebView (Paperclip)** | Companies, org chart, business tasks, budgets |
 
-### How the Butler Routes
+---
 
-When you text: "Show my budget pie chart"
+## Bridge HTTP API
 
-1. **Parse**: Extract keywords, intent, entities
-2. **Consult Agent Registry**: Query Lattice for agent capabilities
-3. **Match & Score**: Keyword overlap + semantic similarity + peer score + load + history
-4. **Pick Winner**: Highest score wins
-5. **Delegate**: Route to domain agent
+### Endpoints
 
-### Routing Decision Tree (Separate Mode)
+```http
+POST /v1/bridges/{bridge_type}/execute
+Content-Type: application/json
+
+{
+  "task_id": "task_abc123",
+  "content": "Implement OAuth login flow",
+  "metadata": {
+    "source": "paperclip",
+    "agent_role": "software_engineer",
+    "company_id": "comp_001",
+    "priority": "high"
+  }
+}
+```
+
+Response (streaming SSE):
+```json
+{
+  "output": "Here's the implementation...",
+  "artifacts": ["src/auth/oauth.ts"],
+  "usage": {
+    "prompt_tokens": 1234,
+    "completion_tokens": 567,
+    "cost_usd": 0.042
+  },
+  "status": "completed",
+  "duration_seconds": 42.1
+}
+```
+
+### Other Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | /v1/bridges | List available bridges |
+| POST | /v1/bridges/{type}/start | Start bridge daemon |
+| POST | /v1/bridges/{type}/stop | Stop bridge daemon |
+| GET | /v1/agents/domain | List domain agents (for Paperclip mapping) |
+| GET | /v1/health | Health check |
+
+### Auth
+
+Simple API key: `Authorization: Bearer <key>`
+
+---
+
+## Paperclip Integration
+
+### AthenaAdapter (TypeScript)
+
+```typescript
+// paperclip/packages/adapters/src/athena.ts
+export class AthenaAdapter extends BaseAdapter {
+  async executeTask(task: PaperclipTask): Promise<AdapterResult> {
+    const mapping = this.config.mappings[task.agent.role];
+    const bridgeType = mapping.bridge;
+    
+    const response = await fetch(`${this.config.athenaEndpoint}/execute/${bridgeType}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${this.config.apiKey}` },
+      body: JSON.stringify({
+        task_id: task.id,
+        content: task.description,
+        metadata: { role: task.agent.role, company: task.companyId }
+      })
+    });
+    
+    const result = await response.json();
+    return {
+      status: result.status,
+      output: result.output,
+      cost: result.cost,
+      artifacts: result.artifacts
+    };
+  }
+}
+```
+
+### Agent Role Mapping
+
+```yaml
+# paperclip/config/agent-mappings.yaml
+software_engineer:
+  athena_agent: work
+  bridge: codex
+  budget_daily: 10.00
+
+cfo:
+  athena_agent: finance
+  bridge: claude
+  budget_daily: 8.00
+
+ceo:
+  athena_agent: business
+  bridge: claude
+  budget_daily: 15.00
+
+cto:
+  athena_agent: technology
+  bridge: codex
+  budget_daily: 12.00
+
+research_analyst:
+  athena_agent: research
+  bridge: hermes
+  budget_daily: 6.00
+```
+
+---
+
+## Domain Agents
+
+| Agent | Bridge | Specializations |
+|-------|--------|-----------------|
+| **Personal** | Claude | Habits, health, relationships, calendar |
+| **Work** | Codex | Coding, projects, deliverables |
+| **Finance** | Claude | Budgeting, accounts, investments |
+| **Business** | Claude | Companies, revenue, strategy (CEO) |
+| **Learning** | Claude | Courses, skills, growth |
+| **Technology** | Codex | Infrastructure, DevOps, tools |
+| **Social** | Claude | Network, community, events |
+| **Research** | Hermes | Papers, experiments, knowledge |
+
+---
+
+## Bridges (External AI Frameworks)
+
+| Bridge | Type | Invocation | Effort |
+|--------|------|------------|--------|
+| **ClaudeCodeBridge** | Subprocess | `claude --loop --stdio` | Medium |
+| **CodexBridge** | API | OpenAI API | Easy |
+| **HermesBridge** | ACP | `hermes agent run` | Medium |
+| **GeminiBridge** | Subprocess/API | `gemini` CLI or Google AI API | Medium |
+| **OpenClawBridge** | HTTP API | `POST /api/agent` | Medium-Hard |
+| **AgentZeroBridge** | Subprocess | Docker container | Hard |
+| **DeerFlowBridge** | HTTP API + SSE | `POST /v1/flow` | Hard |
+| **PiAgentBridge** | Subprocess/API | `pi-agent` CLI | Easy-Medium |
+| **OpenCodeBridge** | Subprocess | `opencode` CLI | Easy |
+| **GooseBridge** | ACP | `goose run` | Medium |
+
+---
+
+## Task Message Flow
+
+```
+Paperclip UI: Create task "Implement OAuth login"
+    ↓
+Paperclip backend: POST /api/companies/comp_001/tasks
+    ↓
+Assign to agent: "Software Engineer" (role: software_engineer)
+    ↓
+AthenaAdapter receives task
+    ↓
+Lookup mapping: software_engineer → Work Agent + CodexBridge
+    ↓
+Translate to Athena TaskMessage:
+    {
+      "task_id": "paperclip-123",
+      "type": "code_generation",
+      "content": "Implement OAuth login flow...",
+      "metadata": {
+        "source": "paperclip",
+        "company": "comp_001",
+        "agent_role": "software_engineer"
+      }
+    }
+    ↓
+POST to Athena HTTP API: /execute/codex
+    ↓
+CodexBridge executes (subprocess or API)
+    ↓
+Streams output back via HTTP
+    ↓
+AthenaAdapter translates to Paperclip result
+    ↓
+Paperclip posts comment: "✅ Code generated. Cost: $0.42"
+    ↓
+Task status: completed
+```
+
+---
+
+## Build Plan (3 Parallel Tracks)
+
+### Track 1: Athena Bridge HTTP API (2 days)
+- [ ] FastAPI server with bridge execution endpoint
+- [ ] Bridge management endpoints
+- [ ] Domain agent listing
+- [ ] API key auth + CORS
+- [ ] Mock tests
+
+### Track 2: Paperclip Fork + AthenaAdapter (2-3 weeks)
+- [ ] Fork Paperclip → athena-paperclip/
+- [ ] Add AthenaAdapter (TypeScript)
+- [ ] Create agent-mappings.yaml
+- [ ] Modify agent creation UI for "Athena Domain Agent"
+- [ ] Set up shared PostgreSQL
+- [ ] Test end-to-end
+
+### Track 3: Mission Control (6 weeks)
+- [ ] Dashboard, IDE, Memories, Calendar, Tasks pages
+- [ ] Personal, Work, Finance, Learning, Technology, Social, Research pages
+- [ ] Business page (WebView embedding Paperclip)
+- [ ] Polish, themes, plugins
+
+---
+
+## Data Models
+
+### TaskMessage
+
 ```python
-if message.target == "buddy" or message.command.startswith("/buddy"):
-    → Route to Buddy conversation
-elif message.target and message.target.startswith("@"):
-    → Route to mentioned domain agent
-else:
-    → Route to Buddy (default, Buddy decides)
+@dataclass
+class TaskMessage:
+    task_id: str
+    type: str                    # "code_generation", "analysis", etc.
+    content: str                 # The actual task description
+    metadata: dict = field(default_factory=dict)
+    # metadata contains: source, agent_role, company_id, priority, budget
+    created_by: str = "system"
+    created_at: datetime = field(default_factory=datetime.utcnow)
 ```
 
-### Butler Does NOT Do
-- ❌ No intelligence ("dumb relay")
-- ❌ No decisions — agents decide
-- ❌ No memory storage — Lattice stores
-- ❌ No local state (except config)
+### ResultMessage
 
-### Resilience Features (Downside Fixes)
-1. **Circuit Breaker** — Auto-opens after failures, half-open for recovery
-2. **Health Monitoring** — Per-agent health scores (0-1)
-3. **Confidence Classifier** — Keyword-based domain classification with context
-4. **Response Validator** — Auto-detects `render_via="buddy"` flag
-5. **Buddy Fallback** — Falls back to Mission Control when Buddy down
-6. **Session Context** — Tracks last 10 queries per user
-7. **Retry Logic** — 2 retries with exponential backoff (1s, 2s)
-8. **Clarification** — Asks user when confidence < threshold
-
----
-
-## Buddy — UI Agent
-
-### What It Is
-Buddy is a fork of [agent0ai/space-agent](https://github.com/agent0ai/space-agent), adapted as a The Agency node. It renders visualizations in the browser.
-
-### Two Pages
-1. **Mission Control** (default) — Domain agent summaries
-2. **Buddy Page** (floating icon) — Complex visualizations
-
-### Rendering Flow
-```
-Domain Agent → returns {render_via: "buddy", component: "chart_pie", data: {...}}
-    → Butler sees render_via flag → routes to Buddy
-    → Buddy renders via ComponentRegistry → returns HTML
-    → User sees chart in browser
-```
-
-### Built-in Components
-- chart_bar (vertical/horizontal SVG bars)
-- chart_line (SVG polyline)
-- chart_pie (CSS conic-gradient)
-- table (sortable grids)
-- card (key-value displays)
-- form (interactive inputs)
-
-### Buddy Personality
-Defined in `buddy/personality.md` — injected as system prompt. Proactive, concise, uses emojis sparingly.
-
----
-
-## Hierarchical Domain Agent System
-
-### Architecture (Not Flat Parallel)
-```
-Domain Agent (PersonalAgent)
-    ↓ analyzes query
-    ↓ determines specializations needed
-    ↓ spawns ONLY relevant children
-    ↓ runs them in parallel
-    ↓ synthesizes results
-    → returns response
-```
-
-### Key Difference: Dynamic, Not Fixed
-**Old (Flat)**: Always spawn all 6 sub-agents
-**New (Hierarchical)**: Analyze query → spawn only 1-3 relevant specialists
-
-Example: "headache" → only spawns `personal_doctor` (not all 6)
-
-### Template-Driven
-- Specializations are YAML templates, not code
-- Non-developers can create new agent types
-- Hot-swappable without redeployment
-
-### AgentBuilder Utility
-Fluent API for constructing child agents:
 ```python
-AgentBuilder(factory)
-    .with_template('doctor', 'personal')
-    .with_override('model.temperature', 0.2)
-    .build()
+@dataclass
+class ResultMessage:
+    task_id: str
+    bridge_type: str
+    status: str                  # "completed", "failed", "timeout"
+    output: str
+    artifacts: list[str] = field(default_factory=list)
+    usage: dict = field(default_factory=dict)
+    # usage contains: prompt_tokens, completion_tokens, cost_usd
+    duration_seconds: float = 0.0
+    error: Optional[str] = None
+    bridge_id: str = ""
+    created_at: datetime = field(default_factory=datetime.utcnow)
 ```
 
-### 8 Domain Agents
-| Domain | Sub-Agent Specializations |
-|--------|--------------------------|
-| **Personal** | habits, scheduling, relationships, life_coordination, health, fitness |
-| **Finance** | market_analysis, portfolio, risk, news |
-| **Work** | (template-ready) |
-| **Coding** | (template-ready) |
-| **Social** | (template-ready) |
-| **Learning** | (template-ready) |
-| **Research** | (template-ready) |
-| **Business** | (template-ready) |
+### CapabilityAdvertisement
 
-### Factory Pattern
 ```python
-agent = factory.create(
-    template_name="market_analyst",
-    domain="finance",
-    instance_id="market_analyst_001"
-)
+@dataclass
+class CapabilityAdvertisement:
+    bridge_type: str
+    capabilities: list[str]      # ["code_generation", "analysis", ...]
+    supported_task_types: list[str]
+    supports_streaming: bool
+    supports_tools: bool
+    metadata: dict = field(default_factory=dict)
 ```
 
-### Self-Extending Meta-System (Future)
-The system watches for expertise gaps and designs new agents:
-
-1. **ExpertiseGapDetector** — Monitors queries, extracts skills, finds gaps
-2. **AgentDesigner** — Generates template proposals from gap clusters
-3. **Approval UI** — "You seem to need a Database Engineer. Create?"
-4. **TemplateInstaller** — Saves approved template, registers with system
-
-Example growth:
-- Week 1: Personal domain only
-- Week 2: User asks database questions → System suggests Database Engineer
-- Week 3: User asks crypto DB questions → System suggests Crypto DB Specialist
-
 ---
 
-## Sandbox Addon
+## Quality Assurance
 
-### Two Modes
-**Mode 1: Clean Room** — Empty Python environment
-**Mode 2: The Agency Mirror (Gemini)** — Full The Agency codebase clone for testing changes
-
-### Backends
-| Backend | Isolation | Use Case |
-|---------|-----------|----------|
-| Docker (Primary) | Strong (namespaces + cgroups) | Production, untrusted code |
-| Process (Fallback) | Medium (RLIMIT) | Trusted code, fast iteration |
-| RestrictedPython (Optional) | Weak | Development only |
-
-### Why Docker
-- Filesystem, network, process isolation
-- Resource limits (CPU, memory, PIDs)
-- seccomp/AppArmor security
-- Snapshot/restore via docker commit
-
-### Concurrency
-- Per-subject asyncio.Semaphore (default 5)
-- FIFO wait queue when limit reached
-- Background cleanup of aged sandboxes
-
-### Security Guarantees
-- ✗ Host filesystem access
-- ✗ Network access (default none)
-- ✗ Resource exhaustion
-- ✗ Privilege escalation
-- ✗ Host process visibility
-
----
-
-## QA Critic Addon
-
-### Purpose
-Quality enforcement system (NOT red teaming). Simultaneously reviews every agent's work.
-
-### Quality Dimensions (10)
-Correctness, Security, Completeness, Consistency, Safety, Performance, Usability, Maintainability, Compliance, Robustness
-
-### Scoring
-Severity-weighted: Critical=4×, High=3×, Medium=2×, Low=1×, Info=0.5×
-
-Quality Levels: excellent (≥0.9), good (≥0.7), fair (≥0.5), poor (≥0.3), failing (<0.3)
-
-### Enforcement Actions
-ALLOW, ALLOW_WITH_WARNING, REQUIRE_APPROVAL, BLOCK, RETRY, ESCALATE, QUARANTINE
+### QA Critic
+- 10 quality dimensions (correctness, security, completeness, etc.)
+- Severity-weighted scoring (critical=4x, high=3x, medium=2x)
+- Enforcement actions: ALLOW, BLOCK, RETRY, ESCALATE, etc.
 
 ### Built-in Rules
-| Rule | Severity | Dimension |
-|------|----------|-----------|
-| output_not_empty | HIGH | Completeness |
-| no_sensitive_leak | CRITICAL | Security |
-| execution_within_limits | MEDIUM | Performance |
-| error_free_execution | HIGH | Robustness |
+- output_not_empty (HIGH)
+- no_sensitive_leak (CRITICAL)
+- execution_within_limits (MEDIUM)
+- error_free_execution (HIGH)
 
-### Policy Packs
-- **strict**: fail_on [CRITICAL, HIGH], min_score 0.9
-- **balanced**: fail_on [CRITICAL], min_score 0.7
-- **permissive**: fail_on [CRITICAL], allow_warnings, min_score 0.3
-
-### Scenario Testing
-Jailbreak, PromptInjection, DataExfiltration, ToolMisuse, Boundary scenarios
-
-### Canary Suite
-Lightweight smoke tests: output_not_empty, uses_at_least_one_tool, finishes_within_timeout, no_critical_violations
+### Test Approach
+- 100% mock-tested (no live dependencies)
+- All bridges tested with mocked subprocess/API calls
+- Integration tests use temporary directories and JSON fallback
 
 ---
 
-## Integration Architecture
+## Competitive Analysis
 
-```
-User (Telegram/Discord/CLI/VS Code)
-        ↓
-   [Gateway/Butler]
-        ↓
-   ┌─────────────────────────────────────────┐
-   │              Lattice (Graph DB)          │
-   │  ┌───────────────────────────────────┐  │
-   │  │  Domain Agents (8)                │  │
-   │  │  (dynamically spawn children)     │  │
-   │  └───────────────────────────────────┘  │
-   │  ┌───────────────────────────────────┐  │
-   │  │  Buddy (UI Renderer)              │  │
-   │  │  (charts, tables, cards, forms)   │  │
-   │  └───────────────────────────────────┘  │
-   └─────────────────────────────────────────┘
-        ↓
-   [Addons]
-   ├── Sandbox (isolated execution)
-   ├── QA Critic (quality review)
-   └── Simulation (social simulation)
-```
+### Competitors Researched (10)
+1. **agent-zero** — Secure containerized agent
+2. **goose** — Multi-provider MCP agent (43.6k stars)
+3. **cline** — IDE-integrated coding (20.5k stars)
+4. **OpenHands** — Sandboxed code execution (28.3k stars)
+5. **OpenCode** — Terminal LSP-native coding
+6. **DeerFlow** — Production LangGraph agent
+7. **pi-mono** — Clean modular monorepo
+8. **Hermes** — Multi-agent protocol + memory
+9. **OpenClaw** — Multi-channel inbox + device automation
+10. **PAI** — Persistent learning AI
 
-### Cross-Component Flow
-```
-User → Gateway → Lattice → Domain Agent
-                  ↓
-                Buddy (rendering)
-                  ↓
-        ┌─────────┴─────────┐
-        ↓                   ↓
-   Sandbox              QA Critic
-   (execution)          (quality review)
-        ↓                   ↓
-   Metrics ──────────→ Enforcement Decision
-   (exit code,         (ALLOW/BLOCK/
-    memory, time)       RETRY/ESCALATE)
-```
+### Where The Agency Wins
+1. Truly decentralized (no central gateway bottleneck)
+2. Domain agents baked in (8 specialized domains)
+3. Local-first by design (all data on machine)
+4. Orthogonal Security layer
+5. Lightweight (runs on 2-core, 4GB)
+6. Python-native (ML/data science)
+7. Structured memory (MemPalace drawers)
+8. No lock-in (not tied to Claude, MCP, LangGraph, VS Code)
 
----
-
-## Work Tracking System (Jack's Golden Rule)
-
-### The Golden Rule
-> **If it's not in the wing, it doesn't exist.**
-
-### After Every Git Commit
-- [ ] Does commit message reference a task ID? (TASK-123)
-- [ ] Update tasks/<id>.json → status = "completed"
-- [ ] Set completed_at = now (ISO8601)
-- [ ] Add commit hash to task.result.commit
-- [ ] If work item done → move to completed/<year>/<month>/
-- [ ] Log to metrics/throughput.jsonl
-- [ ] Sync to MemPalace
-
-### When Starting New Work
-- [ ] Create tasks/<uuid>.json with status = "in_progress"
-- [ ] Set actual_effort.started_at = now
-- [ ] Add task_id to work/<work_id>.json.tasks[]
-- [ ] Update state.json current_activity
-
-### Directory Structure
-```
-~/.theagency/wings/wing_<agent>/
-├── tasks/<task_id>.json
-├── work/<work_id>.json
-├── testing/<test_run_id>.json
-├── completed/<year>/<month>/
-├── metrics/throughput.jsonl
-└── state.json
-```
-
----
-
-## Design Decisions
-
-### Why Decentralized Coordination
-No single boss agent. Agents vote, score each other, govern themselves.
-
-### Why Hierarchical Agents (Not Flat)
-1. **Efficiency** — Only spawn needed agents
-2. **Cost** — Fewer LLM calls
-3. **Latency** — Parallel execution of relevant agents only
-4. **Maintainability** — Children isolated
-5. **Extensibility** — New capabilities = new YAML file
-
-### Why Template-Driven
-- Specializations are data, not code
-- Non-developers can create new agent types
-- Hot-swappable without redeployment
-
-### Why Template Inheritance
-- Children inherit parent context (tools, memory)
-- Automatic context continuity
-- Parent's tools/memory available to child
-
-### Why Factory Pattern
-- All agent creation through factory ensuring consistency
-- AgentBuilder for complex constructions
-- Simple factory.create() for simple cases
-
-### Why Fork-and-Adapt
-Buddy forked from Space-Agent. Merge upstream updates. Continue independently if upstream stops.
-
-### Why Canary Rollout
-Changes validated in The Agency Mirror sandboxes before staged rollout (1 → 10% → 100%).
+### Gaps to Close (12)
+1. Provider diversity (P0)
+2. Sandbox isolation (P0)
+3. Extension marketplace (P1)
+4. IDE integration (P1)
+5. Multi-tenant SaaS (P1)
+6. Web/Desktop UI (P2)
+7. LSP code intelligence (P2)
+8. Tool breadth (P2)
+9. Human-in-the-loop (P3)
+10. Observability (P3)
+11. Cloud scalability (P4)
+12. Test coverage (ongoing)
 
 ---
 
@@ -355,15 +421,22 @@ Changes validated in The Agency Mirror sandboxes before staged rollout (1 → 10
 |------|------------|
 | **Lattice** | Shared graph database (Neo4j + Qdrant) |
 | **Butler** | Gateway agent — dumb message relay |
-| **Buddy** | UI rendering agent — forked Space-Agent |
+| **Buddy** | UI rendering agent (forked Space-Agent) |
 | **Clean Room** | Sandbox Mode 1 — empty Python environment |
-| **The Agency Mirror** | Sandbox Mode 2 — full The Agency codebase clone |
+| **Agency Mirror** | Sandbox Mode 2 — full codebase clone |
 | **QA Critic** | Quality enforcement system |
-| **Canary** | Lightweight smoke test for monitoring |
-| **Gap Healing** | Auto-retry for prior failures |
-| **Preflight** | Pre-execution cost/time estimation |
-| **Pack** | Group of related rules (core, security, etc.) |
-| **Scenario** | Multi-step adversarial test |
+| **Canary** | Lightweight smoke test |
+| **Bridge** | External AI framework wrapper |
 | **AgentBuilder** | Fluent utility for child agent construction |
-| **Self-Extending** | System creates new agents based on usage |
+| **Paperclip** | Business Agent UI (forked, Node.js + React) |
+| **Mission Control** | Unified TUI (Python Textual, embeds Paperclip) |
+| **AutoDream** | Background memory consolidation |
+| **MemPalace** | Structured memory system (drawers) |
 | **Jack's Golden Rule** | "If it's not in the wing, it doesn't exist" |
+| **Wing** | Per-agent isolated storage (~/.athena/wings/{name}/) |
+| **Drawer** | Memory container within a wing |
+
+---
+
+*Last updated: 2026-09-16 by Hermes Agent*
+*Status: Architecture defined. Awaiting build instructions.*
