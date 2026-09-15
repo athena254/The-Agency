@@ -1,4 +1,4 @@
-# Nexus Adversarial/QA Critic Addon — Detailed Specification
+# The Agency Adversarial/QA Critic Addon — Detailed Specification
 
 ## 1. Overview
 
@@ -441,31 +441,31 @@ rules:
 
 ```bash
 # Review agent output
-nexus qa review --agent <id> --policy strict
+theagency qa review --agent <id> --policy strict
 
 # List all rules
-nexus qa rules list --dimension security --severity critical
+theagency qa rules list --dimension security --severity critical
 
 # Run scenarios
-nexus qa scenarios list
-nexus qa scenarios run --suite jailbreak,prompt_injection
+theagency qa scenarios list
+theagency qa scenarios run --suite jailbreak,prompt_injection
 
 # Run canary suite
-nexus qa canary run
-nexus qa canary watch --interval 30
+theagency qa canary run
+theagency qa canary watch --interval 30
 
 # Enforce decisions
-nexus qa enforce --agent <id> --run-id <run_id>
+theagency qa enforce --agent <id> --run-id <run_id>
 
 # View audit trail
-nexus qa audit show <run_id>
+theagency qa audit show <run_id>
 
 # Gap healing
-nexus qa gaps heal --agent <id>
+theagency qa gaps heal --agent <id>
 
 # Policy management
-nexus qa policy export > policy.yaml
-nexus qa policy import policy.yaml
+theagency qa policy export > policy.yaml
+theagency qa policy import policy.yaml
 ```
 
 ---

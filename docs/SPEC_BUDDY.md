@@ -1,8 +1,8 @@
-# Nexus Buddy UI Agent — Detailed Specification
+# The Agency Buddy UI Agent — Detailed Specification
 
 ## 1. Overview
 
-Buddy is the **user-facing UI agent** in Nexus. It's a fork of [agent0ai/space-agent](https://github.com/agent0ai/space-agent), adapted to run as a first-class Nexus node. It handles:
+Buddy is the **user-facing UI agent** in The Agency. It's a fork of [agent0ai/space-agent](https://github.com/agent0ai/space-agent), adapted to run as a first-class The Agency node. It handles:
 
 1. **Mission Control** (default page) — Domain agent summaries, charts, tables, system status
 2. **Buddy Page** — Renders complex visualizations (charts, tables, cards, forms) via component registry
@@ -70,7 +70,7 @@ class SpaceAgentNode(BaseAgent):
 
 ```python
 class BuddyAdapter(NodeInterface):
-    """Registers Buddy as a Nexus node."""
+    """Registers Buddy as a The Agency node."""
     
     def get_capabilities(self) -> set:
         return {
@@ -384,7 +384,7 @@ def render_form(data: dict) -> str:
 
 ### 4.2 Page Flow
 ```
-User opens Nexus UI
+User opens The Agency UI
     ↓
 Mission Control (default page)
     ↓
@@ -437,10 +437,10 @@ if response.render_via == "buddy":
 git remote add buddy-upstream https://github.com/agent0ai/space-agent.git
 
 # Pull updates regularly
-git subtree pull --prefix=athena/gateways/buddy buddy-upstream main --squash
+git subtree pull --prefix=theagency/gateways/buddy buddy-upstream main --squash
 
 # Push custom changes back (if needed)
-git subtree push --prefix=athena/gateways/buddy buddy-fork main
+git subtree push --prefix=theagency/gateways/buddy buddy-fork main
 ```
 
 ### 6.2 Sync Script
@@ -457,7 +457,7 @@ def sync_buddy():
     
     # Merge subtree
     result = subprocess.run(
-        ["git", "subtree", "pull", "--prefix=athena/gateways/buddy",
+        ["git", "subtree", "pull", "--prefix=theagency/gateways/buddy",
          "buddy-upstream", "main", "--squash"],
         capture_output=True,
         text=True,
@@ -469,7 +469,7 @@ def sync_buddy():
     
     # Run tests to verify merge didn't break anything
     test_result = subprocess.run(
-        ["pytest", "athena/gateways/buddy/tests/", "-v"],
+        ["pytest", "theagency/gateways/buddy/tests/", "-v"],
         capture_output=True,
         text=True,
     )
@@ -540,10 +540,10 @@ Buddy's personality is defined in `personality.md` and injected as system prompt
 ```markdown
 # Buddy — System Prompt
 
-You are **Buddy**, the user interface agent for Nexus.
+You are **Buddy**, the user interface agent for The Agency.
 
 ## Your Role
-- Help users understand Nexus system status
+- Help users understand The Agency system status
 - Render complex data into visualizations
 - Route user queries to the right domain agents
 - Summarize agent responses in user-friendly format
@@ -582,7 +582,7 @@ pydantic>=2.0
 ## 10. File Structure
 
 ```
-athena/gateways/buddy/
+theagency/gateways/buddy/
 ├── __init__.py                 # Exports
 ├── node.py                     # SpaceAgentNode + BuddyAdapter
 ├── personality.md              # System prompt
@@ -606,12 +606,12 @@ athena/gateways/buddy/
 
 ## 11. Relationship to Space-Agent
 
-| Space-Agent (Upstream) | Buddy (Nexus) |
+| Space-Agent (Upstream) | Buddy (The Agency) |
 |------------------------|---------------|
-| Standalone Node.js server | Nexus node in Python |
+| Standalone Node.js server | The Agency node in Python |
 | Direct REST API → UI | Lattice messaging → WebSocket |
 | Single agent with tools | Routes to specialized domain agents |
-| Own auth/runtime | Uses Nexus Gatekeeper + Coordinator |
+| Own auth/runtime | Uses The Agency Gatekeeper + Coordinator |
 | File-based state | Graph database (Lattice) + distributed |
 
 ---
@@ -621,14 +621,14 @@ athena/gateways/buddy/
 ### Mode A: Separate Process (RECOMMENDED)
 ```bash
 # Terminal 1: Start Buddy
-python -m nexus.gateways.buddy.node --port 3002
+python -m theagency.gateways.buddy.node --port 3002
 
 # Terminal 2: Start Butler (routes to Buddy via Lattice)
-python -m nexus.gateways.butler_separate
+python -m theagency.gateways.butler_separate
 ```
 
 ### Mode B: Merged Process (Dev/Demo)
 ```bash
 # Single process handles both Butler + Buddy
-python -m nexus.gateways.butler_merged --port 3002
+python -m theagency.gateways.butler_merged --port 3002
 ```

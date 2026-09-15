@@ -1,12 +1,12 @@
-# Nexus Sandbox Addon — Detailed Specification
+# The Agency Sandbox Addon — Detailed Specification
 
 ## 1. Overview
 
-The Sandbox addon provides **isolated execution environments** where Nexus agents can safely run potentially breaking code. Multiple agents can use sandboxes concurrently, each getting their own isolated workspace with enforced resource limits.
+The Sandbox addon provides **isolated execution environments** where The Agency agents can safely run potentially breaking code. Multiple agents can use sandboxes concurrently, each getting their own isolated workspace with enforced resource limits.
 
 **Two Modes:**
 - **Mode 1: Clean Room** — Empty Python environment for testing algorithms, math, data processing
-- **Mode 2: Nexus Mirror (Gemini)** — Full Nexus codebase inside sandbox for testing system changes before mainstream rollout
+- **Mode 2: The Agency Mirror (Gemini)** — Full The Agency codebase inside sandbox for testing system changes before mainstream rollout
 
 ---
 
@@ -34,8 +34,8 @@ docker run \
   --security-opt no-new-privileges \
   --security-opt seccomp=builtin \
   --security-opt apparmor=docker-default \
-  -v /tmp/nexus-sandbox-workspaces/<id>:/workspace \
-  nexus-sandbox-base:latest \
+  -v /tmp/theagency-sandbox-workspaces/<id>:/workspace \
+  theagency-sandbox-base:latest \
   sleep infinity
 ```
 
@@ -86,7 +86,7 @@ resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
 - Agent's code — copied in at runtime
 
 ### 3.2 What's NOT Inside
-- ❌ Nexus core system (no access to Lattice, agents, governance)
+- ❌ The Agency core system (no access to Lattice, agents, governance)
 - ❌ Other agents' data (isolated per sandbox)
 - ❌ Host filesystem (except limited `/tmp` access)
 - ❌ Database connections (unless explicitly provided)
@@ -96,19 +96,19 @@ resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
 - Mathematical computations
 - Data transformations
 - Third-party library testing
-- Safe code that doesn't need Nexus
+- Safe code that doesn't need The Agency
 
 ---
 
-## 4. Mode 2: Nexus Mirror (Sandbox Gemini)
+## 4. Mode 2: The Agency Mirror (Sandbox Gemini)
 
 ### 4.1 Purpose
-Full Nexus codebase inside sandbox for **testing system changes before mainstream rollout**. Used by self-rectification nodes to validate upgrades.
+Full The Agency codebase inside sandbox for **testing system changes before mainstream rollout**. Used by self-rectification nodes to validate upgrades.
 
 ### 4.2 What Happens During Setup
-1. Clone Nexus repository into workspace
+1. Clone The Agency repository into workspace
 2. Checkout specified branch/commit
-3. Install dependencies: `pip install -e /workspace/nexus[test]`
+3. Install dependencies: `pip install -e /workspace/theagency[test]`
 4. Optionally spin up isolated Lattice DB instance
 5. Optionally seed test data
 6. Optionally run test suite automatically
@@ -127,7 +127,7 @@ Phase 4: Mainstream (merge to main)
 ```
 
 ### 4.4 Use Cases
-- Testing proposed changes to Nexus core
+- Testing proposed changes to The Agency core
 - Self-rectification nodes validating their own upgrades
 - Integration testing before mainstream merge
 - Dry-running governance proposals
@@ -337,7 +337,7 @@ import subprocess
 subprocess.run([
     "docker", "build",
     "-f", "Dockerfile.base",
-    "-t", "nexus-sandbox-base:latest",
+    "-t", "theagency-sandbox-base:latest",
     "."
 ], check=True)
 ```
@@ -362,7 +362,7 @@ GET    /health                   → {"status": "ok"}
 
 ### 9.2 Quick Start
 ```bash
-cd nexus
+cd theagency
 docker-compose -f docker-compose.sandbox.yml up -d
 curl -X POST http://localhost:8000/sandbox/create \
   -H "Content-Type: application/json" \

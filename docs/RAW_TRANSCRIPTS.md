@@ -1,6 +1,6 @@
 # Raw Transcripts Archive
 
-This file contains verbatim extracts from forwarded texts about the Athena/Nexus system.
+This file contains verbatim extracts from forwarded texts about the Athena/The Agency system.
 Referenced by: docs/ARCHITECTURE.md, docs/SPECIFICATION.md, docs/SPEC_*.md
 
 ---
@@ -96,8 +96,8 @@ Mode 3: Butler + Buddy Merged (Not Recommended)
 
 How Users Select During Setup:
 - Option A: Configuration file (gateway_modes.yaml)
-- Option B: Environment variable (ATHENA_GATEWAY_MODE=separate)
-- Option C: Direct module invocation (python -m athena.gateways.butler_separate)
+- Option B: Environment variable (THE_AGENCY_GATEWAY_MODE=separate)
+- Option C: Direct module invocation (python -m theagency.gateways.butler_separate)
 
 ---
 
@@ -128,7 +128,7 @@ How Domain Agents Opt for Buddy:
 Buddy Fork Sync Strategy (recommended: Git subtree):
 ```bash
 git remote add upstream https://github.com/agent0ai/space-agent.git
-git subtree pull --prefix=athena/gateways/buddy upstream main --squash
+git subtree pull --prefix=theagency/gateways/buddy upstream main --squash
 ```
 
 Buddy Does NOT auto-update when space agent developers update their domain agents. Buddy is a static UI rendering agent — it receives messages from Butler via Lattice, formats domain agent responses into UI elements, sends UI updates via WebSocket. When a domain agent updates, only the domain agent changes — not Buddy.
@@ -167,7 +167,7 @@ def route_message(message, sender):
 
 ---
 
-## 8. 12 Files in athena/gateways/
+## 8. 12 Files in theagency/gateways/
 
 1. launcher.py — Unified entry point — reads config, launches correct mode
 2. butler_only.py — Mode 1: Butler routes directly to domain agents
@@ -192,7 +192,7 @@ Plus core stubs:
 ## 9. Buddy Integration Components
 
 1. BUDDY_INTEGRATION_SPEC.md — 16-section spec (19 KB)
-2. Domain Agent Helper: athena/CORE/helpers/buddy_client.py
+2. Domain Agent Helper: theagency/CORE/helpers/buddy_client.py
    - BuddyClient class with fluent API:
      - request_render(component, data, text, metadata)
      - render_chart(chart_type, chart_data, text)
@@ -276,16 +276,16 @@ QA Critic Components:
 ## 13. QA Critic CLI Commands
 
 ```bash
-nexus qa review --agent <id> --policy strict
-nexus qa rules list --dimension security --severity critical
-nexus qa scenarios list
-nexus qa scenarios run --suite jailbreak,prompt_injection
-nexus qa canary run
-nexus qa canary watch --interval 30
-nexus qa enforce --agent <id> --run-id <run_id>
-nexus qa audit show <run_id>
-nexus qa gaps heal --agent <id>
-nexus qa policy export > policy.yaml
+theagency qa review --agent <id> --policy strict
+theagency qa rules list --dimension security --severity critical
+theagency qa scenarios list
+theagency qa scenarios run --suite jailbreak,prompt_injection
+theagency qa canary run
+theagency qa canary watch --interval 30
+theagency qa enforce --agent <id> --run-id <run_id>
+theagency qa audit show <run_id>
+theagency qa gaps heal --agent <id>
+theagency qa policy export > policy.yaml
 ```
 
 ---
@@ -706,17 +706,17 @@ class QARuleRegistry:
 
 ## 30. Git Adoption Announcement (from forwarded text)
 
-📢 ATHENA GIT ADOPTION — ACTION REQUIRED
-Project Athena is now under Git version control at /root/project-athena/
+📢 THE_AGENCY GIT ADOPTION — ACTION REQUIRED
+The Agency is now under Git version control at /root/project-theagency/
 All code must be committed to the repository. The Forge department (7 agents) is already auto-committing every 15 minutes.
 
 YOUR ACTION:
-1. Read the full announcement: cat /root/project-athena/GIT_ADOPTION_ANNOUNCEMENT.md
+1. Read the full announcement: cat /root/project-theagency/GIT_ADOPTION_ANNOUNCEMENT.md
 2. Add git commit to your build cycle (after each build):
    import subprocess
    from datetime import datetime
    def git_commit():
-       subprocess.run(['git','add','-A','athena/your-section/'],cwd='/root/project-athena')
+       subprocess.run(['git','add','-A','theagency/your-section/'],cwd='/root/project-athena')
        subprocess.run(['git','commit','-m',f'Agent YOUR_NAME: update — {datetime.utcnow()}','--no-verify'],cwd='/root/project-athena')
 3. Test: create a file, commit, verify with: cd /root/project-athena && git log --oneline -3
 
@@ -865,13 +865,13 @@ Recently Completed (committed):
 
 | File/Dir | Purpose |
 |----------|---------|
-| `athena/gateways/launcher.py` | Entry point for gateway system |
-| `athena/gateways/butler_separate.py` | Main Butler (recommended mode) |
-| `athena/gateways/buddy/node.py` | Buddy UI node |
-| `athena/core/orchestrator/orchestrator.py` | Agent coordination |
-| `athena/core/sms/` | Semantic Memory Store (retrieval, secrets, spawn) |
-| `athena/core/safety/` | Safety & guardrails system |
-| `athena/bridges/registry.py` | Bridge registration |
+| `theagency/gateways/launcher.py` | Entry point for gateway system |
+| `theagency/gateways/butler_separate.py` | Main Butler (recommended mode) |
+| `theagency/gateways/buddy/node.py` | Buddy UI node |
+| `theagency/core/orchestrator/orchestrator.py` | Agent coordination |
+| `theagency/core/sms/` | Semantic Memory Store (retrieval, secrets, spawn) |
+| `theagency/core/safety/` | Safety & guardrails system |
+| `theagency/bridges/registry.py` | Bridge registration |
 | `addons/simulation/simulation_runner.py` | Simulation engine |
 | `vendor/oasis/` | OASIS submodule (camel-ai/oasis) |
 | `FORGE/` | Department coordination (pending cleanup) |
@@ -904,27 +904,27 @@ Uncommitted: addons/simulation/{oasis_adapter.py, tests/test_oasis_adapter.py}
 
 ## 41. Resilience Fixes Implemented (for Butler Downsides)
 
-1. Circuit Breaker Pattern (athena/core/monitoring/circuit_breaker.py)
+1. Circuit Breaker Pattern (theagency/core/monitoring/circuit_breaker.py)
    - Full state machine: CLOSED → OPEN → HALF_OPEN → CLOSED
    - Tracks consecutive failures, error rate, latency, peer scores
    - Auto-opens after threshold, half-open after recovery timeout
 
-2. Agent Health Monitoring (athena/core/monitoring/agent_health.py)
+2. Agent Health Monitoring (theagency/core/monitoring/agent_health.py)
    - Global monitor tracks all agents
    - Per-agent circuit breakers registry
    - Health score queries for routing decisions
 
-3. Routing Confidence Classifier (athena/core/routing/classifier.py)
+3. Routing Confidence Classifier (theagency/core/routing/classifier.py)
    - Keyword-based domain classification
    - Context-aware (uses recent user queries)
    - Returns confidence scores per domain
 
-4. Response Validator (athena/core/routing/response_validator.py)
+4. Response Validator (theagency/core/routing/response_validator.py)
    - Auto-detects structured vs plain text responses
    - Auto-adds render_via="buddy" if missing (configurable)
    - Includes BuddyResponseBuilder fluent API
 
-5. Butler Integration (athena/gateways/butler_separate.py)
+5. Butler Integration (theagency/gateways/butler_separate.py)
    - Circuit breaker registry in __init__
    - route_to_domain_agent() wrapped with circuit breaker
    - Fast-fail when circuit OPEN (no hanging)
@@ -967,7 +967,7 @@ butler:
 
 Directory Structure:
 ```
-~/.athena/wings/wing_<agent>/
+~/.theagency/wings/wing_<agent>/
 ├── tasks/<task_id>.json
 ├── work/<work_id>.json
 ├── testing/<test_run_id>.json
@@ -998,7 +998,7 @@ COMMIT_HASH=$(git rev-parse HEAD)
 COMMIT_MSG=$(git log -1 --pretty=%B)
 TASK_IDS=$(echo "$COMMIT_MSG" | grep -oE 'TASK-[A-Za-z0-9]+' | cut -d- -f2 | tr '\n' ' ')
 for TASK_ID in $TASK_IDS; do
-  TASK_FILE="$HOME/.athena/wings/wing_work/tasks/${TASK_ID}.json"
+  TASK_FILE="$HOME/.theagency/wings/wing_work/tasks/${TASK_ID}.json"
   [ -f "$TASK_FILE" ] || continue
   jq ".status = \"completed\" |
       .completed_at = \"$(date -Iseconds)\" |

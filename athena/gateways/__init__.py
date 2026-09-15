@@ -1,4 +1,4 @@
-"""Nexus Gateway System - Butler Architecture.
+"""The Agency Gateway System - Butler Architecture.
 
 A message relay system connecting user interfaces (Telegram, Discord, CLI, VS Code)
 to agent systems. Supports three operational modes:

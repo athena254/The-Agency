@@ -1,8 +1,8 @@
-# Nexus Gateway (Butler) Addon — Detailed Specification
+# The Agency Gateway (Butler) Addon — Detailed Specification
 
 ## 1. Overview
 
-The Gateway (codename "Butler") is the **front door** to Nexus. It's a **dumb message relay** that connects user interfaces (Telegram, Discord, CLI, VS Code) to the Nexus system.
+The Gateway (codename "Butler") is the **front door** to The Agency. It's a **dumb message relay** that connects user interfaces (Telegram, Discord, CLI, VS Code) to the The Agency system.
 
 **What it does:**
 - Receives messages from whatever interface the user is using
@@ -43,7 +43,7 @@ User → Butler → Lattice → Buddy → Domain Agents
 ```
 
 - Butler handles auth, rate-limiting, interface routing
-- Buddy runs as separate Nexus node in its own process
+- Buddy runs as separate The Agency node in its own process
 - Full graphical UI with tool execution, agent routing, visualization
 - Clean separation — each can scale independently
 
@@ -266,19 +266,19 @@ mode: "separate"
 modes:
   butler-only:
     description: "Butler routes directly to domain agents, no Buddy UI"
-    entry: "python -m nexus.gateways.butler_only"
+    entry: "python -m theagency.gateways.butler_only"
     
   separate:
     description: "Butler routes to Buddy via Lattice + to domain agents"
-    entry: "python -m nexus.gateways.butler_separate"
-    buddy_entry: "python -m nexus.gateways.buddy.node"
+    entry: "python -m theagency.gateways.butler_separate"
+    buddy_entry: "python -m theagency.gateways.buddy.node"
     butler_port: 3000
     buddy_port: 3002
     lattice_url: "localhost:47113"
     
   merged:
     description: "Single process handles both gateway routing and UI"
-    entry: "python -m nexus.gateways.butler_merged"
+    entry: "python -m theagency.gateways.butler_merged"
     port: 3002
 
 # Interface adapters configuration
@@ -372,7 +372,7 @@ class ButlerSeparate:
         
         # Start Buddy as separate subprocess
         buddy_process = await asyncio.create_subprocess_exec(
-            "python", "-m", "nexus.gateways.buddy.node",
+            "python", "-m", "theagency.gateways.buddy.node",
             "--port", str(self._buddy_port),
         )
         

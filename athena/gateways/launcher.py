@@ -62,12 +62,12 @@ class GatewayLauncher:
 
     def _apply_env_overrides(self) -> None:
         """Allow environment variables to override config values."""
-        env_mode = os.environ.get("NEXUS_GATEWAY_MODE")
+        env_mode = os.environ.get("THE_AGENCY_GATEWAY_MODE")
         if env_mode:
             self.mode = GatewayMode(env_mode)
-            logger.info("Mode overridden by NEXUS_GATEWAY_MODE to %s", env_mode)
+            logger.info("Mode overridden by THE_AGENCY_GATEWAY_MODE to %s", env_mode)
 
-        log_level = os.environ.get("NEXUS_LOG_LEVEL")
+        log_level = os.environ.get("THE_AGENCY_LOG_LEVEL")
         if log_level:
             self.config.setdefault("logging", {})["level"] = log_level
 
@@ -94,7 +94,7 @@ class GatewayLauncher:
         self._apply_env_overrides()
         self._setup_logging()
 
-        logger.info("Launching Nexus Gateway in %s mode", self.mode.value)
+        logger.info("Launching The Agency Gateway in %s mode", self.mode.value)
 
         if self.mode == GatewayMode.BUTLER_ONLY:
             await self._launch_butler_only()

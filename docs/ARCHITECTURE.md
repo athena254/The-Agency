@@ -1,8 +1,8 @@
-# Nexus — Architecture (Updated)
+# The Agency — Architecture (Updated)
 
 ## System Overview
 
-Nexus is a **decentralized multi-agent orchestration system** where specialized AI agents collaborate autonomously through a shared graph database (the "Lattice"). Agents vote, score each other, and govern themselves.
+The Agency is a **decentralized multi-agent orchestration system** where specialized AI agents collaborate autonomously through a shared graph database (the "Lattice"). Agents vote, score each other, and govern themselves.
 
 ---
 
@@ -18,7 +18,7 @@ Nexus is a **decentralized multi-agent orchestration system** where specialized 
 | **Governance** | Voting, proposals, reputation, access control |
 | **SMS** | Semantic Memory Store (retrieval, secrets, spawn, dream, librarian) |
 | **QA Critic** | Quality enforcement with parallel rule execution |
-| **Sandbox** | Isolated code execution (Clean Room + Nexus Mirror) |
+| **Sandbox** | Isolated code execution (Clean Room + The Agency Mirror) |
 
 ---
 
@@ -72,7 +72,7 @@ else:
 ## Buddy — UI Agent
 
 ### What It Is
-Buddy is a fork of [agent0ai/space-agent](https://github.com/agent0ai/space-agent), adapted as a Nexus node. It renders visualizations in the browser.
+Buddy is a fork of [agent0ai/space-agent](https://github.com/agent0ai/space-agent), adapted as a The Agency node. It renders visualizations in the browser.
 
 ### Two Pages
 1. **Mission Control** (default) — Domain agent summaries
@@ -172,7 +172,7 @@ Example growth:
 
 ### Two Modes
 **Mode 1: Clean Room** — Empty Python environment
-**Mode 2: Nexus Mirror (Gemini)** — Full Nexus codebase clone for testing changes
+**Mode 2: The Agency Mirror (Gemini)** — Full The Agency codebase clone for testing changes
 
 ### Backends
 | Backend | Isolation | Use Case |
@@ -303,7 +303,7 @@ User → Gateway → Lattice → Domain Agent
 
 ### Directory Structure
 ```
-~/.athena/wings/wing_<agent>/
+~/.theagency/wings/wing_<agent>/
 ├── tasks/<task_id>.json
 ├── work/<work_id>.json
 ├── testing/<test_run_id>.json
@@ -345,7 +345,7 @@ No single boss agent. Agents vote, score each other, govern themselves.
 Buddy forked from Space-Agent. Merge upstream updates. Continue independently if upstream stops.
 
 ### Why Canary Rollout
-Changes validated in Nexus Mirror sandboxes before staged rollout (1 → 10% → 100%).
+Changes validated in The Agency Mirror sandboxes before staged rollout (1 → 10% → 100%).
 
 ---
 
@@ -357,7 +357,7 @@ Changes validated in Nexus Mirror sandboxes before staged rollout (1 → 10% →
 | **Butler** | Gateway agent — dumb message relay |
 | **Buddy** | UI rendering agent — forked Space-Agent |
 | **Clean Room** | Sandbox Mode 1 — empty Python environment |
-| **Nexus Mirror** | Sandbox Mode 2 — full Nexus codebase clone |
+| **The Agency Mirror** | Sandbox Mode 2 — full The Agency codebase clone |
 | **QA Critic** | Quality enforcement system |
 | **Canary** | Lightweight smoke test for monitoring |
 | **Gap Healing** | Auto-retry for prior failures |

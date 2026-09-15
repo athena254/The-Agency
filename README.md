@@ -1,4 +1,4 @@
-# Nexus — Decentralized Multi-Agent Orchestration System
+# The Agency — Decentralized Multi-Agent Orchestration System
 
 > A lattice of domain agents, governed by peers, healing itself, thinking together.
 
@@ -6,22 +6,22 @@
 
 ```bash
 # Clone
-git clone https://github.com/danny-dis/nexus.git
-cd nexus
+git clone https://github.com/danny-dis/theagency.git
+cd theagency
 
 # Install
 pip install -e ".[all]"
 
 # Run gateway (default: separate mode)
-python -m nexus.gateways.launcher
+python -m theagency.gateways.launcher
 
 # Or run sandbox standalone
 docker-compose -f docker-compose.sandbox.yml up -d
 ```
 
-## What is Nexus?
+## What is The Agency?
 
-Nexus is a **decentralized multi-agent system** where specialized AI agents collaborate autonomously through a shared graph database (the "Lattice"). Instead of one central boss, agents vote on decisions, score each other's work, and govern themselves.
+The Agency is a **decentralized multi-agent system** where specialized AI agents collaborate autonomously through a shared graph database (the "Lattice"). Instead of one central boss, agents vote on decisions, score each other's work, and govern themselves.
 
 **Three Gateway Modes:**
 - **Butler Only** — Routes directly to domain agents (headless, API-only)
@@ -30,7 +30,7 @@ Nexus is a **decentralized multi-agent system** where specialized AI agents coll
 
 **Two Sandbox Modes:**
 - **Clean Room** — Empty Python environment for algorithm testing
-- **Nexus Mirror (Gemini)** — Full codebase clone for testing system changes
+- **The Agency Mirror (Gemini)** — Full codebase clone for testing system changes
 
 **QA Critic Addon:**
 - Simultaneously reviews every agent's work

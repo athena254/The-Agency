@@ -1,4 +1,4 @@
-# Nexus — Roadmap
+# The Agency — Roadmap
 
 ## Phase 1: Foundation (Complete ✅)
 

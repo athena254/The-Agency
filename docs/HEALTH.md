@@ -1,10 +1,10 @@
-# Nexus — Project Health Assessment
+# The Agency — Project Health Assessment
 
 ## Executive Summary
 
 **Overall Status**: Infrastructure-rich, domain-poor
 
-Nexus has excellent foundational services and sophisticated addons, but the core product (domain agents) is 0% built. The governance and coordination layer (the "secret sauce") is largely incomplete.
+The Agency has excellent foundational services and sophisticated addons, but the core product (domain agents) is 0% built. The governance and coordination layer (the "secret sauce") is largely incomplete.
 
 ---
 
@@ -55,7 +55,7 @@ Nexus has excellent foundational services and sophisticated addons, but the core
 | Orchestrator | 🟡 60% | Partial | Integration gaps |
 | Aether | 🟡 30% | Partial | Wrapper exists, system missing |
 
-**Verdict**: These are the "secret sauce" that differentiates Nexus. Currently the biggest risk to the project.
+**Verdict**: These are the "secret sauce" that differentiates The Agency. Currently the biggest risk to the project.
 
 ---
 
@@ -96,7 +96,7 @@ Finance/Business/Research agents (the actual "domain agents" users interact with
 ### Risk 2: Governance Gap
 **Impact**: HIGH | **Likelihood**: CERTAIN
 
-The "peer scoring, consensus spawn" feature that differentiates Nexus from a simple agent framework is not built. Only stubs exist.
+The "peer scoring, consensus spawn" feature that differentiates The Agency from a simple agent framework is not built. Only stubs exist.
 
 **Mitigation**: Prioritize governance module before domain agents.
 
@@ -157,6 +157,6 @@ Original roadmap estimates 1,700 hours for full product. At current pace (focus 
 
 ## Simple Summary
 
-Nexus is a **framework for building AI agent teams**. The infrastructure is 70% ready (secure spawning, search, LLM routing, sandboxing, research loops). But the actual domain specialists (Finance, Business, etc.) that make it useful are 0% built. The team has been making sophisticated tools instead of the product itself. The governance and coordination layer (the "secret sauce") is largely unimplemented. The project has excellent technical depth but needs to pivot from infrastructure addons to domain agent delivery.
+The Agency is a **framework for building AI agent teams**. The infrastructure is 70% ready (secure spawning, search, LLM routing, sandboxing, research loops). But the actual domain specialists (Finance, Business, etc.) that make it useful are 0% built. The team has been making sophisticated tools instead of the product itself. The governance and coordination layer (the "secret sauce") is largely unimplemented. The project has excellent technical depth but needs to pivot from infrastructure addons to domain agent delivery.
 
 **Grade: B+ for infrastructure, D for product delivery, C- overall**

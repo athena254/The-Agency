@@ -1,4 +1,4 @@
-# Nexus Gateway Modes Configuration
+# The Agency Gateway Modes Configuration
 # Central configuration for the Butler architecture gateway system.
 
 # ── Mode Selection ──────────────────────────────────────────────
@@ -71,7 +71,7 @@ adapters:
 
   cli:
     enabled: true
-    prompt: "nexus> "
+    prompt: "theagency> "
 
   vscode:
     enabled: true

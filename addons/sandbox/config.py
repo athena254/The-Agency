@@ -1,4 +1,4 @@
-"""Sandbox configuration: enums, dataclasses, and policy types for the Nexus sandbox addon."""
+"""Sandbox configuration: enums, dataclasses, and policy types for the The Agency sandbox addon."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ class SandboxType(str, enum.Enum):
     """Sandbox operational mode."""
 
     CLEAN_ROOM = "clean_room"
-    ATHENA_MIRROR = "athena_mirror"
+    THE_AGENCY_MIRROR = "athena_mirror"
 
 
 class NetworkAccess(str, enum.Enum):
@@ -88,15 +88,15 @@ class ResourceLimits:
 
 
 # ---------------------------------------------------------------------------
-# Athena Mirror Configuration
+# TheAgency Mirror Configuration
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class AthenaMirrorConfig:
-    """Configuration for Mode 2: Athena Mirror (Gemini)."""
+class TheAgencyMirrorConfig:
+    """Configuration for Mode 2: TheAgency Mirror (Gemini)."""
 
-    nexus_repo_path: str = "/workspace/nexus"
+    theagency_repo_path: str = "/workspace/theagency"
     install_editable: bool = True
     init_lattice: bool = True
     run_tests: bool = True
@@ -109,7 +109,7 @@ class AthenaMirrorConfig:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "nexus_repo_path": self.nexus_repo_path,
+            "theagency_repo_path": self.theagency_repo_path,
             "install_editable": self.install_editable,
             "init_lattice": self.init_lattice,
             "run_tests": self.run_tests,
@@ -140,13 +140,13 @@ class SandboxConfig:
     policy: SandboxPolicy = SandboxPolicy.STRICT
     env_vars: dict[str, str] = field(default_factory=dict)
     labels: dict[str, str] = field(default_factory=dict)
-    athena_mirror: AthenaMirrorConfig | None = None
+    athena_mirror: TheAgencyMirrorConfig | None = None
     auto_destroy_seconds: int = 3600
     tags: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        if self.sandbox_type == SandboxType.ATHENA_MIRROR and self.athena_mirror is None:
-            self.athena_mirror = AthenaMirrorConfig()
+        if self.sandbox_type == SandboxType.THE_AGENCY_MIRROR and self.athena_mirror is None:
+            self.athena_mirror = TheAgencyMirrorConfig()
 
     def to_dict(self) -> dict[str, Any]:
         return {

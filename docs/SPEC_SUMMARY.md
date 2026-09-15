@@ -1,6 +1,6 @@
-# Nexus — Project Specification Summary
+# The Agency — Project Specification Summary
 
-**Project Nexus** is a decentralized multi-agent AI orchestration system. This document is a quick-reference index to the full specification suite.
+**Project The Agency** is a decentralized multi-agent AI orchestration system. This document is a quick-reference index to the full specification suite.
 
 ---
 
@@ -19,13 +19,13 @@
 
 ## 2. Component Summary
 
-### 2.1 Gateway (Butler) — `athena/gateways/`
+### 2.1 Gateway (Butler) — `theagency/gateways/`
 - **Three modes**: Butler-only, Separate (RECOMMENDED), Merged
 - **Responsibilities**: Message routing, governance, health monitoring
 - **Does NOT do**: Intelligence, decisions, memory storage
 - **Key files**: `launcher.py`, `butler_separate.py`, `butler_only.py`, `butler_merged.py`, `gateway_agent.py`
 
-### 2.2 Buddy — `athena/gateways/buddy/`
+### 2.2 Buddy — `theagency/gateways/buddy/`
 - **What**: UI rendering agent (forked Space-Agent)
 - **Two pages**: Mission Control (default) + Buddy Page (floating icon)
 - **Rendering**: Charts, tables, cards, forms via component registry
@@ -33,7 +33,7 @@
 - **Key files**: `node.py`, `components/registry.py`, `components/renderers.py`, `personality.md`
 
 ### 2.3 Sandbox — `addons/sandbox/`
-- **Two modes**: Clean Room (Mode 1) + Nexus Mirror/Gemini (Mode 2)
+- **Two modes**: Clean Room (Mode 1) + The Agency Mirror/Gemini (Mode 2)
 - **Backends**: Docker (primary), Process (fallback), RestrictedPython (optional)
 - **Concurrency**: Per-subject asyncio.Semaphore
 - **Key files**: `sandbox_api.py`, `sandbox_manager.py`, `backends/docker_backend.py`, `sandbox_service.py`
@@ -59,7 +59,7 @@ Merged         → Butler+Buddy → Domain Agents (dev/demo)
 ### 3.2 Two-Mode Sandbox
 ```
 Clean Room     → Empty Python env, test algorithms
-Nexus Mirror   → Full codebase clone, test system changes
+The Agency Mirror   → Full codebase clone, test system changes
 ```
 
 ### 3.3 Canary Rollout
@@ -142,7 +142,7 @@ User → Gateway → Lattice → Domain Agents
 | **Butler** | Gateway agent — dumb message relay, no intelligence |
 | **Buddy** | UI rendering agent — forked Space-Agent |
 | **Clean Room** | Sandbox Mode 1 — empty Python environment |
-| **Nexus Mirror** | Sandbox Mode 2 — full Nexus codebase clone |
+| **The Agency Mirror** | Sandbox Mode 2 — full The Agency codebase clone |
 | **QA Critic** | Quality enforcement system — reviews every agent execution |
 | **Canary** | Lightweight smoke test for continuous monitoring |
 | **Gap Healing** | Auto-scheduling re-checks for prior failures |
