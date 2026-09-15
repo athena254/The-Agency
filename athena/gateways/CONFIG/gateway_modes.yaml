@@ -1,0 +1,101 @@
+# Nexus Gateway Modes Configuration
+# Central configuration for the Butler architecture gateway system.
+
+# ── Mode Selection ──────────────────────────────────────────────
+# Valid values: "butler_only", "butler_separate", "butler_merged"
+# butler_separate is the recommended production mode.
+active_mode: "butler_separate"
+
+# ── Butler Configuration ────────────────────────────────────────
+butler:
+  name: "Butler"
+  description: "Central message relay and routing orchestrator"
+  max_concurrent_sessions: 50
+  session_timeout_seconds: 1800
+  retry_attempts: 3
+  retry_delay_seconds: 1.0
+
+# ── Buddy Configuration ─────────────────────────────────────────
+buddy:
+  name: "Buddy"
+  description: "UI rendering agent with component-based output"
+  websocket_host: "127.0.0.1"
+  websocket_port: 8765
+  heartbeat_interval_seconds: 30
+  max_message_size_bytes: 1048576  # 1 MB
+  component_render_timeout_seconds: 5.0
+
+# ── Domain Agents ───────────────────────────────────────────────
+domain_agents:
+  - name: "research"
+    endpoint: "http://localhost:8001/agent/research"
+    capabilities: ["search", "summarize", "cite"]
+    health_check_interval_seconds: 60
+
+  - name: "coding"
+    endpoint: "http://localhost:8002/agent/coding"
+    capabilities: ["generate", "refactor", "test", "debug"]
+    health_check_interval_seconds: 60
+
+  - name: "analytics"
+    endpoint: "http://localhost:8003/agent/analytics"
+    capabilities: ["query", "visualize", "report"]
+    health_check_interval_seconds: 60
+
+  - name: "operations"
+    endpoint: "http://localhost:8004/agent/operations"
+    capabilities: ["deploy", "monitor", "alert"]
+    health_check_interval_seconds: 60
+
+# ── Routing Rules ───────────────────────────────────────────────
+routing:
+  # Patterns that route to Buddy
+  buddy_patterns:
+    - "^@buddy"
+    - "^/buddy"
+    - "^hey buddy"
+
+  # Patterns that route to a domain agent
+  agent_prefix: "@"
+  default_target: "buddy"
+
+  # Render detection
+  render_via_buddy: true
+
+# ── Adapters ────────────────────────────────────────────────────
+adapters:
+  telegram:
+    enabled: true
+    token_env: "TELEGRAM_BOT_TOKEN"
+    polling_interval_seconds: 1.0
+
+  cli:
+    enabled: true
+    prompt: "nexus> "
+
+  vscode:
+    enabled: true
+    port: 8766
+
+  discord:
+    enabled: false
+    token_env: "DISCORD_BOT_TOKEN"
+
+# ── Governance ──────────────────────────────────────────────────
+governance:
+  max_input_length: 10000
+  max_output_length: 50000
+  blocked_patterns:
+    - "rm -rf /"
+    - "DROP TABLE"
+    - "__import__('os').system"
+  require_confirmation_for:
+    - "file_delete"
+    - "deployment"
+    - "external_api_call"
+
+# ── Logging ─────────────────────────────────────────────────────
+logging:
+  level: "INFO"
+  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+  file: null  # null = stdout only
