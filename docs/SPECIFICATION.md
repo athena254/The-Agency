@@ -1,7 +1,7 @@
-# The Agency — Full System Specification
+# The Agency — Complete System Specification
 
 > **Reconstructed from 1,417 user instructions** across 13 chat exports (Apr 10 – May 31, 2026)
-> **Project:** Athena (autonomous multi-agent framework, renamed to "The Agency")
+> **Project:** Athena → renamed to "The Agency"
 > **Repository:** `C:\Users\alphi\theagency\`
 
 ---
@@ -23,13 +23,14 @@
 | Principle | Meaning |
 |-----------|---------|
 | **Modular & Reusable** | Build once, reuse everywhere (Unix philosophy) |
-| **Graceful Degradation** | Removing any addon leaves a working system; each is independent |
+| **Graceful Degradation** | Removing any addon leaves a working system |
 | **Core Independence** | Athena minimal install = full agent (no addons required) |
-| **Concurrent Multi-Agent** | All addons support parallel execution by personal + work + domain agents |
-| **Local-First** | Markdown files as primary memory; Noesis/SMS as upgrade, not dependency |
+| **Concurrent Multi-Agent** | All addons support parallel execution |
+| **Local-First** | Markdown files as primary memory; Noesis/SMS as upgrade |
 | **Human Holds Absolute Truth** | Athena second; agents vote with evidence; human approves |
 | **Plug & Play** | Drop a skill from OpenClaw/Claude Code → Athena rewrites it natively |
-| **Small Model Target** | 1B parameter model achieves 70% of Claude/GPT with efficient workflows |
+| **Small Model Target** | 1B parameter model achieves 70% of frontier models with efficient workflows |
+| **Task-Agnostic Factories** | Dark/Ghost factories handle any language, any project type |
 
 ### 1.3 Minimal Installation
 
@@ -39,6 +40,8 @@ When installed minimally (just core + LLM API key), Athena:
 - Can emulate simulation, research, etc. through code execution
 - Learns from itself (self-improvement loop)
 - Spawns subagents for sensitive/parallel work
+- **Pre-loaded:** Only Personal domain agent ships by default
+- **Other domains added on-demand** via consensus (Butler + Personal Agent + User approval)
 
 ---
 
@@ -50,6 +53,7 @@ When installed minimally (just core + LLM API key), Athena:
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         ATHENA CORE (dom0)                          │
 │  Single minimal agent | Shared LLM key (env var) | Markdown memory  │
+│  Butler (Gateway) routes to Buddy + Domain Agents                   │
 └───────────┬──────────────┬──────────────┬──────────────┬────────────┘
             │              │              │              │
     ┌───────▼──────┐ ┌────▼─────┐ ┌─────▼──────┐ ┌────▼─────┐
@@ -93,7 +97,12 @@ When installed minimally (just core + LLM API key), Athena:
     ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
     │  SELF    │ │ ADVERSAR │ │INFERENCE │ │  EXTERNAL│
     │ RECTIFY  │ │  IAL     │ │ (Ollama) │ │COORDINATOR│
-    │(Critique)│ │(Red Team)│ │(Temp VMs)│ │(Bridges) │
+    │(Critique)│ │(Critic)  │ │(Temp VMs)│ │(Bridges) │
+    └──────────┘ └──────────┘ └──────────┘ └──────────┘
+    ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+    │  AETHER  │ │ FREE LLN │ │POST-COMMIT│ │ DISPOSABL│
+    │(Durable  │ │(Smart    │ │(Work     │ │(Ephmeral │
+    │  Exec)   │ │  Router) │ │  Track)  │ │  Agents) │
     └──────────┘ └──────────┘ └──────────┘ └──────────┘
 
     ════════════════════════════════════════════════
@@ -111,15 +120,16 @@ When installed minimally (just core + LLM API key), Athena:
 
 ### 2.2 Infrastructure (Physical/Virtual)
 
-| Machine | Role | Location |
-|---------|------|----------|
-| **Windows 11 Host** | Development, daily driver | Local |
-| **WSL (Kali Linux)** | Agent testing, OSINT | Local |
-| **VPS 172.238.240.113** | OpenClaw production (Kael) | Remote |
-| **VPS 172.16.122.186** | Defense VM (Parrot OS) | Remote |
-| **Offense VM** | Kali OS + offensive tools | Remote |
-| **McKenna** | Hermes agent instance | Remote |
-| **3CX Phone System** | Voice communication, payphone access | Remote |
+| Machine | Role | Location | IP/Details |
+|---------|------|----------|------------|
+| **Windows 11 Host** | Development, daily driver | Local | WSL Kali |
+| **WSL (Kali Linux)** | Agent testing, OSINT, Umbral agent | Local | |
+| **VPS Production** | OpenClaw production (Kael) | Remote | 172.238.240.113 |
+| **Defense VM** | Parrot OS + defensive tools | Remote | 172.16.122.186 |
+| **Offense VM** | Kali OS + offensive tools | Remote | |
+| **McKenna** | Hermes agent instance | Remote | |
+| **3CX Phone System** | Voice communication | Remote | Payphone access |
+| **SearXNG** | Self-hosted metasearch | Local | Docker |
 
 ---
 
@@ -131,14 +141,18 @@ When installed minimally (just core + LLM API key), Athena:
 - **Personal Research & Secrets** — runs local model for privacy
 - **Home** — household management
 - **Leisure** — entertainment, hobbies
+- **Nutritionist** — meal planning, dietary advice
+- **Companion** — "My buddy" agent, acts as best friend
 
-### 3.2 Work Agent
+### 3.2 Work Agent (Multica Fork)
 - **Backend Dev** — APIs, databases, services
 - **Frontend Dev** — React, UI/UX, dashboards
 - **Mobile Dev** — iOS, Android, React Native
 - **Cloud/DevOps** — AWS, GCP, Azure, K8s, Terraform
 - **Network Dev** — infrastructure, security, protocols
 - **Production Dev** — CI/CD, deployment, monitoring
+- **QA** — testing, security audits
+- **Pentester** — runs policy tests (Offensive VM)
 
 ### 3.3 Finance Agent
 - **Investment Agent** — stocks, bonds, portfolio management
@@ -146,13 +160,15 @@ When installed minimally (just core + LLM API key), Athena:
 - **Cryptocurrency Agent** — DeFi, trading, analysis
 - **Stocks Expert** — market analysis, news, signals
 - **Risk Assessor** — financial risk evaluation
+- **Wall Street Expert** — institutional-grade analysis
 
-### 3.4 Business Agent
+### 3.4 Business Agent (Paperclip Fork)
 - **Sales & Marketing** — projections, campaigns, CRM
 - **Strategy** — business planning, competitive analysis
 - **Operations** — workflows, processes, automation
 - **Legal** — contracts, compliance, IP
 - **CEO** — executive oversight, decision support
+- **Role:** Acts as CEO of the holding company
 
 ### 3.5 Learning & Growth Agent
 - **Courses** — curriculum management, progress tracking
@@ -179,12 +195,31 @@ When installed minimally (just core + LLM API key), Athena:
 - **Defensive** — Parrot OS, monitoring, hardening
 - **OSINT/SIGINT** — intelligence gathering, 3D timeline mapping
 - **Adversarial** — risk analysis, threat modeling
+- **Reconnaissance** — surveillance, geology understanding, 3D reconstruction
+- **Tools:** Shannon, CAI, Strix, Decepticon, Talon, SearXNG
+
+### 3.10 Domain Agent Consensus Protocol
+When a new subagent is requested:
+1. Request sent to Butler + Personal Agent + User
+2. All three must agree (vote based on evidence + agent track record)
+3. If denied, agent can appeal to Lattice
+4. **Autonomous fallback:** If user doesn't reply in X time, other linked agents vote
+5. Human can always override
+6. Final score is executed
+
+### 3.11 Domain Agent Rules
+- All agents can work even if all addons/nodes unavailable
+- Each domain agent spawns its own specialized subagents
+- Domain agents are templates AND managers
+- User only gets Personal agent by default; others added via consensus
+- System identifies expertise gap and creates perfect subagent to fill it
+- No predefined subagents — created through set channels as needed
 
 ---
 
 ## 4. Memory Architecture
 
-### 4.1 Tiered Memory System
+### 4.1 Three-Tier Memory System
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -193,24 +228,27 @@ When installed minimally (just core + LLM API key), Athena:
 │  Bank statements | GitHub | Google Workspace | Email | SMS      │
 │  Tweets | Social media | Chat logs | Local markdown files       │
 │  Builds relationship graph across ALL data sources              │
+│  Name: Neuro Operational Epistemic Sovereign Intelligent System │
+│  Location: Separate project folder, MCP access                  │
 └───────────────────────────────┬─────────────────────────────────┘
                                 │ MCP Protocol
 ┌───────────────────────────────▼─────────────────────────────────┐
 │                    SMS (Sovereign Mind System)                   │
 │  Athena's LOCAL memory core | Built-in, always available        │
-│  Hot → Warm → Normal → Cool → Cold tiered lifecycle            │
+│  5-Tier Lifecycle: Hot → Warm → Normal → Cool → Cold          │
 │  Automatic aging, compression, and archival                     │
+│  Status: Phase 3 COMPLETE (commit 4c77d4d)                     │
 └───────────────────────────────┬─────────────────────────────────┘
                                 │
 ┌───────────────────────────────▼─────────────────────────────────┐
 │                    MARKDOWN FILES (Base Layer)                   │
 │  Primary memory even when SMS/Noesis offline                    │
-│  Per-agent wings: ~/.athena/wings/{agent_name}/                │
+│  Per-agent wings: ~/.theagency/wings/{agent_name}/             │
 │  Structure: wing → room → drawer → item                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.2 SMS Node Structure
+### 4.2 SMS Node Structure (Sovereign Mind System)
 
 | Node | Purpose | Description |
 |------|---------|-------------|
@@ -229,26 +267,41 @@ When installed minimally (just core + LLM API key), Athena:
 
 > **"If Noesis goes offline, agents continue via SMS. If SMS goes offline, agents continue via markdown. Markdown ALWAYS works."**
 
-This is a design-from-day-one feature: every node is fully independent.
+- Every node has local storage that syncs with memory OS
+- Overhead is acceptable for safety
+- From day one, every node is fully independent
+- If memory OS offline, can reconstruct from local storage
+
+### 4.4 Context Management
+- **Problem:** Context window overruns → crashes on 4GB machines
+- **Solution:** Compression agents custom per agent (based on model + tasks)
+- **Hybrid mode:** System automatically switches based on agent's work
+- **Multi-channel:** Personal agent on Telegram, Business on Slack, Coding on Discord
+- **SMS shares only needed context and memory — nothing more**
 
 ---
 
 ## 5. Addons / Nodes (Plug-and-Play Superpowers)
 
 ### 5.1 Noesis (Second Brain)
-- **Status:** Independent project, connects via MCP
-- **Purpose:** Ingests owner's entire digital life (bank statements, GitHub, email, SMS, social media, local files)
+- **Status:** Independent project (separate from Athena)
 - **Full Name:** Neuro Operational Epistemic Sovereign Intelligent System
-- **Features:** Relationship graph, automatic categorization, cross-reference discovery
-- **Location:** Separate project folder, exposes MCP for all agents
+- **Purpose:** Ingests owner's entire digital life
+- **Data Sources:** Bank statements, GitHub, Google Workspace (email, docs), local markdown, chats, SMS, tweets, social media, photos, videos
+- **Features:** Relationship graph, automatic categorization, cross-reference discovery, tagging, value/permission assignment
+- **Location:** Separate project folder inside `/root/project-athena/`
+- **Connection:** MCP server for all agents
+- **Privacy:** Fully local, data sovereignty — raw data stays on owner's machine
+- **Can work without Athena** — independent project
 
 ### 5.2 Sovereign Mind System (SMS)
-- **Status:** Core Athena component (built-in, completed pre-June)
+- **Status:** Core Athena component, **COMPLETE** (Phase 3 committed)
 - **Purpose:** Local memory for Athena agents
-- **Lifecycle:** Hot → Warm → Normal → Cool → Cold (auto-aging)
+- **5-Tier Lifecycle:** Hot → Warm → Normal → Cool → Cold (auto-aging)
 - **Components:** Secrets, Retrieval, Spawn, Lattice, Librarian, Dream, CPR, Gatekeeper
 - **Storage:** SQLite + Neo4j + Qdrant (hybrid)
-- **Completed:** Phase 3 — Tiered Memory Engine + Lifecycle Integration (commit 4c77d4d)
+- **75+ files, ~20,000 LOC**
+- **Tiered memory engine with lifecycle integration**
 
 ### 5.3 Dream Node
 - **Status:** Research complete (inspired by Claude Code Auto-Dream + OpenClaw dreaming)
@@ -261,17 +314,19 @@ This is a design-from-day-one feature: every node is fully independent.
 - **Purpose:** Multi-agent social, economic, and policy simulation
 - **Engine:** OASIS framework (Open Agent Social Interaction Simulations)
 - **Capacity:** 100–1000+ agents, parallel execution
-- **Use cases:** Business agents run product scenarios, personal agents optimize daily schedules
-- **Alternative:** Fork OASIS → wrap as Athena addon (recommended path)
+- **Use cases:** Business agents run product scenarios, personal agents optimize daily schedules, work agent runs policy tests
+- **Alternatives evaluated:** Fork OASIS → wrap as Athena addon (recommended), or use camel-oasis package directly
+- **Social + Economic + Policy simulation**
 
 ### 5.5 Auto-Research Node (Karpathy Inspired)
 - **Status:** Scaffolded (18 files, Apr 30 – May 5)
 - **Purpose:** Iterative improvement loop for anything measurable
-- **Targets:** Prompts, system code, calculations, workflows, finance models
+- **Targets:** Prompts, system prompts, system code, calculations, workflows, finance models
 - **Method:** Modify → Execute → Evaluate → Log → Repeat
 - **Concurrent:** Personal + work agents run simultaneously on different targets
+- **Cross-pollination:** If auto-research improves one workflow, Dark Factory automatically improves others using same formula
 
-### 5.6 Dark Factory (Python)
+### 5.6 Dark Factory (Python-Focused)
 - **Status:** Designed, partially scaffolded
 - **Purpose:** Continuous Python-focused software generation for Athena agents
 - **Modes:**
@@ -281,8 +336,14 @@ This is a design-from-day-one feature: every node is fully independent.
   4. Iteratively improve existing code
   5. Self-rectify (discover bugs, fix, validate)
   6. **Absorption:** Clone any GitHub repo → rewrite to Athena-native
-- **Collaboration:** Works with Ghost Factory (multi-language input → Python)
-- **Multi-Agent:** Multiple agents can call Dark Factory simultaneously in parallel
+- **Input:** Natural language OR structured schema (agent-provided)
+- **Output:** Defined by requester (full project, CLI tool, module)
+- **Validation:** Self-validates + agent validates second time
+- **Task-Agnostic:** Can build anything — Windows exe, COBOL program, custom OS
+- **Full SDLC:** Requirements → Design → Build → Test → Deploy → Maintain
+- **Multi-Agent:** Multiple agents can call Dark Factory simultaneously without bleeding into each other
+- **Long-term maintenance:** Linked to GitHub, ships features, fixes bugs continuously
+- **Failure recovery:** Built-in patterns to prevent infinite loops
 
 ### 5.7 Ghost Factory (Multi-Language)
 - **Status:** Scaffolded (6-mode universal software construction, commit a54866a)
@@ -294,22 +355,29 @@ This is a design-from-day-one feature: every node is fully independent.
   4. **Contribute** — Contribute to public repos as independent builds
   5. **Rework** — Rework code to Athena-compatible format
   6. **Study** — Learn new languages/frameworks from online sources on-demand
-- **Collaboration:** Translates non-Python → Python for Dark Factory consumption
 - **Languages:** Rust, JavaScript, Go, C, C++, F#, Malbolge, custom languages
+- **Collaboration:** Translates non-Python → Python for Dark Factory consumption
+- **Learning:** Studies new languages from documentation when needed
+- **Example:** Build a cryptographic app using Malbolge (no training data) → Android app
 
 ### 5.8 Self-Rectification Node
 - **Status:** Designed
 - **Purpose:** Self-critique and correction system
 - **Method:** Detect own errors → Propose fixes → Validate → Apply
 - **Scope:** Code, workflows, prompts, system configuration
-- **Modes:** Test changes in latest Athena environment before making mainstream
+- **Modes:**
+  1. Test changes in latest Athena environment before making mainstream
+  2. Like a different tree — test → see how it is → keep main safe → role out approved changes in stages
 
 ### 5.9 Adversarial Node (Critic)
 - **Status:** Designed (research from Sparfuchs-QA, Cisco Skill Scanner, Giskard)
-- **Purpose:** Critic/QA system (NOT red teaming)
+- **Purpose:** Critic/QA system (NOT red teaming — that's Security Agent's job)
 - **Method:** Simultaneously checks every agent's work and finds loopholes
 - **Responsibility:** Enforce quality with strict QA rules
-- **Pairing:** Works with Security Agent for defense validation
+- **Research Sources:**
+  - Sparfuchs-QA (sparfuchs-qa.git)
+  - Cisco AI Defense (skill-scanner.git)
+  - Giskard (giskard-oss.git)
 
 ### 5.10 Sandbox Node (Athena Mirror)
 - **Status:** Designed (Sandbox addon complete, node wrapper planned)
@@ -319,13 +387,16 @@ This is a design-from-day-one feature: every node is fully independent.
   2. **Agency Mirror** — full codebase clone for testing
   3. **VM-based** — Firecracker microVMs per subagent
 - **Use cases:** Test code before deploying, run sensitive operations, experiment safely
+- **Virtual environment:** Mimics Athena as it is
+- **Can run independently** — used by other agents outside Athena environment
 
-### 5.11 Inference Node (Ollama)
+### 5.11 Inference Node (Ollama-Packaged)
 - **Status:** Designed
 - **Purpose:** Local model execution for zero-cost subagent spawning
 - **Packaging:** Bundled Ollama + model selection
 - **Advertisement:** "Temporary subagents available via Inference Node"
 - **Cost:** Zero (runs on local hardware)
+- **Qubes philosophy:** Like qubes VMs — spin temporary subagents running on local models
 
 ### 5.12 External Coordinator Node
 - **Status:** Bridge infrastructure built (Apr 30 – May 5)
@@ -342,23 +413,38 @@ This is a design-from-day-one feature: every node is fully independent.
   - OpenCode (CLI)
   - Gemini CLI (subprocess/API)
 - **Interface:** Standardized `execute(task, context, timeout, budget)` → `BridgeResult`
+- **Key insight:** Same Codex you run runs natively with Athena — system understands it natively
 
-### 5.13 Post-Commit Hook (Work Tracking)
+### 5.13 Aether (Durable Execution)
+- **Status:** Designed (wrapper exists, full system pending)
+- **Purpose:** Build AI agents and harnesses with checkpoint recovery
+- **Checkpoint:** After every LLM call, tool use, decision
+- **Enables:** Crash recovery, long-running workflows
+- **Sprint:** Planned for Sprint 3+
+
+### 5.14 FreeLLM Addon
+- **Status:** Built (based on freellmapi.git, 17 tests passing)
+- **Purpose:** Smart LLM routing across free/local/paid providers
+- **4 Options:**
+  1. **Free** — User-provided API keys, near-free inference
+  2. **User API Keys** — Per-provider keys, round-robin or priority routing
+  3. **Subscription** — Paid tiers with coding plans, subscription-based providers
+  4. **Local Inference** — Ollama with user-defined models
+- **Hybrid:** Smart routing through rolling window or fixed RPM, user-defined rules
+
+### 5.15 Post-Commit Work Tracking
 - **Status:** Built (Jack's Golden Rule)
 - **Purpose:** Update work tracking on every commit
+- **Rename:** "Athena system services"
 - **Files:** `~/.theagency/wings/{agent}/tasks/` and `completed/`
 - **Format:** JSON task files with status, commit hash, timestamps
+- **Golden Rule:** "If it's not in the wing, it doesn't exist"
 
-### 5.14 Disposable Agent Runner
+### 5.16 Disposable Agent Runner
 - **Status:** Designed
 - **Purpose:** Ephemeral agents for sensitive or zero-cost tasks
 - **Pairing:** Inference Node (Ollama) for local, free execution
-
-### 5.15 FreeLLM Addon
-- **Status:** Built (based on freellmapi.git, 17 tests passing)
-- **Purpose:** Smart LLM routing across free/local/paid providers
-- **Tiers:** Free, User API Keys, Subscription, Local Inference, Hybrid
-- **Routing:** Rolling window, fixed RPM, user-defined rules
+- **Features:** Runs sensitive operations without persistent state
 
 ---
 
@@ -481,7 +567,11 @@ class CapabilityAdvertisement:
 | **Deployment** | Docker → K8s | Scalable, reproducible, isolated |
 | **GUI (Business)** | Paperclip fork (React) | Companies, org chart, tasks |
 | **GUI (Mission Control)** | Python Textual TUI | Unified agent dashboard |
+| **GUI (Coding)** | Superset fork | Multi-agent IDE |
+| **GUI (Work)** | Multica fork | Project management |
 | **Sandbox** | Firecracker microVMs | Lightweight isolation per subagent |
+| **State Management** | Zustand (React) | Lightweight, fast |
+| **Data Fetching** | React Query | Server state management |
 
 ---
 
@@ -489,7 +579,7 @@ class CapabilityAdvertisement:
 
 ### 9.1 Concept
 
-A model routing gateway (inspired by [freellmapi](https://github.com/tashfeenahmed/freellmapi.git)) with 4 options:
+A model routing gateway (inspired by [freellmapi](https://github.com/tashfeenahmed/freellmapi.git)) with 5 options:
 
 | Option | Description |
 |--------|-------------|
@@ -499,28 +589,13 @@ A model routing gateway (inspired by [freellmapi](https://github.com/tashfeenahm
 | **Local Inference** | Ollama with user-defined models and rules |
 | **Hybrid** | Smart routing through rolling window or fixed RPM, user-defined rules |
 
-### 9.2 Routing Strategy
-
-```python
-class LLMRouter:
-    """Smart routing across providers with cost optimization."""
-    
-    def route(self, task: TaskMessage) -> Provider:
-        # 1. Check user-defined rules
-        if rule := self.rules.match(task):
-            return rule.provider
-        
-        # 2. Check free tier availability
-        if free := self.free_tier.available(task):
-            return free
-        
-        # 3. Check local inference capability
-        if self.ollama.can_handle(task):
-            return self.ollama
-        
-        # 4. Fall back to lowest-cost paid provider
-        return self.paid_tier.cheapest(task)
-```
+### 9.2 Athena Core Key Sharing
+- Athena gets key from env var, shared by other agents
+- If user has multiple providers, each agent gets its own LLM:
+  - Research Agent: Kimi K2.6
+  - Athena: Claude 4.7 Opus
+  - Personal Agent: GPT 5.5
+  - News Agent: Grok 4.3
 
 ---
 
@@ -568,6 +643,17 @@ athena/skills/quality_assurance/
 4. **Tag your work** — every commit tagged with agent name
 5. **Document chain of thought** — why you changed what you changed
 6. **Log mistakes** — record errors and fixes permanently
+7. **Double-check** — always reason and plan before editing
+8. **No circular imports** — fix immediately
+
+### 10.4 First QA Scan Results
+- Quality Score: 0/100 (baseline)
+- Issues: 719 total
+  - Code Style: 403
+  - Documentation: 312
+  - Security: 3 (exec/eval, SQL injection)
+  - Test Coverage: 1
+  - Architecture: 4 high-complexity functions
 
 ---
 
@@ -603,19 +689,11 @@ Message format:
 | **MemPalace MCP** | Persistent task inbox, capability sharing |
 | **A2A (Agent-to-Agent)** | Google A2A protocol if all agents support it |
 | **Telegram** | Primary messaging channel (cron jobs, reports) |
-| **Discord** | Alternative (evaluated, Telegram chosen for simplicity) |
+| **Discord** | Alternative for coding domain |
+| **Slack** | Business agent |
 | **3CX Phone** | Voice calls, payphone access from anywhere |
 
-### 11.3 Consensus Protocol (Agent Voting)
-
-When an agent requests a new subagent:
-1. Request sent to Butler + Personal Agent + User
-2. All three must agree (vote based on evidence + agent track record)
-3. If denied, agent can appeal
-4. If user doesn't reply in X time, other linked agents vote
-5. Human can always override
-
-### 11.4 Cron Jobs & Heartbeats
+### 11.3 Cron Jobs & Heartbeats
 
 - **Daily briefings** — 7:30 AM EAT (news from worldmonitor.app, HN, daily.dev)
 - **Nightly memory sync** — sweep MemPalace, update from other agents, write report
@@ -623,6 +701,15 @@ When an agent requests a new subagent:
 - **QA monitoring** — continuous git commit scanning, auto-issue creation
 - **Self-diagnosis** — agents check own health, report issues
 - **Forge heartbeat** — 10-minute build cycles
+- **Obsidian backups** — Midday + end of day
+- **Delta reports** — Every 30 minutes from Forge
+
+### 11.4 Task Routing
+> **"Work should always be broken down and each piece routed to the BEST agent to complete it. They all work in parallel and produce richer results."**
+
+- Personal agent needs finance review → routes to Finance agent
+- Business agent has financial insight → included in reports
+- Cross-domain insights shared via Lattice
 
 ---
 
@@ -630,6 +717,7 @@ When an agent requests a new subagent:
 
 ### 12.1 MemPalace
 - **Role:** Shared knowledge graph across ALL agents (not just Athena)
+- **Location:** `/root/.local/share/pipx/venvs/mempalace/`
 - **Features:** Spatial memory (wing→room→drawer), knowledge graph, MCP server
 - **Agents connected:** Kael (OpenClaw), Zoey (Hermes), Aiden (AgentZero), Ally (DeerFlow)
 
@@ -641,6 +729,7 @@ When an agent requests a new subagent:
 - **Role:** Self-hosted social media management
 - **URL:** `http://localhost:4007`
 - **Integrations:** X, LinkedIn, Facebook, Reddit, TikTok
+- **Stack:** Docker compose (PostgreSQL, Redis, Temporal, Elasticsearch)
 
 ### 12.4 3CX Phone System
 - **Role:** Self-hosted PBX for voice communication
@@ -650,6 +739,32 @@ When an agent requests a new subagent:
 - **Role:** Independent second brain project
 - **Ingests:** Bank statements, GitHub, Google Workspace, email, SMS, social media, local files
 - **Protocol:** MCP server for agent access
+
+### 12.6 Paperclip (Business UI Fork)
+- **Role:** Business Agent UI
+- **Source:** github.com/paperclipai/paperclip
+- **Features:** Companies, org chart, tasks, budgets, headcount, MRR
+- **Integration:** Built-in "Athena" adapter maps roles → domain agents
+
+### 12.7 Multica (Work UI Fork)
+- **Role:** Work Agent UI
+- **Source:** github.com/multica-ai/multica
+- **Features:** Projects, sprints, deliverables, team management
+- **Integration:** Work agent controls Multica, assigns projects to subagents
+
+### 12.8 Superset (Coding UI Fork)
+- **Role:** Coding Agent IDE
+- **Source:** github.com/superset-sh/superset
+- **Features:** Multi-agent IDE accommodating Claude, Codex, Gemini, OpenCode
+- **Integration:** Fork + rewrite Pulse to Athena-compatible for built-in agent
+
+### 12.9 Space-Agent (Buddy UI Fork)
+- **Role:** Mission Control UI / Buddy agent
+- **Source:** github.com/agent0ai/space-agent
+- **Features:** Two-page Mission Control, component rendering
+- **Development:** Can build more features on top, continue if original stops
+- **Default:** Mission Control has two pages (Mission Control + Buddy page)
+- **Switching:** User selects Buddy floating icon → switches to Buddy page
 
 ---
 
@@ -663,11 +778,21 @@ export LLM_API_KEY="sk-..."
 python -m theagency.core.agent  # Starts Athena minimal
 ```
 
+**What you get:**
+- Athena Core (single agent)
+- Butler (gateway)
+- Personal domain agent (pre-loaded)
+- Markdown memory
+- Bridge system infrastructure
+
 ### 13.2 Full Install (With Addons)
 
 ```bash
 pip install theagency[all]
 theagency install --profile full
+# Installs: Noesis, SMS, Dream, Simulation, Auto-Research,
+#           Dark Factory, Ghost Factory, Sandbox, Adversarial,
+#           External Coordinator, all bridges
 ```
 
 ### 13.3 Selective Install
@@ -685,6 +810,11 @@ theagency vm create --agent personal --os ubuntu --resources "2cpu,4gb"
 theagency vm create --agent security --os kali --resources "2cpu,4gb"
 theagency vm create --agent work --os ubuntu --resources "4cpu,8gb"
 ```
+
+### 13.5 GUI Options
+- **Just Butler + Normal UI** (no Buddy)
+- **Butler + Buddy addon** (recommended)
+- **Butler and Buddy as one** (not recommended)
 
 ---
 
@@ -704,62 +834,88 @@ theagency vm create --agent work --os ubuntu --resources "4cpu,8gb"
 | **v0.9.0** | Jan 2027 | All addons shipped, full integration |
 | **v1.0.0** | Feb 2027 | Production-ready, bug-free, plug-and-play |
 
+### 14.1 Internal Milestones
+- **v0.3.0 internal** — fully functional (all domain agents working)
+- **v0.5.0 public** — ready for testing
+- **v0.9.0** — full product with 99% bugs fixed, only edge cases remaining
+- **v1.0.0** — all edge cases resolved
+
 ---
 
 ## 15. Agent Roster (Current)
 
-| Agent | Platform | Role | Created |
-|-------|----------|------|---------|
-| **Kael ⚡️** | OpenClaw | Main daily agent, coordination lead | Apr 11 |
-| **Zoey 😜** | Hermes Agent | Research, installation, multi-agent | Apr 11 |
-| **Aiden** | AgentZero | AgentZero instance (Docker) | Apr 11 |
-| **Ally** | DeerFlow | DeerFlow agent | Apr 12 |
-| **McKenna** | Hermes Agent | Secondary Hermes instance | Apr 12 |
-| **Nexus** | Hermes Agent | System monitoring, cleanup | Apr 10 |
-| **Jack** | Hermes Agent (new profile) | QA/Critic, competitive analysis | Apr 29 |
-| **Clara** | Hermes Agent (new profile) | Buddy UI / Space-Agent fork | Apr 29 |
-| **Teresa** | Hermes Agent (new profile) | Build agent, addon scaffolding | Apr 29 |
-| **Remex** | Hermes Agent (new profile) | Memory systems, SMS/Noesis | May 1 |
-| **Qore** | Hermes Agent (new profile) | QA officer, git monitoring | May 1 |
-| **Umbral** | Hermes Agent (new profile) | OSINT/SIGINT, Kali Linux | May 21 |
-| **charlie** | Unknown | Task agent | May 30 |
+| Agent | Platform | Role | Created | Status |
+|-------|----------|------|---------|--------|
+| **Kael ⚡️** | OpenClaw | Main daily agent, coordination lead | Apr 11 | Architect AI agent |
+| **Zoey 😜** | Hermes Agent | Research, installation, multi-agent | Apr 11 | Active |
+| **Aiden** | AgentZero | AgentZero instance (Docker) | Apr 11 | Recovered |
+| **Ally** | DeerFlow | DeerFlow agent | Apr 12 | Troubleshooting |
+| **McKenna** | Hermes Agent | Secondary Hermes instance | Apr 12 | Active |
+| **Nexus** | Hermes Agent | System monitoring, cleanup | Apr 10 | Active |
+| **Jack** | Hermes Agent | QA/Critic, competitive analysis | Apr 29 | Active |
+| **Clara** | Hermes Agent | Buddy UI / Space-Agent fork | Apr 29 | Active |
+| **Teresa** | Hermes Agent | Build agent, addon scaffolding | Apr 29 | Active |
+| **Remex** | Hermes Agent | Memory systems, SMS/Noesis | May 1 | Active |
+| **Qore** | Hermes Agent | QA officer, git monitoring | May 1 | Active |
+| **Umbral** | Hermes Agent | OSINT/SIGINT, Kali Linux | May 21 | Active |
+| **charlie** | Unknown | Task agent | May 30 | Active |
+
+### 15.1 Forge Department
+- **7 agents** auto-building Athena with 15-minute heartbeat
+- **Zoom** — build subagent with 10-minute heartbeat
+- Subagents: Lead Software Architect, LLM Harness Engineer, Frontend/UI Engineer, QA subagent
+- Can hire new subagents as needed
+- All work in parallel with 24/7 uptime
+- Auto-restart on failure
 
 ---
 
-## 16. Glossary
+## 16. Job Search Automation
+
+- **Target:** Remote jobs, $30-100/day
+- **Skills:** Databases, AI full-stack (Python, Rust, JS), Junior-Mid level
+- **Strategy:** Apply to many, one will hit
+- **Scope:** All countries, all continents
+- **Integration:** Auto-apply via agent delegation
+
+---
+
+## 17. Glossary
 
 | Term | Definition |
 |------|------------|
 | **The Agency** | Decentralized multi-agent AI system (formerly Project Athena) |
 | **Athena Core** | The single minimal agent at the heart of the system |
 | **Lattice** | Neo4j graph database storing agent/task/deliverable relationships |
-| **SMS** | Sovereign Mind System — local memory core for Athena agents |
-| **Noesis** | External second brain (independent project, connects via MCP) |
-| **Domain Agent** | Native agent handling a broad life area (Personal, Work, Finance, etc.) |
-| **Sub-Specialist** | Fine-tuned agent spawned by a domain agent (e.g., StocksExpert under Finance) |
-| **Addon/Node** | Pluggable capability module (Simulation, Auto-Research, Dark Factory, etc.) |
-| **Bridge** | External AI framework wrapper (Claude Code, Codex, Goose, etc.) |
-| **Dark Factory** | Python-focused continuous code generation and self-improvement system |
-| **Ghost Factory** | Multi-language build system (reverse engineering, forking, contributing) |
+| **SMS** | Sovereign Mind System — local memory core (5-tier: Hot→Cold) |
+| **Noesis** | External second brain (independent project, MCP access) |
+| **Domain Agent** | Native agent handling a broad life area (Personal, Work, etc.) |
+| **Sub-Specialist** | Fine-tuned agent spawned by a domain agent |
+| **Addon/Node** | Pluggable capability module |
+| **Bridge** | External AI framework wrapper |
+| **Dark Factory** | Python-focused continuous code generation + Absorption mode |
+| **Ghost Factory** | Multi-language 6-mode build system |
 | **Self-Rectification** | Self-critique and correction system |
 | **Adversarial** | Critic/QA system enforcing quality (not red teaming) |
-| **Sandbox** | Isolated execution environment (Clean Room or Athena Mirror) |
+| **Sandbox** | Isolated execution environment (Clean Room / Athena Mirror) |
 | **Inference Node** | Local Ollama-based execution for zero-cost subagents |
 | **External Coordinator** | Translation layer for external AI harnesses |
-| **Dream Node** | Background memory consolidation during idle cycles |
-| **MemPalace** | Shared knowledge graph MCP server (connects all agents) |
-| **Wing** | Per-agent isolated storage (`~/.theagency/wings/{name}/`) |
-| **Room** | Memory container within a wing |
-| **Drawer** | Individual memory item within a room |
-| **Hot/Warm/Normal/Cool/Cold** | Memory tier lifecycle (auto-aging) |
-| **Qubes Philosophy** | Security by isolation; temporary VMs; dom0 controls |
-| **Golden Rule (Jack)** | Plan first, modular code, work tracking, tag commits |
+| **Aether** | Durable execution framework with checkpoint recovery |
 | **FreeLLM** | Smart LLM routing across free/local/paid providers |
-| **Forge** | Department of 7 agents auto-building Athena with 15-min heartbeats |
+| **Dream Node** | Background memory consolidation |
+| **MemPalace** | Shared knowledge graph MCP server (all agents) |
+| **Wing** | Per-agent isolated storage |
+| **Room** | Memory container within a wing |
+| **Drawer** | Individual memory item |
+| **Qubes Philosophy** | Security by isolation; temporary VMs; dom0 = Athena Core |
+| **Golden Rule (Jack)** | Plan first, modular code, work tracking, tag commits |
+| **Forge** | Department of 7+ agents auto-building Athena |
 | **Zoom** | Build subagent with 10-minute heartbeat |
 | **Buddy** | Space-Agent fork for UI rendering in Mission Control |
+| **Absorption** | Clone any GitHub repo → rewrite to Athena-native |
+| **Consensus** | Agent voting for new subagents (Butler + Personal + User) |
 
 ---
 
 *Last updated: 2026-09-17 by Hermes Agent*
-*Status: Full specification reconstructed from 1,417 user instructions. Ready for build.*
+*Status: Complete specification from 1,417 user instructions. Ready for build.*
