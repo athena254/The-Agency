@@ -60,7 +60,7 @@ When installed minimally (just core + LLM API key), Athena:
     │  ├─Companion │ │ ├─Mobile │ │ ├─Crypto   │ │ ├─Ops    │
     │  ├─Research  │ │ ├─Cloud  │ │ ├─Stocks   │ │ ├─Legal  │
     │  └─Secrets   │ │ └─Net    │ │ └─Risk     │ │ └─CEO    │
-    └──────────────┘ └──────────┘ └────────────┘ └──────────┘
+    └──────────────┘ └──────────┘ └────────────┘ └────────────┘
             │              │              │              │
     ┌───────▼──────┐ ┌────▼─────┐ ┌─────▼──────┐ ┌────▼─────┐
     │   Learning   │ │  Techno  │ │   Social   │ │ Research │
@@ -68,7 +68,7 @@ When installed minimally (just core + LLM API key), Athena:
     │  ├─Courses   │ │ ├─Infra  │ │ ├─Network  │ │ ├─Papers │
     │  ├─Skills    │ │ ├─DevOps │ │ ├─Community│ │ ├─Exper  │
     │  └─Growth    │ │ └─Tools  │ │ └─Events   │ │ └─Know   │
-    └──────────────┘ └──────────┘ └────────────┘ └──────────┘
+    └──────────────┘ └──────────┘ └────────────┘ └────────────┘
                                 │
                     ┌───────────▼───────────┐
                     │   SECURITY AGENT (9th) │
@@ -116,10 +116,9 @@ When installed minimally (just core + LLM API key), Athena:
 | **Windows 11 Host** | Development, daily driver | Local |
 | **WSL (Kali Linux)** | Agent testing, OSINT | Local |
 | **VPS 172.238.240.113** | OpenClaw production (Kael) | Remote |
-| **McKenna** | Hermes agent instance | Remote |
 | **VPS 172.16.122.186** | Defense VM (Parrot OS) | Remote |
-| **Defense VM** | Parrot OS + defensive tools | Remote |
 | **Offense VM** | Kali OS + offensive tools | Remote |
+| **McKenna** | Hermes agent instance | Remote |
 | **3CX Phone System** | Voice communication, payphone access | Remote |
 
 ---
@@ -239,17 +238,20 @@ This is a design-from-day-one feature: every node is fully independent.
 ### 5.1 Noesis (Second Brain)
 - **Status:** Independent project, connects via MCP
 - **Purpose:** Ingests owner's entire digital life (bank statements, GitHub, email, SMS, social media, local files)
+- **Full Name:** Neuro Operational Epistemic Sovereign Intelligent System
 - **Features:** Relationship graph, automatic categorization, cross-reference discovery
-- **Alternative name:** Neuro Operational Epistemic Sovereign Intelligent System
+- **Location:** Separate project folder, exposes MCP for all agents
 
 ### 5.2 Sovereign Mind System (SMS)
-- **Status:** Core Athena component (built-in)
+- **Status:** Core Athena component (built-in, completed pre-June)
 - **Purpose:** Local memory for Athena agents
 - **Lifecycle:** Hot → Warm → Normal → Cool → Cold (auto-aging)
 - **Components:** Secrets, Retrieval, Spawn, Lattice, Librarian, Dream, CPR, Gatekeeper
+- **Storage:** SQLite + Neo4j + Qdrant (hybrid)
+- **Completed:** Phase 3 — Tiered Memory Engine + Lifecycle Integration (commit 4c77d4d)
 
 ### 5.3 Dream Node
-- **Status:** Planned (research complete — inspired by Claude Code Auto-Dream + OpenClaw dreaming)
+- **Status:** Research complete (inspired by Claude Code Auto-Dream + OpenClaw dreaming)
 - **Purpose:** Background memory consolidation during idle/sleep cycles
 - **Features:** Auto-merge related facts, extract insights, reduce Lattice bloat
 - **Trigger:** Cron-based or idle detection
@@ -260,6 +262,7 @@ This is a design-from-day-one feature: every node is fully independent.
 - **Engine:** OASIS framework (Open Agent Social Interaction Simulations)
 - **Capacity:** 100–1000+ agents, parallel execution
 - **Use cases:** Business agents run product scenarios, personal agents optimize daily schedules
+- **Alternative:** Fork OASIS → wrap as Athena addon (recommended path)
 
 ### 5.5 Auto-Research Node (Karpathy Inspired)
 - **Status:** Scaffolded (18 files, Apr 30 – May 5)
@@ -268,7 +271,7 @@ This is a design-from-day-one feature: every node is fully independent.
 - **Method:** Modify → Execute → Evaluate → Log → Repeat
 - **Concurrent:** Personal + work agents run simultaneously on different targets
 
-### 5.6 Dark Factory
+### 5.6 Dark Factory (Python)
 - **Status:** Designed, partially scaffolded
 - **Purpose:** Continuous Python-focused software generation for Athena agents
 - **Modes:**
@@ -279,28 +282,33 @@ This is a design-from-day-one feature: every node is fully independent.
   5. Self-rectify (discover bugs, fix, validate)
   6. **Absorption:** Clone any GitHub repo → rewrite to Athena-native
 - **Collaboration:** Works with Ghost Factory (multi-language input → Python)
+- **Multi-Agent:** Multiple agents can call Dark Factory simultaneously in parallel
 
-### 5.7 Ghost Factory
-- **Status:** Scaffolded (6-mode universal software construction)
+### 5.7 Ghost Factory (Multi-Language)
+- **Status:** Scaffolded (6-mode universal software construction, commit a54866a)
 - **Purpose:** Multi-language build system (not just Python)
-- **Capabilities:**
-  - Build new programs from scratch
-  - Reverse-engineer without source code
-  - Fork GitHub repos and add features
-  - Contribute to public repos as independent builds
-  - Rework code to Athena-compatible format
+- **6 Modes:**
+  1. **New** — Build new programs from scratch
+  2. **Reverse** — Reverse-engineer without source code
+  3. **Fork** — Fork GitHub repos and add features
+  4. **Contribute** — Contribute to public repos as independent builds
+  5. **Rework** — Rework code to Athena-compatible format
+  6. **Study** — Learn new languages/frameworks from online sources on-demand
 - **Collaboration:** Translates non-Python → Python for Dark Factory consumption
+- **Languages:** Rust, JavaScript, Go, C, C++, F#, Malbolge, custom languages
 
 ### 5.8 Self-Rectification Node
 - **Status:** Designed
 - **Purpose:** Self-critique and correction system
 - **Method:** Detect own errors → Propose fixes → Validate → Apply
 - **Scope:** Code, workflows, prompts, system configuration
+- **Modes:** Test changes in latest Athena environment before making mainstream
 
-### 5.9 Adversarial Node
-- **Status:** Planned
-- **Purpose:** Red teaming and risk analysis
-- **Method:** Attack own systems → Report findings → Recommend hardening
+### 5.9 Adversarial Node (Critic)
+- **Status:** Designed (research from Sparfuchs-QA, Cisco Skill Scanner, Giskard)
+- **Purpose:** Critic/QA system (NOT red teaming)
+- **Method:** Simultaneously checks every agent's work and finds loopholes
+- **Responsibility:** Enforce quality with strict QA rules
 - **Pairing:** Works with Security Agent for defense validation
 
 ### 5.10 Sandbox Node (Athena Mirror)
@@ -313,7 +321,7 @@ This is a design-from-day-one feature: every node is fully independent.
 - **Use cases:** Test code before deploying, run sensitive operations, experiment safely
 
 ### 5.11 Inference Node (Ollama)
-- **Status:** Planned
+- **Status:** Designed
 - **Purpose:** Local model execution for zero-cost subagent spawning
 - **Packaging:** Bundled Ollama + model selection
 - **Advertisement:** "Temporary subagents available via Inference Node"
@@ -345,6 +353,12 @@ This is a design-from-day-one feature: every node is fully independent.
 - **Status:** Designed
 - **Purpose:** Ephemeral agents for sensitive or zero-cost tasks
 - **Pairing:** Inference Node (Ollama) for local, free execution
+
+### 5.15 FreeLLM Addon
+- **Status:** Built (based on freellmapi.git, 17 tests passing)
+- **Purpose:** Smart LLM routing across free/local/paid providers
+- **Tiers:** Free, User API Keys, Subscription, Local Inference, Hybrid
+- **Routing:** Rolling window, fixed RPM, user-defined rules
 
 ---
 
@@ -473,7 +487,7 @@ class CapabilityAdvertisement:
 
 ## 9. FreeLLM / LLM Routing
 
-### 10.1 Concept
+### 9.1 Concept
 
 A model routing gateway (inspired by [freellmapi](https://github.com/tashfeenahmed/freellmapi.git)) with 4 options:
 
@@ -485,7 +499,7 @@ A model routing gateway (inspired by [freellmapi](https://github.com/tashfeenahm
 | **Local Inference** | Ollama with user-defined models and rules |
 | **Hybrid** | Smart routing through rolling window or fixed RPM, user-defined rules |
 
-### 10.2 Routing Strategy
+### 9.2 Routing Strategy
 
 ```python
 class LLMRouter:
@@ -510,9 +524,9 @@ class LLMRouter:
 
 ---
 
-## 11. Quality Assurance
+## 10. Quality Assurance
 
-### 11.1 QA Critic (Jack's System)
+### 10.1 QA Critic (Jack's System)
 
 Built-in quality enforcement with 10 dimensions:
 
@@ -529,7 +543,7 @@ Built-in quality enforcement with 10 dimensions:
 | Innovation | LOW | Novel solutions preferred |
 | Graceful Degradation | HIGH | Fails safely |
 
-### 11.2 QA Scanners
+### 10.2 QA Scanners
 
 ```
 athena/skills/quality_assurance/
@@ -546,7 +560,7 @@ athena/skills/quality_assurance/
     └── rule_registry.py         # Configurable rule engine
 ```
 
-### 11.3 Golden Rules (Jack's Rules)
+### 10.3 Golden Rules (Jack's Rules)
 
 1. **Plan first** — dry run before editing files
 2. **Modular & reusable** — build once, reuse forever
@@ -557,9 +571,9 @@ athena/skills/quality_assurance/
 
 ---
 
-## 12. Communication & Coordination
+## 11. Communication & Coordination
 
-### 12.1 Coordination Protocol (MemPalace Message Bus)
+### 11.1 Coordination Protocol (MemPalace Message Bus)
 
 ```
 wing: coordination/
@@ -582,7 +596,7 @@ Message format:
 }
 ```
 
-### 12.2 Real-Time Coordination
+### 11.2 Real-Time Coordination
 
 | Method | Use Case |
 |--------|----------|
@@ -592,45 +606,56 @@ Message format:
 | **Discord** | Alternative (evaluated, Telegram chosen for simplicity) |
 | **3CX Phone** | Voice calls, payphone access from anywhere |
 
-### 12.3 Cron Jobs & Heartbeats
+### 11.3 Consensus Protocol (Agent Voting)
+
+When an agent requests a new subagent:
+1. Request sent to Butler + Personal Agent + User
+2. All three must agree (vote based on evidence + agent track record)
+3. If denied, agent can appeal
+4. If user doesn't reply in X time, other linked agents vote
+5. Human can always override
+
+### 11.4 Cron Jobs & Heartbeats
 
 - **Daily briefings** — 7:30 AM EAT (news from worldmonitor.app, HN, daily.dev)
 - **Nightly memory sync** — sweep MemPalace, update from other agents, write report
 - **Auto-commit** — Forge daemon every 15 minutes
 - **QA monitoring** — continuous git commit scanning, auto-issue creation
 - **Self-diagnosis** — agents check own health, report issues
+- **Forge heartbeat** — 10-minute build cycles
 
 ---
 
-## 13. External Integrations
+## 12. External Integrations
 
-### 13.1 MemPalace
+### 12.1 MemPalace
 - **Role:** Shared knowledge graph across ALL agents (not just Athena)
-- **Location:** `/root/.local/share/pipx/venvs/mempalace/`
 - **Features:** Spatial memory (wing→room→drawer), knowledge graph, MCP server
 - **Agents connected:** Kael (OpenClaw), Zoey (Hermes), Aiden (AgentZero), Ally (DeerFlow)
 
-### 13.2 SearXNG
+### 12.2 SearXNG
 - **Role:** Self-hosted metasearch engine for agent web searches
-- **Location:** Docker container on local machine
 - **Use:** Primary web search for agents (privacy-respecting)
 
-### 13.3 Postiz
+### 12.3 Postiz
 - **Role:** Self-hosted social media management
 - **URL:** `http://localhost:4007`
 - **Integrations:** X, LinkedIn, Facebook, Reddit, TikTok
-- **Stack:** Docker compose (PostgreSQL, Redis, Temporal, Elasticsearch)
 
-### 13.4 3CX Phone System
+### 12.4 3CX Phone System
 - **Role:** Self-hosted PBX for voice communication
 - **Use:** Call agents from anywhere, even payphones
-- **Setup:** Dedicated VM or Raspberry Pi
+
+### 12.5 Noesis
+- **Role:** Independent second brain project
+- **Ingests:** Bank statements, GitHub, Google Workspace, email, SMS, social media, local files
+- **Protocol:** MCP server for agent access
 
 ---
 
-## 14. Deployment & Installation
+## 13. Deployment & Installation
 
-### 14.1 Minimal Install (Core Only)
+### 13.1 Minimal Install (Core Only)
 
 ```bash
 pip install theagency-core
@@ -638,17 +663,14 @@ export LLM_API_KEY="sk-..."
 python -m theagency.core.agent  # Starts Athena minimal
 ```
 
-### 14.2 Full Install (With Addons)
+### 13.2 Full Install (With Addons)
 
 ```bash
 pip install theagency[all]
 theagency install --profile full
-# Installs: Noesis, SMS, Dream, Simulation, Auto-Research,
-#           Dark Factory, Ghost Factory, Sandbox, Adversarial,
-#           External Coordinator, all bridges
 ```
 
-### 14.3 Selective Install
+### 13.3 Selective Install
 
 ```bash
 theagency install --addons simulation,auto_research,dark_factory
@@ -656,7 +678,7 @@ theagency install --domains finance,business,security
 theagency install --bridges claude_code,codex,openclaw
 ```
 
-### 14.4 VM Per Agent (Qubes-Style)
+### 13.4 VM Per Agent (Qubes-Style)
 
 ```bash
 theagency vm create --agent personal --os ubuntu --resources "2cpu,4gb"
@@ -666,7 +688,7 @@ theagency vm create --agent work --os ubuntu --resources "4cpu,8gb"
 
 ---
 
-## 15. Version Roadmap
+## 14. Version Roadmap
 
 | Version | Target | Features |
 |---------|--------|----------|
@@ -684,7 +706,7 @@ theagency vm create --agent work --os ubuntu --resources "4cpu,8gb"
 
 ---
 
-## 16. Agent Roster (Current)
+## 15. Agent Roster (Current)
 
 | Agent | Platform | Role | Created |
 |-------|----------|------|---------|
@@ -704,7 +726,7 @@ theagency vm create --agent work --os ubuntu --resources "4cpu,8gb"
 
 ---
 
-## 17. Glossary
+## 16. Glossary
 
 | Term | Definition |
 |------|------------|
@@ -720,7 +742,7 @@ theagency vm create --agent work --os ubuntu --resources "4cpu,8gb"
 | **Dark Factory** | Python-focused continuous code generation and self-improvement system |
 | **Ghost Factory** | Multi-language build system (reverse engineering, forking, contributing) |
 | **Self-Rectification** | Self-critique and correction system |
-| **Adversarial** | Red teaming and risk analysis system |
+| **Adversarial** | Critic/QA system enforcing quality (not red teaming) |
 | **Sandbox** | Isolated execution environment (Clean Room or Athena Mirror) |
 | **Inference Node** | Local Ollama-based execution for zero-cost subagents |
 | **External Coordinator** | Translation layer for external AI harnesses |
@@ -733,8 +755,11 @@ theagency vm create --agent work --os ubuntu --resources "4cpu,8gb"
 | **Qubes Philosophy** | Security by isolation; temporary VMs; dom0 controls |
 | **Golden Rule (Jack)** | Plan first, modular code, work tracking, tag commits |
 | **FreeLLM** | Smart LLM routing across free/local/paid providers |
+| **Forge** | Department of 7 agents auto-building Athena with 15-min heartbeats |
+| **Zoom** | Build subagent with 10-minute heartbeat |
+| **Buddy** | Space-Agent fork for UI rendering in Mission Control |
 
 ---
 
 *Last updated: 2026-09-17 by Hermes Agent*
-*Status: Full specification reconstructed from pre-June chat exports. Ready for build.*
+*Status: Full specification reconstructed from 1,417 user instructions. Ready for build.*
