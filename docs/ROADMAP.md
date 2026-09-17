@@ -85,6 +85,12 @@
 
 Actual progress: ~30% toward sprint goal
 
+## Full System Specification
+
+For the complete system spec (architecture, domain agents, addons, memory system, bridges, data models, deployment, version roadmap), see `docs/SPECIFICATION.md`.
+
+This document is the **canonical reference** reconstructed from 1,417 user instructions across all chat exports (April–May 2026).
+
 What needs to happen:
 1. **Unified Lattice Service** (2 weeks) — Neo4j + vector DB, unified API
 2. **Governance Module** (2 weeks) — voting, reputation, escalation

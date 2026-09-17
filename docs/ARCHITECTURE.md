@@ -1,12 +1,23 @@
-# The Agency — Architecture (Final)
+# The Agency — Architecture (Reconstructed from Pre-June Chats)
+
+> **Sources:** 1,417 user instructions across 13 chat exports (Apr 10 – May 31, 2026)
+> **Full specification:** See `docs/SPECIFICATION.md`
 
 ## System Overview
 
-**The Agency** is a decentralized multi-agent orchestration system. Three integrated layers:
+**The Agency** is a **Qubes OS-inspired decentralized multi-agent architecture** where:
+
+- **Athena Core** is a single, minimal agent capable of handling **any and all user requests** without addons
+- **Domain Agents** (Personal, Work, Finance, Business, Learning, Technology, Social, Research, Security) handle broad life areas
+- **Sub-Specialists** are spawned per-domain (e.g., Finance → InvestmentAgent, PersonalBanker, CryptoAgent, StocksExpert)
+- **Addons/Nodes** act as "superpowers" — removable modules that multiply agent capability
+- **External Coordinator** bridges Claude Code, Codex, Goose, OpenClaw, Hermes, AgentZero, DeerFlow, Pi agent, OpenCode
+
+### Three Integrated Layers
 
 | Layer | Technology | Purpose |
 |-------|------------|---------|
-| **Athena Core** | Python | Domain agents, bridges, MemPalace, coordination |
+| **Athena Core** | Python | Domain agents, bridges, SMS/Noesis, coordination |
 | **Paperclip** | Node.js + React | Business Agent UI (companies, org chart, tasks) |
 | **Mission Control** | Python Textual TUI | Unified UI for all agents (embeds Paperclip for Business) |
 

@@ -1,764 +1,740 @@
-# The Agency — Full Specification
+# The Agency — Full System Specification
 
-## 1. Gateway/Butler Specification
+> **Reconstructed from 1,417 user instructions** across 13 chat exports (Apr 10 – May 31, 2026)
+> **Project:** Athena (autonomous multi-agent framework, renamed to "The Agency")
+> **Repository:** `C:\Users\alphi\theagency\`
 
-### 1.1 Three Gateway Modes Configuration
+---
 
-```yaml
-# config/gateway_modes.yaml
-mode: "separate"  # "butler-only" | "separate" | "merged"
+## 1. Core Identity & Vision
 
-modes:
-  butler-only:
-    description: "Butler routes directly to domain agents, no Buddy UI"
-    entry: "python -m theagency.gateways.butler_only"
-    
-  separate:
-    description: "Butler routes to Buddy via Lattice + to domain agents"
-    entry: "python -m theagency.gateways.butler_separate"
-    buddy_entry: "python -m theagency.gateways.buddy.node"
-    
-  merged:
-    description: "Single process handles both gateway routing and UI"
-    entry: "python -m theagency.gateways.butter_merged"
+### 1.1 What is The Agency?
+
+**The Agency** is a **Qubes OS-inspired decentralized multi-agent architecture** where:
+
+- **Athena Core** is a single, minimal agent capable of handling **any and all user requests** without addons
+- **Domain Agents** (Personal, Work, Finance, Business, Learning, Technology, Social, Research, Security) handle broad life areas
+- **Sub-Specialists** are spawned per-domain (e.g., Finance → InvestmentAgent, PersonalBanker, CryptoAgent, StocksExpert)
+- **Addons/Nodes** act as "superpowers" — removable modules that multiply agent capability
+- **External Coordinator** bridges Claude Code, Codex, Goose, OpenClaw, Hermes, AgentZero, DeerFlow, Pi agent, OpenCode
+
+### 1.2 Design Principles
+
+| Principle | Meaning |
+|-----------|---------|
+| **Modular & Reusable** | Build once, reuse everywhere (Unix philosophy) |
+| **Graceful Degradation** | Removing any addon leaves a working system; each is independent |
+| **Core Independence** | Athena minimal install = full agent (no addons required) |
+| **Concurrent Multi-Agent** | All addons support parallel execution by personal + work + domain agents |
+| **Local-First** | Markdown files as primary memory; Noesis/SMS as upgrade, not dependency |
+| **Human Holds Absolute Truth** | Athena second; agents vote with evidence; human approves |
+| **Plug & Play** | Drop a skill from OpenClaw/Claude Code → Athena rewrites it natively |
+| **Small Model Target** | 1B parameter model achieves 70% of Claude/GPT with efficient workflows |
+
+### 1.3 Minimal Installation
+
+When installed minimally (just core + LLM API key), Athena:
+- Performs any task OpenClaw, Hermes, DeerFlow, or AgentZero can
+- Has markdown-based memory (like OpenClaw)
+- Can emulate simulation, research, etc. through code execution
+- Learns from itself (self-improvement loop)
+- Spawns subagents for sensitive/parallel work
+
+---
+
+## 2. System Architecture
+
+### 2.1 Qubes OS-Inspired Design
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         ATHENA CORE (dom0)                          │
+│  Single minimal agent | Shared LLM key (env var) | Markdown memory  │
+└───────────┬──────────────┬──────────────┬──────────────┬────────────┘
+            │              │              │              │
+    ┌───────▼──────┐ ┌────▼─────┐ ┌─────▼──────┐ ┌────▼─────┐
+    │   Personal   │ │   Work   │ │  Finance   │ │ Business │
+    │   Agent      │ │  Agent   │ │  Agent     │ │  Agent   │
+    │  ├─Health    │ │ ├─Backend│ │ ├─Invest   │ │ ├─Sales  │
+    │  ├─Relation  │ │ ├─Front  │ │ ├─Banker   │ │ ├─Strat  │
+    │  ├─Companion │ │ ├─Mobile │ │ ├─Crypto   │ │ ├─Ops    │
+    │  ├─Research  │ │ ├─Cloud  │ │ ├─Stocks   │ │ ├─Legal  │
+    │  └─Secrets   │ │ └─Net    │ │ └─Risk     │ │ └─CEO    │
+    └──────────────┘ └──────────┘ └────────────┘ └──────────┘
+            │              │              │              │
+    ┌───────▼──────┐ ┌────▼─────┐ ┌─────▼──────┐ ┌────▼─────┐
+    │   Learning   │ │  Techno  │ │   Social   │ │ Research │
+    │   Agent      │ │  Agent   │ │  Agent     │ │  Agent   │
+    │  ├─Courses   │ │ ├─Infra  │ │ ├─Network  │ │ ├─Papers │
+    │  ├─Skills    │ │ ├─DevOps │ │ ├─Community│ │ ├─Exper  │
+    │  └─Growth    │ │ └─Tools  │ │ └─Events   │ │ └─Know   │
+    └──────────────┘ └──────────┘ └────────────┘ └──────────┘
+                                │
+                    ┌───────────▼───────────┐
+                    │   SECURITY AGENT (9th) │
+                    │  Cross-cutting layer   │
+                    │  Kali/Parrot OS tools  │
+                    └───────────────────────┘
+
+    ════════════════════════════════════════════════
+                     ADDONS / NODES
+    ════════════════════════════════════════════════
+    ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+    │  NOESIS  │ │   SMS    │ │   DREAM  │ │   SANDBOX│
+    │ (2nd     │ │ (Sov.    │ │ (Memory  │ │ (Athena  │
+    │  Brain)  │ │  Mind)   │ │  Consol) │ │  Mirror) │
+    └──────────┘ └──────────┘ └──────────┘ └──────────┘
+    ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+    │   SIM    │ │   AUTO   │ │   DARK   │ │  GHOST   │
+    │ (MiroFish│ │ RESEARCH │ │ FACTORY  │ │ FACTORY  │
+    │  Social) │ │ (Karpathy│ │ (Python) │ │ (Multi-  │
+    │          │ │  Loop)   │ │          │ │  Lang)   │
+    └──────────┘ └──────────┘ └──────────┘ └──────────┘
+    ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+    │  SELF    │ │ ADVERSAR │ │INFERENCE │ │  EXTERNAL│
+    │ RECTIFY  │ │  IAL     │ │ (Ollama) │ │COORDINATOR│
+    │(Critique)│ │(Red Team)│ │(Temp VMs)│ │(Bridges) │
+    └──────────┘ └──────────┘ └──────────┘ └──────────┘
+
+    ════════════════════════════════════════════════
+                  BRIDGES (External AI)
+    ════════════════════════════════════════════════
+    ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐
+    │Claude│ │Codex │ │Goose │ │Hermes│ │Open- │
+    │ Code │ │      │ │      │ │      │ │Claw  │
+    └──────┘ └──────┘ └──────┘ └──────┘ └──────┘
+    ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐
+    │Agent │ │Deer- │ │  Pi  │ │Open- │ │Gemini│
+    │Zero  │ │Flow  │ │Agent │ │Code  │ │ CLI  │
+    └──────┘ └──────┘ └──────┘ └──────┘ └──────┘
 ```
 
-### 1.2 Butler Routing Decision Tree
+### 2.2 Infrastructure (Physical/Virtual)
 
-```python
-async def route_message(message: Message, sender: str) -> None:
-    # 1. Explicit Buddy targeting
-    if message.target == "buddy" or message.command.startswith("/buddy"):
-        await route_to_buddy_conversation(message)
-        return
-    
-    # 2. Agent mention
-    if message.target and message.target.startswith("@"):
-        await route_to_domain_agent(message)
-        return
-    
-    # 3. Default: route to Buddy conversation
-    await route_to_buddy_conversation(message)
+| Machine | Role | Location |
+|---------|------|----------|
+| **Windows 11 Host** | Development, daily driver | Local |
+| **WSL (Kali Linux)** | Agent testing, OSINT | Local |
+| **VPS 172.238.240.113** | OpenClaw production (Kael) | Remote |
+| **McKenna** | Hermes agent instance | Remote |
+| **VPS 172.16.122.186** | Defense VM (Parrot OS) | Remote |
+| **Defense VM** | Parrot OS + defensive tools | Remote |
+| **Offense VM** | Kali OS + offensive tools | Remote |
+| **3CX Phone System** | Voice communication, payphone access | Remote |
+
+---
+
+## 3. Domain Agents (Native to The Agency)
+
+### 3.1 Personal Agent
+- **Health** — fitness, diet, medical tracking
+- **Relationships & Companionship** — social connections, "Buddy" agent acts as best friend
+- **Personal Research & Secrets** — runs local model for privacy
+- **Home** — household management
+- **Leisure** — entertainment, hobbies
+
+### 3.2 Work Agent
+- **Backend Dev** — APIs, databases, services
+- **Frontend Dev** — React, UI/UX, dashboards
+- **Mobile Dev** — iOS, Android, React Native
+- **Cloud/DevOps** — AWS, GCP, Azure, K8s, Terraform
+- **Network Dev** — infrastructure, security, protocols
+- **Production Dev** — CI/CD, deployment, monitoring
+
+### 3.3 Finance Agent
+- **Investment Agent** — stocks, bonds, portfolio management
+- **Personal Banker** — budgeting, savings, accounts
+- **Cryptocurrency Agent** — DeFi, trading, analysis
+- **Stocks Expert** — market analysis, news, signals
+- **Risk Assessor** — financial risk evaluation
+
+### 3.4 Business Agent
+- **Sales & Marketing** — projections, campaigns, CRM
+- **Strategy** — business planning, competitive analysis
+- **Operations** — workflows, processes, automation
+- **Legal** — contracts, compliance, IP
+- **CEO** — executive oversight, decision support
+
+### 3.5 Learning & Growth Agent
+- **Courses** — curriculum management, progress tracking
+- **Skills** — capability development, practice plans
+- **Growth** — personal development, goals
+
+### 3.6 Technology Agent
+- **Infrastructure** — servers, networking, cloud
+- **DevOps** — automation, pipelines, tooling
+- **Tools** — software evaluation, installation
+
+### 3.7 Social Agent
+- **Network** — professional connections, outreach
+- **Community** — engagement, events, groups
+- **Events** — scheduling, coordination
+
+### 3.8 Research & Legacy Agent
+- **Papers** — academic research, summarization
+- **Experiments** — hypothesis testing, data collection
+- **Knowledge Gaps** — identify and fill information voids
+
+### 3.9 Security Agent (9th Node — Cross-Cutting)
+- **Offensive** — Kali Linux, pentesting, red teaming
+- **Defensive** — Parrot OS, monitoring, hardening
+- **OSINT/SIGINT** — intelligence gathering, 3D timeline mapping
+- **Adversarial** — risk analysis, threat modeling
+
+---
+
+## 4. Memory Architecture
+
+### 4.1 Tiered Memory System
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    NOESIS (External Second Brain)                │
+│  Independent project | MCP server | Ingests ALL digital life    │
+│  Bank statements | GitHub | Google Workspace | Email | SMS      │
+│  Tweets | Social media | Chat logs | Local markdown files       │
+│  Builds relationship graph across ALL data sources              │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │ MCP Protocol
+┌───────────────────────────────▼─────────────────────────────────┐
+│                    SMS (Sovereign Mind System)                   │
+│  Athena's LOCAL memory core | Built-in, always available        │
+│  Hot → Warm → Normal → Cool → Cold tiered lifecycle            │
+│  Automatic aging, compression, and archival                     │
+└───────────────────────────────┬─────────────────────────────────┘
+                                │
+┌───────────────────────────────▼─────────────────────────────────┐
+│                    MARKDOWN FILES (Base Layer)                   │
+│  Primary memory even when SMS/Noesis offline                    │
+│  Per-agent wings: ~/.athena/wings/{agent_name}/                │
+│  Structure: wing → room → drawer → item                        │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### 1.3 Butler Routing Decision Tree (Separate Mode)
+### 4.2 SMS Node Structure
 
-```python
-async def route_message(message: Message, sender: str) -> None:
-    # 1. Explicit Buddy targeting
-    if message.target == "buddy" or message.command.startswith("/buddy"):
-        await route_to_buddy_conversation(message)
-        return
-    
-    # 2. Agent mention
-    if message.target and message.target.startswith("@"):
-        await route_to_domain_agent(message)
-        return
-    
-    # 3. Domain agent render hint (response)
-    if message.has_rendering_hint and message.render_via == "buddy":
-        await route_response_to_buddy(message)
-        return
-    
-    # 4. Default: route to Buddy conversation
-    await route_to_buddy_conversation(message)
-```
+| Node | Purpose | Description |
+|------|---------|-------------|
+| **Secrets** | Credential storage | Encrypted key-value with ACL, per-agent isolation |
+| **Retrieval** | Search & query | Multi-mode: semantic (Qdrant), graph (Neo4j), hybrid |
+| **Spawn** | Subagent lifecycle | Secure process creation with sandboxing, resource limits |
+| **Lattice** | Relationship graph | Neo4j graph DB for agent/task/deliverable relationships |
+| **Librarian** | Data normalization | Deduplication, schema validation, import/export |
+| **Dream** | Memory consolidation | Background merge, AutoDream cycles, insight extraction |
+| **CPR** | Compression | Context window reduction, summary generation |
+| **Gatekeeper** | Auth/Routing | Access control, routing decisions, anomaly detection |
+| **Discoverer** | Pattern finding | Correlation detection, trend identification |
+| **AnomalyMonitor** | Health/Security | Drift detection, performance monitoring |
 
-### 1.4 Buddy Integration Protocol
+### 4.3 Memory Independence Rule
 
-Domain agents request Buddy rendering via response format:
-```python
+> **"If Noesis goes offline, agents continue via SMS. If SMS goes offline, agents continue via markdown. Markdown ALWAYS works."**
+
+This is a design-from-day-one feature: every node is fully independent.
+
+---
+
+## 5. Addons / Nodes (Plug-and-Play Superpowers)
+
+### 5.1 Noesis (Second Brain)
+- **Status:** Independent project, connects via MCP
+- **Purpose:** Ingests owner's entire digital life (bank statements, GitHub, email, SMS, social media, local files)
+- **Features:** Relationship graph, automatic categorization, cross-reference discovery
+- **Alternative name:** Neuro Operational Epistemic Sovereign Intelligent System
+
+### 5.2 Sovereign Mind System (SMS)
+- **Status:** Core Athena component (built-in)
+- **Purpose:** Local memory for Athena agents
+- **Lifecycle:** Hot → Warm → Normal → Cool → Cold (auto-aging)
+- **Components:** Secrets, Retrieval, Spawn, Lattice, Librarian, Dream, CPR, Gatekeeper
+
+### 5.3 Dream Node
+- **Status:** Planned (research complete — inspired by Claude Code Auto-Dream + OpenClaw dreaming)
+- **Purpose:** Background memory consolidation during idle/sleep cycles
+- **Features:** Auto-merge related facts, extract insights, reduce Lattice bloat
+- **Trigger:** Cron-based or idle detection
+
+### 5.4 Simulation Node (MiroFish-Offline Inspired)
+- **Status:** Scaffolded (23 modules, Apr 30 – May 5)
+- **Purpose:** Multi-agent social, economic, and policy simulation
+- **Engine:** OASIS framework (Open Agent Social Interaction Simulations)
+- **Capacity:** 100–1000+ agents, parallel execution
+- **Use cases:** Business agents run product scenarios, personal agents optimize daily schedules
+
+### 5.5 Auto-Research Node (Karpathy Inspired)
+- **Status:** Scaffolded (18 files, Apr 30 – May 5)
+- **Purpose:** Iterative improvement loop for anything measurable
+- **Targets:** Prompts, system code, calculations, workflows, finance models
+- **Method:** Modify → Execute → Evaluate → Log → Repeat
+- **Concurrent:** Personal + work agents run simultaneously on different targets
+
+### 5.6 Dark Factory
+- **Status:** Designed, partially scaffolded
+- **Purpose:** Continuous Python-focused software generation for Athena agents
+- **Modes:**
+  1. Generate tools from natural language
+  2. Build full CLIs from schema
+  3. Create reusable modules
+  4. Iteratively improve existing code
+  5. Self-rectify (discover bugs, fix, validate)
+  6. **Absorption:** Clone any GitHub repo → rewrite to Athena-native
+- **Collaboration:** Works with Ghost Factory (multi-language input → Python)
+
+### 5.7 Ghost Factory
+- **Status:** Scaffolded (6-mode universal software construction)
+- **Purpose:** Multi-language build system (not just Python)
+- **Capabilities:**
+  - Build new programs from scratch
+  - Reverse-engineer without source code
+  - Fork GitHub repos and add features
+  - Contribute to public repos as independent builds
+  - Rework code to Athena-compatible format
+- **Collaboration:** Translates non-Python → Python for Dark Factory consumption
+
+### 5.8 Self-Rectification Node
+- **Status:** Designed
+- **Purpose:** Self-critique and correction system
+- **Method:** Detect own errors → Propose fixes → Validate → Apply
+- **Scope:** Code, workflows, prompts, system configuration
+
+### 5.9 Adversarial Node
+- **Status:** Planned
+- **Purpose:** Red teaming and risk analysis
+- **Method:** Attack own systems → Report findings → Recommend hardening
+- **Pairing:** Works with Security Agent for defense validation
+
+### 5.10 Sandbox Node (Athena Mirror)
+- **Status:** Designed (Sandbox addon complete, node wrapper planned)
+- **Purpose:** Isolated code execution with mini-Athena environment
+- **Modes:**
+  1. **Clean Room** — empty Python environment
+  2. **Agency Mirror** — full codebase clone for testing
+  3. **VM-based** — Firecracker microVMs per subagent
+- **Use cases:** Test code before deploying, run sensitive operations, experiment safely
+
+### 5.11 Inference Node (Ollama)
+- **Status:** Planned
+- **Purpose:** Local model execution for zero-cost subagent spawning
+- **Packaging:** Bundled Ollama + model selection
+- **Advertisement:** "Temporary subagents available via Inference Node"
+- **Cost:** Zero (runs on local hardware)
+
+### 5.12 External Coordinator Node
+- **Status:** Bridge infrastructure built (Apr 30 – May 5)
+- **Purpose:** Translation layer between Athena and external AI harnesses
+- **Bridges:**
+  - Claude Code (subprocess)
+  - Codex (OpenAI API)
+  - Goose (ACP)
+  - Hermes (ACP, subprocess)
+  - OpenClaw (HTTP API)
+  - AgentZero (Docker container)
+  - DeerFlow (HTTP API + SSE)
+  - Pi Agent (CLI/API)
+  - OpenCode (CLI)
+  - Gemini CLI (subprocess/API)
+- **Interface:** Standardized `execute(task, context, timeout, budget)` → `BridgeResult`
+
+### 5.13 Post-Commit Hook (Work Tracking)
+- **Status:** Built (Jack's Golden Rule)
+- **Purpose:** Update work tracking on every commit
+- **Files:** `~/.theagency/wings/{agent}/tasks/` and `completed/`
+- **Format:** JSON task files with status, commit hash, timestamps
+
+### 5.14 Disposable Agent Runner
+- **Status:** Designed
+- **Purpose:** Ephemeral agents for sensitive or zero-cost tasks
+- **Pairing:** Inference Node (Ollama) for local, free execution
+
+---
+
+## 6. Bridge HTTP API Specification
+
+### 6.1 Core Endpoints
+
+```http
+POST /v1/bridges/{bridge_type}/execute
+Content-Type: application/json
+
 {
-    "text": "Human-readable summary",
-    "render_via": "buddy",
-    "component": "chart_bar|chart_line|chart_pie|table|card|form|custom",
-    "data": {...},
-    "metadata": {"title": "...", "description": "..."}
+  "task_id": "task_abc123",
+  "content": "Implement OAuth login flow",
+  "metadata": {
+    "source": "athena",
+    "agent": "work_agent.backend_dev",
+    "priority": "high",
+    "budget_usd": 0.50
+  }
 }
 ```
 
-### 1.5 Resilience Features
-
-| Feature | Implementation |
-|---------|----------------|
-| Circuit Breaker | CircuitBreaker class with CLOSED/OPEN/HALF_OPEN states |
-| Health Monitoring | AgentHealthMonitor with per-agent health scores (0-1) |
-| Confidence Classifier | RoutingConfidenceClassifier with keyword-based domain detection |
-| Response Validator | Auto-detects render_via flag |
-| Buddy Fallback | Falls back to Mission Control when Buddy offline |
-| Session Context | Tracks last 10 queries per user |
-| Retry Logic | 2 retries with exponential backoff (1s, 2s) |
-| Clarification | Asks user when confidence < threshold |
-
-### 1.6 Circuit Breaker Configuration
-
-```yaml
-butler:
-  circuit_breaker:
-    failure_threshold: 3
-    recovery_timeout: 30.0
-    error_rate_threshold: 0.5
-    minimum_calls: 5
-    per_agent:
-      personal_agent:
-        failure_threshold: 5
-  routing:
-    confidence_threshold: 0.6
-  health_check_interval: 30.0
+Response (streaming SSE):
+```json
+{
+  "output": "Here's the implementation...",
+  "artifacts": ["src/auth/oauth.ts"],
+  "usage": {
+    "prompt_tokens": 1234,
+    "completion_tokens": 567,
+    "cost_usd": 0.042
+  },
+  "status": "completed",
+  "duration_seconds": 42.1
+}
 ```
 
-### 1.7 Gateway Launcher
+### 6.2 Other Endpoints
 
-```python
-class GatewayLauncher:
-    """Unified entry point — reads config, launches correct mode."""
-    
-    def __init__(self, config_path: str = "config/gateway_modes.yaml"):
-        self._config = self._load_config(config_path)
-        self._mode = self._config.get("mode", "separate")
-    
-    def launch(self) -> None:
-        if self._mode == "butler-only":
-            from .butler_only import ButlerOnly
-            gateway = ButlerOnly(self._config)
-        elif self._mode == "separate":
-            from .butler_separate import ButlerSeparate
-            gateway = ButlerSeparate(self._config)
-        elif self._mode == "merged":
-            from .butler_merged import ButlerMerged
-            gateway = ButlerMerged(self._config)
-        asyncio.run(gateway.start())
-```
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | /v1/bridges | List available bridges + capabilities |
+| POST | /v1/bridges/{type}/start | Start bridge daemon |
+| POST | /v1/bridges/{type}/stop | Stop bridge daemon |
+| GET | /v1/agents/domain | List domain agents + sub-specialists |
+| GET | /v1/health | System health check |
+| GET | /v1/capabilities | Aggregate capability advertisement |
+
+### 6.3 Auth
+
+- API key: `Authorization: Bearer <token>`
+- Per-agent key isolation (domain agents can have own LLM providers)
+- Session tracking (last 10 queries per user)
 
 ---
 
-## 2. Sandbox Specification
+## 7. Data Models
 
-### 2.1 Configuration Data Models
-
-```python
-@dataclass
-class ResourceLimits:
-    cpu_percent: float = 50.0
-    memory_mb: int = 512
-    disk_mb: int = 1024
-    max_pids: int = 64
-    max_open_files: int = 1024
-    runtime_seconds: int = 300
-
-@dataclass
-class AthenaMirrorConfig:
-    include: bool = False
-    source: Literal["git", "local", "image"] = "local"
-    repo_path: Optional[Path] = None
-    branch: Optional[str] = None
-    commit: Optional[str] = None
-    install_editable: bool = True
-    extra_dependencies: list[str] = field(default_factory=list)
-    mount_lattice: bool = False
-    lattice_backend: str = "sqlite"
-    lattice_db_path: str = "/workspace/lattice-test.db"
-    auto_test: bool = False
-    test_command: str = "pytest tests/ -x --tb=short"
-    test_timeout: int = 600
-    persistent_after_test: bool = False
-    ttl_hours: int = 24
-
-@dataclass
-class SandboxConfig:
-    subject: str
-    backend: SandboxBackend = SandboxBackend.DOCKER
-    sandbox_type: SandboxType = SandboxType.CLEAN_ROOM
-    network_access: NetworkAccess = NetworkAccess.NONE
-    resource_limits: ResourceLimits = field(default_factory=ResourceLimits)
-    allowed_imports: list[str] = field(default_factory=lambda: [
-        "math", "json", "os", "sys", "datetime", "collections",
-        "itertools", "functools", "statistics", "random", "string",
-        "re", "hashlib", "copy", "pprint", "textwrap", "dataclasses",
-        "typing", "enum", "abc", "io", "pathlib", "uuid", "time"
-    ])
-    env_vars: dict[str, str] = field(default_factory=dict)
-    workspace_path: Optional[Path] = None
-    athena_mirror: AthenaMirrorConfig = field(default_factory=AthenaMirrorConfig)
-    preserve_workspace: bool = False
-    tags: dict[str, str] = field(default_factory=dict)
-```
-
-### 2.2 Public API
-
-```python
-class SandboxAPI:
-    async def start(self) -> None
-    async def stop(self) -> None
-    
-    async def create(
-        self,
-        subject: str,
-        backend: Union[str, SandboxBackend] = "docker",
-        memory_mb: int = 512,
-        runtime_seconds: int = 300,
-        network_access: Union[str, NetworkAccess] = "none",
-        allowed_imports: Optional[list[str]] = None,
-        env_vars: Optional[dict[str, str]] = None,
-        athena_mirror: Optional[AthenaMirrorConfig] = None,
-        tags: Optional[dict[str, str]] = None,
-    ) -> str  # Returns sandbox_id
-    
-    async def run_code(self, sandbox_id: str, code: str, timeout: Optional[int] = None) -> SandboxResult
-    async def run_tests(self, sandbox_id: str, test_path: str = "tests/", timeout: int = 120) -> SandboxResult
-    async def install_packages(self, sandbox_id: str, packages: list[str]) -> SandboxResult
-    async def copy_to_sandbox(self, sandbox_id: str, host_path: Union[str, Path], sandbox_path: str) -> None
-    async def copy_from_sandbox(self, sandbox_id: str, sandbox_path: str, host_path: Union[str, Path]) -> None
-    async def snapshot(self, sandbox_id: str, label: str = "") -> str
-    async def restore(self, sandbox_id: str, snapshot_id: str) -> None
-    async def destroy(self, sandbox_id: str) -> bool
-    async def get_metrics(self, sandbox_id: str) -> SandboxStats
-    async def list_sandboxes(self, subject: Optional[str] = None) -> list[dict]
-    async def get_stats(self) -> dict
-```
-
-### 2.3 Result Models
+### 7.1 TaskMessage
 
 ```python
 @dataclass
-class SandboxResult:
-    success: bool
-    result: Any = None
-    stdout: str = ""
-    stderr: str = ""
-    exit_code: Optional[int] = None
-    duration_ms: float = 0.0
-    memory_peak_mb: float = 0.0
-    error_message: Optional[str] = None
-
-@dataclass
-class SandboxStats:
-    cpu_usage_percent: float = 0.0
-    memory_rss_mb: float = 0.0
-    thread_count: int = 0
-    open_files: int = 0
-    disk_used_mb: float = 0.0
-    uptime_seconds: float = 0.0
+class TaskMessage:
+    task_id: str
+    type: str                    # "code_generation", "simulation", "research", etc.
+    content: str                 # Task description
+    metadata: dict = field(default_factory=dict)
+    # metadata: source, agent, priority, budget, parent_task_id
+    created_by: str = "system"
+    created_at: datetime = field(default_factory=datetime.utcnow)
 ```
 
-### 2.4 HTTP Service API
-
-```
-POST   /sandbox/create           → {"sandbox_id": "..."}
-POST   /sandbox/{id}/run         → SandboxResult
-POST   /sandbox/{id}/tests       → SandboxResult
-POST   /sandbox/{id}/packages    → SandboxResult
-POST   /sandbox/{id}/snapshot    → {"snapshot_id": "..."}
-POST   /sandbox/{id}/restore     → {"success": true}
-GET    /sandbox/{id}/metrics     → SandboxStats
-GET    /sandboxes?subject=...    → [{"sandbox_id": "...", ...}]
-DELETE /sandbox/{id}             → {"success": true}
-GET    /health                   → {"status": "ok"}
-```
-
-### 2.5 Agent Wrapper Template
+### 7.2 ResultMessage
 
 ```python
-#!/usr/bin/env python3
-"""Sandbox wrapper — DO NOT EDIT"""
-
-import sys
-import resource
-import builtins
-import importlib
-import traceback
-from pathlib import Path
-
-# 1. Set resource limits
-resource.setrlimit(resource.RLIMIT_CPU, (300, 300))
-resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, -1))
-resource.setrlimit(resource.RLIMIT_NOFILE, (1024, 1024))
-resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
-
-# 2. Install import hook
-ALLOWED_IMPORTS = ['math', 'json', 'os', 'sys', 'datetime', ...]
-_original_import = builtins.__import__
-def safe_import(name, *args, **kwargs):
-    if name.split('.')[0] not in ALLOWED_IMPORTS:
-        raise ImportError(f"Import of '{name}' is not allowed")
-    return _original_import(name, *args, **kwargs)
-builtins.__import__ = safe_import
-
-# 3. Execute user code
-code_path = Path(__file__).parent / "agent_code.py"
-agent_globals = {"__builtins__": builtins.__dict__}
-try:
-    exec(compile(code_path.read_text(), str(code_path), 'exec'), agent_globals)
-    result = agent_globals.get("result")
-    print(f"__AGENT_RESULT__\n{repr(result)}")
-except Exception as e:
-    print(f"__AGENT_ERROR__{e}\n{traceback.format_exc()}")
-    sys.exit(1)
+@dataclass
+class ResultMessage:
+    task_id: str
+    bridge_type: str             # "native", "claude_code", "codex", etc.
+    status: str                  # "completed", "failed", "timeout"
+    output: str
+    artifacts: list[str] = field(default_factory=list)
+    usage: dict = field(default_factory=dict)
+    duration_seconds: float = 0.0
+    error: Optional[str] = None
 ```
 
----
-
-## 3. QA Critic Specification
-
-### 3.1 Configuration Data Models
+### 7.3 CapabilityAdvertisement
 
 ```python
-class QualityDimension(Enum):
-    CORRECTNESS = "correctness"
-    SECURITY = "security"
-    COMPLETENESS = "completeness"
-    CONSISTENCY = "consistency"
-    SAFETY = "safety"
-    PERFORMANCE = "performance"
-    USABILITY = "usability"
-    MAINTAINABILITY = "maintainability"
-    COMPLIANCE = "compliance"
-    ROBUSTNESS = "robustness"
-
-class Severity(Enum):
-    CRITICAL = "critical"
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-    INFO = "info"
-
-class QualityLevel(Enum):
-    EXCELLENT = "excellent"
-    GOOD = "good"
-    FAIR = "fair"
-    POOR = "poor"
-    FAILING = "failing"
-
-class EnforcementAction(Enum):
-    ALLOW = "allow"
-    ALLOW_WITH_WARNING = "allow_with_warning"
-    REQUIRE_APPROVAL = "require_approval"
-    BLOCK = "block"
-    RETRY = "retry"
-    ESCALATE = "escalate"
-    QUARANTINE = "quarantine"
-
 @dataclass
-class QARule:
-    id: str
-    name: str
-    description: str
-    severity: Severity
-    dimension: QualityDimension
-    rule_type: QARuleType
-    enabled: bool = True
-    config: dict = field(default_factory=dict)
-
-@dataclass
-class Violation:
-    rule_id: str
-    severity: Severity
-    message: str
-    evidence: dict = field(default_factory=dict)
-    dimension: QualityDimension = QualityDimension.CORRECTNESS
-
-@dataclass
-class QAReview:
-    run_id: str
+class CapabilityAdvertisement:
     agent_id: str
-    overall_score: float  # 0-1
-    quality_level: QualityLevel
-    violations: list[Violation]
-    enforcement_action: EnforcementAction
-    audit_trail: dict = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
-    duration_ms: float = 0.0
-    rules_applied: int = 0
-    rules_passed: int = 0
-    rules_failed: int = 0
-    rules_skipped: int = 0
+    domain: str                  # "personal", "work", "finance", etc.
+    capabilities: list[str]      # ["code_generation", "simulation", ...]
+    supports_streaming: bool
+    supports_tools: bool
+    addons: list[str]            # ["simulation", "auto_research", ...]
+    llm: str                     # Current model
+    status: str                  # "active", "idle", "error"
 ```
 
-### 3.2 QACritic API
+---
+
+## 8. Technology Stack
+
+| Component | Choice | Rationale |
+|-----------|--------|-----------|
+| **Language (agents)** | Python 3.11+ | ML/data science integration, async support |
+| **Language (tooling)** | TypeScript | Bridge adapters, GUI, web frontend |
+| **Lattice DB** | Neo4j | Graph relationships between agents/tasks/deliverables |
+| **Vector DB** | Qdrant | Semantic search, similarity matching |
+| **Local Memory** | Markdown files | Always works, human-readable, git-friendly |
+| **External Memory** | Noesis (MCP) | Rich second brain, connects all data sources |
+| **LLM Router** | Pluggable | Ollama local, OpenAI/Anthropic cloud, Nous Portal, FreeLLM |
+| **Message Bus** | Redis Streams (optional) | Real-time agent coordination |
+| **Policy Engine** | Cedar (ACL) | Fine-grained access control |
+| **Observability** | OpenTelemetry | Tracing, metrics, audit logs |
+| **Deployment** | Docker → K8s | Scalable, reproducible, isolated |
+| **GUI (Business)** | Paperclip fork (React) | Companies, org chart, tasks |
+| **GUI (Mission Control)** | Python Textual TUI | Unified agent dashboard |
+| **Sandbox** | Firecracker microVMs | Lightweight isolation per subagent |
+
+---
+
+## 9. FreeLLM / LLM Routing
+
+### 10.1 Concept
+
+A model routing gateway (inspired by [freellmapi](https://github.com/tashfeenahmed/freellmapi.git)) with 4 options:
+
+| Option | Description |
+|--------|-------------|
+| **Free** | User-provided API keys, near-free inference for normal usage |
+| **User API Keys** | Per-provider keys, round-robin or priority routing |
+| **Subscription** | Paid tiers with coding plans, subscription-based providers |
+| **Local Inference** | Ollama with user-defined models and rules |
+| **Hybrid** | Smart routing through rolling window or fixed RPM, user-defined rules |
+
+### 10.2 Routing Strategy
 
 ```python
-class QACritic:
-    _instance: Optional[QACritic] = None
+class LLMRouter:
+    """Smart routing across providers with cost optimization."""
     
-    @classmethod
-    def get_critic(cls) -> QACritic:
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-    
-    async def review(
-        self,
-        run_id: str,
-        agent_id: str,
-        context: dict,
-        rules: Optional[list[str]] = None,
-        parallel: bool = True,
-    ) -> QAReview:
-        """Run all enabled rules in parallel via asyncio.gather."""
-        enabled_rules = self._get_enabled_rules(rules)
+    def route(self, task: TaskMessage) -> Provider:
+        # 1. Check user-defined rules
+        if rule := self.rules.match(task):
+            return rule.provider
         
-        if parallel:
-            results = await asyncio.gather(
-                *[rule.check(context) for rule in enabled_rules],
-                return_exceptions=True,
-            )
-        else:
-            results = [await rule.check(context) for rule in enabled_rules]
+        # 2. Check free tier availability
+        if free := self.free_tier.available(task):
+            return free
         
-        violations = [r for r in results if isinstance(r, Violation)]
-        score, level = compute_quality_score(len(enabled_rules), violations)
+        # 3. Check local inference capability
+        if self.ollama.can_handle(task):
+            return self.ollama
         
-        return QAReview(
-            run_id=run_id,
-            agent_id=agent_id,
-            overall_score=score,
-            quality_level=level,
-            violations=violations,
-            enforcement_action=self._determine_action(violations, score),
-        )
-    
-    def preflight(self, context: dict) -> dict:
-        """Compute expected coverage/quality before execution."""
-        return {
-            "estimated_cost": self._estimate_cost(context),
-            "estimated_time": self._estimate_time(context),
-            "coverage": self._estimate_coverage(context),
-        }
+        # 4. Fall back to lowest-cost paid provider
+        return self.paid_tier.cheapest(task)
 ```
 
-### 3.3 QAEnforcer API
+---
 
-```python
-class QAEnforcer:
-    def __init__(self, critic: QACritic, policy_pack: str = "balanced"):
-        self._critic = critic
-        self._policy = self._load_policy(policy_pack)
-    
-    async def enforce(self, review: QAReview) -> EnforcementDecision:
-        """Map violations to enforcement action using policy."""
-        violations = review.violations
-        
-        # Check critical violations
-        if any(v.severity == Severity.CRITICAL for v in violations):
-            return EnforcementDecision(
-                action=EnforcementAction.BLOCK,
-                reason="Critical violation detected",
-            )
-        
-        # Check high violations (strict policy)
-        if self._policy.fail_on_high and any(v.severity == Severity.HIGH for v in violations):
-            return EnforcementDecision(action=EnforcementAction.BLOCK, ...)
-        
-        # Check score threshold
-        if review.overall_score < self._policy.min_score:
-            return EnforcementDecision(action=EnforcementAction.RETRY, ...)
-        
-        # Check for warnings
-        if violations:
-            return EnforcementDecision(action=EnforcementAction.ALLOW_WITH_WARNING, ...)
-        
-        return EnforcementDecision(action=EnforcementAction.ALLOW, ...)
+## 11. Quality Assurance
+
+### 11.1 QA Critic (Jack's System)
+
+Built-in quality enforcement with 10 dimensions:
+
+| Dimension | Weight | Description |
+|-----------|--------|-------------|
+| Correctness | CRITICAL | Output matches requirements |
+| Security | CRITICAL | No vulnerabilities, no secret leaks |
+| Completeness | HIGH | All parts addressed |
+| Efficiency | MEDIUM | Resource usage within limits |
+| Modularity | HIGH | Reusable, single-responsibility |
+| Documentation | MEDIUM | Clear comments and README |
+| Test Coverage | MEDIUM | Adequate test coverage |
+| Style | LOW | Consistent formatting |
+| Innovation | LOW | Novel solutions preferred |
+| Graceful Degradation | HIGH | Fails safely |
+
+### 11.2 QA Scanners
+
+```
+athena/skills/quality_assurance/
+├── scanners/
+│   ├── code_style_scanner.py    # PEP8, formatting, complexity
+│   ├── import_scanner.py        # Import validity & circular deps
+│   ├── test_coverage_scanner.py # Coverage analysis
+│   ├── architecture_scanner.py  # Layer violations, dependency checks
+│   ├── security_scanner.py      # Security audit, secrets detection
+│   └── doc_scanner.py           # Documentation quality
+├── reporters/
+│   └── html_reporter.py         # HTML report generator
+└── rules/
+    └── rule_registry.py         # Configurable rule engine
 ```
 
-### 3.4 Built-in Rule Implementations
+### 11.3 Golden Rules (Jack's Rules)
 
-```python
-# Rule: output_not_empty (HIGH, Completeness)
-async def check_output_not_empty(context: dict) -> Optional[Violation]:
-    output = context.get("output", "")
-    if not output or not output.strip():
-        return Violation(
-            rule_id="output_not_empty",
-            severity=Severity.HIGH,
-            message="Agent produced empty output",
-            dimension=QualityDimension.COMPLETENESS,
-        )
-    return None
+1. **Plan first** — dry run before editing files
+2. **Modular & reusable** — build once, reuse forever
+3. **Work tracking** — if it's not in the wing, it doesn't exist
+4. **Tag your work** — every commit tagged with agent name
+5. **Document chain of thought** — why you changed what you changed
+6. **Log mistakes** — record errors and fixes permanently
 
-# Rule: no_sensitive_leak (CRITICAL, Security)
-SENSITIVE_PATTERNS = [
-    r'(api[_\s]?key|apikey)\s*[=:]\s*["\'][\w\-]+["\']',
-    r'(password|passwd|pwd)\s*[=:]\s*["\'][^"\']+["\']',
-    r'(secret[_\s]?key|secretkey)\s*[=:]\s*["\'][\w\-]+["\']',
-    r'(token|access[_\s]?token)\s*[=:]\s*["\'][\w\-]+["\']',
-    r'ssh-rsa\s+AAAA[^\s]+',
-    r'-----BEGIN\s+(RSA|DSA|EC|OPENSSH)\s+PRIVATE\s+KEY-----',
-]
+---
 
-async def check_no_sensitive_leak(context: dict) -> Optional[Violation]:
-    output = context.get("output", "")
-    for pattern in SENSITIVE_PATTERNS:
-        match = re.search(pattern, output, re.IGNORECASE)
-        if match:
-            return Violation(
-                rule_id="no_sensitive_leak",
-                severity=Severity.CRITICAL,
-                message=f"Sensitive data leaked: {match.group()[:20]}...",
-                evidence={"pattern": pattern, "match": match.group()},
-                dimension=QualityDimension.SECURITY,
-            )
-    return None
+## 12. Communication & Coordination
 
-# Rule: execution_within_limits (MEDIUM, Performance)
-async def check_execution_within_limits(context: dict) -> Optional[Violation]:
-    metrics = context.get("metrics", {})
-    max_time = context.get("max_time_seconds", 300)
-    max_memory = context.get("max_memory_mb", 512)
-    actual_time = metrics.get("execution_time_seconds", 0)
-    actual_memory = metrics.get("peak_memory_mb", 0)
-    
-    if actual_time > max_time:
-        return Violation(
-            rule_id="execution_within_limits",
-            severity=Severity.MEDIUM,
-            message=f"Execution exceeded time limit: {actual_time:.1f}s > {max_time}s",
-            evidence={"actual_time": actual_time, "limit": max_time},
-            dimension=QualityDimension.PERFORMANCE,
-        )
-    if actual_memory > max_memory:
-        return Violation(
-            rule_id="execution_within_limits",
-            severity=Severity.MEDIUM,
-            message=f"Execution exceeded memory limit: {actual_memory:.1f}MB > {max_memory}MB",
-            evidence={"actual_memory": actual_memory, "limit": max_memory},
-            dimension=QualityDimension.PERFORMANCE,
-        )
-    return None
+### 12.1 Coordination Protocol (MemPalace Message Bus)
 
-# Rule: error_free_execution (HIGH, Robustness)
-async def check_error_free_execution(context: dict) -> Optional[Violation]:
-    metrics = context.get("metrics", {})
-    exit_code = metrics.get("exit_code", 0)
-    stderr = metrics.get("stderr", "")
-    
-    if exit_code != 0:
-        return Violation(
-            rule_id="error_free_execution",
-            severity=Severity.HIGH,
-            message=f"Execution failed with exit code {exit_code}",
-            dimension=QualityDimension.ROBUSTNESS,
-        )
-    return None
+```
+wing: coordination/
+├── inbox/               # Incoming tasks per agent
+├── outbox/              # Completed results
+├── protocol/            # PROTOCOL_SPEC (v1.0)
+├── capabilities/        # Per-agent capability registry
+└── tasks/               # Shared task board
 ```
 
-### 3.5 Scoring Algorithm
-
-```python
-SEVERITY_WEIGHTS = {
-    Severity.CRITICAL: 4.0,
-    Severity.HIGH: 3.0,
-    Severity.MEDIUM: 2.0,
-    Severity.LOW: 1.0,
-    Severity.INFO: 0.5,
+Message format:
+```json
+{
+  "sender": "kael",
+  "recipient": "zoey",
+  "type": "task|result|heartbeat|error",
+  "payload": { "command": "get_weather", "location": "Nairobi" },
+  "trace_id": "test-003",
+  "timestamp": "2026-04-14T10:30:00Z"
 }
-
-QUALITY_THRESHOLDS = {
-    QualityLevel.EXCELLENT: 0.9,
-    QualityLevel.GOOD: 0.7,
-    QualityLevel.FAIR: 0.5,
-    QualityLevel.POOR: 0.3,
-    QualityLevel.FAILING: 0.0,
-}
-
-def compute_quality_score(total_rules: int, violations: list[Violation]) -> tuple[float, QualityLevel]:
-    if total_rules == 0:
-        return 1.0, QualityLevel.EXCELLENT
-    
-    total_weight = sum(SEVERITY_WEIGHTS[v.severity] for v in violations)
-    max_possible = total_rules * SEVERITY_WEIGHTS[Severity.CRITICAL]
-    score = max(0.0, 1.0 - (total_weight / max_possible))
-    
-    for level, threshold in QUALITY_THRESHOLDS.items():
-        if score >= threshold:
-            return score, level
-    
-    return score, QualityLevel.FAILING
 ```
 
-### 3.6 Scenario Testing
+### 12.2 Real-Time Coordination
 
-```python
-class Scenario(ABC):
-    @abstractmethod
-    async def run(self, context: dict) -> ScenarioResult: ...
+| Method | Use Case |
+|--------|----------|
+| **MemPalace MCP** | Persistent task inbox, capability sharing |
+| **A2A (Agent-to-Agent)** | Google A2A protocol if all agents support it |
+| **Telegram** | Primary messaging channel (cron jobs, reports) |
+| **Discord** | Alternative (evaluated, Telegram chosen for simplicity) |
+| **3CX Phone** | Voice calls, payphone access from anywhere |
 
-class JailbreakScenario(Scenario):
-    """Tests if agent ignores instructions under prompt injection."""
-    async def run(self, context: dict) -> ScenarioResult: ...
+### 12.3 Cron Jobs & Heartbeats
 
-class PromptInjectionScenario(Scenario):
-    """Tests if agent reveals system prompt."""
-    async def run(self, context: dict) -> ScenarioResult: ...
+- **Daily briefings** — 7:30 AM EAT (news from worldmonitor.app, HN, daily.dev)
+- **Nightly memory sync** — sweep MemPalace, update from other agents, write report
+- **Auto-commit** — Forge daemon every 15 minutes
+- **QA monitoring** — continuous git commit scanning, auto-issue creation
+- **Self-diagnosis** — agents check own health, report issues
 
-class DataExfiltrationScenario(Scenario):
-    """Tests if agent leaks sensitive context data."""
-    async def run(self, context: dict) -> ScenarioResult: ...
+---
 
-class ToolMisuseScenario(Scenario):
-    """Tests if agent misuses available tools."""
-    async def run(self, context: dict) -> ScenarioResult: ...
+## 13. External Integrations
 
-class BoundaryScenario(Scenario):
-    """Tests edge cases and boundary conditions."""
-    async def run(self, context: dict) -> ScenarioResult: ...
+### 13.1 MemPalace
+- **Role:** Shared knowledge graph across ALL agents (not just Athena)
+- **Location:** `/root/.local/share/pipx/venvs/mempalace/`
+- **Features:** Spatial memory (wing→room→drawer), knowledge graph, MCP server
+- **Agents connected:** Kael (OpenClaw), Zoey (Hermes), Aiden (AgentZero), Ally (DeerFlow)
 
-class ScenarioRunner:
-    async def run_suite(
-        self,
-        scenarios: list[Scenario],
-        context: dict,
-        parallel: bool = True,
-    ) -> list[ScenarioResult]: ...
-```
+### 13.2 SearXNG
+- **Role:** Self-hosted metasearch engine for agent web searches
+- **Location:** Docker container on local machine
+- **Use:** Primary web search for agents (privacy-respecting)
 
-### 3.7 Canary Suite
+### 13.3 Postiz
+- **Role:** Self-hosted social media management
+- **URL:** `http://localhost:4007`
+- **Integrations:** X, LinkedIn, Facebook, Reddit, TikTok
+- **Stack:** Docker compose (PostgreSQL, Redis, Temporal, Elasticsearch)
 
-```python
-class CanarySuite:
-    """Lightweight smoke tests for continuous monitoring."""
-    
-    BUILT_IN_CANARIES = [
-        "output_not_empty",
-        "uses_at_least_one_tool",
-        "finishes_within_timeout",
-        "no_critical_violations",
-    ]
-    
-    async def run(self, context: dict, canaries: Optional[list[str]] = None) -> CanaryResult: ...
-    async def watch(self, interval_seconds: float = 60.0, callback: Optional[Callable] = None) -> None: ...
-```
+### 13.4 3CX Phone System
+- **Role:** Self-hosted PBX for voice communication
+- **Use:** Call agents from anywhere, even payphones
+- **Setup:** Dedicated VM or Raspberry Pi
 
-### 3.8 CLI Commands
+---
+
+## 14. Deployment & Installation
+
+### 14.1 Minimal Install (Core Only)
 
 ```bash
-# Review agent output
-theagency qa review --agent <id> --policy strict
-
-# List all rules
-theagency qa rules list --dimension security --severity critical
-
-# Run scenarios
-theagency qa scenarios list
-theagency qa scenarios run --suite jailbreak,prompt_injection
-
-# Run canary suite
-theagency qa canary run
-theagency qa canary watch --interval 30
-
-# Enforce decisions
-theagency qa enforce --agent <id> --run-id <run_id>
-
-# View audit trail
-theagency qa audit show <run_id>
-
-# Gap healing
-theagency qa gaps heal --agent <id>
-
-# Policy management
-theagency qa policy export > policy.yaml
-theagency qa policy import policy.yaml
+pip install theagency-core
+export LLM_API_KEY="sk-..."
+python -m theagency.core.agent  # Starts Athena minimal
 ```
 
-### 3.9 Pack System
+### 14.2 Full Install (With Addons)
 
-```yaml
-# templates/packs/core/pack.yaml
-name: core
-description: Always-on rules for basic quality
-rules:
-  - output_not_empty
-  - no_sensitive_leak
-  - execution_within_limits
-  - error_free_execution
+```bash
+pip install theagency[all]
+theagency install --profile full
+# Installs: Noesis, SMS, Dream, Simulation, Auto-Research,
+#           Dark Factory, Ghost Factory, Sandbox, Adversarial,
+#           External Coordinator, all bridges
+```
 
-# templates/packs/security/pack.yaml
-name: security
-description: Security-focused rules
-rules:
-  - no_sensitive_leak
-  - no_sql_injection
-  - no_xss_vulnerability
+### 14.3 Selective Install
 
-# templates/packs/adversarial/pack.yaml
-name: adversarial
-description: Adversarial test scenarios
-rules:
-  - jailbreak_resistance
-  - prompt_injection_resistance
-  - data_exfiltration_resistance
+```bash
+theagency install --addons simulation,auto_research,dark_factory
+theagency install --domains finance,business,security
+theagency install --bridges claude_code,codex,openclaw
+```
+
+### 14.4 VM Per Agent (Qubes-Style)
+
+```bash
+theagency vm create --agent personal --os ubuntu --resources "2cpu,4gb"
+theagency vm create --agent security --os kali --resources "2cpu,4gb"
+theagency vm create --agent work --os ubuntu --resources "4cpu,8gb"
 ```
 
 ---
 
-## 4. Integration Contracts
+## 15. Version Roadmap
 
-### 4.1 Sandbox Integration with QA Critic
-The sandbox reports metrics (execution_time, peak_memory, exit_code, stderr) to the QA Critic for enforcement decisions.
-
-### 4.2 Gateway Integration with Sandbox
-Domain agents request sandboxes via the Butler. The Butler routes sandbox creation requests through the Lattice.
-
-### 4.3 Gateway Integration with QA Critic
-Every agent execution is reviewed by the QA Critic before output reaches the user. BLOCK decisions trigger re-routing or regeneration.
-
----
-
-## 5. Error Handling Strategy
-
-### 5.1 Three-Tier Error Model
-1. **Check-level errors** — Rule itself failed → ERROR status, doesn't fail review unless CRITICAL
-2. **Execution errors** — Agent crashed → Auto-BLOCK + ESCALATE
-3. **System errors** — QA system down → Fail-OPEN or fail-CLOSED based on `error_policy`
-
-### 5.2 Recovery Strategies
-- Retry with exponential backoff for transient failures (429, 5xx)
-- Fallback provider if LLM check fails on primary model
-- Graceful degradation: if meta-analyzer unavailable, return rule results without cross-validation
+| Version | Target | Features |
+|---------|--------|----------|
+| **v0.0.1** | Apr 2026 | Core scaffold, SMS nodes, basic agent |
+| **v0.1.0** | May 2026 | Domain agents, External coordinator, 3 bridges |
+| **v0.2.0** | Jun 2026 | Simulation addon, Auto-research addon |
+| **v0.3.0** | Jul 2026 | FinanceAgent + 4 sub-specialists |
+| **v0.4.0** | Aug 2026 | BusinessAgent + ResearchAgent |
+| **v0.5.0** | Sep 2026 | **GitHub push** — working harness rivaling existing ones |
+| **v0.6.0** | Oct 2026 | CodingAgent + PersonalAgent |
+| **v0.7.0** | Nov 2026 | Dark Factory + Ghost Factory full integration |
+| **v0.8.0** | Dec 2026 | Sandbox (Firecracker VMs), Adversarial node |
+| **v0.9.0** | Jan 2027 | All addons shipped, full integration |
+| **v1.0.0** | Feb 2027 | Production-ready, bug-free, plug-and-play |
 
 ---
 
-## 6. Monitoring & Observability
+## 16. Agent Roster (Current)
 
-### 6.1 Sandbox Metrics
-- CPU usage (%), Memory (RSS MB), Uptime (seconds)
-- Thread count, Open files, Disk used (MB)
-- Exit code, Duration (ms), Error messages
-
-### 6.2 QA Critic Metrics
-- Quality scores over time, per agent, per dimension
-- Violation counts by severity
-- Enforcement action distribution
-- Rule pass/fail rates
-
-### 6.3 Audit Trail
-Every review writes a complete record:
-- Run metadata (agent, policy, config)
-- Raw violations (stream)
-- Deduplicated findings
-- Delta from prior run
-- Coverage report
-- Quality audit (second opinion)
-- Pre-flight expectations vs reality
+| Agent | Platform | Role | Created |
+|-------|----------|------|---------|
+| **Kael ⚡️** | OpenClaw | Main daily agent, coordination lead | Apr 11 |
+| **Zoey 😜** | Hermes Agent | Research, installation, multi-agent | Apr 11 |
+| **Aiden** | AgentZero | AgentZero instance (Docker) | Apr 11 |
+| **Ally** | DeerFlow | DeerFlow agent | Apr 12 |
+| **McKenna** | Hermes Agent | Secondary Hermes instance | Apr 12 |
+| **Nexus** | Hermes Agent | System monitoring, cleanup | Apr 10 |
+| **Jack** | Hermes Agent (new profile) | QA/Critic, competitive analysis | Apr 29 |
+| **Clara** | Hermes Agent (new profile) | Buddy UI / Space-Agent fork | Apr 29 |
+| **Teresa** | Hermes Agent (new profile) | Build agent, addon scaffolding | Apr 29 |
+| **Remex** | Hermes Agent (new profile) | Memory systems, SMS/Noesis | May 1 |
+| **Qore** | Hermes Agent (new profile) | QA officer, git monitoring | May 1 |
+| **Umbral** | Hermes Agent (new profile) | OSINT/SIGINT, Kali Linux | May 21 |
+| **charlie** | Unknown | Task agent | May 30 |
 
 ---
 
-## 7. Quality Gates
+## 17. Glossary
 
-### 7.1 Build Phase
-- All code must pass sandbox Clean Room tests before commit
-- All rules must pass canary suite
-
-### 7.2 Pre-Deployment
-- All code must pass The Agency Mirror (Mode 2) integration tests
-- QA Critic score ≥ 0.9 for production deployments
-- No CRITICAL or HIGH violations
-
-### 7.3 Runtime
-- Every agent execution reviewed by QA Critic
-- Canary suite runs continuously
-- Violations logged to audit trail
-- Trend analysis for quality regression detection
+| Term | Definition |
+|------|------------|
+| **The Agency** | Decentralized multi-agent AI system (formerly Project Athena) |
+| **Athena Core** | The single minimal agent at the heart of the system |
+| **Lattice** | Neo4j graph database storing agent/task/deliverable relationships |
+| **SMS** | Sovereign Mind System — local memory core for Athena agents |
+| **Noesis** | External second brain (independent project, connects via MCP) |
+| **Domain Agent** | Native agent handling a broad life area (Personal, Work, Finance, etc.) |
+| **Sub-Specialist** | Fine-tuned agent spawned by a domain agent (e.g., StocksExpert under Finance) |
+| **Addon/Node** | Pluggable capability module (Simulation, Auto-Research, Dark Factory, etc.) |
+| **Bridge** | External AI framework wrapper (Claude Code, Codex, Goose, etc.) |
+| **Dark Factory** | Python-focused continuous code generation and self-improvement system |
+| **Ghost Factory** | Multi-language build system (reverse engineering, forking, contributing) |
+| **Self-Rectification** | Self-critique and correction system |
+| **Adversarial** | Red teaming and risk analysis system |
+| **Sandbox** | Isolated execution environment (Clean Room or Athena Mirror) |
+| **Inference Node** | Local Ollama-based execution for zero-cost subagents |
+| **External Coordinator** | Translation layer for external AI harnesses |
+| **Dream Node** | Background memory consolidation during idle cycles |
+| **MemPalace** | Shared knowledge graph MCP server (connects all agents) |
+| **Wing** | Per-agent isolated storage (`~/.theagency/wings/{name}/`) |
+| **Room** | Memory container within a wing |
+| **Drawer** | Individual memory item within a room |
+| **Hot/Warm/Normal/Cool/Cold** | Memory tier lifecycle (auto-aging) |
+| **Qubes Philosophy** | Security by isolation; temporary VMs; dom0 controls |
+| **Golden Rule (Jack)** | Plan first, modular code, work tracking, tag commits |
+| **FreeLLM** | Smart LLM routing across free/local/paid providers |
 
 ---
 
-*End of specification. For raw source material see docs/RAW_TRANSCRIPTS.md*
+*Last updated: 2026-09-17 by Hermes Agent*
+*Status: Full specification reconstructed from pre-June chat exports. Ready for build.*
