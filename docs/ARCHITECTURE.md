@@ -438,5 +438,20 @@ class CapabilityAdvertisement:
 
 ---
 
-*Last updated: 2026-09-16 by Hermes Agent*
-*Status: Architecture defined. Awaiting build instructions.*
+## Pre-June 2026 Context
+
+**Full extraction from chat exports (12,880 messages):** See `docs/EXTRACTED_CONTEXT.md`
+
+Key additions from pre-June chats:
+- **Complete agent roster** with responsibilities (11 agents including Kael, Zoey, Clara, Teresa, Onyx, JACK, Remex, Qore, Umbral, Nexus, charlie)
+- **Built addons:** auto_research (Karpathy), simulation (MiroFish), QA suite (Jack)
+- **Project reorganization:** `ADDONS/` → `skills/`, SMS nodes → `core/sms/`, `CORE/` → `core/`
+- **Concurrent execution design:** all addons support multi-agent parallel execution
+- **Git adoption:** project under version control, Forge auto-commits every 15 min
+- **External integrations:** Postiz (social media), Buddy (Space-Agent fork), SearXNG
+- **Infrastructure:** WSL Kali, Docker Desktop, VPS target at 172.238.240.113
+
+---
+
+*Last updated: 2026-09-17 by Hermes Agent*
+*Status: Architecture defined. Pre-June context extracted. Awaiting build instructions.*

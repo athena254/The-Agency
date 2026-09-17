@@ -62,6 +62,23 @@
 | OpenTelemetry Observability | ❌ 0% | Sprint 6 |
 | Security Audit | ❌ 0% | Sprint 6 |
 
+## Pre-June 2026 Progress (from Chat Exports)
+
+**Sprint 1 (✅ Complete):**
+- Core services (Secrets, Retrieval, Spawn, LLM Harness, Test, Base Agent)
+- Project reorganization (Teresa): `ADDONS/` → `skills/`, `CORE/` → `core/`
+- Auto-research addon (Teresa): Karpathy-style experiment loop
+- Simulation addon (Teresa): MiroFish-inspired swarm engine
+- QA skill suite (Jack): 6 scanners, 719 issues found on first scan
+- Git adoption + Forge auto-commit daemon
+- Concurrent multi-agent addon design
+
+**Sprint 2 (🔄 In Progress — ~30%):**
+- Lattice + Governance + Finance domain target
+- Actual: Core scaffolding done, domain agents not started
+
+---
+
 ## Current Sprint Focus
 
 **Sprint 2 (Weeks 3-7): Lattice + Governance + Finance domain**
