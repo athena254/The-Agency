@@ -40,6 +40,15 @@ class TelegramHandler:
         if self._config.allowed_chat_ids and chat_id not in self._config.allowed_chat_ids:
             return {"status": "rejected", "reason": "chat not allowed"}
 
+        # Bot commands are answered deterministically from real system
+        # state — never through the LLM, so no fiction is possible.
+        command = text.strip().lower()
+        if command in ("/agents", "/status", "/whoami"):
+            response = await self._system_answer(command)
+            if chat_id:
+                await self._adapter.send_message(chat_id, response)
+            return {"status": "ok", "chat_id": chat_id, "command": command}
+
         # Process via Butler if available, else demo agent
         if self._butler:
             response = await self._butler.handle_message(text, sender, {"chat_id": chat_id})
@@ -51,6 +60,40 @@ class TelegramHandler:
             await self._adapter.send_message(chat_id, response)
 
         return {"status": "ok", "chat_id": chat_id, "response_length": len(response)}
+
+    async def _system_answer(self, command: str) -> str:
+        """Deterministic answers built from real system state."""
+        if command == "/agents":
+            if self._butler:
+                agents = await self._butler.orchestrator.list_agents()
+                lines = [f"• {a.name} — domain: {a.domain}" for a in agents]
+                return (
+                    "🤖 *Registered agents (live from the registry)*\n\n"
+                    + "\n".join(lines)
+                )
+            return "Butler not running."
+        if command == "/status":
+            if self._butler:
+                health = await self._butler.orchestrator.health_check()
+                return (
+                    "🤖 *System status (live)*\n\n"
+                    f"• Orchestrator: {health.get('orchestrator')}\n"
+                    f"• Agents: {health.get('identity_registry')}\n"
+                    f"• Tasks: {health.get('tasks')}\n"
+                    f"• LLM: {health.get('llm', {}).get('provider')}/"
+                    f"{health.get('llm', {}).get('model')}\n"
+                    f"• Memory: {health.get('memory')}\n"
+                    f"• Evidence: {health.get('evidence')}"
+                )
+            return "Butler not running."
+        if command == "/whoami":
+            return (
+                "🤖 I am the *Butler* — the gateway of The Agency, a real "
+                "multi-agent system running on this machine. I route your "
+                "messages to registered agents and report what they actually "
+                "did. Use /agents to see them, /status for system health."
+            )
+        return "Unknown command."
 
     async def process_message(self, message: dict[str, Any]) -> str:
         """Process a message and return the response text."""

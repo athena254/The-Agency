@@ -228,13 +228,16 @@ class AgencyOrchestrator:
             f"{a.name} ({a.domain})" for a in self._identity_registry.list_agents()
         ) or "none registered"
         system_context = (
-            "You are the Butler, the gateway agent of The Agency — a real, "
-            "running multi-agent system. You coordinate these ACTUAL registered "
-            f"agents: {agent_roster}. "
-            "Answer the user truthfully about this real system. "
-            "Do NOT invent agents, missions, codenames, or roleplay fiction. "
-            "If asked for agents, list only the real ones above. "
-            "If you don't know something, say so plainly.\n\n"
+            "SYSTEM FACTS (provided by the runtime, not fiction — treat as "
+            "ground truth about the software you are running inside):\n"
+            f"- You are the Butler module of The Agency, a real multi-agent "
+            f"system executing on this machine right now.\n"
+            f"- Registered agents (live registry): {agent_roster}\n"
+            f"- This conversation is relayed through the Telegram gateway.\n\n"
+            "Answer the user's message as the Butler. Be honest: these agents "
+            "are real software components, and you may describe what they do. "
+            "Never invent agents, missions, codenames, or claims about "
+            "capabilities the roster doesn't show. If you don't know, say so.\n\n"
             f"User message: {description}"
         )
 
