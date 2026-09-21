@@ -224,12 +224,19 @@ class AgencyOrchestrator:
         # Execute each subtask
         subtask_results: list[dict[str, Any]] = []
         for subtask in graph.subtasks:
+            # Build a conversational prompt: the agent answers the user's
+            # message directly rather than echoing planner step labels.
+            prompt = (
+                f"You are '{task.created_by}', an agent of The Agency answering "
+                f"a user's message. Respond helpfully and concisely.\n\n"
+                f"User message: {description}"
+            )
             # Execute
             exec_result = await self._executor.execute(
                 task=TaskMessage(
                     task_id=task_id,
                     type="subtask",
-                    content=subtask.description,
+                    content=prompt,
                     created_by=task.created_by,
                 ),
                 context={"agent_id": task.created_by, "subtask_id": subtask.subtask_id},
@@ -278,6 +285,7 @@ class AgencyOrchestrator:
                 "status": exec_result.status.value,
                 "verification": verification.status.value,
                 "risk_category": category.value,
+                "output": exec_result.output,
             })
 
         # Update task status
@@ -285,10 +293,15 @@ class AgencyOrchestrator:
         final_status = TaskStatus.COMPLETED if all_completed else TaskStatus.FAILED
         await self._task_manager.update_status(task_id, final_status)
 
+        # Surface the real agent output: join subtask outputs (the actual
+        # LLM responses) instead of a technical execution summary.
+        outputs = [str(r["output"]) for r in subtask_results if r.get("output")]
+        final_output = "\n\n".join(outputs) if outputs else f"Executed {len(subtask_results)} subtasks"
+
         # Store in memory
         await self._memory_store.store(MemoryItem(
             agent_id=task.created_by,
-            content=f"Task '{task.title}' executed: {len(subtask_results)} subtasks",
+            content=f"Task '{task.title}' → {final_output[:500]}",
             tier=MemoryTier.NORMAL,
             importance=0.7,
             tags=["task", "execution"],
@@ -297,7 +310,7 @@ class AgencyOrchestrator:
         result = ExecutionResult(
             task_id=task_id,
             status=ExecutionStatus.COMPLETED if all_completed else ExecutionStatus.FAILED,
-            output=f"Executed {len(subtask_results)} subtasks",
+            output=final_output,
             attempts=len(subtask_results),
             duration_s=0.0,
         )
