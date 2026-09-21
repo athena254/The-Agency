@@ -54,6 +54,8 @@ class ExecutionContext(BaseModel):
     max_retries: int = Field(default=2, ge=0, description="Retries after the initial attempt.")
     backoff_base_s: float = Field(default=0.5, ge=0, description="Base backoff between retries.")
     model: str = Field(default="", description="Preferred model name, if any.")
+    agent_id: str | None = Field(default=None, description="Agent executing this task.")
+    subtask_id: str | None = Field(default=None, description="Subtask identifier, if part of a plan.")
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -260,6 +262,12 @@ class AgentExecutor:
             if not task.strip():
                 raise ValueError("task must not be empty.")
             return task, {}
+        # Handle TaskMessage dataclass (from kernel.tasks)
+        if hasattr(task, "content") and hasattr(task, "task_id"):
+            prompt = str(getattr(task, "content", ""))
+            if not prompt.strip():
+                raise ValueError("task must not be empty.")
+            return prompt, {"task_id": task.task_id, "type": getattr(task, "type", "")}
         prompt = str(task.get("prompt", task.get("description", "")))
         if not prompt.strip():
             raise ValueError("task dict must carry a 'prompt' or 'description'.")
