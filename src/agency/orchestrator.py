@@ -221,22 +221,32 @@ class AgencyOrchestrator:
         description = task.input.get("description", task.title)
         graph = self._planner.plan(description)
 
+        # Ground the LLM in real system state — the actual registered
+        # agents and their domains — so it answers as the real system
+        # instead of roleplaying fiction.
+        agent_roster = ", ".join(
+            f"{a.name} ({a.domain})" for a in self._identity_registry.list_agents()
+        ) or "none registered"
+        system_context = (
+            "You are the Butler, the gateway agent of The Agency — a real, "
+            "running multi-agent system. You coordinate these ACTUAL registered "
+            f"agents: {agent_roster}. "
+            "Answer the user truthfully about this real system. "
+            "Do NOT invent agents, missions, codenames, or roleplay fiction. "
+            "If asked for agents, list only the real ones above. "
+            "If you don't know something, say so plainly.\n\n"
+            f"User message: {description}"
+        )
+
         # Execute each subtask
         subtask_results: list[dict[str, Any]] = []
         for subtask in graph.subtasks:
-            # Build a conversational prompt: the agent answers the user's
-            # message directly rather than echoing planner step labels.
-            prompt = (
-                f"You are '{task.created_by}', an agent of The Agency answering "
-                f"a user's message. Respond helpfully and concisely.\n\n"
-                f"User message: {description}"
-            )
             # Execute
             exec_result = await self._executor.execute(
                 task=TaskMessage(
                     task_id=task_id,
                     type="subtask",
-                    content=prompt,
+                    content=system_context,
                     created_by=task.created_by,
                 ),
                 context={"agent_id": task.created_by, "subtask_id": subtask.subtask_id},
