@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import signal
+import os
 import sys
 from pathlib import Path
 
@@ -12,6 +12,11 @@ import structlog
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+# Load .env before importing config
+from dotenv import load_dotenv
+load_dotenv()
+
+from agency.agents.demo.agent import DemoAgent
 from agency.butler.config import ButlerConfig
 from agency.butler.service import ButlerService
 from agency.orchestrator import AgencyOrchestrator
@@ -27,6 +32,7 @@ class TelegramBot:
     def __init__(self, token: str, webhook_url: str | None = None) -> None:
         self._config = TelegramConfig(bot_token=token, webhook_url=webhook_url)
         self._orchestrator = AgencyOrchestrator()
+        self._demo = DemoAgent()
         self._butler = ButlerService(config=ButlerConfig(), orchestrator=self._orchestrator)
         self._handler = TelegramHandler(self._config, butler=self._butler)
         self._running = False
@@ -38,11 +44,6 @@ class TelegramBot:
         await self._orchestrator.start()
         await self._butler.start()
         self._running = True
-
-        # Handle graceful shutdown
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(self.stop()))
 
         if self._config.webhook_url:
             await self._handler._adapter.set_webhook(

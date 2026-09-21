@@ -6,6 +6,7 @@ from typing import Any
 
 import structlog
 
+from agency.agents.demo.agent import DemoAgent
 from agency.telegram.adapter import TelegramAdapter
 from agency.telegram.config import TelegramConfig
 
@@ -19,6 +20,7 @@ class TelegramHandler:
         self._config = config
         self._butler = butler
         self._adapter = TelegramAdapter(config)
+        self._demo = DemoAgent()
         self._log = structlog.get_logger(__name__)
 
     async def handle_update(self, update: dict[str, Any]) -> dict[str, Any]:
@@ -38,11 +40,11 @@ class TelegramHandler:
         if self._config.allowed_chat_ids and chat_id not in self._config.allowed_chat_ids:
             return {"status": "rejected", "reason": "chat not allowed"}
 
-        # Process via Butler if available
+        # Process via Butler if available, else demo agent
         if self._butler:
             response = await self._butler.handle_message(text, sender, {"chat_id": chat_id})
         else:
-            response = f"Echo: {text}"
+            response = await self._demo.handle(text, {"sender": sender, "chat_id": chat_id})
 
         # Send response
         if chat_id:
@@ -57,7 +59,7 @@ class TelegramHandler:
 
         if self._butler:
             return await self._butler.handle_message(text, sender, {})
-        return f"Echo: {text}"
+        return await self._demo.handle(text, {"sender": sender})
 
     async def send_response(self, chat_id: int, text: str) -> dict[str, Any]:
         """Send a response to a Telegram chat."""

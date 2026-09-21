@@ -2,32 +2,29 @@
 
 from __future__ import annotations
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import os
+
+from dotenv import load_dotenv
+
+# Load .env before reading env vars
+load_dotenv()
 
 
-class TelegramConfig(BaseSettings):
+class TelegramConfig:
     """Telegram bot configuration.
 
-    Loads from .env with TELEGRAM_ prefix.
+    Loads from environment variables with TELEGRAM_ prefix.
     """
 
-    model_config = SettingsConfigDict(env_prefix="TELEGRAM_", extra="ignore")
-
-    bot_token: str = Field(default="", description="Telegram bot token")
-    api_base: str = Field(
-        default="https://api.telegram.org",
-        description="Telegram Bot API base URL",
-    )
-    webhook_url: str | None = Field(default=None, description="Webhook URL")
-    webhook_secret: str | None = Field(default=None, description="Webhook secret token")
-    allowed_chat_ids: list[int] = Field(
-        default_factory=list,
-        description="Allowed chat IDs (empty = allow all)",
-    )
-    max_message_length: int = Field(default=4096, ge=1, le=4096)
-    timeout: float = Field(default=30.0, gt=0)
-    parse_mode: str = Field(default="Markdown", description="Message parse mode")
+    def __init__(self, **kwargs) -> None:
+        self.bot_token: str = kwargs.get("bot_token", "") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        self.api_base: str = kwargs.get("api_base", "") or os.environ.get("TELEGRAM_API_BASE", "https://api.telegram.org")
+        self.webhook_url: str | None = kwargs.get("webhook_url", None) or os.environ.get("TELEGRAM_WEBHOOK_URL")
+        self.webhook_secret: str | None = kwargs.get("webhook_secret", None) or os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+        self.allowed_chat_ids: list[int] = kwargs.get("allowed_chat_ids", []) or []
+        self.max_message_length: int = int(kwargs.get("max_message_length", 4096))
+        self.timeout: float = float(kwargs.get("timeout", 30.0))
+        self.parse_mode: str = kwargs.get("parse_mode", "Markdown")
 
     @property
     def is_configured(self) -> bool:
