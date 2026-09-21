@@ -29,6 +29,7 @@ from agency.kernel.identity import Agent, Capability, TrustLevel
 from agency.kernel.policies import ActionClass, PolicyEngine, Permission
 from agency.kernel.registry import AgentRegistry
 from agency.kernel.tasks import Task, TaskManager, TaskMessage, TaskStatus
+from agency.llm.adapter import LLMAdapter
 from agency.memory.sms.lifecycle import TieredMemoryEngine
 from agency.memory.sms.models import MemoryItem, MemoryQuery, MemoryTier
 from agency.memory.sms.retrieval import RetrievalEngine
@@ -52,9 +53,33 @@ class AgencyOrchestrator:
         await orch.stop()
     """
 
-    def __init__(self, config: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any] | None = None,
+        llm: LLMAdapter | None = None,
+    ) -> None:
         self._config = config or {}
         self._log = structlog.get_logger(__name__)
+
+        # LLM — shared adapter for all agent execution. Falls back to
+        # deterministic echo mode when no API keys are configured, so
+        # tests and offline runs never require network access.
+        llm_config = self._config.get("llm_config")
+        if llm is not None:
+            self._llm_adapter = llm
+        elif llm_config is not None:
+            from agency.llm.config import LLMConfig as _LLMConfig
+
+            if isinstance(llm_config, _LLMConfig):
+                self._llm_adapter = LLMAdapter(config=llm_config)
+            elif isinstance(llm_config, dict):
+                from agency.llm.config import LLMConfig as _LC
+
+                self._llm_adapter = LLMAdapter(config=_LC(**llm_config))
+            else:
+                self._llm_adapter = LLMAdapter()
+        else:
+            self._llm_adapter = LLMAdapter()
 
         # Kernel
         self._identity_registry = AgentRegistry()
@@ -65,7 +90,7 @@ class AgencyOrchestrator:
         # Agents
         self._runtime_registry = RuntimeAgentRegistry()
         self._planner = AgentPlanner(self._runtime_registry)
-        self._executor = AgentExecutor()
+        self._executor = AgentExecutor(llm=self._llm_adapter)
         self._verifier = AgentVerifier()
         self._loop = AgentLoop()
 
@@ -232,7 +257,7 @@ class AgencyOrchestrator:
             risk, category = self._risk_engine.assess(finding)
 
             # Audit
-            self._audit_log.append(AuditEntry(
+            await self._audit_log.append(AuditEntry(
                 timestamp=datetime.now(UTC),
                 agent=task.created_by,
                 task=task_id,
@@ -302,6 +327,16 @@ class AgencyOrchestrator:
     # Health
     # ------------------------------------------------------------------ #
 
+    @property
+    def llm_adapter(self) -> LLMAdapter:
+        """The shared LLM adapter used for agent execution."""
+        return self._llm_adapter
+
+    @property
+    def executor(self) -> AgentExecutor:
+        """The task executor (wired to :attr:`llm_adapter`)."""
+        return self._executor
+
     async def health_check(self) -> dict[str, Any]:
         """Check all components."""
         return {
@@ -314,5 +349,10 @@ class AgencyOrchestrator:
             "evidence": "ok",
             "risk": "ok",
             "bridges": len(self._bridge_coordinator.list_bridges()),
+            "llm": {
+                "provider": self._llm_adapter.provider_kind.value,
+                "model": self._llm_adapter.config.model,
+                "echo_mode": self._llm_adapter.echo_mode,
+            },
             "timestamp": datetime.now(UTC).isoformat(),
         }

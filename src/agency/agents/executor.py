@@ -22,6 +22,8 @@ from uuid import uuid4
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
+from agency.llm.adapter import LLMAdapter
+
 logger = structlog.get_logger(__name__)
 
 # Callable invoked as ``llm(prompt, context)``; may be sync or async and may
@@ -85,21 +87,37 @@ class AgentExecutor:
     Parameters
     ----------
     llm:
-        Callable ``(prompt, context_dict) -> output``; sync or async. When
-        omitted a trivial echo backend is used (useful for tests).
+        Either a callable ``(prompt, context_dict) -> output`` (sync or
+        async) or an :class:`~agency.llm.adapter.LLMAdapter` instance (in
+        which case ``llm.generate`` is used). When omitted a default
+        ``LLMAdapter`` is created — it serves real LLM calls when API keys
+        are configured and falls back to deterministic echo mode otherwise.
     default_timeout_s / default_max_retries / default_backoff_base_s:
         Defaults applied when :class:`ExecutionContext` leaves them unset.
     """
 
     def __init__(
         self,
-        llm: LLMCallable | None = None,
+        llm: LLMCallable | LLMAdapter | None = None,
         *,
         default_timeout_s: float = 60.0,
         default_max_retries: int = 2,
         default_backoff_base_s: float = 0.5,
     ) -> None:
-        self._llm: LLMCallable = llm or self._echo_backend
+        self._adapter: LLMAdapter | None
+        if llm is None:
+            self._adapter = LLMAdapter()
+            self._llm: LLMCallable = self._adapter.generate
+        elif isinstance(llm, LLMAdapter):
+            self._adapter = llm
+            self._llm = llm.generate
+        elif hasattr(llm, "generate"):
+            # Duck-typed LLM adapter (e.g. test doubles exposing generate()).
+            self._adapter = llm  # type: ignore[assignment]
+            self._llm = llm.generate  # type: ignore[attr-defined]
+        else:
+            self._adapter = None
+            self._llm = llm  # type: ignore[assignment]
         self._default_timeout_s = default_timeout_s
         self._default_max_retries = default_max_retries
         self._default_backoff_base_s = default_backoff_base_s
@@ -108,6 +126,16 @@ class AgentExecutor:
         self._cancelled: set[str] = set()
         self._lock = RLock()
         self._log = structlog.get_logger(__name__)
+
+    @property
+    def adapter(self) -> LLMAdapter | None:
+        """The backing :class:`LLMAdapter`, if this executor uses one."""
+        return self._adapter
+
+    @property
+    def llm(self) -> LLMCallable:
+        """The underlying LLM callable invoked as ``llm(prompt, context)``."""
+        return self._llm
 
     # ------------------------------------------------------------------ #
     # Execution
@@ -294,6 +322,12 @@ class AgentExecutor:
 
     @staticmethod
     async def _echo_backend(prompt: str, context: dict[str, Any]) -> dict[str, Any]:
+        """Deprecated legacy echo backend.
+
+        Kept for backwards compatibility only. New code paths use
+        :class:`~agency.llm.adapter.LLMAdapter` (which itself falls back
+        to echo mode when no credentials are configured).
+        """
         return {"echo": prompt, "task_id": context.get("task_id")}
 
 

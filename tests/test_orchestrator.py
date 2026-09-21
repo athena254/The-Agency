@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from agency.llm.adapter import LLMAdapter
 from agency.orchestrator import AgencyOrchestrator
 
 
@@ -62,6 +63,16 @@ async def test_submit_and_execute_task(orchestrator: AgencyOrchestrator):
     # Verify task status updated
     updated_task = await orchestrator.get_task(task.task_id)
     assert updated_task.status.value == "completed"
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_uses_llm_adapter(orchestrator: AgencyOrchestrator):
+    """Orchestrator must wire a shared LLMAdapter into the executor."""
+    assert isinstance(orchestrator.llm_adapter, LLMAdapter)
+    assert isinstance(orchestrator.executor.adapter, LLMAdapter)
+    assert orchestrator.executor.adapter is orchestrator.llm_adapter
+    # Executor's callable must be the adapter's generate method.
+    assert orchestrator.executor.llm == orchestrator.llm_adapter.generate
 
 
 @pytest.mark.asyncio

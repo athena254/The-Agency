@@ -29,8 +29,39 @@ from pydantic import BaseModel, ConfigDict, Field
 from agency import __version__
 from agency.butler.config import ButlerConfig
 from agency.butler.service import ButlerService
+from agency.orchestrator import AgencyOrchestrator
 
 log = structlog.get_logger(__name__)
+
+
+def _build_llm_callable(config: ButlerConfig):  # type: ignore[no-untyped-def]
+    """Build an LLM routing callable from Butler config via LLMAdapter.
+
+    Returns ``LLMAdapter.generate`` bound method when an LLM provider is
+    configured, else ``None`` (keyword routing fallback).
+    """
+    if not config.llm_enabled:
+        return None
+    try:
+        from agency.llm.adapter import LLMAdapter
+        from agency.llm.config import ProviderKind, load_config
+    except ImportError:
+        log.warning("butler.llm_unavailable")
+        return None
+    try:
+        provider = ProviderKind(config.llm_provider.strip().lower())
+    except ValueError:
+        log.warning("butler.unknown_llm_provider", provider=config.llm_provider)
+        return None
+    llm_config = load_config(
+        provider=provider,
+        model=config.llm_model or None,
+        load_dotenv=False,
+    )
+    adapter = LLMAdapter(llm_config)
+    if adapter.echo_mode:
+        return None
+    return adapter.generate
 
 
 # --------------------------------------------------------------------------- #
@@ -101,10 +132,17 @@ def _get_service(request: Request) -> ButlerService:
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-    """Build the ButlerService on startup; stop it on shutdown."""
+    """Build the orchestrator + ButlerService on startup; stop them on shutdown."""
     config = getattr(application.state, "butler_config", None) or ButlerConfig()
-    service = getattr(application.state, "butler", None) or ButlerService(config=config)
-    application.state.butler = service
+    service = getattr(application.state, "butler", None)
+    if service is None:
+        orchestrator = getattr(application.state, "orchestrator", None)
+        if orchestrator is None:
+            orchestrator = AgencyOrchestrator()
+            application.state.orchestrator = orchestrator
+        llm = _build_llm_callable(config)
+        service = ButlerService(config=config, orchestrator=orchestrator, llm=llm)
+        application.state.butler = service
     try:
         await service.start()
     except Exception:
