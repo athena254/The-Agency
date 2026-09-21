@@ -44,6 +44,10 @@ qa-data/
 sandbox-workspaces/
 *.log
 
+# Environment / secrets (never commit filled-in .env files)
+.env
+!.env.example
+
 # OS
 .DS_Store
 Thumbs.db
