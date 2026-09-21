@@ -28,6 +28,7 @@ class ProviderKind(str, Enum):
     OLLAMA = "ollama"
     LOCAL = "local"
     ECHO = "echo"
+    POLLINATIONS = "pollinations"
 
     def __str__(self) -> str:
         return self.value
@@ -69,6 +70,7 @@ _DEFAULT_MODELS: dict[ProviderKind, str] = {
     ProviderKind.OLLAMA: "llama3.1",
     ProviderKind.LOCAL: "local-model",
     ProviderKind.ECHO: "echo",
+    ProviderKind.POLLINATIONS: "openai-fast",
 }
 
 # Named presets: ``load_named_provider("claude")`` etc.

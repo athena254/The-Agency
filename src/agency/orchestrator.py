@@ -350,8 +350,8 @@ class AgencyOrchestrator:
             "risk": "ok",
             "bridges": len(self._bridge_coordinator.list_bridges()),
             "llm": {
-                "provider": self._llm_adapter.provider_kind.value,
-                "model": self._llm_adapter.config.model,
+                "provider": self._llm_adapter.provider,
+                "model": self._llm_adapter.model,
                 "echo_mode": self._llm_adapter.echo_mode,
             },
             "timestamp": datetime.now(UTC).isoformat(),
