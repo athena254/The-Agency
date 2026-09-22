@@ -60,8 +60,9 @@ class TelegramHandler:
             return {"status": "ok", "chat_id": chat_id, "command": "/research"}
 
         # /propose-agent <name> <domain> <capability1> [capability2 ...]
-        if command.startswith("/propose-agent"):
-            args = text.strip()[len("/propose-agent"):].strip()
+        # (also /propose_agent — Telegram menus can't contain hyphens)
+        if command.startswith(("/propose-agent", "/propose_agent")):
+            args = text.strip().split(maxsplit=1)[1] if " " in text.strip() else ""
             response = await self._handle_propose_agent(args, sender)
             if chat_id:
                 await self._adapter.send_message(chat_id, response)
@@ -164,7 +165,7 @@ class TelegramHandler:
                 "• /research <topic> — Web research with cited sources\n"
                 "• /agents — List registered agents\n"
                 "• /status — Live system health\n"
-                "• /propose-agent <name> <domain> <cap...> — Governance spawn\n"
+                "• /propose_agent <name> <domain> <cap...> — Governance spawn\n"
                 "• /proposals — Open governance proposals\n"
                 "• /whoami — What this bot is\n\n"
                 "Or just chat — plain English routes to the right agent."

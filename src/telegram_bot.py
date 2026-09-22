@@ -37,7 +37,7 @@ class TelegramBot:
         {"command": "status", "description": "Live system health"},
         {"command": "agents", "description": "List registered agents"},
         {"command": "research", "description": "Research a topic: /research <topic>"},
-        {"command": "propose-agent", "description": "Propose a new agent via governance"},
+        {"command": "propose_agent", "description": "Propose a new agent via governance"},
         {"command": "proposals", "description": "List open governance proposals"},
         {"command": "whoami", "description": "What this bot is"},
     ]
