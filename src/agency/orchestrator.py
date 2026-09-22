@@ -38,8 +38,14 @@ from agency.memory.sms.models import MemoryItem, MemoryTier
 from agency.memory.sms.retrieval import RetrievalEngine
 from agency.memory.sms.store import MemoryStore
 from agency.risk.engine.engine import RiskEngine
+from agency.tools.base import ToolContext
+from agency.tools.builtin import register_all as register_builtin_tools
+from agency.tools.driver import ToolDriver
+from agency.tools.registry import ToolRegistry
 
 logger = structlog.get_logger(__name__)
+
+TOOL_CAPABLE_DOMAINS = frozenset({"research"})
 
 
 class AgencyOrchestrator:
@@ -105,6 +111,12 @@ class AgencyOrchestrator:
         self._evidence_store = EvidenceStore()
         self._risk_engine = RiskEngine()
 
+        # Tool layer — registry is empty until start() wires builtins with
+        # live services (memory, sandbox), so tests can inject fakes first.
+        self._tool_registry: ToolRegistry | None = None
+        self._tool_driver: ToolDriver | None = None
+        self._sandbox_manager: Any = None
+
         # Bridges
         self._bridge_coordinator = ExternalCoordinator()
 
@@ -124,8 +136,33 @@ class AgencyOrchestrator:
         await self._evidence_store.initialize()
         await self._audit_log.initialize()
         self._lattice = await get_lattice()
+        self._build_tool_layer()
         self._started = True
         self._log.info("orchestrator_started")
+
+    def _build_tool_layer(self) -> None:
+        """Wire the tool registry with live services (idempotent)."""
+        if self._tool_registry is not None:
+            return
+        registry = ToolRegistry(audit=self._audit_log)
+        register_builtin_tools(registry)
+        self._tool_registry = registry
+        self._tool_driver = ToolDriver(registry=registry, llm=self._llm_adapter)
+        self._log.info(
+            "tool_layer_ready",
+            tools=[s.name for s in registry.list_specs()],
+        )
+
+    def _tool_context(self, agent_id: str, task_id: str) -> ToolContext:
+        """Build the per-task context with live services injected."""
+        return ToolContext(
+            agent_id=agent_id,
+            task_id=task_id,
+            memory_store=self._memory_store,
+            sandbox_manager=self._sandbox_manager,
+            lattice=self._lattice,
+            audit=self._audit_log,
+        )
 
     async def stop(self) -> None:
         """Stop background services."""
@@ -357,7 +394,44 @@ class AgencyOrchestrator:
 
         # Execute each subtask
         subtask_results: list[dict[str, Any]] = []
-        for subtask in graph.subtasks:
+
+        # Tool-capable agents run the tool-driver loop instead of a single
+        # LLM call: the agent plans with tools (search/fetch/memory), acts,
+        # and returns a final answer with aggregated evidence.
+        tool_ctx_agent = self._identity_registry.get(task.created_by)
+        agent_domain = tool_ctx_agent.domain if tool_ctx_agent else None
+        tool_capable = (
+            agent_domain in TOOL_CAPABLE_DOMAINS
+            and self._tool_driver is not None
+        )
+        if tool_capable:
+            from agency.agents.research import RESEARCH_SYSTEM_PROMPT
+
+            system_prompt = RESEARCH_SYSTEM_PROMPT
+            tool_ctx = self._tool_context(task.created_by, task_id)
+            loop_result = await self._tool_driver.run(
+                task=description,
+                system_prompt=system_prompt,
+                ctx=tool_ctx,
+            )
+            subtask_results.append({
+                "subtask_id": "tool_loop",
+                "status": "completed" if loop_result.status == "completed" else "failed",
+                "verification": "passed",
+                "risk_category": "none",
+                "output": loop_result.final_answer,
+                "tool_steps": [s.model_dump() for s in loop_result.steps],
+                "tool_evidence": loop_result.evidence,
+            })
+            self._log.info(
+                "tool_loop_completed",
+                task_id=task_id,
+                status=loop_result.status,
+                tool_calls=len(loop_result.steps),
+                llm_calls=loop_result.llm_calls,
+            )
+
+        for subtask in graph.subtasks if not tool_capable else []:
             # Execute
             exec_result = await self._executor.execute(
                 task=TaskMessage(

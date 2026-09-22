@@ -50,6 +50,15 @@ class TelegramHandler:
                 await self._adapter.send_message(chat_id, response)
             return {"status": "ok", "chat_id": chat_id, "command": command}
 
+        # /research <topic> — run the research agent's tool loop
+        # (web search → fetch → synthesize → cite → store).
+        if command.startswith("/research"):
+            args = text.strip()[len("/research"):].strip()
+            response = await self._handle_research(args, sender)
+            if chat_id:
+                await self._send_long(chat_id, response)
+            return {"status": "ok", "chat_id": chat_id, "command": "/research"}
+
         # /propose-agent <name> <domain> <capability1> [capability2 ...]
         if command.startswith("/propose-agent"):
             args = text.strip()[len("/propose-agent"):].strip()
@@ -83,6 +92,36 @@ class TelegramHandler:
             await self._adapter.send_message(chat_id, response)
 
         return {"status": "ok", "chat_id": chat_id, "response_length": len(response)}
+
+    async def _handle_research(self, args: str, sender: str) -> str:
+        """Run the research agent's tool loop on a topic."""
+        topic = args.strip()
+        if not topic:
+            return "Usage: /research <topic>"
+        if not self._butler:
+            return "Butler not running."
+
+        orchestrator = self._butler.orchestrator
+        research_agent = next(
+            (a for a in await orchestrator.list_agents() if a.domain == "research"),
+            None,
+        )
+        if research_agent is None:
+            return "No research agent registered. Restart the bot to seed it."
+
+        task = await orchestrator.submit_task(
+            title=f"Research: {topic[:80]}",
+            description=topic,
+            agent_id=research_agent.id,
+        )
+        result = await orchestrator.execute_task(task.task_id)
+        output = result.output if isinstance(result.output, str) else str(result.output)
+        return f"🔍 *Research complete*\n\n{output}"
+
+    async def _send_long(self, chat_id: int, text: str, limit: int = 3800) -> None:
+        """Send text, splitting into multiple messages above the limit."""
+        for i in range(0, max(len(text), 1), limit):
+            await self._adapter.send_message(chat_id, text[i : i + limit])
 
     async def _system_answer(self, command: str) -> str:
         """Deterministic answers built from real system state."""

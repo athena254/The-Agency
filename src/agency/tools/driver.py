@@ -19,7 +19,7 @@ _INVALID_JSON_OBSERVATION = (
 _FORCED_FINAL_MESSAGE = 'You have used all tool calls. Answer now with {"final": ...}'
 _FALLBACK_MAX_ITERATIONS = "Maximum tool iterations reached without a final answer."
 _FALLBACK_PARSE_FAILURE = "Could not produce a final answer."
-_LIST_EVIDENCE_KEYS = ("urls", "sources", "queries")
+_LIST_EVIDENCE_KEYS = ("urls", "sources", "queries", "url")
 
 
 class ToolLoopStep(BaseModel):
@@ -156,7 +156,9 @@ class ToolDriver:
             if value is None:
                 continue
             items = value if isinstance(value, list) else [value]
-            bucket = evidence.setdefault(key, [])
+            # Normalize singular "url" into the shared "urls" bucket.
+            bucket_key = "urls" if key == "url" else key
+            bucket = evidence.setdefault(bucket_key, [])
             for item in items:
                 if item not in bucket:
                     bucket.append(item)

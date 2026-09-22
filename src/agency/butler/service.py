@@ -30,7 +30,14 @@ log = structlog.get_logger(__name__)
 
 LLMCallable = Callable[[str, dict[str, Any]], Any | Awaitable[Any]]
 
-_DEFAULT_DOMAINS: tuple[str, ...] = ("security", "memory", "evidence", "risk", "general")
+_DEFAULT_DOMAINS: tuple[str, ...] = (
+    "security",
+    "memory",
+    "evidence",
+    "risk",
+    "research",
+    "general",
+)
 
 
 class ButlerService:

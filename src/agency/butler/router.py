@@ -34,6 +34,11 @@ DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
         "risk", "risks", "risky", "assess", "assessment", "impact",
         "likelihood", "exposure", "threat model", "mitigat", "severity",
     ),
+    "research": (
+        "research", "look up", "lookup", "find out", "latest on",
+        "news on", "news about", "search for", "search the web",
+        "what's new", "who is", "what is", "cite", "sources",
+    ),
     "task": (
         "task", "todo", "plan", "execute", "schedule", "workflow", "pipeline",
     ),
