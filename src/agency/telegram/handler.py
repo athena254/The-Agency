@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import re
 import structlog
 
 from agency.agents.demo.agent import DemoAgent
@@ -34,7 +35,7 @@ class TelegramHandler:
         sender = message.get("from", {}).get("username", "unknown")
 
         if not text:
-            return {"status": "ignored", "reason": "empty message"}
+            return {"status": "ignored", "reason": "empty text"}
 
         # Check allowed chat IDs
         if self._config.allowed_chat_ids and chat_id not in self._config.allowed_chat_ids:
@@ -56,6 +57,18 @@ class TelegramHandler:
             if chat_id:
                 await self._adapter.send_message(chat_id, response)
             return {"status": "ok", "chat_id": chat_id, "command": "/propose-agent"}
+
+        # Plain-English agent creation: detect intent and handle
+        # without LLM. This lets users say "create a new agent
+        # called X that does Y" instead of memorizing commands.
+        agent_intent = self._detect_agent_creation_intent(text)
+        if agent_intent and self._butler:
+            response = await self._handle_plain_english_agent_creation(
+                agent_intent, sender
+            )
+            if chat_id:
+                await self._adapter.send_message(chat_id, response)
+            return {"status": "ok", "chat_id": chat_id, "intent": "create_agent"}
 
         # Process via Butler if available, else demo agent
         if self._butler:
@@ -189,6 +202,136 @@ class TelegramHandler:
                 f"(quorum: {p.quorum_required}, votes: {len(p.votes)})"
             )
         return "📋 *Open Proposals*\n\n" + "\n".join(lines)
+
+    def _detect_agent_creation_intent(self, text: str) -> dict | None:
+        """Detect if the user wants to create a new agent.
+
+        Parses plain English and returns structured intent, or None.
+        Examples:
+            "create a new agent" → {}
+            "make a bot called X" → {"name": "X"}
+            "new agent named Y that does Z" → {"name": "Y", "description": "Z"}
+            "spawn agent for finance" → {"domain": "finance"}
+        """
+        import re
+
+        lower = text.lower().strip()
+        # Remove common filler words
+        lower = re.sub(r"^(hey|hi|hello|please|can you|could you|i want|i'd like|i need)\s*", "", lower)
+        lower = re.sub(r"^(create|make|build|spawn|add|new)\s+(a|an|the)\s+(new\s+)?(agent|bot|one)\s*", "", lower)
+        lower = re.sub(r"^(create|make|build|spawn|add|new)\s+(agent|bot)\s*", "", lower)
+        lower = re.sub(r"^(agent|bot)\s*", "", lower)
+
+        if not lower or lower in ("agent", "a agent", "an agent", "the agent"):
+            # User just said "create agent" without details
+            return {}
+
+        result = {}
+
+        # Extract name: "called X", "named X", "name is X"
+        name_match = re.search(r"(?:called|named|name is|name)\s+[\"']?([a-zA-Z][a-zA-Z0-9_-]*)", text, re.IGNORECASE)
+        if name_match:
+            result["name"] = name_match.group(1)
+
+        # Extract domain: "for Y", "in Y", "that does Y"
+        domain_match = re.search(r"(?:for|in|domain|specializ(?:e|es?)\s+in)\s+[\"']?([a-zA-Z][a-zA-Z0-9_-]*)", text, re.IGNORECASE)
+        if domain_match:
+            result["domain"] = domain_match.group(1)
+
+        # Extract capabilities BEFORE purpose (so "that does X" doesn't get consumed by purpose)
+        cap_match = re.search(r"(?:that\s+(?:does|can)|can\s+do|with\s+capabilities?|capable\s+of)\s+(.+?)(?:\.|$)", text, re.IGNORECASE)
+        if cap_match:
+            caps_text = cap_match.group(1)
+            # Replace " and " with "," then split on ","
+            caps_text = re.sub(r"\s+and\s+", ",", caps_text)
+            caps = [c.strip().replace(" ", "_") for c in caps_text.split(",") if c.strip()]
+            result["capabilities"] = caps
+
+        # Extract purpose/description (after capabilities to avoid overlap)
+        purpose_match = re.search(r"(?:to|so\s+it|that|which)\s+(.+?)(?:\.|$)", text, re.IGNORECASE)
+        if purpose_match:
+            # Don't override capabilities with purpose text
+            existing_caps = result.get("capabilities")
+            new_purpose = purpose_match.group(1).strip()
+            if not existing_caps:
+                result["purpose"] = new_purpose
+
+        return result if result else {}
+
+    async def _handle_plain_english_agent_creation(self, intent: dict, sender: str) -> str:
+        """Handle agent creation intent from plain English."""
+        if not self._butler:
+            return "Butler not running."
+
+        name = intent.get("name")
+        domain = intent.get("domain", "general")
+        capabilities = intent.get("capabilities", [])
+        purpose = intent.get("purpose", "")
+
+        # Build capabilities from purpose if none given
+        if not capabilities and purpose:
+            # Convert "analyze financial data" to ["analyze", "financial_data"]
+            words = purpose.replace("-", " ").split()
+            capabilities = [w[:20] for w in words[:3] if len(w) > 2]
+        if not capabilities:
+            capabilities = [domain, "respond"]
+
+        # If no name, tell user we need one
+        if not name:
+            return (
+                "I can create a new agent for you through governance. "
+                "To proceed, I need at minimum a name.\n\n"
+                "Examples:\n"
+                '• "Create an agent called StockBot for finance"\n'
+                '• "New bot named HealthTracker that tracks medical records"\n'
+                '• "Spawn a CryptoAgent for cryptocurrency analysis"\n\n'
+                "What would you like to call it?"
+            )
+
+        orchestrator = self._butler.orchestrator
+        lattice = orchestrator._lattice
+        if lattice is None:
+            return "Lattice not available. Cannot create proposal."
+
+        # Submit the proposal
+        proposal_id = await lattice.submit_proposal(
+            proposer_id=sender,
+            proposal_type="spawn_agent",
+            payload={"name": name, "domain": domain, "capabilities": capabilities},
+            quorum=0.66,
+            ttl_seconds=3600,
+        )
+
+        # Butler and user auto-approve
+        await orchestrator.resolve_agent_proposal(
+            proposal_id=proposal_id,
+            voter_id="butler",
+            decision="approve",
+            evidence=["Direct request from human user via plain English"],
+        )
+        await orchestrator.resolve_agent_proposal(
+            proposal_id=proposal_id,
+            voter_id="user",
+            decision="approve",
+            evidence=["User initiated the agent proposal"],
+        )
+
+        proposal = await lattice.get_proposal_status(proposal_id)
+        if proposal.status == "passed":
+            agents = await orchestrator.list_agents()
+            new_agent = next((a for a in agents if a.name == name and a.domain == domain), None)
+            if new_agent:
+                return (
+                    f"✅ Agent spawned successfully!\n\n"
+                    f"• Name: {new_agent.name}\n"
+                    f"• ID: {new_agent.id}\n"
+                    f"• Domain: {new_agent.domain}\n"
+                    f"• Capabilities: {', '.join(capabilities)}\n"
+                    f"• Proposal: {proposal_id[:16]}..."
+                )
+            return f"Proposal passed but agent not found in registry."
+
+        return f"Proposal submitted: {proposal_id[:16]}... Status: {proposal.status}"
 
     async def process_message(self, message: dict[str, Any]) -> str:
         """Process a message and return the response text."""
