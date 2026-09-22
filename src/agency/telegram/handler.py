@@ -63,9 +63,11 @@ class TelegramHandler:
         # called X that does Y" instead of memorizing commands.
         agent_intent = self._detect_agent_creation_intent(text)
         if agent_intent and self._butler:
+            self._log.info("telegram.agent_creation_intent", intent=agent_intent, sender=sender)
             response = await self._handle_plain_english_agent_creation(
                 agent_intent, sender
             )
+            self._log.info("telegram.agent_creation_response", response=response[:200])
             if chat_id:
                 await self._adapter.send_message(chat_id, response)
             return {"status": "ok", "chat_id": chat_id, "intent": "create_agent"}
@@ -294,6 +296,7 @@ class TelegramHandler:
             return "Lattice not available. Cannot create proposal."
 
         # Submit the proposal
+        self._log.info("lattice.spawn_submit", name=name, domain=domain, capabilities=capabilities)
         proposal_id = await lattice.submit_proposal(
             proposer_id=sender,
             proposal_type="spawn_agent",
@@ -301,6 +304,7 @@ class TelegramHandler:
             quorum=0.66,
             ttl_seconds=3600,
         )
+        self._log.info("lattice.spawn_proposal_created", proposal_id=proposal_id)
 
         # Butler and user auto-approve
         await orchestrator.resolve_agent_proposal(
@@ -309,16 +313,22 @@ class TelegramHandler:
             decision="approve",
             evidence=["Direct request from human user via plain English"],
         )
+        self._log.info("lattice.spawn_butler_voted", proposal_id=proposal_id)
         await orchestrator.resolve_agent_proposal(
             proposal_id=proposal_id,
             voter_id="user",
             decision="approve",
             evidence=["User initiated the agent proposal"],
         )
+        self._log.info("lattice.spawn_user_voted", proposal_id=proposal_id)
 
         proposal = await lattice.get_proposal_status(proposal_id)
+        self._log.info("lattice.spawn_proposal_status", status=proposal.status)
         if proposal.status == "passed":
             agents = await orchestrator.list_agents()
+            self._log.info("lattice.spawn_agents_count", count=len(agents))
+            for a in agents:
+                self._log.info("lattice.spawn_agent", name=a.name, domain=a.domain, id=a.id)
             new_agent = next((a for a in agents if a.name == name and a.domain == domain), None)
             if new_agent:
                 return (
@@ -329,7 +339,7 @@ class TelegramHandler:
                     f"• Capabilities: {', '.join(capabilities)}\n"
                     f"• Proposal: {proposal_id[:16]}..."
                 )
-            return f"Proposal passed but agent not found in registry."
+            return f"Proposal passed but agent not found in registry. Proposal: {proposal_id[:16]}..."
 
         return f"Proposal submitted: {proposal_id[:16]}... Status: {proposal.status}"
 

@@ -780,7 +780,7 @@ class SQLiteLattice:
                     "proposal_submitted",
                     proposer_id,
                     proposal_id,
-                    {"proposal_type": proposal_type, "payload": dict(payload)},
+                    {"proposal_type": proposal_type, **dict(payload)},
                 )
                 await db.commit()
                 return proposal_id
