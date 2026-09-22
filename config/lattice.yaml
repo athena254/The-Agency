@@ -1,0 +1,25 @@
+lattice:
+  backend: "sqlite"
+  sqlite:
+    path: "./data/lattice.db"
+    wal_mode: true
+  neo4j:
+    uri: "bolt://localhost:7687"
+    user: "neo4j"
+    password: "${NEO4J_PASSWORD}"
+    database: "theagency"
+  qdrant:
+    url: "http://localhost:6333"
+    api_key: "${QDRANT_API_KEY}"
+    default_collection: "agency_vectors"
+  vectors:
+    model: "sentence-transformers/all-MiniLM-L6-v2"
+    dimension: 384
+    fallback_to_metadata_only: true
+  events:
+    retention_days: 365
+    prune_enabled: false
+  governance:
+    default_quorum: 0.66
+    proposal_ttl_seconds: 3600
+    reputation_window: 20
