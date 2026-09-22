@@ -110,6 +110,7 @@ class AgencyOrchestrator:
 
         # Lattice
         self._lattice = None
+        self._spawned_proposals = set()
 
         self._started = False
 
@@ -188,37 +189,64 @@ class AgencyOrchestrator:
         """Cast a vote on a spawn-agent proposal and auto-spawn if quorum reached."""
         if self._lattice is None:
             raise RuntimeError("Lattice is not available")
-        
+
+        # Get proposal details before voting so we have the payload
+        try:
+            proposal = await self._lattice.get_proposal_status(proposal_id)
+            # Also get payload from events if available
+            events = await self._lattice.get_events(target_id=proposal_id, event_type="proposal_submitted")
+            proposal_payload = events[-1].payload if events else {}
+        except Exception:
+            proposal = None
+            proposal_payload = {}
+
         result = await self._lattice.cast_vote(
             voter_id=voter_id,
             proposal_id=proposal_id,
             decision=decision,
             evidence=evidence,
         )
-        
-        # Auto-spawn if quorum reached and proposal passed
-        if result.get("status") == "passed":
-            await self._spawn_from_proposal(proposal_id)
-        
+
+        # Auto-spawn only once per proposal
+        if result.get("status") == "passed" and proposal_id not in self._spawned_proposals:
+            self._spawned_proposals.add(proposal_id)
+            await self._spawn_from_proposal(proposal_id, proposal_payload)
+
         return result
 
-    async def _spawn_from_proposal(self, proposal_id: str) -> None:
+    async def _spawn_from_proposal(self, proposal_id: str, proposal_payload: dict | None = None) -> None:
         """Spawn an agent from a passed governance proposal."""
-        proposal = await self._lattice.get_proposal_status(proposal_id)
+        try:
+            proposal = await self._lattice.get_proposal_status(proposal_id)
+        except Exception as exc:
+            self._log.warning("lattice.spawn_get_failed", proposal_id=proposal_id, error=str(exc))
+            return
+
         if proposal.proposal_type != "spawn_agent":
             return
-        
-        # Get proposal payload from backend events
-        payload = {}
-        if self._lattice is not None:
-            events = await self._lattice.get_events(target_id=proposal_id, event_type="proposal_submitted")
-            if events:
-                payload = events[-1].payload
-        
+
+        # Use the payload we already have; fall back to event lookup only if needed
+        payload = proposal_payload or {}
+        if not payload:
+            try:
+                events = await self._lattice.get_events(target_id=proposal_id, event_type="proposal_submitted")
+                if events:
+                    payload = events[-1].payload
+            except Exception:
+                pass
+
         name = payload.get("name", f"agent-{proposal_id[:8]}")
+        if not name:
+            name = f"agent-{proposal_id[:8]}"
+        
         domain = payload.get("domain", "general")
         capabilities = payload.get("capabilities", [domain, "respond"])
         
+        # Validate: Agent requires non-empty name
+        if len(name) < 1:
+            self._log.warning("lattice.spawn_invalid_name", proposal_id=proposal_id)
+            return
+
         agent = await self.register_agent(
             name=name,
             domain=domain,
