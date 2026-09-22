@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
-import re
 import structlog
 
 from agency.agents.demo.agent import DemoAgent
@@ -44,7 +44,7 @@ class TelegramHandler:
         # Bot commands are answered deterministically from real system
         # state — never through the LLM, so no fiction is possible.
         command = text.strip().lower()
-        if command in ("/agents", "/status", "/whoami", "/proposals"):
+        if command in ("/agents", "/status", "/whoami", "/proposals", "/start", "/help"):
             response = await self._system_answer(command)
             if chat_id:
                 await self._adapter.send_message(chat_id, response)
@@ -157,6 +157,18 @@ class TelegramHandler:
             )
         if command == "/proposals":
             return await self._list_proposals()
+        if command in ("/start", "/help"):
+            return (
+                "🤖 *The Agency — Butler*\n\n"
+                "Commands:\n"
+                "• /research <topic> — Web research with cited sources\n"
+                "• /agents — List registered agents\n"
+                "• /status — Live system health\n"
+                "• /propose-agent <name> <domain> <cap...> — Governance spawn\n"
+                "• /proposals — Open governance proposals\n"
+                "• /whoami — What this bot is\n\n"
+                "Or just chat — plain English routes to the right agent."
+            )
         return "Unknown command."
 
     async def _handle_propose_agent(self, args: str, sender: str) -> str:
@@ -254,7 +266,6 @@ class TelegramHandler:
             "new agent named Y that does Z" → {"name": "Y", "description": "Z"}
             "spawn agent for finance" → {"domain": "finance"}
         """
-        import re
 
         lower = text.lower().strip()
         # Remove common filler words

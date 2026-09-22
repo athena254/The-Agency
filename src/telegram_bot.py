@@ -6,6 +6,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from typing import ClassVar
 
 import structlog
 
@@ -14,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # Load .env before importing config
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from agency.agents.demo.agent import DemoAgent
@@ -28,6 +30,17 @@ logger = structlog.get_logger(__name__)
 
 class TelegramBot:
     """Telegram bot that connects to the Agency."""
+
+    # The command menu registered with Telegram (setMyCommands).
+    COMMANDS: ClassVar[list[dict[str, str]]] = [
+        {"command": "start", "description": "Show welcome and command list"},
+        {"command": "status", "description": "Live system health"},
+        {"command": "agents", "description": "List registered agents"},
+        {"command": "research", "description": "Research a topic: /research <topic>"},
+        {"command": "propose-agent", "description": "Propose a new agent via governance"},
+        {"command": "proposals", "description": "List open governance proposals"},
+        {"command": "whoami", "description": "What this bot is"},
+    ]
 
     def __init__(self, token: str, webhook_url: str | None = None) -> None:
         self._config = TelegramConfig(bot_token=token, webhook_url=webhook_url)
@@ -44,6 +57,14 @@ class TelegramBot:
         await self._orchestrator.start()
         await self._butler.start()
         self._running = True
+
+        # Register the command menu so Telegram's autocomplete matches
+        # what the handler actually supports.
+        try:
+            await self._handler._adapter.set_my_commands(self.COMMANDS)
+            logger.info("telegram_commands_registered", count=len(self.COMMANDS))
+        except Exception as exc:  # noqa: BLE001 — menu is cosmetic, never fatal
+            logger.warning("telegram_commands_register_failed", error=str(exc))
 
         if self._config.webhook_url:
             await self._handler._adapter.set_webhook(
@@ -82,7 +103,6 @@ class TelegramBot:
 
 async def main() -> None:
     """Main entry point."""
-    import os
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     if not token:

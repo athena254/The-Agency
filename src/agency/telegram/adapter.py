@@ -47,6 +47,16 @@ class TelegramAdapter:
             raise RuntimeError(f"Telegram API error: {data}")
         return data["result"]
 
+    async def set_my_commands(self, commands: list[dict[str, str]]) -> dict[str, Any]:
+        """Register the bot's command menu (Telegram setMyCommands)."""
+        client = await self._get_client()
+        resp = await client.post("/setMyCommands", json={"commands": commands})
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("ok"):
+            raise RuntimeError(f"Telegram API error: {data}")
+        return data["result"]
+
     async def send_message(
         self,
         chat_id: int | str,
