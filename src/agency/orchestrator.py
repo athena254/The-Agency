@@ -9,35 +9,35 @@ Every component is injected or created with defaults. No global state.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
 import structlog
 
-from agency.agents.executor import AgentExecutor, ExecutionContext, ExecutionResult, ExecutionStatus
-from agency.agents.loop import AgentLoop, LoopResult, LoopStatus
-from agency.agents.planner import AgentPlanner, TaskGraph
+from agency.agents.executor import AgentExecutor, ExecutionResult, ExecutionStatus
+from agency.agents.loop import AgentLoop
+from agency.agents.planner import AgentPlanner
 from agency.agents.registry import AgentRegistry as RuntimeAgentRegistry
-from agency.agents.registry import AgentStatus
-from agency.agents.verifier import AgentVerifier, VerificationResult, VerificationStatus
+from agency.agents.verifier import AgentVerifier, VerificationStatus
 from agency.bridges.coordinator import ExternalCoordinator
-from agency.evidence.store.models import EvidenceEntry, EvidenceLevel, Finding, Severity, VerificationState
+from agency.evidence.store.models import (
+    Finding,
+    Severity,
+    VerificationState,
+)
 from agency.evidence.store.store import EvidenceStore
 from agency.kernel.audit import AuditEntry, AuditLog
 from agency.kernel.identity import Agent, Capability, TrustLevel
-from agency.kernel.policies import ActionClass, PolicyEngine, Permission
+from agency.kernel.policies import ActionClass, Permission, PolicyEngine
 from agency.kernel.registry import AgentRegistry
 from agency.kernel.tasks import Task, TaskManager, TaskMessage, TaskStatus
+from agency.lattice import get_lattice
 from agency.llm.adapter import LLMAdapter
-from agency.lattice import get_lattice, reset_lattice
-from agency.lattice.models import NodeType
 from agency.memory.sms.lifecycle import TieredMemoryEngine
-from agency.memory.sms.models import MemoryItem, MemoryQuery, MemoryTier
+from agency.memory.sms.models import MemoryItem, MemoryTier
 from agency.memory.sms.retrieval import RetrievalEngine
 from agency.memory.sms.store import MemoryStore
 from agency.risk.engine.engine import RiskEngine
-from agency.risk.engine.models import RiskCategory
 
 logger = structlog.get_logger(__name__)
 
@@ -165,7 +165,7 @@ class AgencyOrchestrator:
                     capabilities=capabilities,
                 )
             except Exception:
-                self._log.warning("lattice.agent_register_failed", agent_id=agent.id)
+                self._log.warning("lattice.agent_register_failed", agent_id=agent.id, exc_info=True)
 
         # Grant default permission for L0-L1 actions
         perm = Permission(
@@ -177,6 +177,60 @@ class AgencyOrchestrator:
 
         self._log.info("agent_registered", agent_id=agent.id, name=name, domain=domain)
         return agent
+
+    async def resolve_agent_proposal(
+        self,
+        proposal_id: str,
+        voter_id: str,
+        decision: str,
+        evidence: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Cast a vote on a spawn-agent proposal and auto-spawn if quorum reached."""
+        if self._lattice is None:
+            raise RuntimeError("Lattice is not available")
+        
+        result = await self._lattice.cast_vote(
+            voter_id=voter_id,
+            proposal_id=proposal_id,
+            decision=decision,
+            evidence=evidence,
+        )
+        
+        # Auto-spawn if quorum reached and proposal passed
+        if result.get("status") == "passed":
+            await self._spawn_from_proposal(proposal_id)
+        
+        return result
+
+    async def _spawn_from_proposal(self, proposal_id: str) -> None:
+        """Spawn an agent from a passed governance proposal."""
+        proposal = await self._lattice.get_proposal_status(proposal_id)
+        if proposal.proposal_type != "spawn_agent":
+            return
+        
+        # Get proposal payload from backend events
+        payload = {}
+        if self._lattice is not None:
+            events = await self._lattice.get_events(target_id=proposal_id, event_type="proposal_submitted")
+            if events:
+                payload = events[-1].payload
+        
+        name = payload.get("name", f"agent-{proposal_id[:8]}")
+        domain = payload.get("domain", "general")
+        capabilities = payload.get("capabilities", [domain, "respond"])
+        
+        agent = await self.register_agent(
+            name=name,
+            domain=domain,
+            capabilities=capabilities,
+            trust_level=TrustLevel.OBSERVED,
+        )
+        self._log.info(
+            "agent_spawned_via_governance",
+            agent_id=agent.id,
+            proposal_id=proposal_id,
+            name=name,
+        )
 
     async def list_agents(self) -> list[Agent]:
         """List all registered agents."""
@@ -208,7 +262,7 @@ class AgencyOrchestrator:
                     payload={"title": title, "description": description, "task_id": task.task_id},
                 )
             except Exception:
-                self._log.warning("lattice.task_create_failed", task_id=task.task_id)
+                self._log.warning("lattice.task_create_failed", task_id=task.task_id, exc_info=True)
 
         self._log.info("task_submitted", task_id=task.task_id, title=title)
         return task
@@ -306,7 +360,7 @@ class AgencyOrchestrator:
             await self._evidence_store.add_finding(finding)
 
             # Assess risk
-            risk, category = self._risk_engine.assess(finding)
+            _, category = self._risk_engine.assess(finding)
 
             # Audit
             await self._audit_log.append(AuditEntry(
@@ -401,8 +455,8 @@ class AgencyOrchestrator:
         if self._lattice is not None:
             try:
                 lattice_status = await self._lattice.get_status()
-            except Exception as e:
-                lattice_status = {"error": str(e)}
+            except Exception as exc:
+                lattice_status = {"error": str(exc)}
 
         return {
             "status": "ok" if self._started else "stopped",

@@ -497,6 +497,10 @@ class InMemoryLatticeBackend:
             raise KeyError(f"Unknown proposal: {proposal_id}")
         return proposal
 
+    async def list_open_proposals(self) -> list[ConsensusProposal]:
+        """Return all proposals with status='open'."""
+        return [p for p in self._proposals.values() if p.status == "open"]
+
     async def update_reputation(
         self,
         agent_id: str,

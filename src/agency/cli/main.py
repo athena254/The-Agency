@@ -290,6 +290,41 @@ def agent_create(
     )
 
 
+@agent_app.command("propose")
+def agent_propose(
+    name: str = typer.Option(..., "--name", "-n", help="Human-readable agent name."),
+    domain: str = typer.Option("general", "--domain", "-d", help="Operational domain."),
+    capability: Annotated[list[str] | None, typer.Option("--capability", "-c", help="Capability (repeatable).")] = None,
+    proposer: str = typer.Option("user", "--proposer", help="Proposer identity."),
+    quorum: float = typer.Option(0.66, "--quorum", help="Quorum threshold (0.0-1.0)."),
+    ttl: int = typer.Option(3600, "--ttl", help="Proposal TTL in seconds."),
+    server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+) -> None:
+    """Propose a new agent via governance (requires quorum to pass)."""
+    base = _server_url(server_url)
+    body: dict[str, Any] = {
+        "name": name,
+        "domain": domain,
+        "capabilities": capability or [],
+        "proposer": proposer,
+        "quorum": quorum,
+        "ttl": ttl,
+    }
+    with _client(base) as client:
+        payload = _handle_response(client.post("/v1/governance/propose", json=body))
+    if output_json:
+        _print_json(payload)
+        return
+    console.print(
+        Panel(
+            f"[yellow]Agent proposed[/yellow] [bold]{payload.get('proposal_id', payload.get('id'))}[/bold]\n"
+            f"[dim]Status: {payload.get('status', 'open')} | Quorum: {quorum} | Votes: {payload.get('vote_count', 0)}[/dim]",
+            expand=False,
+        )
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Tasks: agency task create / list
 # --------------------------------------------------------------------------- #

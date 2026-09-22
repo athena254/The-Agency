@@ -49,12 +49,14 @@ from agency import __version__
 from agency.api.routers import agents as agents_router
 from agency.api.routers import bridges as bridges_router
 from agency.api.routers import evidence as evidence_router
+from agency.api.routers import governance as governance_router
 from agency.api.routers import memory as memory_router
 from agency.api.routers import tasks as tasks_router
 from agency.bridges.coordinator import ExternalCoordinator
 from agency.evidence.store.store import EvidenceStore
 from agency.kernel.registry import AgentRegistry
 from agency.kernel.tasks import TaskManager
+from agency.lattice import get_lattice
 from agency.memory.sms.retrieval import RetrievalEngine
 from agency.memory.sms.store import MemoryStore
 from agency.risk.engine.engine import RiskEngine
@@ -113,10 +115,18 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.memory_store = memory_store
     application.state.memory_retrieval = RetrievalEngine(memory_store)
 
+    # Lattice
+    lattice = await get_lattice()
+    application.state.lattice = lattice
+
     log.info("api.startup", version=__version__)
     try:
         yield
     finally:
+        try:
+            await lattice.close()
+        except Exception:
+            log.exception("api.shutdown.lattice_close_failed")
         try:
             await evidence_store.close()
         except Exception:  # Shutdown must not raise.
@@ -149,6 +159,7 @@ def create_app() -> FastAPI:
     application.include_router(memory_router.router, prefix="/v1/memory")
     application.include_router(evidence_router.router, prefix="/v1/evidence")
     application.include_router(bridges_router.router, prefix="/v1/bridges")
+    application.include_router(governance_router.router)
 
     @application.get("/v1/health", response_model=HealthResponse, tags=["ops"], summary="Health check")
     async def health(request: Request) -> HealthResponse:
