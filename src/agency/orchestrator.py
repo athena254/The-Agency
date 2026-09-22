@@ -30,6 +30,8 @@ from agency.kernel.policies import ActionClass, PolicyEngine, Permission
 from agency.kernel.registry import AgentRegistry
 from agency.kernel.tasks import Task, TaskManager, TaskMessage, TaskStatus
 from agency.llm.adapter import LLMAdapter
+from agency.lattice import get_lattice, reset_lattice
+from agency.lattice.models import NodeType
 from agency.memory.sms.lifecycle import TieredMemoryEngine
 from agency.memory.sms.models import MemoryItem, MemoryQuery, MemoryTier
 from agency.memory.sms.retrieval import RetrievalEngine
@@ -106,6 +108,9 @@ class AgencyOrchestrator:
         # Bridges
         self._bridge_coordinator = ExternalCoordinator()
 
+        # Lattice
+        self._lattice = None
+
         self._started = False
 
     # ------------------------------------------------------------------ #
@@ -117,12 +122,16 @@ class AgencyOrchestrator:
         await self._memory_store.initialize()
         await self._evidence_store.initialize()
         await self._audit_log.initialize()
+        self._lattice = await get_lattice()
         self._started = True
         self._log.info("orchestrator_started")
 
     async def stop(self) -> None:
         """Stop background services."""
         await self._memory_lifecycle.stop_periodic()
+        if self._lattice is not None:
+            await self._lattice.close()
+            self._lattice = None
         self._started = False
         self._log.info("orchestrator_stopped")
 
@@ -146,6 +155,17 @@ class AgencyOrchestrator:
         )
         self._identity_registry.register(agent)
         self._runtime_registry.register(agent)
+
+        # Register in Lattice if available
+        if self._lattice is not None:
+            try:
+                await self._lattice.register_agent(
+                    agent_id=agent.id,
+                    agent_type=domain,
+                    capabilities=capabilities,
+                )
+            except Exception:
+                self._log.warning("lattice.agent_register_failed", agent_id=agent.id)
 
         # Grant default permission for L0-L1 actions
         perm = Permission(
@@ -178,6 +198,18 @@ class AgencyOrchestrator:
             created_by=agent_id or "system",
             input={"description": description},
         )
+
+        # Create task in Lattice if available
+        if self._lattice is not None and agent_id is not None:
+            try:
+                await self._lattice.create_task(
+                    agent_id=agent_id,
+                    task_type="user_request",
+                    payload={"title": title, "description": description, "task_id": task.task_id},
+                )
+            except Exception:
+                self._log.warning("lattice.task_create_failed", task_id=task.task_id)
+
         self._log.info("task_submitted", task_id=task.task_id, title=title)
         return task
 
@@ -365,6 +397,13 @@ class AgencyOrchestrator:
 
     async def health_check(self) -> dict[str, Any]:
         """Check all components."""
+        lattice_status = None
+        if self._lattice is not None:
+            try:
+                lattice_status = await self._lattice.get_status()
+            except Exception as e:
+                lattice_status = {"error": str(e)}
+
         return {
             "status": "ok" if self._started else "stopped",
             "orchestrator": "running" if self._started else "stopped",
@@ -375,6 +414,7 @@ class AgencyOrchestrator:
             "evidence": "ok",
             "risk": "ok",
             "bridges": len(self._bridge_coordinator.list_bridges()),
+            "lattice": lattice_status,
             "llm": {
                 "provider": self._llm_adapter.provider,
                 "model": self._llm_adapter.model,

@@ -112,6 +112,7 @@ class HealthResponse(BaseModel):
     version: str = Field(default=__version__)
     butler: str = Field(default="running")
     agents: int = Field(default=0)
+    lattice: dict | None = Field(default=None, description="Lattice status if available.")
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -217,10 +218,21 @@ def create_app(config: ButlerConfig | None = None) -> FastAPI:
         service = getattr(request.app.state, "butler", None)
         count = len(service.router.list_agents()) if service is not None else 0
         running = service is not None and getattr(service, "_started", False)
+
+        # Include Lattice status if available
+        lattice_status = None
+        lat = service.lattice if service is not None else None
+        if lat is not None:
+            try:
+                lattice_status = await lat.get_status()
+            except Exception:
+                lattice_status = {"error": "unavailable"}
+
         return HealthResponse(
             status="ok" if running else "starting",
             butler="running" if running else "starting",
             agents=count,
+            lattice=lattice_status,
         )
 
     @application.get("/", include_in_schema=False)

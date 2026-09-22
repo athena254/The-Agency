@@ -50,10 +50,20 @@ class ButlerService:
         self._router = router or MessageRouter()
         self._audit = audit_log or AuditLog(":memory:")
         self._memory = memory_store or MemoryStore()
+        self._lattice = None  # Will be set from orchestrator
         self._llm = llm
         self._log = structlog.get_logger(__name__)
         self._started = False
         self._seeded = False
+
+    @property
+    def lattice(self):
+        """Reference to the orchestrator's Lattice instance, if available."""
+        if self._lattice is not None:
+            return self._lattice
+        if hasattr(self._orchestrator, '_lattice'):
+            return self._orchestrator._lattice
+        return None
 
     # ------------------------------------------------------------------ #
     # Properties
@@ -85,6 +95,9 @@ class ButlerService:
         await self._audit.initialize()
         await self._memory.initialize()
         await self._orchestrator.start()
+        # Pick up the Lattice from orchestrator after it starts
+        if hasattr(self._orchestrator, '_lattice') and self._orchestrator._lattice is not None:
+            self._lattice = self._orchestrator._lattice
         await self._ensure_default_agents()
         self._started = True
         self._log.info("butler.started")
