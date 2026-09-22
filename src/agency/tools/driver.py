@@ -195,7 +195,7 @@ class ToolDriver:
         while True:
             prompt = self._build_prompt(task, system_prompt, specs, history)
             try:
-                raw = await self._llm.generate(prompt, {"task_id": task_id})
+                raw = await self._llm.generate(prompt, {"task_id": task_id, "strict": True})
             except Exception as exc:  # noqa: BLE001 — surfaced as llm_error
                 return ToolLoopResult(
                     final_answer=f"LLM error: {exc}",
@@ -253,7 +253,9 @@ class ToolDriver:
                         [*history, {"assistant": "", "observation": _FORCED_FINAL_MESSAGE}],
                     )
                     try:
-                        forced_raw = await self._llm.generate(forced_prompt, {"task_id": task_id})
+                        forced_raw = await self._llm.generate(
+                            forced_prompt, {"task_id": task_id, "strict": True}
+                        )
                     except Exception as exc:  # noqa: BLE001
                         return ToolLoopResult(
                             final_answer=f"LLM error: {exc}",

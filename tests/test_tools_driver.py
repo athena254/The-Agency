@@ -361,7 +361,7 @@ async def test_llm_receives_task_id_in_context() -> None:
     llm = FakeLLM(['{"final": "ok"}'])
     driver = ToolDriver(registry, llm)
     await driver.run("task", "sys", make_ctx(task_id="task-abc"))
-    assert llm.calls[0][1] == {"task_id": "task-abc"}
+    assert llm.calls[0][1] == {"task_id": "task-abc", "strict": True}
 
 
 def test_extract_json_nested_and_first_wins() -> None:

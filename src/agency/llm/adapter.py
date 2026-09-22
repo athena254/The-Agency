@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
+import json
 import os
 from typing import Any
 
 import structlog
-
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -128,6 +127,10 @@ class LLMAdapter:
                 return self._echo_generate(prompt)
         except Exception as e:
             self._log.error("llm_error", provider=provider, model=model, error=str(e))
+            if ctx.get("strict"):
+                # Tool loops must never mistake the echo fallback for a
+                # real model response — re-raise so the driver handles it.
+                raise
             return self._echo_generate(prompt)
 
     async def stream(self, prompt: str, context: dict[str, Any] | None = None):
@@ -249,7 +252,41 @@ class LLMAdapter:
             resp.raise_for_status()
             data = resp.json()
 
-        return data["choices"][0]["message"]["content"]
+        # Tolerate shape variations: some responses carry plain text,
+        # some omit choices, some nest differently.
+        if isinstance(data, str):
+            return data
+        choices = data.get("choices")
+        if isinstance(choices, list) and choices:
+            message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                return content
+            # Native function-calling models sometimes emit tool_calls
+            # with empty content — translate to our JSON protocol so the
+            # tool driver understands it.
+            tool_calls = message.get("tool_calls")
+            if isinstance(tool_calls, list) and tool_calls:
+                first = tool_calls[0] or {}
+                function = first.get("function", {}) if isinstance(first, dict) else {}
+                name = function.get("name")
+                if isinstance(name, str) and name.strip():
+                    raw_args = function.get("arguments", "{}")
+                    try:
+                        args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                    except (TypeError, ValueError):
+                        args = {}
+                    return json.dumps({"action": {"name": name.strip(), "args": args}})
+            # Reasoning-only responses: the model thought but emitted no
+            # content. Fall back to the reasoning text — the driver's JSON
+            # extractor can usually pull an action/final out of it.
+            reasoning = message.get("reasoning")
+            if isinstance(reasoning, str) and reasoning.strip():
+                return reasoning
+        content = data.get("content")
+        if isinstance(content, str) and content.strip():
+            return content
+        raise ValueError(f"unexpected Pollinations response shape: {str(data)[:200]}")
 
     async def _ollama_generate(self, prompt: str, model: str) -> str:
         import httpx
