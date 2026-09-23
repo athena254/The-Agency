@@ -178,11 +178,18 @@ class SandboxManager:
     def _new_id() -> str:
         return f"sbx-{uuid.uuid4().hex[:12]}"
 
-    def _get_backend(self) -> DockerSandboxBackend:
+    def _get_backend(self) -> "DockerSandboxBackend | ProcessSandboxBackend":
         if self._backend is None:
             with self._lock:
                 if self._backend is None:
-                    self._backend = DockerSandboxBackend()
+                    # Lazy import: process.py imports manager's types,
+                    # so importing it at module level would be circular.
+                    from agency.security.sandbox.process import ProcessSandboxBackend
+
+                    if self._default_config.backend is SandboxBackend.PROCESS:
+                        self._backend = ProcessSandboxBackend()
+                    else:
+                        self._backend = DockerSandboxBackend()
         return self._backend
 
     def create_sandbox(self, agent_id: str, config: SandboxConfig | None = None) -> Sandbox:

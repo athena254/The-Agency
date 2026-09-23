@@ -13,12 +13,14 @@ from agency.security.sandbox.manager import (
     SandboxManager,
     SandboxStatus,
 )
+from agency.security.sandbox.process import ProcessSandboxBackend
 
 __all__ = [
     "DockerSandboxBackend",
     "ExecutionResult",
     "FilesystemPolicy",
     "NetworkPolicy",
+    "ProcessSandboxBackend",
     "ResourceLimits",
     "Sandbox",
     "SandboxBackend",

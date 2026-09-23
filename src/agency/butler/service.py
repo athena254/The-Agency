@@ -23,6 +23,7 @@ from agency.butler.router import MessageRouter
 from agency.kernel.audit import AuditEntry, AuditLog
 from agency.kernel.identity import Agent
 from agency.memory.sms.models import MemoryItem, MemoryTier
+from agency.memory.sms.retrieval import RetrievalEngine
 from agency.memory.sms.store import MemoryStore
 from agency.orchestrator import AgencyOrchestrator
 
@@ -56,7 +57,10 @@ class ButlerService:
         self._orchestrator = orchestrator or AgencyOrchestrator()
         self._router = router or MessageRouter()
         self._audit = audit_log or AuditLog(":memory:")
-        self._memory = memory_store or MemoryStore()
+        # Share the orchestrator's memory store — one store, one truth.
+        # (A standalone MemoryStore here was a second, separate DB.)
+        self._memory = memory_store or self._orchestrator._memory_store
+        self._memory_retrieval = RetrievalEngine(self._memory)
         self._lattice = None  # Will be set from orchestrator
         self._llm = llm
         self._log = structlog.get_logger(__name__)
@@ -167,6 +171,13 @@ class ButlerService:
         merged: dict[str, Any] = {**context, "sender": sender}
         started = datetime.now(UTC)
 
+        # Recall earlier conversation with this sender so the agent has
+        # continuity (parity with OpenClaw/Hermes). Best-effort — never
+        # blocks the turn.
+        memory_context = await self._recall_history(sender, text)
+        if memory_context:
+            merged["memory_context"] = memory_context
+
         agent = await self.route(text, merged)
         await self._audit_append(
             agent=agent.id,
@@ -228,7 +239,7 @@ class ButlerService:
             description=message,
             agent_id=agent.id,
         )
-        result = await self._orchestrator.execute_task(task.task_id)
+        result = await self._orchestrator.execute_task(task.task_id, context=context)
         output = result.output if isinstance(result.output, str) else str(result.output)
         await self._audit_append(
             agent=agent.id,
@@ -349,15 +360,33 @@ class ButlerService:
         except Exception:
             self._log.exception("butler.audit_failed", action=action)
 
+    async def _recall_history(self, sender: str, message: str) -> str:
+        """Retrieve earlier turns with ``sender`` relevant to ``message``.
+
+        Returns a formatted context block, or "" when nothing relevant
+        is found. Best-effort: any failure returns "".
+        """
+        try:
+            items = await self._memory_retrieval.semantic_search(
+                message, agent_id=f"chat-{sender}", limit=5
+            )
+        except Exception:
+            self._log.debug("butler.history_recall_failed", sender=sender)
+            return ""
+        if not items:
+            return ""
+        lines = [f"- {item.content[:300]}" for item in items]
+        return "Earlier conversation:\n" + "\n".join(lines)
+
     async def _store_turn(self, sender: str, agent: Agent, message: str, response: str) -> None:
         try:
             await self._memory.store(
                 MemoryItem(
-                    agent_id=agent.id,
+                    agent_id=f"chat-{sender}",
                     content=f"[{sender}] {message}\n[{agent.name}] {response}",
                     tier=MemoryTier.NORMAL,
                     importance=0.6,
-                    tags=["butler", "conversation", agent.domain],
+                    tags=["butler", "conversation", agent.domain, f"chat-{sender}"],
                 )
             )
         except Exception:

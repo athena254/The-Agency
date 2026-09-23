@@ -38,6 +38,8 @@ from agency.memory.sms.models import MemoryItem, MemoryTier
 from agency.memory.sms.retrieval import RetrievalEngine
 from agency.memory.sms.store import MemoryStore
 from agency.risk.engine.engine import RiskEngine
+from agency.security.sandbox.config import SandboxBackend, SandboxConfig
+from agency.security.sandbox.manager import SandboxManager
 from agency.tools.base import ToolContext
 from agency.tools.builtin import register_all as register_builtin_tools
 from agency.tools.driver import ToolDriver
@@ -45,7 +47,12 @@ from agency.tools.registry import ToolRegistry
 
 logger = structlog.get_logger(__name__)
 
-TOOL_CAPABLE_DOMAINS = frozenset({"research"})
+TOOL_CAPABLE_DOMAINS = frozenset({"research", "general"})
+
+# Per-domain tool-loop budgets (general is lighter: mostly chat).
+_TOOL_ITERATIONS: dict[str, int] = {"research": 6, "general": 4}
+
+_DEFAULT_MEMORY_DB = "data/memory.db"
 
 
 class AgencyOrchestrator:
@@ -65,6 +72,7 @@ class AgencyOrchestrator:
         self,
         config: dict[str, Any] | None = None,
         llm: LLMAdapter | None = None,
+        memory_db_path: str | None = None,
     ) -> None:
         self._config = config or {}
         self._log = structlog.get_logger(__name__)
@@ -102,8 +110,13 @@ class AgencyOrchestrator:
         self._verifier = AgentVerifier()
         self._loop = AgentLoop()
 
-        # Memory
-        self._memory_store = MemoryStore()
+        # Memory — persistent by default so turns and findings survive
+        # restarts. Tests pass ":memory:" explicitly for speed.
+        self._memory_store = MemoryStore(
+            db_path=memory_db_path
+            if memory_db_path is not None
+            else (self._config.get("memory_db_path") or _DEFAULT_MEMORY_DB)
+        )
         self._memory_lifecycle = TieredMemoryEngine(self._memory_store)
         self._memory_retrieval = RetrievalEngine(self._memory_store)
 
@@ -115,7 +128,13 @@ class AgencyOrchestrator:
         # live services (memory, sandbox), so tests can inject fakes first.
         self._tool_registry: ToolRegistry | None = None
         self._tool_driver: ToolDriver | None = None
-        self._sandbox_manager: Any = None
+        # Process sandbox — works without Docker (weaker isolation, see
+        # ProcessSandboxBackend docstring). Docker config can override.
+        self._sandbox_manager = SandboxManager(
+            default_config=SandboxConfig(
+                backend=SandboxBackend.PROCESS, timeout=30
+            )
+        )
 
         # Bridges
         self._bridge_coordinator = ExternalCoordinator()
@@ -349,7 +368,9 @@ class AgencyOrchestrator:
     # Execution pipeline
     # ------------------------------------------------------------------ #
 
-    async def execute_task(self, task_id: str) -> ExecutionResult:
+    async def execute_task(
+        self, task_id: str, context: dict[str, Any] | None = None
+    ) -> ExecutionResult:
         """Execute a task through the full pipeline.
 
         Pipeline:
@@ -405,14 +426,30 @@ class AgencyOrchestrator:
             and self._tool_driver is not None
         )
         if tool_capable:
-            from agency.agents.research import RESEARCH_SYSTEM_PROMPT
+            if agent_domain == "research":
+                from agency.agents.research import RESEARCH_SYSTEM_PROMPT
 
-            system_prompt = RESEARCH_SYSTEM_PROMPT
+                system_prompt = RESEARCH_SYSTEM_PROMPT
+            else:
+                from agency.agents.general import GENERAL_SYSTEM_PROMPT
+
+                system_prompt = GENERAL_SYSTEM_PROMPT
+
+            # Recall earlier conversation for this user (parity: the
+            # butler passes memory_context; classic path does the same).
+            memory_context = (context or {}).get("memory_context") or ""
+            if memory_context:
+                system_prompt = (
+                    f"{system_prompt}\n\nRelevant earlier conversation "
+                    f"(real, retrieved from memory):\n{memory_context}"
+                )
+
             tool_ctx = self._tool_context(task.created_by, task_id)
             loop_result = await self._tool_driver.run(
                 task=description,
                 system_prompt=system_prompt,
                 ctx=tool_ctx,
+                max_tool_iterations=_TOOL_ITERATIONS.get(agent_domain or "", 4),
             )
             subtask_results.append({
                 "subtask_id": "tool_loop",

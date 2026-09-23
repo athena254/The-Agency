@@ -176,8 +176,15 @@ class ToolDriver:
         error = getattr(result, "error", None) or "unknown error"
         return f"Tool '{tool_name}' failed: {error}"
 
-    async def run(self, task: str, system_prompt: str, ctx: ToolContext) -> ToolLoopResult:
+    async def run(
+        self,
+        task: str,
+        system_prompt: str,
+        ctx: ToolContext,
+        max_tool_iterations: int | None = None,
+    ) -> ToolLoopResult:
         """Run the tool loop until a final answer, limit, or LLM error."""
+        budget = max_tool_iterations if max_tool_iterations is not None else self._max_tool_iterations
         steps: list[ToolLoopStep] = []
         evidence: dict[str, Any] = {}
         history: list[dict[str, str]] = []
@@ -245,7 +252,7 @@ class ToolDriver:
                 observation = self._summarize_result(tool_name, result)
                 history.append({"assistant": raw_text, "observation": observation})
                 tool_calls += 1
-                if tool_calls >= self._max_tool_iterations:
+                if tool_calls >= budget:
                     forced_prompt = self._build_prompt(
                         task,
                         system_prompt,

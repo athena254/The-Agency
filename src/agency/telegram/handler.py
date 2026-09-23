@@ -115,7 +115,7 @@ class TelegramHandler:
             description=topic,
             agent_id=research_agent.id,
         )
-        result = await orchestrator.execute_task(task.task_id)
+        result = await orchestrator.execute_task(task.task_id, context={"sender": sender})
         output = result.output if isinstance(result.output, str) else str(result.output)
         return f"🔍 *Research complete*\n\n{output}"
 
