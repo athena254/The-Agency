@@ -27,9 +27,9 @@ jobs:
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
       - name: Run Ruff linter
-        run: uv run ruff check src/ tests/
+        run: uvx ruff check src/ tests/
       - name: Run Ruff formatter check
-        run: uv run ruff format --check src/ tests/
+        run: uvx ruff format --check src/ tests/
 
   typecheck:
     name: Type Check (Mypy)
@@ -45,7 +45,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
       - name: Run Mypy
-        run: uv run mypy src/
+        run: uv run python -m mypy src/
 
   test:
     name: Test (Python ${{ matrix.python-version }}, ${{ matrix.os }})
@@ -66,7 +66,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
       - name: Run tests
-        run: uv run pytest tests/ -v --tb=short --cov=agency --cov-report=xml --cov-report=term-missing
+        run: uv run python -m pytest tests/ -v --tb=short --cov=agency --cov-report=xml --cov-report=term-missing
       - name: Upload coverage
         if: matrix.python-version == '3.11' && matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
@@ -88,4 +88,4 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
       - name: Run security tests
-        run: uv run pytest tests/test_security_red.py tests/test_security_blue.py tests/test_security_purple.py tests/test_security_sandbox.py -v --tb=short
+        run: uv run python -m pytest tests/test_security_red.py tests/test_security_blue.py tests/test_security_purple.py tests/test_security_sandbox.py -v --tb=short
