@@ -43,7 +43,7 @@ jobs:
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: uv sync --dev
       - name: Run Mypy
         run: uv run mypy src/
 
@@ -64,7 +64,7 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: uv sync --dev
       - name: Run tests
         run: uv run pytest tests/ -v --tb=short --cov=agency --cov-report=xml --cov-report=term-missing
       - name: Upload coverage
@@ -86,6 +86,6 @@ jobs:
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: uv sync --dev
       - name: Run security tests
         run: uv run pytest tests/test_security_red.py tests/test_security_blue.py tests/test_security_purple.py tests/test_security_sandbox.py -v --tb=short
