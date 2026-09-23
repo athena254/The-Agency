@@ -248,12 +248,11 @@ class AgencyOrchestrator:
 
         # Get proposal details before voting so we have the payload
         try:
-            proposal = await self._lattice.get_proposal_status(proposal_id)
+            await self._lattice.get_proposal_status(proposal_id)
             # Also get payload from events if available
             events = await self._lattice.get_events(target_id=proposal_id, event_type="proposal_submitted")
             proposal_payload = events[-1].payload if events else {}
         except Exception:
-            proposal = None
             proposal_payload = {}
 
         result = await self._lattice.cast_vote(

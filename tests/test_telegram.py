@@ -7,7 +7,6 @@ import pytest
 from agency.agents.demo.agent import DemoAgent
 from agency.telegram.adapter import TelegramAdapter
 from agency.telegram.config import TelegramConfig
-from agency.telegram.handler import TelegramHandler
 
 
 @pytest.fixture

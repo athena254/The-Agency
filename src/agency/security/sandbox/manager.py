@@ -178,7 +178,7 @@ class SandboxManager:
     def _new_id() -> str:
         return f"sbx-{uuid.uuid4().hex[:12]}"
 
-    def _get_backend(self) -> "DockerSandboxBackend | ProcessSandboxBackend":
+    def _get_backend(self) -> DockerSandboxBackend | ProcessSandboxBackend:
         if self._backend is None:
             with self._lock:
                 if self._backend is None:

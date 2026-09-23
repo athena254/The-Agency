@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from agency.butler.service import ButlerService
-from agency.memory.sms.models import MemoryItem, MemoryTier
+from agency.memory.sms.models import MemoryItem
 from agency.memory.sms.store import MemoryStore
 from agency.orchestrator import AgencyOrchestrator
 

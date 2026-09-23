@@ -1,24 +1,24 @@
 """Tests for governance-driven agent spawning."""
 
-import pytest
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
-from agency.orchestrator import AgencyOrchestrator
 from agency.lattice.api import Lattice
 from agency.lattice.backends.base import LatticeBackend
 from agency.lattice.models import (
     ConsensusProposal,
-    NodeType,
     LatticeEvent,
+    NodeType,
     Vote,
     utc_now,
 )
-from agency.kernel.identity import TrustLevel
+from agency.orchestrator import AgencyOrchestrator
 
 
 class FakeRegistry:

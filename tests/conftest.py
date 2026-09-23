@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -27,10 +26,9 @@ from agency.security.blue.defender import BlueTeam
 from agency.security.purple.validator import PurpleTeam
 from agency.security.red.executor import RedTeamExecutor
 from agency.security.red.planner import RedTeamPlanner
-from agency.security.sandbox.config import SandboxBackend, SandboxConfig
+from agency.security.sandbox.config import SandboxConfig
 from agency.security.sandbox.manager import ExecutionResult as SandboxExecutionResult
-from agency.security.sandbox.manager import Sandbox, SandboxManager, SandboxStatus
-
+from agency.security.sandbox.manager import Sandbox, SandboxManager
 
 # ------------------------------------------------------------------ #
 # Kernel

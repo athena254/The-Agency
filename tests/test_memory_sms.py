@@ -2,10 +2,8 @@
 
 from datetime import timedelta
 
-import pytest
-
 from agency.memory.sms.lifecycle import TieredMemoryEngine, tier_for_age
-from agency.memory.sms.models import MemoryItem, MemoryQuery, MemoryTier, TIER_ORDER
+from agency.memory.sms.models import TIER_ORDER, MemoryItem, MemoryQuery, MemoryTier
 from agency.memory.sms.retrieval import RetrievalEngine, build_fts_match
 from agency.memory.sms.store import MemoryStore
 

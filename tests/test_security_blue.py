@@ -82,7 +82,6 @@ def test_validate_defense_success(test_blue_team: BlueTeam):
 
 
 def test_validate_defense_missing_config_fails(test_blue_team: BlueTeam):
-    from agency.security.blue.defender import Defense
 
     threat = _threat()
     test_blue_team.analyze_threat(threat)

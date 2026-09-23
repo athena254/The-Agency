@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agency.bridges.base import Bridge, BridgeConfig, BridgeResult, BridgeStatus, BridgeUsage
+from agency.bridges.base import BridgeConfig, BridgeResult, BridgeStatus, BridgeUsage
 from agency.bridges.claude.bridge import ClaudeCodeBridge, ClaudeConfig
 from agency.bridges.codex.bridge import CodexBridge, CodexConfig
 from agency.bridges.coordinator import (

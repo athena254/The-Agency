@@ -31,7 +31,7 @@ def test_approve_unknown_plan(test_red_planner: RedTeamPlanner):
 
 def test_get_and_list_plans(test_red_planner: RedTeamPlanner):
     p1 = test_red_planner.create_plan(target="a", hypothesis="h1")
-    p2 = test_red_planner.create_plan(target="b", hypothesis="h2")
+    test_red_planner.create_plan(target="b", hypothesis="h2")
     test_red_planner.approve_plan(p1.id)
     assert test_red_planner.get_plan(p1.id).id == p1.id
     assert len(test_red_planner.list_plans()) == 2

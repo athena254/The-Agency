@@ -4,11 +4,10 @@ import pytest
 
 from agency.agents.executor import AgentExecutor, ExecutionContext, ExecutionStatus
 from agency.agents.loop import AgentLoop, LoopStatus
-from agency.agents.planner import AgentPlanner, PlanStatus, SubtaskStatus
+from agency.agents.planner import AgentPlanner, SubtaskStatus
 from agency.agents.registry import AgentRegistry, AgentStatus
 from agency.agents.verifier import AgentVerifier, VerificationCriterion, VerificationStatus
 from agency.kernel.identity import Agent
-
 
 # --- Runtime registry --- #
 
