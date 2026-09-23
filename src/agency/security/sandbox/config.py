@@ -21,6 +21,7 @@ class FilesystemPolicy(str, Enum):
 
 class SandboxBackend(str, Enum):
     DOCKER = "docker"
+    PROCESS = "process"
     FIRECRACKER = "firecracker"
     CHROOT = "chroot"
 
