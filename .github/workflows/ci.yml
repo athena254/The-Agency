@@ -27,9 +27,9 @@ jobs:
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
       - name: Run Ruff linter
-        run: uvx ruff check src/ tests/
+        run: uv run ruff check src/ tests/
       - name: Run Ruff formatter check
-        run: uvx ruff format --check src/ tests/
+        run: uv run ruff format --check src/ tests/
 
   typecheck:
     name: Type Check (Mypy)
