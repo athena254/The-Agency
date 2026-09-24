@@ -1,6 +1,6 @@
-"""Absorption mode — clone any GitHub repo and rewrite it to be Athena-native.
+"""Legacy absorption mode — rewrite a repository toward Agency coding conventions.
 
-Athena-native means: Pydantic v2 models for data, structlog for logging,
+The conventions include Pydantic v2 models for data, structlog for logging,
 ``from __future__ import annotations`` with full type hints, and Google-style
 docstrings on public modules.
 """
@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import re
 import subprocess
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -22,7 +23,7 @@ _GITHUB_RE = re.compile(r"^https://github\.com/[\w.-]+/[\w.-]+(?:\.git)?$")
 
 
 class AbsorptionResult(BaseModel):
-    """Outcome of rewriting a repository to Athena-native conventions."""
+    """Outcome of rewriting a repository to Agency coding conventions."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -37,14 +38,15 @@ class AbsorptionResult(BaseModel):
 
 
 class RepoAbsorber:
-    """Clone → analyze → rewrite → validate → commit pipeline."""
+    """Legacy clone → analyze → rewrite → validate pipeline; commits are opt-in."""
 
-    ATHENA_HEADER = '"""Athena-native module (absorbed)."""\n\nfrom __future__ import annotations\n'
+    AGENCY_HEADER = '"""Agency module (absorbed)."""\n\nfrom __future__ import annotations\n'
+    ATHENA_HEADER = AGENCY_HEADER  # Backward-compatible name; no ATHENA integration.
 
     def __init__(
-        self, workspace: Path | str = Path("C:/Users/alphi/AppData/Local/Temp/opencode/absorbed")
+        self, workspace: Path | str | None = None
     ) -> None:
-        self.workspace = Path(workspace)
+        self.workspace = Path(workspace) if workspace else Path(tempfile.gettempdir()) / "agency" / "absorbed"
         self.workspace.mkdir(parents=True, exist_ok=True)
         self._log = logger.bind(component="RepoAbsorber", workspace=str(self.workspace))
 
@@ -102,8 +104,8 @@ class RepoAbsorber:
         self._log.info("absorb.analyzed", root=str(root), python_files=len(py_files))
         return summary
 
-    def rewrite_to_athena(self, repo_path: Path | str) -> dict[str, object]:
-        """Rewrite Python files in place toward Athena-native conventions."""
+    def rewrite_to_agency(self, repo_path: Path | str) -> dict[str, object]:
+        """Rewrite Python files in place toward Agency coding conventions."""
         root = Path(repo_path)
         if not root.is_dir():
             raise FileNotFoundError(f"repo path not found: {root}")
@@ -153,7 +155,7 @@ class RepoAbsorber:
         return report
 
     def commit_changes(
-        self, repo_path: Path | str, message: str = "Absorb into Athena-native form"
+        self, repo_path: Path | str, message: str = "Absorb into Agency coding conventions"
     ) -> str:
         """Commit rewritten files. Returns the new commit SHA."""
         root = Path(repo_path)
@@ -177,15 +179,15 @@ class RepoAbsorber:
         self._log.info("absorb.committed", root=str(root), sha=commit_sha)
         return commit_sha
 
-    def absorb(self, repo_url: str) -> AbsorptionResult:
-        """Run the full clone → analyze → rewrite → validate → commit pipeline."""
+    def absorb(self, repo_url: str, *, commit: bool = False) -> AbsorptionResult:
+        """Clone, rewrite and validate; commit only on explicit opt-in."""
         repo_path = self.clone_repo(repo_url)
         summary = self.analyze_structure(repo_path)
-        rewrite = self.rewrite_to_athena(repo_path)
+        rewrite = self.rewrite_to_agency(repo_path)
         report = self.validate(repo_path)
         committed = False
         sha: str | None = None
-        if report["passed"]:
+        if report["passed"] and commit:
             sha = self.commit_changes(repo_path)
             committed = True
         return AbsorptionResult(
@@ -202,11 +204,15 @@ class RepoAbsorber:
     # Rewrite rules
     # ------------------------------------------------------------------ #
 
+    def rewrite_to_athena(self, repo_path: Path | str) -> dict[str, object]:
+        """Compatibility alias; rewrites toward Agency conventions, not ATHENA."""
+        return self.rewrite_to_agency(repo_path)
+
     def _rewrite_source(self, source: str) -> str:
-        """Apply lightweight, syntax-preserving Athena-native normalizations."""
+        """Apply lightweight, syntax-preserving Agency normalizations."""
         updated = source
         if "from __future__ import annotations" not in updated:
-            updated = self.ATHENA_HEADER + updated.lstrip("\n")
+            updated = self.AGENCY_HEADER + updated.lstrip("\n")
         if "import structlog" not in updated and "from structlog" not in updated:
             updated = updated.replace(
                 "from __future__ import annotations\n",

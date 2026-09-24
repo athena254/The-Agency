@@ -166,10 +166,10 @@ class DarkFactory:
     # Absorption
     # ------------------------------------------------------------------ #
 
-    def absorb_repo(self, repo_url: str) -> AbsorptionResult:
-        """Rewrite a GitHub repo to be Athena-native via the absorption pipeline."""
-        self._log.info("dark_factory.absorb_start", repo_url=repo_url)
-        return self._absorber.absorb(repo_url)
+    def absorb_repo(self, repo_url: str, *, commit: bool = False) -> AbsorptionResult:
+        """Rewrite a cloned repository toward Agency conventions; commits are opt-in."""
+        self._log.info("dark_factory.absorb_start", repo_url=repo_url, commit=commit)
+        return self._absorber.absorb(repo_url, commit=commit)
 
     # ------------------------------------------------------------------ #
     # Internals
