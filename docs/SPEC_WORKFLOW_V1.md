@@ -1,0 +1,17 @@
+# Workflow v1: bounded deterministic execution
+
+Status: planned slice on `architecture/agency-core`; source requirements in `SOURCE_CONSOLIDATED_BRIEF.md` sections 9–10, 17–18, 28, 40. This is intentionally smaller than the long-term durable Forge workflow system.
+
+## Ownership and contract
+
+`agency.workflows.registry` owns immutable, versioned definitions and run records in SQLite; `agency.workflows.executor` owns execution. Version identity is `(workflow_id, version)`; versions are exact dotted numeric triplets and immutable once registered. A definition consists of ordered steps `(step_id, operation, dependencies, permissions)`. Each step invokes a pre-registered deterministic Python callable; no string eval, shell, dynamic import, external agent call or remote skill execution. An operation receives structured `inputs` and a mapping of prior named step outputs. It cannot directly change workflow control state. Definitions are validated at registration: unique step IDs, known dependencies, no self edge or cycle, no duplicate version, no unknown operation at run time, bounded step count. Stable topological order uses declaration order as tie breaker.
+
+Each execution pins an exact version and stores run ID, actor ID, definition identity, creation/completion time, per-step status/output/error and final status. Inputs/outputs must be JSON serializable and size-bounded. Start `PENDING`, transition through `RUNNING` to `COMPLETED` or `FAILED`, never pretend a failed side-effect was rolled back. A failed or denied step stops subsequent execution and records failure. Run records are inspectable after store restart. **Not promised:** exactly-once side effects, retry/compensation, distributed scheduling, automatic crash resume, agent reasoning nodes, human approval UI. Those require follow-on specifications.
+
+## Security
+
+Executor receives a trusted `authorizer(actor_id, required_permission)->bool` injected by caller, and rejects execution unless actor is nonempty and every step permission is approved at execution time. No authorizer means deny all nonempty-permission steps. An empty permission list does NOT authorize arbitrary operations: operation names must still be in the explicitly supplied trusted callback registry. Agent-provided text never selects callable imports or bypasses a permission. Registry is metadata only; skill registry will later resolve named capabilities but v1 does not silently execute skill contents. Read-only inspection may be caller-controlled; HTTP exposure requires real authentication and separate policy design.
+
+## Tests and integration
+
+Temporary SQLite DB, no network or models. Cover cycle/unknown dependency/duplicate version, version pinning across new definition registration, deterministic topological order, missing operation and denied permission fail-closed, failed step stops descendants and persists error, restart inspection, malformed JSON/huge payload rejection. Test suite `uv run --no-sync python -m pytest tests/test_workflow_registry.py -q` and lint `uv run --no-sync ruff check src/agency/workflows tests/test_workflow_registry.py`. Agent creates only new `src/agency/workflows` and `tests/test_workflow_registry.py`; coordinator wires an API or Forge caller after reviewing security contracts. External workflow alternatives (Temporal, Dagster) were considered in `SPEC_AGENCY_CORE_RECONCILIATION.md`; defer operational dependency until distributed durability is required.
