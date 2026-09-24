@@ -24,6 +24,7 @@ from agency.butler.service import ButlerService
 from agency.orchestrator import AgencyOrchestrator
 from agency.telegram.config import TelegramConfig
 from agency.telegram.handler import TelegramHandler
+from agency.telegram.profile_store import ProfileStore
 
 logger = structlog.get_logger(__name__)
 
@@ -40,6 +41,7 @@ class TelegramBot:
         {"command": "propose_agent", "description": "Propose a new agent via governance"},
         {"command": "proposals", "description": "List open governance proposals"},
         {"command": "whoami", "description": "What this bot is"},
+        {"command": "name", "description": "Set your private name for this assistant"},
     ]
 
     def __init__(self, token: str, webhook_url: str | None = None) -> None:
@@ -47,7 +49,13 @@ class TelegramBot:
         self._orchestrator = AgencyOrchestrator()
         self._demo = DemoAgent()
         self._butler = ButlerService(config=ButlerConfig(), orchestrator=self._orchestrator)
-        self._handler = TelegramHandler(self._config, butler=self._butler)
+        self._handler = TelegramHandler(
+            self._config,
+            butler=self._butler,
+            profile_store=ProfileStore(
+                os.environ.get("REMEX_PROFILE_DB_PATH", "data/remex_profiles.db")
+            ),
+        )
         self._running = False
         self._offset: int | None = None
 

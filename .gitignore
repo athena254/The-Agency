@@ -55,3 +55,6 @@ Thumbs.db
 data/memory.db
 data/memory.db-shm
 data/memory.db-wal
+data/remex_profiles.db
+data/remex_profiles.db-wal
+data/remex_profiles.db-shm
