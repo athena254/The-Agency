@@ -63,12 +63,12 @@ provenance/evidence (`src/agency/evidence/`), sandbox isolation
 |------|-------|-----------------|
 | Butler gateway | Partial | Trusted channels can use owner-scoped threads; unauthenticated HTTP ignores caller `sender`/context, uses a one-turn anonymous identity and no memory persistence |
 | Orchestrator + task pipeline | Partial | `src/agency/orchestrator.py`, `src/agency/kernel/tasks.py` |
-| Research agent | Exists, partial | `src/agency/agents/research/agent.py` exists (a prior status table wrongly said 0%); end-to-end behavior not verified here |
+| Research agent | Exists, partial | `src/agency/agents/research/agent.py`; offline integration tests exercise the route, but a live provider response is not certified by CI |
 | General/demo agents, planner, verifier | Exists, partial | `src/agency/agents/`; capability/eval coverage not claimed |
 | Lattice coordination/governance | Partial | `src/agency/lattice/api.py`, `backends/sqlite.py`, `governance.py` (in-memory proposals, best-effort backend mirror); durable vote persistence is planned |
 | Memory | Partial | `src/agency/memory/sms/`; scoped per sender, hierarchical isolation planned |
 | Sandbox / security / audit | Partial | Isolation guarantees not audited; do not treat as production-hardened |
-| CI workflow | Exists, outcome unverified | `.github/workflows/ci.yml` (and `cd.yml`) exist; a prior roadmap row wrongly said 0%/planned. Workflow success and live operation were not verified for this docs pass |
+| CI workflow | Verified on PR #7 | Seven CI checks passed on `5c4720c` (Python 3.11/3.12 on Ubuntu/Windows, Ruff lint/format, mypy, security scan); CD and live deployment are unverified |
 | Threads / workspaces | Partial | `src/agency/butler/threads.py` persists workspaces/threads/messages; project hierarchy, authenticated API and UI remain planned |
 | Agent Factory | Partial v1 | `src/agency/factory/`: versioned blueprints, approval, L0 identity activation/revocation; no autonomous creation/evaluation or runtime restart recovery |
 | Skill registry, workflow registry/executor | Partial | `src/agency/skills/`, `src/agency/workflows/` provide versioned metadata and a bounded allowlisted runner; not yet integrated with an agent/Forge execution path |
@@ -101,13 +101,14 @@ python -m pytest tests/ -q
 
 # Lint / typecheck (match .github/workflows/ci.yml)
 ruff check src/ tests/
+ruff format --check src/ tests/
 python -m mypy src/
 ```
 
-Do not run live services as part of this docs pass. Server lifecycle commands
-(`agency start`/`stop`/`status`, `src/agency/api/server.py`, Butler HTTP) are
-described by `agency --help` and `src/agency/cli/main.py`; live operation was not
-verified here.
+The offline PR smoke test and CI were verified, not a deployed PR runtime.
+Server lifecycle commands (`agency start`/`stop`/`status`, `src/agency/api/server.py`,
+Butler HTTP) are described by `agency --help` and `src/agency/cli/main.py`;
+live deployment of this PR was not verified.
 
 ## What is The Agency?
 

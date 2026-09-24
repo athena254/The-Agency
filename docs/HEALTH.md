@@ -4,8 +4,8 @@
 > Direction: `docs/SOURCE_CONSOLIDATED_BRIEF.md`; code-backed gaps:
 > `docs/SPEC_AGENCY_CORE_RECONCILIATION.md`. Coarse states only
 > (Exists / Partial / Planned / Missing) — no precise percentages, no
-> production-readiness claims. CI success and live operation were not verified
-> in this docs pass.
+> production-readiness claims. PR #7 CI is verified at `5c4720c`; a deployed PR
+> runtime and full product security audit are not verified.
 
 ## Executive Summary
 
@@ -37,7 +37,7 @@ but production hardness was not established in this pass.
 | Component | State | Notes |
 |-----------|-------|-------|
 | Butler gateway | Partial | Sender history plus owner-scoped SQLite thread history for trusted callers; HTTP thread selection blocked pending auth |
-| Research agent | Exists, partial | `src/agency/agents/research/agent.py` exists — prior "not started" rows were wrong; behavior unverified |
+| Research agent | Exists, partial | Offline integration tests exercise routing; no live-provider certification from CI |
 | General / demo / planner / verifier | Exists, partial | `src/agency/agents/`; eval coverage not claimed |
 | Tools (registry, driver, builtin) | Partial | `src/agency/tools/`; deterministic-first per brief, permission story incomplete |
 | Bridges (claude, codex, hermes, openclaw) | Partial adapters | `src/agency/bridges/`; optional integrations behind explicit boundaries |
@@ -60,7 +60,7 @@ but production hardness was not established in this pass.
 | Agent Factory (versioned) | Partial v1 | `factory/service.py` versioned blueprints, approval gate, L0/UNKNOWN identity activation; no evaluation, automatic grants, or restart rehydration |
 | Skill registry / workflow registry + executor | Partial | Versioned registries and a bounded deterministic runner exist; no agent/Forge integration yet |
 | Forge + native coding agent | Partial inspection gate | `forge/inspection.py` read-only inventory/syntax reports; no tests, coding agent, security review or release; legacy prototypes are separate |
-| CI/CD lineage | Exists, outcome unverified | `.github/workflows/ci.yml`, `cd.yml` exist — prior "planned" rows were wrong; success not verified |
+| CI/CD lineage | CI verified, CD unverified | All seven GitHub CI checks passed for PR #7 commit `5c4720c`; this is not deployment or production approval |
 
 **ATHENA boundary:** ATHENA is a separate peer platform, not an Agency component
 (brief §2). Old diagrams showing ATHENA Core inside the Agency are
@@ -75,8 +75,8 @@ separate pattern source, not a dependency.
    (`lattice/governance.py`), even though durability is planned.
 3. **Security and audit are structural** — policies, audit log, evidence, and critics
    are separate modules, not prompt text.
-4. **CI workflows exist** — lint/typecheck/test/security jobs are defined
-   (outcomes unverified here, but the definitions are real).
+4. **CI workflows pass on the reviewed PR head** — lint/format, typecheck,
+   four platform/interpreter test jobs, and the security scan passed at `5c4720c`.
 5. **Direction is written down and preserved** — the 51-section brief and the
    reconciliation spec give every future phase a normative target.
 
@@ -105,11 +105,13 @@ production readiness — all contradicted by the code or by lack of evidence.
 file/line; brief §50 rule stands — never document planned functionality as
 implemented.
 
-### Risk 5: Unverified operations
-CI workflow success, test counts, and live server/Butler operation were not verified
-in this docs pass.
-**Mitigation**: verify with `python -m pytest tests/ -q`, `ruff check`, CI runs, and
-a smoke test before claiming health in numbers.
+### Risk 5: Unverified deployment and live behavior
+The PR's local suite (628 passed, 17 warnings), offline smoke, and seven GitHub
+CI checks passed at `5c4720c`. This does not test live-provider replies or
+deploy the PR code to the existing bot. The current `main` bot must not be
+mistaken for a running instance of the PR branch.
+**Mitigation**: test the deployed revision and a real user-to-bot reply only
+after review and an authorized rollout; retain the existing warnings as debt.
 
 ## Recommendations
 
@@ -134,7 +136,7 @@ a smoke test before claiming health in numbers.
 | Milestone | Honest state |
 |-----------|--------------|
 | Scaffolding (Butler/orchestrator/agents/tools/Lattice/memory/audit/sandbox) | Partial — code exists, maturity varies |
-| Research agent, CI workflows | Exist — outcomes/behavior unverified here |
+| Research agent, CI workflows | Offline research tests exist; all seven PR #7 CI checks passed at `5c4720c`; live-provider behavior is unverified |
 | Thread store, skill registry, workflow runner | Partial foundations; tests pass, full runtime integration pending |
 | Agent Factory v1, Forge inspection gate | Partial foundations |
 | Autonomous Agent Factory, full Forge, durable governance | Planned |

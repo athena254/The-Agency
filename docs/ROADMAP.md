@@ -31,12 +31,12 @@
 | Butler gateway + routing | Partial | `src/agency/butler/`; sender history and trusted owner-scoped SQLite threads; HTTP thread selection awaits auth |
 | Sandbox / process isolation | Partial | `src/agency/security/sandbox/`; isolation guarantees unaudited |
 | QA / adversarial critics | Partial | `src/agency/agents/verifier.py`, `security/red|blue|purple/`; blocking decision contract planned |
-| Research agent | Exists, partial | `src/agency/agents/research/agent.py`; behavior unverified here |
+| Research agent | Exists, partial | `src/agency/agents/research/agent.py`; offline tests exercise routing, not live-provider quality |
 | General / demo agents, planner | Exists, partial | `src/agency/agents/` |
 | Bridges (claude, codex, hermes, openclaw) | Partial adapters | `src/agency/bridges/`; optional integrations, never dependencies |
 | Lattice + governance + reputation | Partial | `src/agency/lattice/`; durable vote persistence planned |
 | API server + CLI | Partial | `src/agency/api/server.py`, `src/agency/cli/main.py` (`agency` entry point) |
-| CI / CD workflows | Exists, outcome unverified | `.github/workflows/ci.yml`, `cd.yml` |
+| CI / CD workflows | CI verified, CD unverified | Seven GitHub CI checks passed for PR #7 `5c4720c`; CD and deployment not tested |
 | Prototype factories (dark/ghost) | Prototypes only | Standalone; not an integrated Forge |
 
 ### New partial foundations and remaining planned systems
