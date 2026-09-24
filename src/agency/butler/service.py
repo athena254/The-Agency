@@ -15,7 +15,7 @@ import os
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -28,6 +28,9 @@ from agency.memory.sms.models import MemoryItem, MemoryTier
 from agency.memory.sms.retrieval import RetrievalEngine
 from agency.memory.sms.store import MemoryStore
 from agency.orchestrator import AgencyOrchestrator
+
+if TYPE_CHECKING:
+    from agency.lattice.api import Lattice
 
 log = structlog.get_logger(__name__)
 
@@ -66,14 +69,14 @@ class ButlerService:
         self._memory_retrieval = RetrievalEngine(self._memory)
         self._threads = thread_store
         self._owns_threads = thread_store is None
-        self._lattice: Any = None  # Will be set from orchestrator
+        self._lattice: Lattice | None = None  # Will be set from orchestrator
         self._llm = llm
         self._log = structlog.get_logger(__name__)
         self._started = False
         self._seeded = False
 
     @property
-    def lattice(self) -> Any:
+    def lattice(self) -> Lattice | None:
         """Reference to the orchestrator's Lattice instance, if available."""
         if self._lattice is not None:
             return self._lattice
