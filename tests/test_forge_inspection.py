@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import sqlite3
 from pathlib import Path
 
+import pytest
+
+from agency.forge import inspection
 from agency.forge.inspection import (
     CAVEATS,
     MAX_FILE_BYTES,
@@ -142,6 +146,62 @@ def test_oversized_file_rejected(tmp_path: Path):
     report = inspect_changes(tmp_path, ["big.txt"])
     assert report.gate == "FAIL"
     assert any("file_too_large" in r.reason for r in report.rejected)
+
+
+def test_normalized_duplicate_spellings_rejected(tmp_path: Path):
+    _write(tmp_path, "pkg/a.py", b"x = 1\n")
+    report = inspect_changes(tmp_path, ["pkg/a.py", "pkg//a.py", "pkg\\a.py"])
+    assert report.gate == "FAIL"
+    assert len(report.files) == 1
+    assert [r.reason for r in report.rejected] == ["duplicate_path", "duplicate_path"]
+
+
+def test_read_stays_bounded_when_file_grows_after_stat(tmp_path: Path, monkeypatch):
+    _write(tmp_path, "grow.txt", b"small")
+    original_open = inspection.os.open
+    reads = []
+
+    def grow_on_open(path, flags, *args, **kwargs):
+        if os.fspath(path) == os.fspath(tmp_path / "grow.txt"):
+            (tmp_path / "grow.txt").write_bytes(b"x" * (MAX_FILE_BYTES + 100))
+        return original_open(path, flags, *args, **kwargs)
+
+    original_read = inspection.os.read
+
+    def bounded_read(fd, size):
+        reads.append(size)
+        assert size <= MAX_FILE_BYTES + 1
+        return original_read(fd, size)
+
+    monkeypatch.setattr(inspection.os, "open", grow_on_open)
+    monkeypatch.setattr(inspection.os, "read", bounded_read)
+    report = inspect_changes(tmp_path, ["grow.txt"])
+    assert report.gate == "FAIL"
+    assert any("file_too_large" in r.reason or "unreadable" in r.reason for r in report.rejected)
+    assert reads or report.rejected[0].reason.startswith("file_too_large")
+
+
+def test_symlink_swap_between_check_and_open_fails_closed(tmp_path: Path, monkeypatch):
+    _write(tmp_path, "victim.txt", b"inside")
+    _write(tmp_path, "outside.txt", b"outside")
+    trial = tmp_path / "trial"
+    try:
+        trial.symlink_to(tmp_path / "outside.txt")
+    except OSError:
+        pytest.skip("symlinks unavailable")
+    trial.unlink()
+    original_open = inspection.os.open
+
+    def swap_on_open(path, flags, *args, **kwargs):
+        if os.fspath(path) == os.fspath(tmp_path / "victim.txt"):
+            (tmp_path / "victim.txt").unlink()
+            (tmp_path / "victim.txt").symlink_to(tmp_path / "outside.txt")
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(inspection.os, "open", swap_on_open)
+    report = inspect_changes(tmp_path, ["victim.txt"])
+    assert report.gate == "FAIL"
+    assert report.files == ()
 
 
 def test_persistence_survives_restart(tmp_path: Path):
