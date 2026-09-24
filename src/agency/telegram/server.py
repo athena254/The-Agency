@@ -26,7 +26,7 @@ def create_app(config: TelegramConfig, handler: TelegramHandler | None = None) -
     async def webhook(request: Request) -> Response:
         try:
             body = await request.json()
-        except Exception:
+        except ValueError:
             return Response(status_code=400)
 
         # Verify secret token if configured
