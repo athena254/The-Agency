@@ -28,6 +28,12 @@ Make PR #7 reviewable and, if safe, bring CI to green without changing its featu
 - Full `pytest tests/ -q` passes under Python 3.11 and GitHub test matrix passes; no new security-scan finding. Wheel and offline smoke checks should still pass.
 - Code review checks behavior, error handling, public API, and secrets hygiene; status and remote SHA are verified before reporting.
 
+## Quality-gate remediation checkpoint
+
+At `d59eda7`, the actual CI commands in `.github/workflows/ci.yml` are `ruff check src/ tests/`, then `ruff format --check src/ tests/`, and `python -m mypy src/` in a dependency-installed Python 3.11 environment. Local project-venv reproductions report 20 `BLE001`/`S110` lint findings, 53 mypy errors, and 87 unformatted files. The formatter was not reached in CI because lint stopped first. A separately installed temporary 3.11 environment produced many extra third-party `import-untyped` cascades; reconcile package/type-stub versions with CI rather than masking these errors through global ignores.
+
+Split source fixes by file ownership in separate worktrees; preserve broad catches only where a deliberate per-item/transport/finalization boundary must stay alive, with a narrow documented `noqa: BLE001` if unavoidable and a fallback test. No blanket `ignore_missing_imports` or weakened mypy strictness. After integrating reviewed behavioral/type fixes, apply `ruff format src/ tests/` in one dedicated formatting checkpoint, check the complete diff for changed literals/comments, then rerun lint, format check, mypy, the full Python 3.11 suite, and GitHub CI. Do not claim CI green from local success alone.
+
 ## Next feature (not in this slice)
 
 Authenticated project/thread API needs its own design spec, threat model, acceptance tests, documentation checkpoint, and owner approval before implementation. Skill/workflow runtime wiring follows that boundary.
