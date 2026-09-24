@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sqlite3
+from threading import Event, Thread
+
 import pytest
 
 from agency.agents.registry import AgentRegistry as RuntimeRegistry
@@ -318,6 +321,92 @@ def test_double_activation_rejected(tmp_path) -> None:
             fac.activate("analyst", "1.0.0")
         assert kernels.count(include_revoked=True) == 1
     finally:
+        fac.close()
+
+
+def test_activation_event_failure_rolls_back_both_registries(tmp_path) -> None:
+    fac, kernels, runtimes = _factory(tmp_path)
+    try:
+        _draft(fac)
+        fac.approve("analyst", "1.0.0", approver="approver", evidence="e1")
+        fac._conn.execute(
+            "CREATE TRIGGER reject_activation_event BEFORE INSERT ON factory_events "
+            "WHEN NEW.to_status = 'ACTIVE' BEGIN SELECT RAISE(FAIL, 'audit unavailable'); END"
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="audit unavailable"):
+            fac.activate("analyst", "1.0.0")
+        assert fac.get("analyst", "1.0.0").status is BlueprintStatus.APPROVED
+        assert fac.get("analyst", "1.0.0").runtime_agent_id is None
+        assert kernels.count() == 0
+        assert not runtimes.list_agents()
+        assert [e["to_status"] for e in fac.list_events("analyst", "1.0.0")] == [
+            "DRAFT", "APPROVED"
+        ]
+    finally:
+        fac.close()
+
+
+def test_revoke_during_activation_cleans_up_identity(tmp_path) -> None:
+    kernels = KernelRegistry()
+    ready = Event()
+    registered = Event()
+    started = Event()
+    activation_done = Event()
+    completed = Event()
+    errors: list[Exception] = []
+
+    class PausingRevoker(AgentFactory):
+        def get(self, blueprint_id, version):
+            bp = super().get(blueprint_id, version)
+            if not started.is_set():
+                started.set()
+                assert activation_done.wait(5), "activation did not finish"
+            return bp
+
+    def revoke_in_thread() -> None:
+        revoker = None
+        try:
+            revoker = PausingRevoker(
+                str(tmp_path / "factory.db"), kernel_registry=kernels,
+                runtime_registry=racing,
+            )
+            ready.set()
+            assert registered.wait(5), "activation did not register"
+            revoker.revoke("analyst", "1.0.0", evidence="incident")
+        except Exception as exc:  # noqa: BLE001 - report worker failures to test thread
+            errors.append(exc)
+        finally:
+            if revoker is not None:
+                revoker.close()
+            completed.set()
+
+    class RacingRuntimeRegistry(RuntimeRegistry):
+        def register(self, agent, *, metadata=None):
+            result = super().register(agent, metadata=metadata)
+            registered.set()
+            # Old revoke reads APPROVED and pauses; serialized revoke waits
+            # until activation commits before it can read the row.
+            started.wait(0.2)
+            return result
+
+    racing = RacingRuntimeRegistry()
+    fac, _, _ = _factory(tmp_path, kernel_registry=kernels, runtime_registry=racing)
+    try:
+        _draft(fac)
+        fac.approve("analyst", "1.0.0", approver="approver", evidence="e1")
+        thread = Thread(target=revoke_in_thread)
+        thread.start()
+        assert ready.wait(5), "revoker did not initialize"
+        agent = fac.activate("analyst", "1.0.0")
+        activation_done.set()
+        assert completed.wait(5), "revocation did not finish"
+        assert not errors
+        assert fac.get("analyst", "1.0.0").status is BlueprintStatus.REVOKED
+        assert kernels.get_required(agent.id).revoked
+        assert racing.get_agent(agent.id) is None
+    finally:
+        activation_done.set()
+        registered.set()
         fac.close()
 
 

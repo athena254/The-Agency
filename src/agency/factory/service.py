@@ -11,14 +11,11 @@ references, plus the existing kernel and runtime registries. Missing
 callbacks for requested references fail closed. Activated identities use
 TrustLevel.UNKNOWN with L0-only claims; this module never issues Permission.
 
-Race/restart limitation (fail closed, documented): kernel and runtime
-registries are in-memory/ephemeral, so a restart loses live identities while
-SQLite still records ACTIVE rows with runtime_agent_id for provenance. The
-factory never auto-recreates identities; activate() refuses any blueprint
-that is not APPROVED or already carries a runtime id. Concurrent double
-activation is caught with a conditional UPDATE; the loser revokes its
-orphan identity (best effort) and raises ValueError. Post-restart rollout
-needs a new blueprint version with fresh approval.
+Restart limitation (fail closed): kernel and runtime registries are ephemeral,
+so a restart loses live identities while SQLite retains ACTIVE provenance.
+The factory never auto-recreates them; rollout needs a new version and approval.
+Activation and revocation serialize via SQLite write transactions before
+reading state; failed activation revokes any registered identity.
 """
 
 from __future__ import annotations
@@ -431,70 +428,80 @@ class AgentFactory:
         Creates an Agent with TrustLevel.UNKNOWN and L0-only claims,
         registers it via kernel then runtime registries, and records the
         runtime id. Issues no Permission. Fails closed unless the row is
-        still APPROVED with no recorded runtime id at commit time.
+        still APPROVED with no recorded runtime id. The write lock covers
+        the state read, registration, and audit commit so revoke cannot read
+        a stale APPROVED snapshot during registration.
         """
-        bp = self.get(blueprint_id, version)
-        if bp.status is not BlueprintStatus.APPROVED:
-            raise ValueError(
-                f"activate requires APPROVED, found {bp.status.value} "
-                "(no pre-approval activation)."
-            )
-        if bp.runtime_agent_id:
-            raise ValueError("blueprint already active (race/restart ambiguity).")
-        self._check_published_refs(self.validate(bp.blueprint_id, bp.version))
-        agent = Agent(
-            name=bp.name,
-            domain=bp.domain,
-            capabilities=[Capability(name=c) for c in bp.capabilities],
-            trust_level=TrustLevel.UNKNOWN,
-            metadata={
-                "blueprint_id": bp.blueprint_id,
-                "blueprint_version": bp.version,
-                "factory": "agent-factory-v1",
-            },
-        )
-        for cap in agent.capabilities:
-            if cap.max_level != ActionClass.L0_OBSERVATION:
-                raise ValueError("factory issues L0-only capability claims.")
+        agent: Agent | None = None
+        registration_attempted = False
         try:
-            self._kernels.register(agent)
-        except ValueError as exc:
-            raise ValueError(f"kernel registration failed closed: {exc}") from exc
-        try:
-            self._runtimes.register(agent)
-        except Exception as exc:
-            try:
-                self._kernels.revoke(agent.id)
-            except KeyError:
-                # Registration may have failed before the kernel held it.
-                logger.warning("factory.kernel_identity_absent_on_rollback", agent_id=agent.id)
-            raise ValueError(f"runtime registration failed closed: {exc}") from exc
-        now = _now_iso()
-        with self._conn:
-            cur = self._conn.execute(
-                "UPDATE blueprints SET status = ?, runtime_agent_id = ?,"
-                " updated_at = ? WHERE blueprint_id = ? AND version = ?"
-                " AND status = ? AND runtime_agent_id IS NULL",
-                (
-                    BlueprintStatus.ACTIVE.value, agent.id, now,
-                    bp.blueprint_id, bp.version, BlueprintStatus.APPROVED.value,
-                ),
-            )
-            if cur.rowcount != 1:
+            with self._conn:
+                self._conn.execute("BEGIN IMMEDIATE")
+                bp = self.get(blueprint_id, version)
+                if bp.status is not BlueprintStatus.APPROVED:
+                    raise ValueError(
+                        f"activate requires APPROVED, found {bp.status.value} "
+                        "(no pre-approval activation)."
+                    )
+                if bp.runtime_agent_id:
+                    raise ValueError("blueprint already active (race/restart ambiguity).")
+                self.validate(bp.blueprint_id, bp.version)
+                agent = Agent(
+                    name=bp.name,
+                    domain=bp.domain,
+                    capabilities=[Capability(name=c) for c in bp.capabilities],
+                    trust_level=TrustLevel.UNKNOWN,
+                    metadata={
+                        "blueprint_id": bp.blueprint_id,
+                        "blueprint_version": bp.version,
+                        "factory": "agent-factory-v1",
+                    },
+                )
+                for cap in agent.capabilities:
+                    if cap.max_level != ActionClass.L0_OBSERVATION:
+                        raise ValueError("factory issues L0-only capability claims.")
+                registration_attempted = True
+                try:
+                    self._kernels.register(agent)
+                except ValueError as exc:
+                    raise ValueError(f"kernel registration failed closed: {exc}") from exc
+                try:
+                    self._runtimes.register(agent)
+                except Exception as exc:
+                    raise ValueError(f"runtime registration failed closed: {exc}") from exc
+                now = _now_iso()
+                cur = self._conn.execute(
+                    "UPDATE blueprints SET status = ?, runtime_agent_id = ?,"
+                    " updated_at = ? WHERE blueprint_id = ? AND version = ?"
+                    " AND status = ? AND runtime_agent_id IS NULL",
+                    (
+                        BlueprintStatus.ACTIVE.value, agent.id, now,
+                        bp.blueprint_id, bp.version, BlueprintStatus.APPROVED.value,
+                    ),
+                )
+                if cur.rowcount != 1:
+                    raise ValueError("activate lost a race (fail closed; orphan revoked).")
+                self._conn.execute(
+                    "INSERT INTO factory_events (blueprint_id, version, from_status,"
+                    " to_status, actor, evidence, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        bp.blueprint_id, bp.version, BlueprintStatus.APPROVED.value,
+                        BlueprintStatus.ACTIVE.value, bp.creator, bp.evidence, now,
+                    ),
+                )
+        except Exception:
+            if registration_attempted and agent is not None:
                 try:
                     self._runtimes.deregister(agent.id)
                 finally:
-                    # A failed runtime cleanup must not leave the kernel identity live.
-                    self._kernels.revoke(agent.id)
-                raise ValueError("activate lost a race (fail closed; orphan revoked).")
-            self._conn.execute(
-                "INSERT INTO factory_events (blueprint_id, version, from_status,"
-                " to_status, actor, evidence, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    bp.blueprint_id, bp.version, BlueprintStatus.APPROVED.value,
-                    BlueprintStatus.ACTIVE.value, bp.creator, bp.evidence, now,
-                ),
-            )
+                    try:
+                        self._kernels.revoke(agent.id)
+                    except KeyError:
+                        logger.warning(
+                            "factory.kernel_identity_absent_on_rollback", agent_id=agent.id
+                        )
+            raise
+        assert agent is not None
         return agent
 
     def revoke(self, blueprint_id: str, version: str, *, evidence: str) -> Blueprint:
@@ -505,21 +512,26 @@ class AgentFactory:
         missing kernel identity (e.g. after restart) still revokes the row.
         """
         ev = _check_evidence(evidence, "revocation evidence")
-        bp = self.get(blueprint_id, version)
-        if bp.status is BlueprintStatus.REVOKED:
-            return bp
-        if bp.runtime_agent_id:
-            try:
-                self._kernels.revoke(bp.runtime_agent_id)
-            except KeyError:
-                logger.warning("factory.kernel_identity_absent_on_revoke", agent_id=bp.runtime_agent_id)
-            try:
-                self._runtimes.deregister(bp.runtime_agent_id)
-            except KeyError:
-                # Runtime identities do not survive process restarts.
-                logger.info("factory.runtime_identity_absent_on_revoke", agent_id=bp.runtime_agent_id)
-        now = _now_iso()
         with self._conn:
+            self._conn.execute("BEGIN IMMEDIATE")
+            bp = self.get(blueprint_id, version)
+            if bp.status is BlueprintStatus.REVOKED:
+                return bp
+            if bp.runtime_agent_id:
+                try:
+                    self._kernels.revoke(bp.runtime_agent_id)
+                except KeyError:
+                    logger.warning(
+                        "factory.kernel_identity_absent_on_revoke", agent_id=bp.runtime_agent_id
+                    )
+                try:
+                    self._runtimes.deregister(bp.runtime_agent_id)
+                except KeyError:
+                    # Runtime identities do not survive process restarts.
+                    logger.info(
+                        "factory.runtime_identity_absent_on_revoke", agent_id=bp.runtime_agent_id
+                    )
+            now = _now_iso()
             self._conn.execute(
                 "UPDATE blueprints SET status = ?, evidence = ?, updated_at = ?"
                 " WHERE blueprint_id = ? AND version = ?",
