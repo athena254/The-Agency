@@ -20,7 +20,9 @@ class _NoopHandler:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("body", [b"{"], ids=["invalid-json"])
+@pytest.mark.parametrize(
+    "body", [b"{", b"[]", b"null"], ids=["invalid-json", "array", "null"]
+)
 async def test_malformed_webhook_body_returns_400(body: bytes) -> None:
     app = create_app(TelegramConfig(bot_token="test", webhook_secret="test"), _NoopHandler())
     endpoint = next(route.endpoint for route in app.routes if route.path == "/telegram/webhook")

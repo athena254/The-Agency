@@ -183,10 +183,12 @@ class LLMRouter:
 
     def _select(self, task: str, context: dict[str, Any] | None) -> tuple[LLMAdapter, str | None]:
         ctx = context or {}
-        if ctx.get("provider"):
-            # An explicit provider is a constraint, not a preference. Never
-            # route private/local input to a different backend on failure.
-            preset = str(ctx["provider"])
+        if "provider" in ctx:
+            # A supplied provider is a constraint, even when its value is
+            # falsey. Reject invalid values instead of falling back remotely.
+            preset = ctx["provider"]
+            if not isinstance(preset, str) or not preset.strip():
+                raise ValueError("Requested LLM provider must be a non-empty name")
             adapter = self._adapter_for_preset(preset)
             if adapter is None:
                 raise ValueError(f"requested provider {preset!r} is unavailable")
@@ -236,4 +238,7 @@ class LLMRouter:
             real = _provider_name(getattr(adapter, "provider", None))
             if merged["provider"] != real:
                 merged["provider"] = real
+            # Do not disguise an explicitly requested backend failure as an
+            # echo reply, even when the caller supplies strict=False.
+            merged["strict"] = True
         return merged

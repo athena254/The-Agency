@@ -64,7 +64,7 @@ async def test_provider_preset_alias_is_normalized_for_adapter(monkeypatch: pyte
     monkeypatch.setattr(selected, "generate", generate)
     request = {"provider": "claude", "trace": "t"}
     assert await router.route("short task", request) == "selected"
-    assert seen == [{"provider": "echo", "trace": "t"}]
+    assert seen == [{"provider": "echo", "trace": "t", "strict": True}]
     assert request == {"provider": "claude", "trace": "t"}
 
 
@@ -140,4 +140,44 @@ async def test_explicit_provider_remains_binding_with_model_override(
     monkeypatch.setattr(selected, "generate", generate)
     monkeypatch.setattr(default, "generate", lambda *_args, **_kwargs: pytest.fail("default used"))
     assert await router.route("short task", {"provider": "local", "model": "chosen"}) == "from-local"
-    assert seen == [{"provider": "echo", "model": "chosen"}]
+    assert seen == [{"provider": "echo", "model": "chosen", "strict": True}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", ["", " ", 0, False, None])
+async def test_falsey_explicit_provider_is_rejected_without_remote_fallback(
+    monkeypatch: pytest.MonkeyPatch, invalid: Any
+) -> None:
+    router = LLMRouter(
+        adapter=LLMAdapter(provider="echo"), routes={TaskKind.FAST: ("remote",)}
+    )
+    monkeypatch.setattr(
+        router, "_adapter_for_preset", lambda _name: pytest.fail("a preset was selected")
+    )
+    context = {"provider": invalid, "model": "chosen"}
+    with pytest.raises(ValueError, match="non-empty name"):
+        await router.route("short task", context)
+    with pytest.raises(ValueError, match="non-empty name"):
+        _ = [chunk async for chunk in router.route_stream("short task", context)]
+    with pytest.raises(ValueError, match="non-empty name"):
+        router.explain("short task", context)
+
+
+@pytest.mark.asyncio
+async def test_explicit_local_backend_failure_does_not_echo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    local = LLMAdapter(provider="ollama", model="local")
+    router = _router(LLMAdapter(provider="echo"))
+    monkeypatch.setattr(router, "_adapter_for_preset", lambda name: local if name == "local" else None)
+
+    async def backend_failure(_prompt: str, _model: str) -> str:
+        raise OSError("local unavailable")
+
+    monkeypatch.setattr(local, "_ollama_generate", backend_failure)
+    context = {"provider": "local", "strict": False}
+    with pytest.raises(OSError, match="local unavailable"):
+        await router.route("private prompt", context)
+    with pytest.raises(OSError, match="local unavailable"):
+        _ = [chunk async for chunk in router.route_stream("private prompt", context)]
+    assert router.explain("private prompt", context)["provider"] == "ollama"

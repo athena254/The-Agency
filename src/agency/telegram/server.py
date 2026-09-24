@@ -29,6 +29,8 @@ def create_app(config: TelegramConfig, handler: TelegramHandler | None = None) -
             body = await request.json()
         except (ValueError, ClientDisconnect):
             return Response(status_code=400)
+        if not isinstance(body, dict):
+            return Response(status_code=400)
 
         # Verify secret token if configured
         if config.webhook_secret:
