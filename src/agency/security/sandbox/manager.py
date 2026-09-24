@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import structlog
 from pydantic import BaseModel, Field
@@ -22,6 +23,9 @@ from agency.security.sandbox.config import (
     SandboxBackend,
     SandboxConfig,
 )
+
+if TYPE_CHECKING:
+    from agency.security.sandbox.process import ProcessSandboxBackend
 
 logger = structlog.get_logger(__name__)
 
@@ -161,11 +165,11 @@ class DockerSandboxBackend:
 class SandboxManager:
     def __init__(
         self,
-        backend: DockerSandboxBackend | None = None,
+        backend: DockerSandboxBackend | ProcessSandboxBackend | None = None,
         base_workspace_dir: Path | None = None,
         default_config: SandboxConfig | None = None,
     ) -> None:
-        self._backend = backend
+        self._backend: DockerSandboxBackend | ProcessSandboxBackend | None = backend
         self._base_workspace_dir = base_workspace_dir or (
             Path(tempfile.gettempdir()) / "agency-sandboxes"
         )
