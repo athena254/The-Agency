@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from secrets import compare_digest
 from typing import Any
 
@@ -11,6 +12,7 @@ from starlette.requests import ClientDisconnect
 
 from agency.telegram.config import TelegramConfig
 from agency.telegram.handler import TelegramHandler
+from agency.telegram.profile_store import ProfileStore
 
 logger = structlog.get_logger(__name__)
 
@@ -18,7 +20,16 @@ logger = structlog.get_logger(__name__)
 def create_app(config: TelegramConfig, handler: TelegramHandler | None = None) -> FastAPI:
     """Create FastAPI app for Telegram webhook."""
     app = FastAPI(title="The Agency — Telegram Webhook")
-    _handler = handler or TelegramHandler(config)
+    _handler = (
+        handler
+        if handler is not None
+        else TelegramHandler(
+            config,
+            profile_store=ProfileStore(
+                os.environ.get("REMEX_PROFILE_DB_PATH", "data/remex_profiles.db")
+            ),
+        )
+    )
 
     @app.get("/telegram/health")
     async def health() -> dict[str, Any]:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 from typing import Any
 
 import structlog
@@ -10,6 +11,7 @@ import structlog
 from agency.agents.demo.agent import DemoAgent
 from agency.telegram.adapter import TelegramAdapter
 from agency.telegram.config import TelegramConfig
+from agency.telegram.profile_store import ProfileStore
 
 logger = structlog.get_logger(__name__)
 
@@ -17,11 +19,14 @@ logger = structlog.get_logger(__name__)
 class TelegramHandler:
     """Handles incoming Telegram messages and routes them to the Butler."""
 
-    def __init__(self, config: TelegramConfig, butler: Any = None) -> None:
+    def __init__(
+        self, config: TelegramConfig, butler: Any = None, profile_store: ProfileStore | None = None
+    ) -> None:
         self._config = config
         self._butler = butler
         self._adapter = TelegramAdapter(config)
         self._demo = DemoAgent()
+        self._profiles = profile_store if profile_store is not None else ProfileStore(":memory:")
         self._log = structlog.get_logger(__name__)
 
     async def handle_update(self, update: dict[str, Any]) -> dict[str, Any]:
@@ -44,11 +49,31 @@ class TelegramHandler:
         if self._config.allowed_chat_ids and chat_id not in self._config.allowed_chat_ids:
             return {"status": "rejected", "reason": "chat not allowed"}
 
+        private = message.get("chat", {}).get("type") == "private" and chat_id == user_id
+        if message.get("chat", {}).get("type") in ("group", "supergroup"):
+            if isinstance(chat_id, bool) or not isinstance(chat_id, int):
+                return {"status": "rejected", "reason": "missing Telegram chat ID"}
+            conversation_sender = f"telegram:chat:{chat_id}:user:{user_id}"
+        else:
+            conversation_sender = sender
+        try:
+            display_name = (self._profiles.get_name(user_id) if private else None) or "Remex"
+        except sqlite3.Error:
+            self._log.exception("telegram.name_read_failed", user_id=user_id)
+            if chat_id:
+                await self._adapter.send_message(chat_id, "Profile unavailable. Please try again.")
+            return {"status": "error", "reason": "profile unavailable"}
+
         # Bot commands are answered deterministically from real system
         # state — never through the LLM, so no fiction is possible.
         command = text.strip().lower()
+        if command == "/name" or command.startswith("/name "):
+            response = self._name_command(user_id, text.strip()[len("/name") :].strip(), private)
+            if chat_id:
+                await self._adapter.send_message(chat_id, response)
+            return {"status": "ok", "chat_id": chat_id, "command": "/name"}
         if command in ("/agents", "/status", "/whoami", "/proposals", "/start", "/help"):
-            response = await self._system_answer(command)
+            response = await self._system_answer(command, display_name)
             if chat_id:
                 await self._adapter.send_message(chat_id, response)
             return {"status": "ok", "chat_id": chat_id, "command": command}
@@ -57,7 +82,7 @@ class TelegramHandler:
         # (web search → fetch → synthesize → cite → store).
         if command.startswith("/research"):
             args = text.strip()[len("/research") :].strip()
-            response = await self._handle_research(args, sender)
+            response = await self._handle_research(args, conversation_sender, display_name)
             if chat_id:
                 await self._send_long(chat_id, response)
             return {"status": "ok", "chat_id": chat_id, "command": "/research"}
@@ -85,7 +110,9 @@ class TelegramHandler:
 
         # Process via Butler if available, else demo agent
         if self._butler:
-            response = await self._butler.handle_message(text, sender, {"chat_id": chat_id})
+            response = await self._butler.handle_message(
+                text, conversation_sender, {"chat_id": chat_id, "assistant_name": display_name}
+            )
         else:
             response = await self._demo.handle(text, {"sender": sender, "chat_id": chat_id})
 
@@ -95,7 +122,7 @@ class TelegramHandler:
 
         return {"status": "ok", "chat_id": chat_id, "response_length": len(response)}
 
-    async def _handle_research(self, args: str, sender: str) -> str:
+    async def _handle_research(self, args: str, sender: str, display_name: str = "Remex") -> str:
         """Run the research agent's tool loop on a topic."""
         topic = args.strip()
         if not topic:
@@ -116,7 +143,9 @@ class TelegramHandler:
             description=topic,
             agent_id=research_agent.id,
         )
-        result = await orchestrator.execute_task(task.task_id, context={"sender": sender})
+        result = await orchestrator.execute_task(
+            task.task_id, context={"sender": sender, "assistant_name": display_name}
+        )
         output = result.output if isinstance(result.output, str) else str(result.output)
         return f"🔍 *Research complete*\n\n{output}"
 
@@ -125,7 +154,26 @@ class TelegramHandler:
         for i in range(0, max(len(text), 1), limit):
             await self._adapter.send_message(chat_id, text[i : i + limit])
 
-    async def _system_answer(self, command: str) -> str:
+    def _name_command(self, user_id: int, value: str, private: bool) -> str:
+        """Update this Telegram user's local presentation name only."""
+        if not private:
+            return "Please use /name in a private chat with this bot."
+        if not value:
+            current = self._profiles.get_name(user_id) or "Remex"
+            return f"My name here is {current}. Use /name <nickname> or /name reset."
+        try:
+            if value.lower() == "reset":
+                self._profiles.reset_name(user_id)
+                return "Name reset to Remex for your conversations."
+            self._profiles.set_name(user_id, value)
+        except ValueError:
+            return "Name must be 1–32 characters: letters, digits, spaces or hyphens."
+        except Exception:  # noqa: BLE001 — never claim a failed database write succeeded.
+            self._log.exception("telegram.name_save_failed", user_id=user_id)
+            return "Could not save your name. Please try again."
+        return f"You can call me {value.strip()} in your conversations."
+
+    async def _system_answer(self, command: str, display_name: str = "Remex") -> str:
         """Deterministic answers built from real system state."""
         if command == "/agents":
             if self._butler:
@@ -149,24 +197,27 @@ class TelegramHandler:
             return "Butler not running."
         if command == "/whoami":
             return (
-                "🤖 I am the *Butler* — the gateway of The Agency, a real "
+                f"🤖 I am *{display_name}* — your assistant and the gateway of The Agency, a real "
                 "multi-agent system running on this machine. I route your "
                 "messages to registered agents and report what they actually "
-                "did. Use /agents to see them, /status for system health."
+                "did. Use /agents to see them, /status for system health. "
+                "The Telegram bot account is shared; this name is private to your conversations."
             )
         if command == "/proposals":
             return await self._list_proposals()
         if command in ("/start", "/help"):
             return (
-                "🤖 *The Agency — Butler*\n\n"
+                f"🤖 *The Agency — {display_name}*\n\n"
                 "Commands:\n"
                 "• /research <topic> — Web research with cited sources\n"
                 "• /agents — List registered agents\n"
                 "• /status — Live system health\n"
                 "• /propose_agent <name> <domain> <cap...> — Governance spawn\n"
                 "• /proposals — Open governance proposals\n"
-                "• /whoami — What this bot is\n\n"
-                "Or just chat — plain English routes to the right agent."
+                "• /whoami — What this bot is\n"
+                "• /name <nickname> — Your private name for me (/name reset to undo)\n\n"
+                "Or just chat — plain English routes to the right agent.\n"
+                "The Telegram bot account is shared; this name is private to your conversations."
             )
         return "Unknown command."
 
@@ -421,9 +472,18 @@ class TelegramHandler:
         if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
             raise ValueError("missing Telegram user ID")
         sender = f"telegram:{user_id}"
-
+        chat = message.get("chat", {})
+        private = chat.get("type") == "private" and chat.get("id") == user_id
+        if chat.get("type") in ("group", "supergroup"):
+            chat_id = chat.get("id")
+            if isinstance(chat_id, bool) or not isinstance(chat_id, int):
+                raise ValueError("missing Telegram chat ID")
+            sender = f"telegram:chat:{chat_id}:user:{user_id}"
+        display_name = (self._profiles.get_name(user_id) if private else None) or "Remex"
         if self._butler:
-            return str(await self._butler.handle_message(text, sender, {}))
+            return str(
+                await self._butler.handle_message(text, sender, {"assistant_name": display_name})
+            )
         return await self._demo.handle(text, {"sender": sender})
 
     async def send_response(self, chat_id: int, text: str) -> dict[str, Any]:
@@ -432,3 +492,4 @@ class TelegramHandler:
 
     async def close(self) -> None:
         await self._adapter.close()
+        self._profiles.close()
