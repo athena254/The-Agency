@@ -1,110 +1,87 @@
-# The Agency — Roadmap
+# The Agency — Roadmap (honest implemented / partial / planned)
 
-## Phase 1: Foundation (Complete ✅)
+> **Normative direction:** `docs/SOURCE_CONSOLIDATED_BRIEF.md` §§45–46 (priorities and
+> build sequence) and `docs/SPEC_AGENCY_CORE_RECONCILIATION.md` (code-backed gap matrix
+> and first build slice). Status words below are coarse — Implemented / Exists /
+> Partial / Planned / Missing — because the evidence does not warrant precise
+> percentages. Nothing here is a production-readiness claim.
 
-| Item | Status | Notes |
-|------|--------|-------|
-| Secrets Manager | ✅ | Encrypted credential storage with ACL |
-| Retrieval System | ✅ | Multi-mode search (semantic + graph + hybrid) using Neo4j |
-| Spawn System | ✅ | Secure sub-agent lifecycle with sandboxing |
-| LLM Harness | ✅ | Pluggable provider abstraction (OpenAI, Anthropic, Ollama) |
-| Test Harness | ✅ | Unified testing framework |
-| Base Agent | ✅ | Common agent foundation with lattice integration |
+## Corrections to prior versions of this file
 
-## Phase 2: Addons (Complete ✅)
+- **ResearchAgent was listed as "0% / not started" (Phase 4).** That was wrong:
+  `src/agency/agents/research/agent.py` (`ResearchAgent`) exists. Corrected to
+  "exists, partial" — end-to-end behavior was not verified in this docs pass.
+- **CI/CD Pipeline was listed as "0% / planned" (Phase 5).** That was wrong:
+  `.github/workflows/ci.yml` and `.github/workflows/cd.yml` exist. Corrected to
+  "exists, outcome unverified" — workflow success and live operation were not
+  verified in this docs pass.
+- Absolute "Complete ✅" labels and precise percentages (20/30/40/60%) were removed;
+  they implied evidence this pass did not establish.
 
-| Item | Status | Notes |
-|------|--------|-------|
-| Sandbox Addon | ✅ | Docker/process backends, HTTP API, standalone service |
-| QA Critic Addon | ✅ | Quality enforcement with parallel rule execution |
-| Auto-Research | ✅ | Autonomous research loop |
-| Simulation | ✅ | Graph-based social simulation |
-| Dark Factory | ✅ | Self-improvement with A/B testing |
-| Bridge System | ✅ | 100% infrastructure, 3 functional bridges |
-| Gateway System | ✅ | Three-mode Butler architecture |
-| Buddy UI | ✅ | Forked Space-Agent, two-page Mission Control |
+## Where things stand
 
-## Phase 3: Core Infrastructure (In Progress 🟡)
+### Implemented or partially implemented (code exists, maturity varies)
 
-| Item | Status | Priority |
-|------|--------|----------|
-| Unified Lattice Service | 🟡 30% | **Critical** — Central coordination DB |
-| Governance Module | 🟡 20% | **Critical** — Voting, reputation, escalation |
-| Gatekeeper | 🟡 40% | Auth/routing logic incomplete |
-| Librarian | 🟡 20% | Normalization/deduplication missing |
-| Dream | 🟡 20% | Sleep cycles not implemented |
-| CPR (Compression) | 🟡 20% | Core logic minimal |
-| Orchestrator | 🟡 60% | Integration incomplete |
-| Aether (Durable Execution) | 🟡 30% | Wrapper exists, full system missing |
+| Item | State | Notes |
+|------|-------|-------|
+| Secrets management | Partial | `src/agency/memory/sms/secrets.py`, `src/agency/config/keys.py` |
+| Retrieval / memory | Partial | `src/agency/memory/sms/store.py`, `retrieval.py`, `lifecycle.py`, `cpr.py` |
+| Agent lifecycle scaffolding | Partial | `src/agency/kernel/registry.py`, `agents/registry.py`, `agents/loop.py`, `agents/executor.py` |
+| Model routing (LLM harness) | Partial | `src/agency/llm/` (openai/anthropic/ollama/echo providers) |
+| Butler gateway + routing | Partial | `src/agency/butler/`; sender-scoped history only, no durable threads yet |
+| Sandbox / process isolation | Partial | `src/agency/security/sandbox/`; isolation guarantees unaudited |
+| QA / adversarial critics | Partial | `src/agency/agents/verifier.py`, `security/red|blue|purple/`; blocking decision contract planned |
+| Research agent | Exists, partial | `src/agency/agents/research/agent.py`; behavior unverified here |
+| General / demo agents, planner | Exists, partial | `src/agency/agents/` |
+| Bridges (claude, codex, hermes, openclaw) | Partial adapters | `src/agency/bridges/`; optional integrations, never dependencies |
+| Lattice + governance + reputation | Partial | `src/agency/lattice/`; durable vote persistence planned |
+| API server + CLI | Partial | `src/agency/api/server.py`, `src/agency/cli/main.py` (`agency` entry point) |
+| CI / CD workflows | Exists, outcome unverified | `.github/workflows/ci.yml`, `cd.yml` |
+| Prototype factories (dark/ghost) | Prototypes only | Standalone; not an integrated Forge |
 
-## Phase 4: Domain Agents (Not Started ❌)
+### Planned (not implemented — other branches may be working on threads/skills first)
 
-| Item | Status | Target Sprint |
-|------|--------|---------------|
-| FinanceAgent | ❌ 0% | Sprint 2 |
-| ├─ MarketAnalyst | ❌ | |
-| ├─ PortfolioManager | ❌ | |
-| ├─ RiskAssessor | ❌ | |
-| └─ NewsAggregator | ❌ | |
-| BusinessAgent | ❌ 0% | Sprint 3 |
-| ResearchAgent | ❌ 0% | Sprint 3 |
-| CodingAgent | ❌ 0% | Sprint 4 |
-| PersonalAgent | ❌ 0% | Sprint 4 |
+| Item | State | Planned next step (per reconciliation spec) |
+|------|-------|----------------------------------------------|
+| Durable thread / workspace / project store | Planned | SQLite-backed identity + message metadata, owner checks, isolation tests |
+| Agent Factory (versioned) | Planned | Spec validation → evaluation → versioned registry → deployment gate |
+| Skill registry (Agency-native) | Planned | Immutable `(skill_id, version)` records, explicit permissions, no arbitrary code execution |
+| Workflow registry + deterministic executor | Planned | Bounded DAG validation, pinned versions, allowlisted ops, fail-closed |
+| Forge (integrated) + native coding agent | Planned | Specify before implementing; reuse audited primitives; no complete Forge promised |
+| Durable governance votes / approvals | Planned | Persist proposals/votes; human-approval flow |
+| Workspace/project UI, branching | Planned | After thread isolation lands |
+| Production deployment, observability, audit | Planned | Docker/K8s, OpenTelemetry, security audit — later phases |
 
-## Phase 5: Integration & Production (Planned)
+`Athena-global-skills` (`https://github.com/athena254/Athena-global-skills`) is a
+separate pattern source for future skills/Forge work, not a dependency and not
+auto-imported.
 
-| Item | Status | Target |
-|------|--------|--------|
-| Noesis Shim (OpenClaw compat) | ❌ 0% | Sprint 5 |
-| Micro-Webs (subgraphs) | ❌ 0% | Sprint 5 |
-| Docker/K8s Deployment | ❌ 0% | Sprint 6 |
-| CI/CD Pipeline | ❌ 0% | Sprint 6 |
-| OpenTelemetry Observability | ❌ 0% | Sprint 6 |
-| Security Audit | ❌ 0% | Sprint 6 |
+## Build sequence (from the brief and reconciliation spec)
 
-## Pre-June 2026 Progress (from Chat Exports)
+1. **Architecture reconciliation** — this docs pass (canonical boundaries, honest statuses).
+2. **Thread context foundation** — durable store, ownership checks, isolation tests.
+3. **Agent Factory prerequisites** — skill registry → workflow registry/executor → factory.
+4. **Forge** — architecture, bounded coding-agent profile, software-factory workflows.
+5. **Security and governance hardening** — capability permissions, sandbox audit, approval gates.
+6. **Competitive maturity** — benchmarks, UX, documented differentiation (brief §22).
 
-**Sprint 1 (✅ Complete):**
-- Core services (Secrets, Retrieval, Spawn, LLM Harness, Test, Base Agent)
-- Project reorganization (Teresa): `ADDONS/` → `skills/`, `CORE/` → `core/`
-- Auto-research addon (Teresa): Karpathy-style experiment loop
-- Simulation addon (Teresa): MiroFish-inspired swarm engine
-- QA skill suite (Jack): 6 scanners, 719 issues found on first scan
-- Git adoption + Forge auto-commit daemon
-- Concurrent multi-agent addon design
+Each phase needs its own spec, tests, and review. The consolidated brief's 51 sections
+remain the target requirements.
 
-**Sprint 2 (🔄 In Progress — ~30%):**
-- Lattice + Governance + Finance domain target
-- Actual: Core scaffolding done, domain agents not started
+## Historical sprint notes (preserved, not current status)
 
----
+- **Sprint 1 (historical claim):** core services, reorganization, auto-research,
+  simulation, QA suite, git adoption, concurrent addon design. Preserved as reported
+  history; not re-verified against current code here.
+- **Sprint 2 (historical claim ~30%):** Lattice + governance + finance domain target;
+  reported as scaffolding done, domain agents not started — except that the research
+  agent module does exist (see correction above).
+- Old timeline estimates (v0.1.0/v0.2.0 "complete", v0.3.0/v0.4.0/v1.0.0 week counts)
+  are withdrawn: they rested on the same unverified percentages removed above. No new
+  dates are promised here.
 
-## Current Sprint Focus
+## Full system specification
 
-**Sprint 2 (Weeks 3-7): Lattice + Governance + Finance domain**
-
-Actual progress: ~30% toward sprint goal
-
-## Full System Specification
-
-For the complete system spec (architecture, domain agents, addons, memory system, bridges, data models, deployment, version roadmap), see `docs/SPECIFICATION.md`.
-
-This document is the **canonical reference** reconstructed from 1,417 user instructions across all chat exports (April–May 2026).
-
-What needs to happen:
-1. **Unified Lattice Service** (2 weeks) — Neo4j + vector DB, unified API
-2. **Governance Module** (2 weeks) — voting, reputation, escalation
-3. **FinanceAgent + 4 sub-agents** (3 weeks) — domain specialists
-4. **Integration & E2E tests** (1 week)
-
-Total remaining: ~8 weeks minimum
-
-## Timeline Estimate
-
-| Milestone | Original | Revised |
-|-----------|----------|---------|
-| v0.1.0 (Foundation) | Complete | ✅ Complete |
-| v0.2.0 (Addons) | Complete | ✅ Complete |
-| v0.3.0 (Finance Alpha) | Sprint 2 | 8+ weeks |
-| v0.4.0 (Multi-domain) | Sprint 3 | 12+ weeks |
-| v1.0.0 (Production) | Sprint 6 | 20+ weeks |
+For the target system (architecture, agents, addons, memory, bridges, data models,
+deployment), see `docs/SOURCE_CONSOLIDATED_BRIEF.md` — it is the canonical reference
+for direction, not a claim about what is built.
