@@ -40,8 +40,11 @@ def _factory(tmp_path, **over) -> tuple[AgentFactory, KernelRegistry, RuntimeReg
 
 def _draft(fac: AgentFactory, **over):
     args = {
-        "blueprint_id": "analyst", "version": "1.0.0", "name": "Analyst",
-        "domain": "research", "capabilities": ["inspect"],
+        "blueprint_id": "analyst",
+        "version": "1.0.0",
+        "name": "Analyst",
+        "domain": "research",
+        "capabilities": ["inspect"],
         "creator": "creator",
     }
     args.update(over)
@@ -54,8 +57,7 @@ def test_create_validate_approve_activate_happy_path(tmp_path) -> None:
         bp = _draft(fac)
         assert bp.status is BlueprintStatus.DRAFT
         assert fac.validate("analyst", "1.0.0").status is BlueprintStatus.DRAFT
-        approved = fac.approve(
-            "analyst", "1.0.0", approver="approver", evidence="review-1")
+        approved = fac.approve("analyst", "1.0.0", approver="approver", evidence="review-1")
         assert approved.status is BlueprintStatus.APPROVED
         assert approved.approver == "approver"
         assert approved.creator != approved.approver
@@ -90,9 +92,12 @@ def test_capability_above_l0_rejected(tmp_path) -> None:
     fac, _, _ = _factory(tmp_path)
     try:
         with pytest.raises(ValueError):
-            _draft(fac, capabilities=[
-                Capability(name="simulate", max_level=ActionClass.L2_CONTROLLED_TESTING)
-            ])
+            _draft(
+                fac,
+                capabilities=[
+                    Capability(name="simulate", max_level=ActionClass.L2_CONTROLLED_TESTING)
+                ],
+            )
     finally:
         fac.close()
 
@@ -100,19 +105,33 @@ def test_capability_above_l0_rejected(tmp_path) -> None:
 def test_restart_persistence(tmp_path) -> None:
     db = str(tmp_path / "factory.db")
     kernels, runtimes = KernelRegistry(), RuntimeRegistry()
-    fac = AgentFactory(db, authorizer=_allow, allowed_capabilities={"inspect"}, kernel_registry=kernels,
-                       runtime_registry=runtimes)
-    fac.create(blueprint_id="analyst", version="1.0.0", name="Analyst",
-               capabilities=["inspect"], creator="creator")
+    fac = AgentFactory(
+        db,
+        authorizer=_allow,
+        allowed_capabilities={"inspect"},
+        kernel_registry=kernels,
+        runtime_registry=runtimes,
+    )
+    fac.create(
+        blueprint_id="analyst",
+        version="1.0.0",
+        name="Analyst",
+        capabilities=["inspect"],
+        creator="creator",
+    )
     fac.approve("analyst", "1.0.0", approver="approver", evidence="e1")
     agent = fac.activate("analyst", "1.0.0")
     runtime_id = agent.id
     assert fac.list_events("analyst", "1.0.0")
     fac.close()
     # Restart: new empty registries (ephemeral), same SQLite file.
-    fac2 = AgentFactory(db, authorizer=_allow, allowed_capabilities={"inspect"},
-                        kernel_registry=KernelRegistry(),
-                        runtime_registry=RuntimeRegistry())
+    fac2 = AgentFactory(
+        db,
+        authorizer=_allow,
+        allowed_capabilities={"inspect"},
+        kernel_registry=KernelRegistry(),
+        runtime_registry=RuntimeRegistry(),
+    )
     try:
         reopened = fac2.get("analyst", "1.0.0")
         assert reopened.status is BlueprintStatus.ACTIVE
@@ -166,7 +185,9 @@ def test_default_capability_allowlist_denies_claims(tmp_path) -> None:
     try:
         with pytest.raises(ValueError, match="unrecognized capability"):
             _draft(fac)
-        assert _draft(fac, capabilities=[], name="Security / Analysis").name == "Security / Analysis"
+        assert (
+            _draft(fac, capabilities=[], name="Security / Analysis").name == "Security / Analysis"
+        )
     finally:
         fac.close()
 
@@ -185,15 +206,24 @@ def test_unpinned_refs_rejected_at_create(tmp_path) -> None:
 
 
 def test_missing_callbacks_fail_closed_for_requested_refs(tmp_path) -> None:
-    fac, _, _ = _factory(
-        tmp_path, is_skill_published=None, is_workflow_published=None)
+    fac, _, _ = _factory(tmp_path, is_skill_published=None, is_workflow_published=None)
     try:
-        fac.create(blueprint_id="a", version="1.0.0", name="A",
-                   skill_refs=[("s", "1.0.0")], creator="creator")
+        fac.create(
+            blueprint_id="a",
+            version="1.0.0",
+            name="A",
+            skill_refs=[("s", "1.0.0")],
+            creator="creator",
+        )
         with pytest.raises(ValueError):
             fac.validate("a", "1.0.0")
-        fac.create(blueprint_id="b", version="1.0.0", name="B",
-                   workflow_refs=[("w", "1.0.0")], creator="creator")
+        fac.create(
+            blueprint_id="b",
+            version="1.0.0",
+            name="B",
+            workflow_refs=[("w", "1.0.0")],
+            creator="creator",
+        )
         with pytest.raises(ValueError):
             fac.validate("b", "1.0.0")
         # No refs at all validates fine without callbacks.
@@ -224,33 +254,58 @@ def test_pinned_refs_checked_against_real_registries(tmp_path) -> None:
     from agency.workflows.registry import WorkflowDefinition, WorkflowRegistry, WorkflowStep
 
     skills = SkillRegistry(str(tmp_path / "s.db"), allowed_permissions=frozenset())
-    skills.register(SkillSpec(skill_id="sum", version="1.0.0", name="Sum",
-                              description="d", implementation="sum.docs",
-                              provenance="team"))
+    skills.register(
+        SkillSpec(
+            skill_id="sum",
+            version="1.0.0",
+            name="Sum",
+            description="d",
+            implementation="sum.docs",
+            provenance="team",
+        )
+    )
     skills.transition("sum", "1.0.0", SkillStatus.TESTING)
     skills.transition("sum", "1.0.0", SkillStatus.APPROVED, "tests pass")
     skills.publish("sum", "1.0.0", "review ok")
     flows = WorkflowRegistry(str(tmp_path / "w.db"))
-    flows.register(WorkflowDefinition(workflow_id="demo", version="1.0.0",
-                                      steps=(WorkflowStep(step_id="a",
-                                                          operation="op"),)))
+    flows.register(
+        WorkflowDefinition(
+            workflow_id="demo", version="1.0.0", steps=(WorkflowStep(step_id="a", operation="op"),)
+        )
+    )
     fac, _, _ = _factory(
         tmp_path,
-        is_skill_published=lambda sid, ver: skills.get(sid, ver).status
-        is SkillStatus.PUBLISHED,
+        is_skill_published=lambda sid, ver: skills.get(sid, ver).status is SkillStatus.PUBLISHED,
         is_workflow_published=lambda wid, ver: flows.get(wid, ver) is not None,
     )
     try:
-        fac.create(blueprint_id="a", version="1.0.0", name="A",
-                   skill_refs=[("sum", "1.0.0")],
-                   workflow_refs=[("demo", "1.0.0")], creator="creator")
+        fac.create(
+            blueprint_id="a",
+            version="1.0.0",
+            name="A",
+            skill_refs=[("sum", "1.0.0")],
+            workflow_refs=[("demo", "1.0.0")],
+            creator="creator",
+        )
         assert fac.validate("a", "1.0.0").status is BlueprintStatus.DRAFT
         # Draft (unpublished) skill version fails closed.
-        skills.register(SkillSpec(skill_id="sum", version="1.0.1", name="Sum",
-                                  description="d", implementation="sum.docs",
-                                  provenance="team"))
-        fac.create(blueprint_id="b", version="1.0.0", name="B",
-                   skill_refs=[("sum", "1.0.1")], creator="creator")
+        skills.register(
+            SkillSpec(
+                skill_id="sum",
+                version="1.0.1",
+                name="Sum",
+                description="d",
+                implementation="sum.docs",
+                provenance="team",
+            )
+        )
+        fac.create(
+            blueprint_id="b",
+            version="1.0.0",
+            name="B",
+            skill_refs=[("sum", "1.0.1")],
+            creator="creator",
+        )
         with pytest.raises(ValueError):
             fac.validate("b", "1.0.0")
     finally:
@@ -340,7 +395,8 @@ def test_activation_event_failure_rolls_back_both_registries(tmp_path) -> None:
         assert kernels.count() == 0
         assert not runtimes.list_agents()
         assert [e["to_status"] for e in fac.list_events("analyst", "1.0.0")] == [
-            "DRAFT", "APPROVED"
+            "DRAFT",
+            "APPROVED",
         ]
     finally:
         fac.close()
@@ -367,7 +423,8 @@ def test_revoke_during_activation_cleans_up_identity(tmp_path) -> None:
         revoker = None
         try:
             revoker = PausingRevoker(
-                str(tmp_path / "factory.db"), kernel_registry=kernels,
+                str(tmp_path / "factory.db"),
+                kernel_registry=kernels,
                 runtime_registry=racing,
             )
             ready.set()
@@ -426,6 +483,27 @@ def test_revocation_marks_row_and_kernel_identity(tmp_path) -> None:
         # Idempotent second revoke.
         again = fac.revoke("analyst", "1.0.0", evidence="incident-7")
         assert again.status is BlueprintStatus.REVOKED
+    finally:
+        fac.close()
+
+
+def test_revocation_audit_failure_keeps_active_identity(tmp_path) -> None:
+    fac, kernels, runtimes = _factory(tmp_path)
+    try:
+        _draft(fac)
+        fac.approve("analyst", "1.0.0", approver="approver", evidence="e1")
+        agent = fac.activate("analyst", "1.0.0")
+        fac._conn.execute("""
+            CREATE TRIGGER fail_revoke_event BEFORE INSERT ON factory_events
+            WHEN NEW.to_status = 'REVOKED'
+            BEGIN SELECT RAISE(ABORT, 'audit failure'); END
+        """)
+        with pytest.raises(Exception, match="audit failure"):
+            fac.revoke("analyst", "1.0.0", evidence="incident")
+        assert fac.get("analyst", "1.0.0").status is BlueprintStatus.ACTIVE
+        assert not kernels.get_required(agent.id).revoked
+        assert runtimes.get_agent(agent.id) is not None
+        assert "REVOKED" not in [e["to_status"] for e in fac.list_events("analyst", "1.0.0")]
     finally:
         fac.close()
 

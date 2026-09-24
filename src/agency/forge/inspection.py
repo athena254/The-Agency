@@ -215,11 +215,14 @@ def _inspect_one(real_root: Path, raw: str) -> tuple[FileRecord | None, Rejected
         # No unbounded read even if the file grows after lstat. O_NOFOLLOW
         # protects the final component on platforms that expose it; identity
         # and path checks catch swaps on platforms (notably Windows) that do not.
-        fd = os.open(candidate, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+        fd = os.open(
+            candidate, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+        )
         try:
             opened = os.fstat(fd)
             if not stat.S_ISREG(opened.st_mode) or (st.st_dev, st.st_ino) != (
-                opened.st_dev, opened.st_ino
+                opened.st_dev,
+                opened.st_ino,
             ):
                 return None, RejectedRecord(path=raw, reason="path_changed_during_read")
             data = bytearray()
@@ -241,16 +244,16 @@ def _inspect_one(real_root: Path, raw: str) -> tuple[FileRecord | None, Rejected
     # st_size and len(data) can differ on concurrent mutation; enforce the cap on both.
     if len(data) > MAX_FILE_BYTES:
         return None, RejectedRecord(path=raw, reason=f"file_too_large:{len(data)}")
-    data = bytes(data)
+    payload = bytes(data)
 
-    digest = hashlib.sha256(data).hexdigest()
+    digest = hashlib.sha256(payload).hexdigest()
     display = "/".join(parts)
     is_python = candidate.suffix.lower() == ".py"
     if not is_python:
         return FileRecord(
             path=display,
             sha256=digest,
-            size_bytes=len(data),
+            size_bytes=len(payload),
             kind="other",
             syntax_ok=None,
             syntax_error=None,
@@ -258,7 +261,7 @@ def _inspect_one(real_root: Path, raw: str) -> tuple[FileRecord | None, Rejected
         ), None
 
     try:
-        text = data.decode("utf-8")
+        text = payload.decode("utf-8")
     except UnicodeDecodeError as exc:
         return None, RejectedRecord(path=raw, reason=f"bad_utf8_python_source:{exc.reason}")
     try:
@@ -268,7 +271,7 @@ def _inspect_one(real_root: Path, raw: str) -> tuple[FileRecord | None, Rejected
         return FileRecord(
             path=display,
             sha256=digest,
-            size_bytes=len(data),
+            size_bytes=len(payload),
             kind="python",
             syntax_ok=False,
             syntax_error=detail,
@@ -277,7 +280,7 @@ def _inspect_one(real_root: Path, raw: str) -> tuple[FileRecord | None, Rejected
     return FileRecord(
         path=display,
         sha256=digest,
-        size_bytes=len(data),
+        size_bytes=len(payload),
         kind="python",
         syntax_ok=True,
         syntax_error=None,
@@ -300,7 +303,9 @@ def inspect_changes(root: str | Path, changed_paths: list[str]) -> InspectionRep
     created_at = datetime.now(UTC)
 
     if len(changed_paths) > MAX_FILES:
-        rejected = (RejectedRecord(path="<batch>", reason=f"file_count_exceeds_limit:{MAX_FILES}"),)
+        cap_rejections = (
+            RejectedRecord(path="<batch>", reason=f"file_count_exceeds_limit:{MAX_FILES}"),
+        )
         logger.info("forge.inspect_cap", root=str(real_root), count=len(changed_paths))
         return InspectionReport(
             report_id=report_id,
@@ -308,7 +313,7 @@ def inspect_changes(root: str | Path, changed_paths: list[str]) -> InspectionRep
             root=str(real_root),
             gate="FAIL",
             files=(),
-            rejected=rejected,
+            rejected=cap_rejections,
         )
 
     if not changed_paths:

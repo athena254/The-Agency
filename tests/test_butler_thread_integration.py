@@ -1,4 +1,5 @@
 """Butler thread integration: isolation, restart, and HTTP auth boundary."""
+
 from __future__ import annotations
 
 import pytest
@@ -88,8 +89,11 @@ async def test_http_spoofed_sender_cannot_recall_or_store_legacy_memory(tmp_path
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/v1/message",
-                json={"message": "repeat my private note", "sender": "alice",
-                      "context": {"memory_context": "private legacy note"}},
+                json={
+                    "message": "repeat my private note",
+                    "sender": "alice",
+                    "context": {"memory_context": "private legacy note"},
+                },
             )
         assert response.status_code == 200
         assert "private legacy note" not in response.json()["response"]

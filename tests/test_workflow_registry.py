@@ -93,9 +93,7 @@ def test_register_get_and_restart(tmp_path) -> None:
     assert [s.step_id for s in fetched.steps] == ["a", "b"]
     assert registry.list_versions("demo")[0].version == "1.0.0"
 
-    executor = WorkflowExecutor(
-        registry, {"op": lambda inputs, prev: {"echo": inputs.get("x")}}
-    )
+    executor = WorkflowExecutor(registry, {"op": lambda inputs, prev: {"echo": inputs.get("x")}})
     run = executor.run("demo", "1.0.0", {"x": 1}, "alice")
     assert run.status == "COMPLETED"
     run_id = run.run_id
@@ -205,9 +203,7 @@ def test_deterministic_ordering_and_output_flow(tmp_path) -> None:
         assert prev["b"] == 20
         return prev["b"] + 1
 
-    executor = WorkflowExecutor(
-        registry, {"op_a": op_a, "op_b": op_b, "op_c": op_c}
-    )
+    executor = WorkflowExecutor(registry, {"op_a": op_a, "op_b": op_b, "op_c": op_c})
     run = executor.run("demo", "1.0.0", {"start": 1}, "actor-1")
     assert run.status == "COMPLETED"
     assert seen == ["a", "b", "c"]
@@ -244,9 +240,7 @@ def test_independent_steps_follow_declaration_order(tmp_path) -> None:
 
 def test_old_version_unaffected_by_new_version(tmp_path) -> None:
     registry = make_registry(tmp_path)
-    registry.register(
-        make_definition(version="1.0.0", steps=(make_step("a", operation="v1"),))
-    )
+    registry.register(make_definition(version="1.0.0", steps=(make_step("a", operation="v1"),)))
     registry.register(
         make_definition(
             version="1.0.1",
@@ -322,9 +316,7 @@ def test_permission_denial_does_not_invoke(tmp_path) -> None:
 
 def test_permission_default_deny_without_authorizer(tmp_path) -> None:
     registry = make_registry(tmp_path)
-    registry.register(
-        make_definition(steps=(make_step("a", permissions=("anything",)),))
-    )
+    registry.register(make_definition(steps=(make_step("a", permissions=("anything",)),)))
     called: list[str] = []
 
     def op(inputs: dict, prev: dict) -> object:
@@ -340,9 +332,7 @@ def test_permission_default_deny_without_authorizer(tmp_path) -> None:
 
 def test_authorizer_allow_runs_step(tmp_path) -> None:
     registry = make_registry(tmp_path)
-    registry.register(
-        make_definition(steps=(make_step("a", permissions=("data.read",)),))
-    )
+    registry.register(make_definition(steps=(make_step("a", permissions=("data.read",)),)))
 
     def op(inputs: dict, prev: dict) -> object:
         return "allowed"
@@ -379,9 +369,7 @@ def test_failure_stops_later_steps_and_persists(tmp_path) -> None:
 
     # Map operations distinctly.
     registry2 = registry
-    executor = WorkflowExecutor(
-        registry2, {"op": ok}, authorizer=None
-    )
+    executor = WorkflowExecutor(registry2, {"op": ok}, authorizer=None)
     # Re-register a workflow with distinct operations for this test.
     registry2.register(
         make_definition(
@@ -528,6 +516,44 @@ def test_64_valid_outputs_do_not_strand_running_state(tmp_path) -> None:
     assert len(calls) == 64
     assert run.status == "COMPLETED"
     assert registry.get_run(run.run_id).status == "COMPLETED"
+    registry.close()
+
+
+def test_nonfinite_inputs_are_rejected_before_creating_a_run(tmp_path) -> None:
+    registry = make_registry(tmp_path)
+    registry.register(WorkflowDefinition("finite", "1.0.0", (WorkflowStep("x", "op"),)))
+    executor = WorkflowExecutor(registry, {"op": lambda inputs, prev: inputs})
+    with pytest.raises(ValueError, match="JSON"):
+        executor.run("finite", "1.0.0", {"bad": float("nan")}, "alice")
+    assert registry._conn.execute("SELECT count(*) FROM workflow_runs").fetchone()[0] == 0
+    registry.close()
+
+
+def test_callback_cannot_mutate_prior_output_after_validation(tmp_path) -> None:
+    registry = make_registry(tmp_path)
+    registry.register(
+        WorkflowDefinition(
+            "snapshot",
+            "1.0.0",
+            (
+                WorkflowStep("first", "emit"),
+                WorkflowStep("second", "mutate", depends_on=("first",)),
+            ),
+        )
+    )
+    original = {"value": 1}
+
+    def mutate(inputs, previous):
+        original["value"] = float("nan")
+        return {"ok": True}
+
+    executor = WorkflowExecutor(
+        registry, {"emit": lambda inputs, previous: original, "mutate": mutate}
+    )
+    run = executor.run("snapshot", "1.0.0", {}, "alice")
+    assert run.status == "COMPLETED"
+    assert run.step_results["first"]["output"] == {"value": 1}
+    assert registry.get_run(run.run_id).step_results["first"]["output"] == {"value": 1}
     registry.close()
 
 

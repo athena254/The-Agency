@@ -142,6 +142,8 @@ def _normalize_refs(value: Any, kind: str) -> tuple[tuple[str, str], ...]:
         raise ValueError(f"too many {kind} refs: {len(value)} > {MAX_REFS}.")
     out: list[tuple[str, str]] = []
     for entry in value:
+        rid: object
+        ver: object
         if isinstance(entry, str):
             if "@" not in entry:
                 raise ValueError(f"unpinned {kind} ref {entry!r}: use id@X.Y.Z.")
@@ -313,11 +315,20 @@ class AgentFactory:
                     " created_at, updated_at)"
                     " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
-                        bid, ver, nm, dom, json.dumps(list(caps)),
+                        bid,
+                        ver,
+                        nm,
+                        dom,
+                        json.dumps(list(caps)),
                         json.dumps([list(r) for r in skills]),
                         json.dumps([list(r) for r in workflows]),
-                        creator, BlueprintStatus.DRAFT.value, None, "",
-                        None, now, now,
+                        creator,
+                        BlueprintStatus.DRAFT.value,
+                        None,
+                        "",
+                        None,
+                        now,
+                        now,
                     ),
                 )
                 self._conn.execute(
@@ -347,9 +358,7 @@ class AgentFactory:
     def _check_published_refs(self, bp: Blueprint) -> None:
         for sid, sver in bp.skill_refs:
             if self._is_skill_published is None:
-                raise ValueError(
-                    f"skill ref {(sid, sver)!r} unverifiable: no skill callback."
-                )
+                raise ValueError(f"skill ref {(sid, sver)!r} unverifiable: no skill callback.")
             try:
                 ok = self._is_skill_published(sid, sver)
             except Exception as exc:
@@ -364,9 +373,7 @@ class AgentFactory:
             try:
                 ok = self._is_workflow_published(wid, wver)
             except Exception as exc:
-                raise ValueError(
-                    f"workflow ref {(wid, wver)!r} failed closed."
-                ) from exc
+                raise ValueError(f"workflow ref {(wid, wver)!r} failed closed.") from exc
             if not ok:
                 raise ValueError(f"workflow ref {(wid, wver)!r} is not published.")
 
@@ -406,8 +413,13 @@ class AgentFactory:
                 " updated_at = ? WHERE blueprint_id = ? AND version = ?"
                 " AND status = ?",
                 (
-                    BlueprintStatus.APPROVED.value, approver, ev, now,
-                    bp.blueprint_id, bp.version, BlueprintStatus.DRAFT.value,
+                    BlueprintStatus.APPROVED.value,
+                    approver,
+                    ev,
+                    now,
+                    bp.blueprint_id,
+                    bp.version,
+                    BlueprintStatus.DRAFT.value,
                 ),
             )
             if cur.rowcount != 1:
@@ -416,8 +428,13 @@ class AgentFactory:
                 "INSERT INTO factory_events (blueprint_id, version, from_status,"
                 " to_status, actor, evidence, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
-                    bp.blueprint_id, bp.version, BlueprintStatus.DRAFT.value,
-                    BlueprintStatus.APPROVED.value, approver, ev, now,
+                    bp.blueprint_id,
+                    bp.version,
+                    BlueprintStatus.DRAFT.value,
+                    BlueprintStatus.APPROVED.value,
+                    approver,
+                    ev,
+                    now,
                 ),
             )
         return self.get(bp.blueprint_id, bp.version)
@@ -475,8 +492,12 @@ class AgentFactory:
                     " updated_at = ? WHERE blueprint_id = ? AND version = ?"
                     " AND status = ? AND runtime_agent_id IS NULL",
                     (
-                        BlueprintStatus.ACTIVE.value, agent.id, now,
-                        bp.blueprint_id, bp.version, BlueprintStatus.APPROVED.value,
+                        BlueprintStatus.ACTIVE.value,
+                        agent.id,
+                        now,
+                        bp.blueprint_id,
+                        bp.version,
+                        BlueprintStatus.APPROVED.value,
                     ),
                 )
                 if cur.rowcount != 1:
@@ -485,8 +506,13 @@ class AgentFactory:
                     "INSERT INTO factory_events (blueprint_id, version, from_status,"
                     " to_status, actor, evidence, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
-                        bp.blueprint_id, bp.version, BlueprintStatus.APPROVED.value,
-                        BlueprintStatus.ACTIVE.value, bp.creator, bp.evidence, now,
+                        bp.blueprint_id,
+                        bp.version,
+                        BlueprintStatus.APPROVED.value,
+                        BlueprintStatus.ACTIVE.value,
+                        bp.creator,
+                        bp.evidence,
+                        now,
                     ),
                 )
         except Exception:
@@ -517,20 +543,6 @@ class AgentFactory:
             bp = self.get(blueprint_id, version)
             if bp.status is BlueprintStatus.REVOKED:
                 return bp
-            if bp.runtime_agent_id:
-                try:
-                    self._kernels.revoke(bp.runtime_agent_id)
-                except KeyError:
-                    logger.warning(
-                        "factory.kernel_identity_absent_on_revoke", agent_id=bp.runtime_agent_id
-                    )
-                try:
-                    self._runtimes.deregister(bp.runtime_agent_id)
-                except KeyError:
-                    # Runtime identities do not survive process restarts.
-                    logger.info(
-                        "factory.runtime_identity_absent_on_revoke", agent_id=bp.runtime_agent_id
-                    )
             now = _now_iso()
             self._conn.execute(
                 "UPDATE blueprints SET status = ?, evidence = ?, updated_at = ?"
@@ -541,10 +553,32 @@ class AgentFactory:
                 "INSERT INTO factory_events (blueprint_id, version, from_status,"
                 " to_status, actor, evidence, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
-                    bp.blueprint_id, bp.version, bp.status.value,
-                    BlueprintStatus.REVOKED.value, bp.creator, ev, now,
+                    bp.blueprint_id,
+                    bp.version,
+                    bp.status.value,
+                    BlueprintStatus.REVOKED.value,
+                    bp.creator,
+                    ev,
+                    now,
                 ),
             )
+        # Persist the audit and tombstone before mutating ephemeral registries.
+        # If either SQL write fails, the existing identity remains intact and
+        # the database stays ACTIVE; the caller can retry revocation.
+        if bp.runtime_agent_id:
+            try:
+                self._kernels.revoke(bp.runtime_agent_id)
+            except KeyError:
+                logger.warning(
+                    "factory.kernel_identity_absent_on_revoke", agent_id=bp.runtime_agent_id
+                )
+            try:
+                self._runtimes.deregister(bp.runtime_agent_id)
+            except KeyError:
+                # Runtime identities do not survive process restarts.
+                logger.info(
+                    "factory.runtime_identity_absent_on_revoke", agent_id=bp.runtime_agent_id
+                )
         return self.get(bp.blueprint_id, bp.version)
 
     def get(self, blueprint_id: str, version: str) -> Blueprint:
@@ -581,13 +615,26 @@ class AgentFactory:
             " WHERE blueprint_id = ? AND version = ? ORDER BY id",
             (blueprint_id, version),
         ).fetchall()
-        return [dict(zip(("from_status", "to_status", "actor", "evidence", "at"), r))
-                for r in rows]
+        return [dict(zip(("from_status", "to_status", "actor", "evidence", "at"), r)) for r in rows]
 
     @staticmethod
     def _row_to_blueprint(row: tuple[Any, ...]) -> Blueprint:
-        (bid, ver, name, domain, caps_j, sk_j, wf_j, creator, status,
-            approver, evidence, runtime_id, created_at, updated_at) = row
+        (
+            bid,
+            ver,
+            name,
+            domain,
+            caps_j,
+            sk_j,
+            wf_j,
+            creator,
+            status,
+            approver,
+            evidence,
+            runtime_id,
+            created_at,
+            updated_at,
+        ) = row
         try:
             caps = tuple(json.loads(caps_j))
             skills = tuple(tuple(r) for r in json.loads(sk_j))
@@ -599,11 +646,20 @@ class AgentFactory:
         except ValueError as exc:
             raise ValueError(f"corrupt blueprint capabilities: {exc}") from None
         return Blueprint(
-            blueprint_id=bid, version=ver, name=name, domain=domain,
-            capabilities=norm_caps, skill_refs=skills, workflow_refs=wfs,
-            creator=creator, status=BlueprintStatus(status), approver=approver,
-            evidence=evidence, runtime_agent_id=runtime_id,
-            created_at=created_at, updated_at=updated_at,
+            blueprint_id=bid,
+            version=ver,
+            name=name,
+            domain=domain,
+            capabilities=norm_caps,
+            skill_refs=skills,
+            workflow_refs=wfs,
+            creator=creator,
+            status=BlueprintStatus(status),
+            approver=approver,
+            evidence=evidence,
+            runtime_agent_id=runtime_id,
+            created_at=created_at,
+            updated_at=updated_at,
         )
 
 

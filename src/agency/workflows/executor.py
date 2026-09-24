@@ -22,7 +22,7 @@ from agency.workflows.registry import (
 )
 
 Authorizer = Callable[[str, str], bool]
-Operation = Callable[[dict, dict[str, object]], object]
+Operation = Callable[[dict[str, object], dict[str, object]], object]
 
 
 def _utcnow_iso() -> str:
@@ -39,11 +39,11 @@ def _check_actor(actor_id: str) -> str:
     return actor_id
 
 
-def _check_inputs(inputs: dict) -> dict:
+def _check_inputs(inputs: dict[str, object]) -> dict[str, object]:
     if not isinstance(inputs, dict):
         raise TypeError("inputs must be a dict.")
     try:
-        text = json.dumps(inputs, sort_keys=True, ensure_ascii=False)
+        text = json.dumps(inputs, sort_keys=True, ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"inputs are not JSON serializable: {exc}") from None
     if len(text.encode("utf-8")) > MAX_JSON_BYTES:
@@ -116,7 +116,7 @@ class WorkflowExecutor:
         self,
         workflow_id: str,
         version: str,
-        inputs: dict,
+        inputs: dict[str, object],
         actor_id: str,
     ) -> WorkflowRun:
         """Execute a pinned workflow version; persists FAILED or COMPLETED."""
@@ -150,7 +150,7 @@ class WorkflowExecutor:
         )
         self._registry.record_run(running)
 
-        step_results: dict[str, dict] = {}
+        step_results: dict[str, dict[str, object]] = {}
         previous_outputs: dict[str, object] = {}
         failed = False
 
@@ -196,8 +196,7 @@ class WorkflowExecutor:
                 step_results[step.step_id] = {
                     "status": "failed",
                     "output": None,
-                    "error": "non-JSON-serializable output: "
-                    f"{type(output).__name__}",
+                    "error": f"non-JSON-serializable output: {type(output).__name__}",
                 }
                 failed = True
                 break
@@ -209,12 +208,15 @@ class WorkflowExecutor:
                 }
                 failed = True
                 break
+            # Keep a JSON snapshot, not the callback's mutable object: later
+            # callbacks can still hold and mutate their own return value.
+            snapshot = json.loads(serialized)
             step_results[step.step_id] = {
                 "status": "ok",
-                "output": output,
+                "output": snapshot,
                 "error": None,
             }
-            previous_outputs[step.step_id] = output
+            previous_outputs[step.step_id] = snapshot
 
         status = "FAILED" if failed else "COMPLETED"
         completed_at = _utcnow_iso()

@@ -299,8 +299,14 @@ class SkillRegistry:
             self._conn.execute(
                 "INSERT INTO skill_events (skill_id, version, from_status, to_status, evidence, at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (skill_id, version, current.status.value, target.value, evidence,
-                 datetime.now(UTC).isoformat()),
+                (
+                    skill_id,
+                    version,
+                    current.status.value,
+                    target.value,
+                    evidence,
+                    datetime.now(UTC).isoformat(),
+                ),
             )
         return self.get(skill_id, version)
 
@@ -320,15 +326,23 @@ class SkillRegistry:
             raise ValueError("publish requires nonempty evidence.")
         current = self.get(skill_id, version)
         if current.status is not SkillStatus.APPROVED:
-            raise ValueError(
-                f"publish requires status APPROVED, found {current.status.value}."
-            )
+            raise ValueError(f"publish requires status APPROVED, found {current.status.value}.")
         return self.transition(skill_id, version, SkillStatus.PUBLISHED, evidence)
 
     @staticmethod
     def _row_to_spec(row: tuple[Any, ...]) -> SkillSpec:
-        (skill_id, version, name, description, inputs_json, outputs_json,
-            permissions_json, implementation, provenance, status) = row
+        (
+            skill_id,
+            version,
+            name,
+            description,
+            inputs_json,
+            outputs_json,
+            permissions_json,
+            implementation,
+            provenance,
+            status,
+        ) = row
         return SkillSpec(
             skill_id=skill_id,
             version=version,

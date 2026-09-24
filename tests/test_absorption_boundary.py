@@ -1,4 +1,5 @@
 """Legacy absorber remains independent and never commits by default."""
+
 from __future__ import annotations
 
 import subprocess
@@ -109,7 +110,9 @@ def test_commit_only_rewritten_files_leaves_unrelated_changes_staged(tmp_path):
     repo.mkdir()
 
     def git(*args):
-        return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+        return subprocess.run(
+            ["git", *args], cwd=repo, check=True, capture_output=True, text=True
+        ).stdout.strip()
 
     git("init")
     git("config", "user.email", "test@example.com")

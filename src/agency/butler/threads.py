@@ -25,6 +25,7 @@ import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import cast
 
 __all__ = [
     "Thread",
@@ -244,7 +245,7 @@ class ThreadStore:
         ).fetchone()
         if row is None:
             raise KeyError(thread_id)
-        return row
+        return cast(sqlite3.Row, row)
 
     def create_thread(
         self,

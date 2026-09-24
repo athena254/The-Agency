@@ -92,7 +92,10 @@ def test_stale_transition_cannot_regress_retired_skill(tmp_path, monkeypatch):
         with pytest.raises(ValueError, match="concurrently"):
             first.transition("summarize-docs", "1.0.0", SkillStatus.DEPRECATED)
         assert second.get("summarize-docs", "1.0.0").status is SkillStatus.RETIRED
-        assert [e["to_status"] for e in second.list_events("summarize-docs", "1.0.0")][-2:] == ["DEPRECATED", "RETIRED"]
+        assert [e["to_status"] for e in second.list_events("summarize-docs", "1.0.0")][-2:] == [
+            "DEPRECATED",
+            "RETIRED",
+        ]
     finally:
         first.close()
         second.close()
@@ -190,8 +193,18 @@ def test_invalid_version_tokens_rejected(tmp_path, bad):
 
 @pytest.mark.parametrize(
     "bad",
-    ["../evil", "/bin/run", "http://x/y", "Foo.Bar", "has space",
-     "import os", "skill;drop", "", "  ", "UPPER"],
+    [
+        "../evil",
+        "/bin/run",
+        "http://x/y",
+        "Foo.Bar",
+        "has space",
+        "import os",
+        "skill;drop",
+        "",
+        "  ",
+        "UPPER",
+    ],
 )
 def test_invalid_implementation_rejected(tmp_path, bad):
     reg = _registry(tmp_path)
@@ -223,8 +236,15 @@ def test_default_registry_rejects_any_permission(tmp_path):
 
 @pytest.mark.parametrize(
     "field,value",
-    [("skill_id", ""), ("skill_id", "  "), ("name", ""), ("implementation", ""),
-     ("provenance", ""), ("provenance", "   "), ("version", "")],
+    [
+        ("skill_id", ""),
+        ("skill_id", "  "),
+        ("name", ""),
+        ("implementation", ""),
+        ("provenance", ""),
+        ("provenance", "   "),
+        ("version", ""),
+    ],
 )
 def test_blank_fields_rejected(tmp_path, field, value):
     reg = _registry(tmp_path)
@@ -265,12 +285,14 @@ def test_legal_lifecycle(tmp_path):
         # Definition fields unchanged by status moves.
         assert published.implementation == "summarize.docs"
         assert published.inputs == {"doc": {"type": "string"}}
-        assert reg.transition(
-            "summarize-docs", "1.0.0", SkillStatus.DEPRECATED
-        ).status is SkillStatus.DEPRECATED
-        assert reg.transition(
-            "summarize-docs", "1.0.0", SkillStatus.RETIRED
-        ).status is SkillStatus.RETIRED
+        assert (
+            reg.transition("summarize-docs", "1.0.0", SkillStatus.DEPRECATED).status
+            is SkillStatus.DEPRECATED
+        )
+        assert (
+            reg.transition("summarize-docs", "1.0.0", SkillStatus.RETIRED).status
+            is SkillStatus.RETIRED
+        )
     finally:
         reg.close()
 

@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -47,7 +48,8 @@ def _safe_source(root: Path, path: Path) -> tuple[str, os.stat_result]:
     try:
         opened = os.fstat(fd)
         if not stat.S_ISREG(opened.st_mode) or (before.st_dev, before.st_ino) != (
-            opened.st_dev, opened.st_ino
+            opened.st_dev,
+            opened.st_ino,
         ):
             raise OSError("source changed during open")
         with os.fdopen(fd, "r", encoding="utf-8") as stream:
@@ -72,14 +74,21 @@ def _replace_source(root: Path, path: Path, text: str, expected: os.stat_result)
     name: str | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=path.parent,
-            prefix=".agency-", suffix=".tmp", delete=False,
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=".agency-",
+            suffix=".tmp",
+            delete=False,
         ) as temp:
             name = temp.name
             temp.write(text)
         _, current = _safe_source(root, path)
         if (current.st_dev, current.st_ino, current.st_mtime_ns, current.st_size) != (
-            expected.st_dev, expected.st_ino, expected.st_mtime_ns, expected.st_size
+            expected.st_dev,
+            expected.st_ino,
+            expected.st_mtime_ns,
+            expected.st_size,
         ):
             raise OSError("source changed before rewrite")
         os.chmod(name, stat.S_IMODE(expected.st_mode))
@@ -113,10 +122,10 @@ class RepoAbsorber:
     AGENCY_HEADER = '"""Agency module (absorbed)."""\n\nfrom __future__ import annotations\n'
     ATHENA_HEADER = AGENCY_HEADER  # Backward-compatible name; no ATHENA integration.
 
-    def __init__(
-        self, workspace: Path | str | None = None
-    ) -> None:
-        self.workspace = Path(workspace) if workspace else Path(tempfile.gettempdir()) / "agency" / "absorbed"
+    def __init__(self, workspace: Path | str | None = None) -> None:
+        self.workspace = (
+            Path(workspace) if workspace else Path(tempfile.gettempdir()) / "agency" / "absorbed"
+        )
         self.workspace.mkdir(parents=True, exist_ok=True)
         self._log = logger.bind(component="RepoAbsorber", workspace=str(self.workspace))
 
@@ -230,8 +239,10 @@ class RepoAbsorber:
         return report
 
     def commit_changes(
-        self, repo_path: Path | str, rewritten_paths: list[str],
-        message: str = "Absorb into Agency coding conventions"
+        self,
+        repo_path: Path | str,
+        rewritten_paths: list[str],
+        message: str = "Absorb into Agency coding conventions",
     ) -> str:
         """Commit rewritten files. Returns the new commit SHA."""
         root = Path(repo_path)
@@ -274,13 +285,13 @@ class RepoAbsorber:
         committed = False
         sha: str | None = None
         if report["passed"] and commit and rewrite["rewritten"]:
-            sha = self.commit_changes(repo_path, rewrite["rewritten"])
+            sha = self.commit_changes(repo_path, cast(list[str], rewrite["rewritten"]))
             committed = True
         return AbsorptionResult(
             repo_url=repo_url,
             repo_path=str(repo_path),
-            files_analyzed=int(summary["python_files"]),
-            files_rewritten=int(rewrite["count"]),
+            files_analyzed=cast(int, summary["python_files"]),
+            files_rewritten=cast(int, rewrite["count"]),
             validation_passed=bool(report["passed"]),
             committed=committed,
             details={"summary": summary, "rewrite": rewrite, "validation": report, "sha": sha},

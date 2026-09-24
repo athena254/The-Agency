@@ -49,9 +49,7 @@ def _check_version(value: str) -> str:
     if not isinstance(value, str):
         raise TypeError("version must be a string.")
     if not _VERSION_RE.match(value):
-        raise ValueError(
-            f"invalid version {value!r}: must be exact dotted numeric X.Y.Z."
-        )
+        raise ValueError(f"invalid version {value!r}: must be exact dotted numeric X.Y.Z.")
     return value
 
 
@@ -114,7 +112,7 @@ class WorkflowRun:
     version: str
     actor_id: str
     status: str
-    step_results: dict[str, dict] = field(default_factory=dict)
+    step_results: dict[str, dict[str, object]] = field(default_factory=dict)
     created_at: str = ""
     completed_at: str | None = None
 
@@ -145,9 +143,7 @@ def _validate_dag(definition: WorkflowDefinition) -> None:
             if dep == step.step_id:
                 raise ValueError(f"step {step.step_id!r} depends on itself.")
             if dep not in seen:
-                raise ValueError(
-                    f"step {step.step_id!r} has unknown dependency {dep!r}."
-                )
+                raise ValueError(f"step {step.step_id!r} has unknown dependency {dep!r}.")
     # Cycle detection (DFS).
     adjacency = {step.step_id: list(step.depends_on) for step in steps}
     visiting: set[str] = set()
@@ -259,9 +255,7 @@ class WorkflowRegistry:
             (stored.workflow_id, stored.version),
         ).fetchone()
         if existing is not None:
-            raise ValueError(
-                f"duplicate version {stored.workflow_id!r} {stored.version!r}."
-            )
+            raise ValueError(f"duplicate version {stored.workflow_id!r} {stored.version!r}.")
         import datetime as _dt
 
         created_at = _dt.datetime.now(_dt.UTC).isoformat()
@@ -295,8 +289,7 @@ class WorkflowRegistry:
         """Return versions in insertion order."""
         _check_id(workflow_id, "workflow_id")
         rows = self._conn.execute(
-            "SELECT definition_json FROM workflow_definitions "
-            "WHERE workflow_id = ? ORDER BY rowid",
+            "SELECT definition_json FROM workflow_definitions WHERE workflow_id = ? ORDER BY rowid",
             (workflow_id,),
         ).fetchall()
         return [_definition_from_json(row[0]) for row in rows]
