@@ -252,8 +252,7 @@ class ClaudeCodeBridge(Bridge):
         input_tokens = output_tokens = 0
         tool_calls: list[Any] = []
         for line in raw.splitlines():
-            for chunk in self._parse_sse_line(line):
-                chunks.append(chunk)
+            chunks.extend(self._parse_sse_line(line))
             try:
                 event = json.loads(line.removeprefix("data:").strip()) if line.strip() else None
             except (json.JSONDecodeError, ValueError):

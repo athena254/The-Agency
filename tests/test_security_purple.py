@@ -2,7 +2,7 @@
 
 import pytest
 
-from agency.security.blue.defender import Threat, ThreatKind, ThreatSeverity
+from agency.security.blue.defender import BlueTeamError, Threat, ThreatKind, ThreatSeverity
 from agency.security.purple.validator import PurpleTeam, PurpleTeamError, Verdict
 
 
@@ -54,7 +54,7 @@ def test_validate_finding_unknown_raises(test_purple_team: PurpleTeam):
 
 
 def test_run_attack_defense_unknown_ids(test_purple_team: PurpleTeam):
-    with pytest.raises(Exception):
+    with pytest.raises((BlueTeamError, PurpleTeamError)):
         test_purple_team.run_attack_defense_test("test-missing", "def-missing")
 
 

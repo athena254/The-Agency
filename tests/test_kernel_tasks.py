@@ -107,7 +107,7 @@ async def test_failed_carries_error_and_output():
 
 async def test_priority_validation():
     manager = TaskManager()
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):
         await manager.create_task(created_by="a", priority=99)
 
 

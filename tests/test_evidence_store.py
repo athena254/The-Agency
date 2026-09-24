@@ -1,5 +1,7 @@
 """Tests for the evidence store: append-only evidence, levels, finding CRUD."""
 
+import sqlite3
+
 import pytest
 
 from agency.evidence.levels import EvidenceLevelManager
@@ -30,7 +32,7 @@ async def test_add_and_get_finding(test_evidence_store: EvidenceStore):
 async def test_duplicate_finding_rejected(test_evidence_store: EvidenceStore):
     finding = _finding()
     await test_evidence_store.add_finding(finding)
-    with pytest.raises(Exception):
+    with pytest.raises(sqlite3.IntegrityError):
         await test_evidence_store.add_finding(finding)
 
 
