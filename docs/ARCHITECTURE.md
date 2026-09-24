@@ -27,8 +27,8 @@ It is preserved in §5+ for context, not as build guidance.
                     BUTLER                  human interaction + scoped context
                       |                     ButlerService.handle_message(message,
                       |                     sender, context); sender-scoped recall
-                      |                     via chat-{sender}; NO independent
-                      |                     thread/workspace store yet
+                      |                     via chat-{sender}; optional trusted
+                      |                     thread history via SQLite store
                       |                     (src/agency/butler/service.py,
                       |                      router.py, server.py, config.py)
                       v
@@ -71,14 +71,12 @@ It is preserved in §5+ for context, not as build guidance.
       vote persistence PLANNED
 
    +----------------------------------------------------------+
-   | PLANNED — drawn dashed, not implemented:                 |
+   | PARTIAL: owner-scoped threads, skill registry, workflows  |
+   | PLANNED — not implemented:                                 |
    |  Agent Factory (versioned spec → validate → evaluate →   |
    |    register → deploy → retire)                           |
-   |  Skill registry (immutable skill_id/version)             |
-   |  Workflow registry + deterministic executor              |
-   |    (bounded DAG, pinned versions, allowlisted ops)       |
    |  Forge — Agency-native software factory + coding agent   |
-   |  Independent thread / workspace / project store          |
+   |  Authenticated thread API, project UI and full workspace  |
    +----------------------------------------------------------+
 ```
 
@@ -108,9 +106,9 @@ patterns for future Forge/skills work — not a dependency, not auto-imported
 | Sandbox / security / audit / evidence / risk | Partial | `src/agency/security/sandbox/`, `security/red|blue|purple/`, `kernel/audit.py`, `kernel/policies.py`, `evidence/`, `risk/`; isolation guarantees unaudited |
 | API server + CLI | Partial | `src/agency/api/server.py`, `api/routers/`, `src/agency/cli/main.py` (`agency` entry point) |
 | CI workflow | Exists, outcome unverified | `.github/workflows/ci.yml`, `cd.yml` exist; success/live operation not verified here |
-| Threads / workspaces / projects | Planned | No module under `src/agency`; other agents are implementing threads elsewhere — not claimed here |
+| Threads / workspaces / projects | Partial | `butler/threads.py` persists owner-scoped threads/workspaces; Butler accepts trusted thread context, unauthenticated HTTP denies selection; projects/UI planned |
 | Agent Factory | Planned | Only identity + runtime registries; no versioned factory gate |
-| Skill registry / workflow registry + executor | Planned | No Agency-native modules; other agents implementing elsewhere — not claimed here |
+| Skill registry / workflow registry + executor | Partial | `skills/registry.py` and `workflows/` implement versioned metadata and a bounded deterministic runner; agent/Forge integration pending |
 | Forge + native coding agent | Planned | `src/agency/addons/dark_factory/`, `ghost_factory` are standalone prototypes, not an integrated Forge |
 
 No precise completion percentages are stated: the evidence does not warrant them.

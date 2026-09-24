@@ -182,12 +182,21 @@ def create_app(config: ButlerConfig | None = None) -> FastAPI:
     )
     async def post_message(payload: MessageRequest, request: Request) -> MessageResponse:
         service = _get_service(request)
+        # This public endpoint accepts a caller-supplied sender; until it has
+        # authentication, it must not expose owner-scoped thread histories.
+        if "thread_id" in payload.context:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Thread selection requires an authenticated channel.",
+            )
         if len(payload.message) > service.config.max_message_length:
             raise HTTPException(
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 detail=f"message exceeds {service.config.max_message_length} chars.",
             )
-        agent = await service.route(payload.message, {**payload.context, "sender": payload.sender})
+        route_context = {**payload.context, "sender": payload.sender}
+        route_context.pop("memory_context", None)
+        agent = await service.route(payload.message, route_context)
         response = await service.handle_message(
             payload.message, payload.sender, dict(payload.context)
         )

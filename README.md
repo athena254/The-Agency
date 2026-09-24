@@ -2,7 +2,7 @@
 
 > Human → Butler → orchestrator/agents/tools, with Lattice coordination,
 > memory, policies/audit/sandbox as cross-cutting infrastructure.
-> Agent Factory, skill/workflow registries, and Forge are **planned**, not implemented.
+> Agent Factory and Forge are **planned**; thread, skill, and workflow foundations are partial.
 
 **Canonical direction:** `docs/SOURCE_CONSOLIDATED_BRIEF.md` (target design, all 51 sections)
 and `docs/SPEC_AGENCY_CORE_RECONCILIATION.md` (code-backed gap matrix and build slice).
@@ -21,8 +21,8 @@ are historical/superseded (see `docs/ARCHITECTURE.md`).
                       |
                     BUTLER                human interaction + scoped context
                       |                   (src/agency/butler/service.py;
-                      |                    sender-scoped recall only,
-                      |                    no independent thread store yet)
+                      |                    sender history + optional owner-scoped
+                      |                    SQLite threads on trusted channels)
                       v
                 ORCHESTRATOR              task submit/execute
                       |                   (src/agency/orchestrator.py)
@@ -45,9 +45,8 @@ are historical/superseded (see `docs/ARCHITECTURE.md`).
        lattice/)     memory/sms/) (src/agency/kernel/,
                                    src/agency/security/sandbox/)
 
-   PLANNED — not implemented: Agent Factory, skill registry,
-   workflow registry/executor, Forge (integrated software factory),
-   independent thread/workspace store.
+   PARTIAL: thread/workspace store, skill registry, bounded workflow runner.
+   PLANNED: Agent Factory, integrated Forge, authenticated thread API.
 ```
 
 Cross-cutting (partial, code-enforced where noted): security policies
@@ -60,7 +59,7 @@ provenance/evidence (`src/agency/evidence/`), sandbox isolation
 
 | Area | State | Evidence / note |
 |------|-------|-----------------|
-| Butler gateway | Partial | `src/agency/butler/service.py`, `server.py`, `router.py`; sender-scoped history only, no durable thread store |
+| Butler gateway | Partial | `service.py` routes optional trusted `thread_id` into an owner-scoped SQLite store; unauthenticated HTTP rejects thread selection |
 | Orchestrator + task pipeline | Partial | `src/agency/orchestrator.py`, `src/agency/kernel/tasks.py` |
 | Research agent | Exists, partial | `src/agency/agents/research/agent.py` exists (a prior status table wrongly said 0%); end-to-end behavior not verified here |
 | General/demo agents, planner, verifier | Exists, partial | `src/agency/agents/`; capability/eval coverage not claimed |
@@ -68,9 +67,9 @@ provenance/evidence (`src/agency/evidence/`), sandbox isolation
 | Memory | Partial | `src/agency/memory/sms/`; scoped per sender, hierarchical isolation planned |
 | Sandbox / security / audit | Partial | Isolation guarantees not audited; do not treat as production-hardened |
 | CI workflow | Exists, outcome unverified | `.github/workflows/ci.yml` (and `cd.yml`) exist; a prior roadmap row wrongly said 0%/planned. Workflow success and live operation were not verified for this docs pass |
-| Threads / workspaces | Planned | No thread/workspace module under `src/agency`; separate agents are working on threads on other branches — not claimed here |
+| Threads / workspaces | Partial | `src/agency/butler/threads.py` persists workspaces/threads/messages; project hierarchy, authenticated API and UI remain planned |
 | Agent Factory | Planned | Identity (`kernel/registry.py`) and runtime (`agents/registry.py`) registries exist; no versioned factory with validation/evaluation gate |
-| Skill registry, workflow registry/executor | Planned | No Agency-native modules under `src/agency`; separate agents are working on skills/workflows elsewhere — not claimed here |
+| Skill registry, workflow registry/executor | Partial | `src/agency/skills/`, `src/agency/workflows/` provide versioned metadata and a bounded allowlisted runner; not yet integrated with an agent/Forge execution path |
 | Forge (integrated software factory) | Planned | `src/agency/addons/dark_factory/` and `ghost_factory` are standalone prototypes, not an integrated Forge; no complete Forge is promised |
 | External bridges (Claude, Codex, Hermes, OpenClaw) | Partial adapters | `src/agency/bridges/`; optional integrations behind explicit boundaries, never architectural dependencies |
 
@@ -78,9 +77,11 @@ Status words used here are deliberately coarse (Exists / Partial / Planned / Mis
 No precise percentages are given because the evidence does not warrant them, and nothing
 above should be read as a production-readiness claim.
 
-## Quick Start (verified commands only)
+## Quick Start (local commands)
 
-Only commands whose targets exist in this checkout are listed. Broken historical
+Only commands whose targets exist in this checkout are listed. `agency agent list`
+and `agency task list` require a running API server and are not standalone commands.
+Broken historical
 instructions (`python -m theagency.gateways.launcher`, `pip install -e ".[all]"`,
 `docker-compose -f docker-compose.sandbox.yml`) have been removed; no replacement
 commands are invented for servers or services that are not defined here.
@@ -91,8 +92,7 @@ pip install -e ".[dev]"
 
 # CLI entry point (defined as agency = "agency.cli:main" in pyproject.toml)
 agency --help
-agency agent list
-agency task list
+
 
 # Tests
 python -m pytest tests/ -q
@@ -140,8 +140,7 @@ historical/superseded rather than deleting them.
   auto-imported from it.
 - Addons and bridges are not labeled production-ready. Prototypes (e.g. dark/ghost
   factory) do not imply a complete Forge.
-- Thread/skill/workflow work happening on other branches is not claimed here.
-- No commits and no live-service runs were part of this documentation pass.
+- The thread, skill, and workflow modules on this branch are partial foundations, not the mature system.
 
 ## License
 

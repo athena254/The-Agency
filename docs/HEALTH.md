@@ -11,8 +11,9 @@
 
 **Overall status**: scaffolding exists across the pipeline (Butler → orchestrator →
 agents/tools, Lattice, memory, policies/audit/sandbox), but the differentiators —
-durable threads, Agent Factory, skill/workflow registries, integrated Forge, durable
-governance — are planned, not built. Two prior status tables were factually wrong
+authenticated multi-threaded work, Agent Factory, integrated Forge, durable
+governance — remain incomplete. Thread, skill and workflow foundations now exist.
+Two prior status tables were factually wrong
 (research agent "0%", CI/CD "0%"); both are corrected below.
 
 ## Component Health
@@ -35,7 +36,7 @@ but production hardness was not established in this pass.
 
 | Component | State | Notes |
 |-----------|-------|-------|
-| Butler gateway | Partial | Routing + audit work; history is sender-scoped (`chat-{sender}`), no thread store |
+| Butler gateway | Partial | Sender history plus owner-scoped SQLite thread history for trusted callers; HTTP thread selection blocked pending auth |
 | Research agent | Exists, partial | `src/agency/agents/research/agent.py` exists — prior "not started" rows were wrong; behavior unverified |
 | General / demo / planner / verifier | Exists, partial | `src/agency/agents/`; eval coverage not claimed |
 | Tools (registry, driver, builtin) | Partial | `src/agency/tools/`; deterministic-first per brief, permission story incomplete |
@@ -51,13 +52,13 @@ but production hardness was not established in this pass.
 | QA / adversarial critics | Partial | `agents/verifier.py`, `security/red|blue|purple/`; formal blocking contract planned |
 | Sandbox / security / audit / evidence / risk | Partial | `security/sandbox/`, `kernel/audit.py`, `kernel/policies.py`, `evidence/`, `risk/`; isolation guarantees unaudited |
 
-### Planned (the actual product gaps): Missing as integrated systems
+### Foundations and remaining product gaps
 
 | Component | State | Notes |
 |-----------|-------|-------|
-| Durable threads / workspaces | Planned | No module under `src/agency`; other branches working on threads — not claimed here |
+| Durable threads / workspaces | Partial | `butler/threads.py` persists threads/messages; authenticated HTTP and project UI pending |
 | Agent Factory (versioned) | Planned | No factory gate; follows skill/workflow contracts per reconciliation spec |
-| Skill registry / workflow registry + executor | Planned | No Agency-native modules; other branches working on skills/workflows — not claimed here |
+| Skill registry / workflow registry + executor | Partial | Versioned registries and a bounded deterministic runner exist; no agent/Forge integration yet |
 | Forge + native coding agent | Planned | `addons/dark_factory/`, `ghost_factory` are prototypes, not an integrated factory; no complete Forge promised |
 | CI/CD lineage | Exists, outcome unverified | `.github/workflows/ci.yml`, `cd.yml` exist — prior "planned" rows were wrong; success not verified |
 
@@ -82,8 +83,8 @@ separate pattern source, not a dependency.
 ## Critical Risks
 
 ### Risk 1: Differentiators still missing
-The thread store, Agent Factory, skill/workflow registries, and Forge — the systems
-that make the Agency more than an agent runner — are planned, not built.
+Agent Factory, Forge, authenticated thread API and end-to-end skill/workflow integration
+are still missing; existing registry/runner foundations alone are not the finished product.
 **Mitigation**: follow the reconciliation build slice in order; do not claim outputs
 from other branches until they land and pass gates.
 
@@ -113,9 +114,9 @@ a smoke test before claiming health in numbers.
 ## Recommendations
 
 ### Immediate
-1. Keep this docs pass uncommitted and reviewable; only the four owned files changed.
-2. Land the thread-store slice first (durable identity, owner checks, isolation tests).
-3. Then skill registry → workflow registry/executor → Agent Factory, per the
+1. Review and harden the integrated thread, skill and workflow foundations.
+2. Add real authentication before enabling thread selection through HTTP.
+3. Then Agent Factory, per the
    reconciliation spec. Forge, durable approvals, and release automation after.
 
 ### Short-term
@@ -134,7 +135,8 @@ a smoke test before claiming health in numbers.
 |-----------|--------------|
 | Scaffolding (Butler/orchestrator/agents/tools/Lattice/memory/audit/sandbox) | Partial — code exists, maturity varies |
 | Research agent, CI workflows | Exist — outcomes/behavior unverified here |
-| Threads, Agent Factory, skills, workflows, Forge, durable governance | Planned |
+| Thread store, skill registry, workflow runner | Partial foundations; tests pass, full runtime integration pending |
+| Agent Factory, Forge, durable governance | Planned |
 | Production deployment | Planned; no date promised |
 
 Old milestone tables with precise week counts and "on track / behind" deltas are
@@ -142,9 +144,9 @@ withdrawn — they rested on the unverified percentages removed above.
 
 ## Simple Summary
 
-The Agency has working scaffolding and a clear, preserved target design, but its
-defining systems are still planned. Prior docs overstated readiness and understated
-what exists (research agent, CI). This assessment corrects both directions and holds
-future claims to file-and-line evidence.
+The Agency has working scaffolding and partial thread, skill, and workflow foundations,
+but its full governed product is not built: Agent Factory, Forge, durable governance,
+and authenticated thread access remain planned. Prior docs overstated readiness and
+understated what exists (research agent, CI). Claims remain tied to code evidence.
 
 *No precise grade or percentage is given — the evidence does not warrant one.*

@@ -33,6 +33,36 @@ def _registry(tmp_path, allowed=ALLOWED) -> SkillRegistry:
     return SkillRegistry(str(tmp_path / "skills.db"), allowed_permissions=allowed)
 
 
+@pytest.mark.parametrize(
+    "status", [SkillStatus.TESTING, SkillStatus.APPROVED, SkillStatus.PUBLISHED]
+)
+def test_registration_cannot_skip_lifecycle(tmp_path, status):
+    reg = _registry(tmp_path)
+    try:
+        with pytest.raises(ValueError, match="DRAFT"):
+            reg.register(_make_spec(status=status))
+        assert reg.list_versions("summarize-docs") == []
+    finally:
+        reg.close()
+
+
+def test_lifecycle_evidence_survives_restart(tmp_path):
+    reg = _registry(tmp_path)
+    reg.register(_make_spec())
+    reg.transition("summarize-docs", "1.0.0", SkillStatus.TESTING)
+    reg.transition("summarize-docs", "1.0.0", SkillStatus.APPROVED, "tests passed")
+    reg.publish("summarize-docs", "1.0.0", "human review")
+    reg.close()
+    reopened = _registry(tmp_path)
+    try:
+        events = reopened.list_events("summarize-docs", "1.0.0")
+        assert [event["to_status"] for event in events] == ["TESTING", "APPROVED", "PUBLISHED"]
+        assert events[-1]["evidence"] == "human review"
+        assert events[-1]["at"]
+    finally:
+        reopened.close()
+
+
 def test_register_get_roundtrip(tmp_path):
     reg = _registry(tmp_path)
     try:

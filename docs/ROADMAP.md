@@ -28,7 +28,7 @@
 | Retrieval / memory | Partial | `src/agency/memory/sms/store.py`, `retrieval.py`, `lifecycle.py`, `cpr.py` |
 | Agent lifecycle scaffolding | Partial | `src/agency/kernel/registry.py`, `agents/registry.py`, `agents/loop.py`, `agents/executor.py` |
 | Model routing (LLM harness) | Partial | `src/agency/llm/` (openai/anthropic/ollama/echo providers) |
-| Butler gateway + routing | Partial | `src/agency/butler/`; sender-scoped history only, no durable threads yet |
+| Butler gateway + routing | Partial | `src/agency/butler/`; sender history and trusted owner-scoped SQLite threads; HTTP thread selection awaits auth |
 | Sandbox / process isolation | Partial | `src/agency/security/sandbox/`; isolation guarantees unaudited |
 | QA / adversarial critics | Partial | `src/agency/agents/verifier.py`, `security/red|blue|purple/`; blocking decision contract planned |
 | Research agent | Exists, partial | `src/agency/agents/research/agent.py`; behavior unverified here |
@@ -39,14 +39,14 @@
 | CI / CD workflows | Exists, outcome unverified | `.github/workflows/ci.yml`, `cd.yml` |
 | Prototype factories (dark/ghost) | Prototypes only | Standalone; not an integrated Forge |
 
-### Planned (not implemented — other branches may be working on threads/skills first)
+### New partial foundations and remaining planned systems
 
 | Item | State | Planned next step (per reconciliation spec) |
 |------|-------|----------------------------------------------|
-| Durable thread / workspace / project store | Planned | SQLite-backed identity + message metadata, owner checks, isolation tests |
+| Durable thread / workspace / project store | Partial | SQLite thread/workspace store and Butler service path; authenticated API and project model pending |
 | Agent Factory (versioned) | Planned | Spec validation → evaluation → versioned registry → deployment gate |
-| Skill registry (Agency-native) | Planned | Immutable `(skill_id, version)` records, explicit permissions, no arbitrary code execution |
-| Workflow registry + deterministic executor | Planned | Bounded DAG validation, pinned versions, allowlisted ops, fail-closed |
+| Skill registry (Agency-native) | Partial | Versioned metadata, lifecycle evidence, explicit permissions; skill runtime binding pending |
+| Workflow registry + deterministic executor | Partial | Bounded DAG validation, pinned versions, allowlisted operations; no Agent/Forge integration or crash resume |
 | Forge (integrated) + native coding agent | Planned | Specify before implementing; reuse audited primitives; no complete Forge promised |
 | Durable governance votes / approvals | Planned | Persist proposals/votes; human-approval flow |
 | Workspace/project UI, branching | Planned | After thread isolation lands |
@@ -59,8 +59,8 @@ auto-imported.
 ## Build sequence (from the brief and reconciliation spec)
 
 1. **Architecture reconciliation** — this docs pass (canonical boundaries, honest statuses).
-2. **Thread context foundation** — durable store, ownership checks, isolation tests.
-3. **Agent Factory prerequisites** — skill registry → workflow registry/executor → factory.
+2. **Thread context foundation** — store, ownership checks, Butler internal routing implemented; authenticated public API pending.
+3. **Agent Factory prerequisites** — skill and workflow registries implemented as partial foundations; factory pending.
 4. **Forge** — architecture, bounded coding-agent profile, software-factory workflows.
 5. **Security and governance hardening** — capability permissions, sandbox audit, approval gates.
 6. **Competitive maturity** — benchmarks, UX, documented differentiation (brief §22).

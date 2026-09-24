@@ -14,12 +14,14 @@ import asyncio
 import os
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import structlog
 
 from agency.butler.config import ButlerConfig
 from agency.butler.router import MessageRouter
+from agency.butler.threads import Thread, ThreadMessage, ThreadStore, Workspace
 from agency.kernel.audit import AuditEntry, AuditLog
 from agency.kernel.identity import Agent
 from agency.memory.sms.models import MemoryItem, MemoryTier
@@ -52,6 +54,7 @@ class ButlerService:
         audit_log: AuditLog | None = None,
         memory_store: MemoryStore | None = None,
         llm: LLMCallable | None = None,
+        thread_store: ThreadStore | None = None,
     ) -> None:
         self._config = config or ButlerConfig()
         self._orchestrator = orchestrator or AgencyOrchestrator()
@@ -61,6 +64,8 @@ class ButlerService:
         # (A standalone MemoryStore here was a second, separate DB.)
         self._memory = memory_store or self._orchestrator._memory_store
         self._memory_retrieval = RetrievalEngine(self._memory)
+        self._threads = thread_store
+        self._owns_threads = thread_store is None
         self._lattice = None  # Will be set from orchestrator
         self._llm = llm
         self._log = structlog.get_logger(__name__)
@@ -95,6 +100,34 @@ class ButlerService:
         """Underlying agency orchestrator."""
         return self._orchestrator
 
+    @property
+    def thread_store(self) -> ThreadStore:
+        """Lazy persistent store; an injected store retains caller ownership."""
+        if self._threads is None:
+            memory_path = self._memory.db_path
+            if memory_path == ":memory:":
+                thread_path = ":memory:"
+            else:
+                path = Path(memory_path).with_name("threads.db")
+                path.parent.mkdir(parents=True, exist_ok=True)
+                thread_path = str(path)
+            self._threads = ThreadStore(thread_path)
+        return self._threads
+
+    def create_workspace(self, owner: str, title: str) -> Workspace:
+        """Create a persistent workspace for a trusted caller identity."""
+        return self.thread_store.create_workspace(owner, title)
+
+    def create_thread(
+        self, owner: str, workspace_id: str, title: str, parent_thread_id: str | None = None
+    ) -> Thread:
+        """Create an isolated thread (or provenance-only branch)."""
+        return self.thread_store.create_thread(owner, workspace_id, title, parent_thread_id)
+
+    def list_thread_messages(self, owner: str, thread_id: str) -> list[ThreadMessage]:
+        """Read only the specified owner's thread history."""
+        return self.thread_store.list_messages(owner, thread_id)
+
     # ------------------------------------------------------------------ #
     # Lifecycle
     # ------------------------------------------------------------------ #
@@ -118,6 +151,9 @@ class ButlerService:
         if not self._started:
             return
         await self._orchestrator.stop()
+        if self._owns_threads and self._threads is not None:
+            self._threads.close()
+            self._threads = None
         self._started = False
         self._log.info("butler.stopped")
 
@@ -169,12 +205,25 @@ class ButlerService:
             text = text[: self._config.max_message_length]
 
         merged: dict[str, Any] = {**context, "sender": sender}
+        merged.pop("memory_context", None)  # Recalled memory is never caller-supplied.
+        thread_id = merged.get("thread_id")
+        if thread_id is not None:
+            # Authorize before routing, recalling, executing, or writing anything.
+            self.thread_store.get_thread(sender, thread_id)
         started = datetime.now(UTC)
 
         # Recall earlier conversation with this sender so the agent has
         # continuity (parity with OpenClaw/Hermes). Best-effort — never
         # blocks the turn.
-        memory_context = await self._recall_history(sender, text)
+        if thread_id is not None:
+            history = self.thread_store.list_messages(sender, thread_id)[-10:]
+            memory_context = (
+                "Earlier conversation:\n"
+                + "\n".join(f"- [{item.role}] {item.content[:300]}" for item in history)
+                if history else ""
+            )
+        else:
+            memory_context = await self._recall_history(sender, text)
         if memory_context:
             merged["memory_context"] = memory_context
 
@@ -201,7 +250,11 @@ class ButlerService:
             result = "failed"
             self._log.exception("butler.execute_failed", sender=sender)
 
-        await self._store_turn(sender, agent, text, response)
+        if thread_id is not None:
+            self.thread_store.append_message(sender, thread_id, "user", text)
+            self.thread_store.append_message(sender, thread_id, "assistant", response)
+        else:
+            await self._store_turn(sender, agent, text, response)
         await self._audit_append(
             agent=agent.id,
             action="butler.handle_message",

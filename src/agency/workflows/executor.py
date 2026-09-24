@@ -52,10 +52,10 @@ def _check_inputs(inputs: dict) -> dict:
 
 
 def _sanitize_error(exc: BaseException) -> str:
-    message = f"{type(exc).__name__}: {exc}"
-    if len(message) > 1000:
-        message = message[:1000]
-    return message
+    # Exception messages may contain credentials or user data. Keep only the
+    # exception type in durable run state; detailed diagnostics belong in a
+    # separately protected audit channel.
+    return type(exc).__name__
 
 
 def topological_order(definition: WorkflowDefinition) -> list[WorkflowStep]:

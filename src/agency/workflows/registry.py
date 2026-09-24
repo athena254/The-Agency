@@ -55,13 +55,13 @@ def _check_version(value: str) -> str:
     return value
 
 
-def _dumps_bounded(value: object) -> str:
+def _dumps_bounded(value: object, max_bytes: int = MAX_JSON_BYTES) -> str:
     try:
         text = json.dumps(value, sort_keys=True, ensure_ascii=False)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"value is not JSON serializable: {exc}") from None
-    if len(text.encode("utf-8")) > MAX_JSON_BYTES:
-        raise ValueError(f"JSON value exceeds {MAX_JSON_BYTES} bytes.")
+    if len(text.encode("utf-8")) > max_bytes:
+        raise ValueError(f"JSON value exceeds {max_bytes} bytes.")
     return text
 
 
@@ -127,7 +127,7 @@ class WorkflowRun:
             raise ValueError("actor_id must be nonblank.")
         if self.status not in ("PENDING", "RUNNING", "COMPLETED", "FAILED"):
             raise ValueError(f"invalid status {self.status!r}.")
-        copied = {key: dict(value) for key, value in dict(self.step_results).items()}
+        copied = copy.deepcopy(self.step_results)
         object.__setattr__(self, "step_results", copied)
 
 
@@ -305,7 +305,9 @@ class WorkflowRegistry:
         """Insert or replace a run record (used by the executor)."""
         if not isinstance(run, WorkflowRun):
             raise TypeError("run must be a WorkflowRun.")
-        step_results_json = _dumps_bounded(run.step_results)
+        # Each step output has a 64KB cap; a whole run can legitimately
+        # contain many such outputs and must not fail at the single-step cap.
+        step_results_json = _dumps_bounded(run.step_results, MAX_JSON_BYTES * MAX_STEPS)
         self._conn.execute(
             "INSERT OR REPLACE INTO workflow_runs (run_id, workflow_id, version, "
             "actor_id, status, step_results_json, created_at, completed_at) "

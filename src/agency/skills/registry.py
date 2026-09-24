@@ -13,6 +13,7 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -148,6 +149,8 @@ def _validate_spec(spec: SkillSpec, allowed_permissions: frozenset[str]) -> None
         raise ValueError("provenance must be a nonblank string.")
     if not isinstance(spec.status, SkillStatus):
         raise ValueError("status must be a SkillStatus.")  # noqa: TRY004
+    if spec.status is not SkillStatus.DRAFT:
+        raise ValueError("new skill versions must begin in DRAFT status.")
     for label, mapping in (("inputs", spec.inputs), ("outputs", spec.outputs)):
         if not isinstance(mapping, dict):
             raise ValueError(f"{label} must be a mapping.")  # noqa: TRY004
@@ -199,6 +202,12 @@ class SkillRegistry:
             "provenance TEXT NOT NULL, "
             "status TEXT NOT NULL, "
             "PRIMARY KEY (skill_id, version))"
+        )
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS skill_events ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, skill_id TEXT NOT NULL, "
+            "version TEXT NOT NULL, from_status TEXT NOT NULL, "
+            "to_status TEXT NOT NULL, evidence TEXT NOT NULL, at TEXT NOT NULL)"
         )
         self._conn.commit()
 
@@ -278,12 +287,28 @@ class SkillRegistry:
             raise ValueError(f"illegal transition: {current.status.value} -> {target.value}.")
         if target.value in _EVIDENCE_STATUSES and not _is_nonblank(evidence):
             raise ValueError(f"transition to {target.value} requires nonempty evidence.")
-        self._conn.execute(
-            "UPDATE skills SET status = ? WHERE skill_id = ? AND version = ?",
-            (target.value, skill_id, version),
-        )
-        self._conn.commit()
+        with self._conn:
+            self._conn.execute(
+                "UPDATE skills SET status = ? WHERE skill_id = ? AND version = ?",
+                (target.value, skill_id, version),
+            )
+            self._conn.execute(
+                "INSERT INTO skill_events (skill_id, version, from_status, to_status, evidence, at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (skill_id, version, current.status.value, target.value, evidence,
+                 datetime.now(UTC).isoformat()),
+            )
         return self.get(skill_id, version)
+
+    def list_events(self, skill_id: str, version: str) -> list[dict[str, str]]:
+        """Return durable evidence for lifecycle transitions in order."""
+        self.get(skill_id, version)
+        rows = self._conn.execute(
+            "SELECT from_status, to_status, evidence, at FROM skill_events "
+            "WHERE skill_id = ? AND version = ? ORDER BY id",
+            (skill_id, version),
+        ).fetchall()
+        return [dict(zip(("from_status", "to_status", "evidence", "at"), row)) for row in rows]
 
     def publish(self, skill_id: str, version: str, evidence: str) -> SkillSpec:
         """Publish an APPROVED skill; requires nonempty evidence, status-only update."""

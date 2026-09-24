@@ -401,8 +401,8 @@ def test_failure_stops_later_steps_and_persists(tmp_path) -> None:
     assert run.status == "FAILED"
     assert "c" not in run.step_results
     assert run.step_results["b"]["status"] == "failed"
-    assert "kaput" in run.step_results["b"]["error"]
-    assert "Traceback" not in run.step_results["b"]["error"]
+    assert run.step_results["b"]["error"] == "RuntimeError"
+    assert "kaput" not in run.step_results["b"]["error"]
     persisted = registry2.get_run(run.run_id)
     assert persisted.status == "FAILED"
     assert "c" not in persisted.step_results
@@ -500,4 +500,14 @@ def test_unknown_workflow_and_run_raise_keyerror(tmp_path) -> None:
         registry.get("missing", "1.0.0")
     with pytest.raises(KeyError):
         registry.get_run("nope")
+    registry.close()
+
+
+def test_multiple_bounded_step_outputs_persist_as_one_run(tmp_path) -> None:
+    registry = make_registry(tmp_path)
+    registry.register(make_definition(steps=(make_step("a"), make_step("b"))))
+    executor = WorkflowExecutor(registry, {"op": lambda _inputs, _prev: "x" * 40_000})
+    run = executor.run("demo", "1.0.0", {}, "actor")
+    assert run.status == "COMPLETED"
+    assert len(registry.get_run(run.run_id).step_results) == 2
     registry.close()
