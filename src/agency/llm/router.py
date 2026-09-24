@@ -183,15 +183,19 @@ class LLMRouter:
 
     def _select(self, task: str, context: dict[str, Any] | None) -> tuple[LLMAdapter, str | None]:
         ctx = context or {}
+        if ctx.get("provider"):
+            # An explicit provider is a constraint, not a preference. Never
+            # route private/local input to a different backend on failure.
+            preset = str(ctx["provider"])
+            adapter = self._adapter_for_preset(preset)
+            if adapter is None:
+                raise ValueError(f"requested provider {preset!r} is unavailable")
+            self._log.debug("route_explicit_provider", provider=preset)
+            return adapter, None
         if ctx.get("model"):
-            # Explicit override — let the default adapter resolve it.
+            # Model overrides apply to the selected default adapter only.
             self._log.debug("route_explicit_model", model=ctx["model"])
             return self._adapter, None
-        if ctx.get("provider"):
-            adapter = self._adapter_for_preset(str(ctx["provider"]))
-            if adapter is not None:
-                self._log.debug("route_explicit_provider", provider=ctx["provider"])
-                return adapter, None
         kind = self._kind_of(task, ctx)
         for preset in self._routes.get(kind, ()):
             adapter = self._adapter_for_preset(preset)

@@ -98,3 +98,46 @@ async def test_unconfigured_preset_falls_back_to_local_echo(monkeypatch: pytest.
     # Real echo adapter: this path must not call any network provider.
     response = await router.route("short task")
     assert isinstance(response, str) and response
+
+
+@pytest.mark.asyncio
+async def test_unavailable_explicit_local_provider_never_falls_back_remote(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    default = LLMAdapter(provider="echo", model="default")
+    remote = LLMAdapter(provider="openai", model="remote")
+    router = LLMRouter(adapter=default, routes={TaskKind.FAST: ("remote",)})
+    calls: list[str] = []
+
+    def preset(name: str) -> LLMAdapter | None:
+        calls.append(name)
+        return remote if name == "remote" else None
+
+    monkeypatch.setattr(router, "_adapter_for_preset", preset)
+    with pytest.raises(ValueError, match="requested provider 'local' is unavailable"):
+        await router.route("short task", {"provider": "local"})
+    with pytest.raises(ValueError, match="requested provider 'local' is unavailable"):
+        _ = [chunk async for chunk in router.route_stream("short task", {"provider": "local"})]
+    with pytest.raises(ValueError, match="requested provider 'local' is unavailable"):
+        router.explain("short task", {"provider": "local"})
+    assert calls == ["local", "local", "local"]
+
+
+@pytest.mark.asyncio
+async def test_explicit_provider_remains_binding_with_model_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    default = LLMAdapter(provider="echo", model="default")
+    selected = LLMAdapter(provider="echo", model="selected")
+    router = _router(default)
+    monkeypatch.setattr(router, "_adapter_for_preset", lambda name: selected if name == "local" else None)
+    seen: list[dict[str, Any]] = []
+
+    async def generate(_prompt: str, context: dict[str, Any] | None = None) -> str:
+        seen.append(dict(context or {}))
+        return "from-local"
+
+    monkeypatch.setattr(selected, "generate", generate)
+    monkeypatch.setattr(default, "generate", lambda *_args, **_kwargs: pytest.fail("default used"))
+    assert await router.route("short task", {"provider": "local", "model": "chosen"}) == "from-local"
+    assert seen == [{"provider": "echo", "model": "chosen"}]
