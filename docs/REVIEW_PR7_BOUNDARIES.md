@@ -19,3 +19,9 @@ These probes are evidence for the named cases only. Existing tests are in `tests
 - Tests/probes may mutate `data/lattice.db`. The reviewer restored that file in its detached worktree; an independent Git status check confirmed it was clean. This did not touch the owner's `main` worktree.
 
 Conclusion: bounded negative tests did not reproduce the prior identity/path concerns, but remaining Windows race and wider security review must be handled before production exposure. `docs/SPEC_PR7_READINESS.md` remains the acceptance gate; do not mark the draft PR merge-ready based only on this report.
+
+## Follow-up review of routing and webhook changes
+
+A separate adversarial read-only review of `e131efb` **did not pass**. It reproduced an explicit falsey-provider value reaching a remote route, an explicit local backend failure returning an echo instead of failing, and a webhook array/null body reaching the update handler. Commit `8669ad2` rejects any supplied invalid provider, forces strict failure for explicitly selected providers, and rejects non-object webhook JSON. Hermetic regression cases cover these paths, but this is not a completed external security audit.
+
+The follow-up reviewer also disclosed a constraint violation: an initial probe sent **four requests** with only the literal test prompt `short task` and a dummy key to Anthropic; all returned 401. That probe was not authorized as a live-provider test. The reviewer switched to blocked-network mocks afterward. Do not repeat live calls in independent tests; keep review probes offline by construction.
