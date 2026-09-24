@@ -72,6 +72,7 @@ PID_FILE = Path(os.environ.get("AGENCY_PID_FILE", str(Path.home() / ".theagency"
 # Helpers
 # --------------------------------------------------------------------------- #
 
+
 def _server_url(value: str | None = None) -> str:
     base = (value or os.environ.get("AGENCY_SERVER_URL", DEFAULT_SERVER_URL)).rstrip("/")
     return base
@@ -123,6 +124,7 @@ def _table(title: str, columns: list[str]) -> Table:
 # Server lifecycle: start / stop / status
 # --------------------------------------------------------------------------- #
 
+
 @app.command("start")
 def start(
     host: str = typer.Option("127.0.0.1", "--host", help="Interface to bind."),
@@ -136,15 +138,25 @@ def start(
     if daemon:
         PID_FILE.parent.mkdir(parents=True, exist_ok=True)
         cmd = [
-            sys.executable, "-m", "uvicorn", "agency.api.server:app",
-            "--host", host, "--port", str(port), "--log-level", log_level,
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "agency.api.server:app",
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "--log-level",
+            log_level,
         ]
         if reload:
             cmd.append("--reload")
         log.info("agency.start.daemon", host=host, port=port)
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         PID_FILE.write_text(str(proc.pid), encoding="utf-8")
-        console.print(f"[green]Agency server starting[/green] (pid {proc.pid}) on http://{host}:{port}")
+        console.print(
+            f"[green]Agency server starting[/green] (pid {proc.pid}) on http://{host}:{port}"
+        )
         return
 
     console.print(f"[green]Starting Agency server[/green] on http://{host}:{port} (Ctrl+C to stop)")
@@ -215,18 +227,23 @@ def status(
     status_value = payload.get("status", "unknown") if isinstance(payload, dict) else "unknown"
     style = "green" if status_value == "ok" else "yellow"
     body = json.dumps(payload, indent=2, default=str) if isinstance(payload, dict) else str(payload)
-    console.print(Panel(body, title=f"Agency status: [{style}]{status_value}[/{style}]", expand=False))
+    console.print(
+        Panel(body, title=f"Agency status: [{style}]{status_value}[/{style}]", expand=False)
+    )
 
 
 # --------------------------------------------------------------------------- #
 # Agents: agency agent list / create
 # --------------------------------------------------------------------------- #
 
+
 @agent_app.command("list")
 def agent_list(
     server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
     domain: str | None = typer.Option(None, "--domain", "-d", help="Filter by domain."),
-    include_revoked: bool = typer.Option(False, "--include-revoked", help="Include revoked agents."),
+    include_revoked: bool = typer.Option(
+        False, "--include-revoked", help="Include revoked agents."
+    ),
     limit: int = typer.Option(100, "--limit", min=1, max=1000),
     output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
 ) -> None:
@@ -262,8 +279,12 @@ def agent_create(
     name: str = typer.Option(..., "--name", "-n", help="Human-readable agent name."),
     domain: str = typer.Option("general", "--domain", "-d", help="Operational domain."),
     trust_level: str = typer.Option("unknown", "--trust", help="Trust level."),
-    capability: Annotated[list[str] | None, typer.Option("--capability", "-c", help="Capability (repeatable).")] = None,
-    agent_id: str | None = typer.Option(None, "--id", help="Explicit agent id (default: generated)."),
+    capability: Annotated[
+        list[str] | None, typer.Option("--capability", "-c", help="Capability (repeatable).")
+    ] = None,
+    agent_id: str | None = typer.Option(
+        None, "--id", help="Explicit agent id (default: generated)."
+    ),
     server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
     output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
 ) -> None:
@@ -294,7 +315,9 @@ def agent_create(
 def agent_propose(
     name: str = typer.Option(..., "--name", "-n", help="Human-readable agent name."),
     domain: str = typer.Option("general", "--domain", "-d", help="Operational domain."),
-    capability: Annotated[list[str] | None, typer.Option("--capability", "-c", help="Capability (repeatable).")] = None,
+    capability: Annotated[
+        list[str] | None, typer.Option("--capability", "-c", help="Capability (repeatable).")
+    ] = None,
     proposer: str = typer.Option("user", "--proposer", help="Proposer identity."),
     quorum: float = typer.Option(0.66, "--quorum", help="Quorum threshold (0.0-1.0)."),
     ttl: int = typer.Option(3600, "--ttl", help="Proposal TTL in seconds."),
@@ -328,6 +351,7 @@ def agent_propose(
 # --------------------------------------------------------------------------- #
 # Tasks: agency task create / list
 # --------------------------------------------------------------------------- #
+
 
 @task_app.command("create")
 def task_create(
@@ -406,6 +430,7 @@ def task_list(
 # Memory: agency memory search
 # --------------------------------------------------------------------------- #
 
+
 @memory_app.command("search")
 def memory_search(
     query: str = typer.Argument(..., help="Free-text query."),
@@ -424,7 +449,9 @@ def memory_search(
     if output_json:
         _print_json(payload)
         return
-    items = payload if isinstance(payload, list) else payload.get("results", payload.get("items", []))
+    items = (
+        payload if isinstance(payload, list) else payload.get("results", payload.get("items", []))
+    )
     table = _table(f"Memory results for '{query}'", ["ID", "Agent", "Tier", "Content"])
     for item in items or []:
         content = str(item.get("content", ""))
@@ -441,6 +468,7 @@ def memory_search(
 # --------------------------------------------------------------------------- #
 # Evidence: agency evidence list
 # --------------------------------------------------------------------------- #
+
 
 @evidence_app.command("list")
 def evidence_list(
@@ -483,6 +511,7 @@ def evidence_list(
 # Risk: agency risk report
 # --------------------------------------------------------------------------- #
 
+
 @risk_app.command("report")
 def risk_report(
     finding_id: str = typer.Argument(..., help="Finding id to assess."),
@@ -499,8 +528,16 @@ def risk_report(
     risk = payload.get("risk", payload) if isinstance(payload, dict) else {}
     category = payload.get("category", "?") if isinstance(payload, dict) else "?"
     table = _table(f"Risk report — {finding_id} [{category}]", ["Dimension", "Value"])
-    for key in ("impact", "likelihood", "confidence", "exposure", "exploitability",
-                "detectability", "reversibility", "blast_radius"):
+    for key in (
+        "impact",
+        "likelihood",
+        "confidence",
+        "exposure",
+        "exploitability",
+        "detectability",
+        "reversibility",
+        "blast_radius",
+    ):
         table.add_row(key, str(risk.get(key, "-") if isinstance(risk, dict) else "-"))
     console.print(table)
     if isinstance(payload, dict) and payload.get("category"):

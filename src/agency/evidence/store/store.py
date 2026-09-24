@@ -229,7 +229,7 @@ class EvidenceStore:
         direction = "DESC" if filters.descending else "ASC"
         query = f"""
             SELECT document FROM findings
-            WHERE {' AND '.join(clauses)}
+            WHERE {" AND ".join(clauses)}
             ORDER BY {column} {direction}
             LIMIT ? OFFSET ?
         """
@@ -251,7 +251,9 @@ class EvidenceStore:
         allowed = {key: value for key, value in updates.items() if key in self._UPDATABLE}
         unknown = set(updates) - set(self._UPDATABLE)
         if unknown:
-            logger.warning("finding_update_ignored_fields", finding_id=finding_id, fields=sorted(unknown))
+            logger.warning(
+                "finding_update_ignored_fields", finding_id=finding_id, fields=sorted(unknown)
+            )
 
         merged = current.model_copy(update=allowed)
         await self._replace_finding(merged)

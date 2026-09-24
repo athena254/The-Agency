@@ -8,6 +8,8 @@ import structlog
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from agency.lattice.api import Lattice
+
 log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/v1/governance", tags=["governance"])
@@ -95,10 +97,10 @@ async def vote(request: Request, body: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _get_lattice(request: Request) -> Any:
+def _get_lattice(request: Request) -> Lattice:
     """Get the Lattice instance from app state."""
     lattice = getattr(request.app.state, "lattice", None)
-    if lattice is None:
+    if not isinstance(lattice, Lattice):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Lattice not initialized",

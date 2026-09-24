@@ -19,7 +19,7 @@ import asyncio
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Self, TypedDict, overload
 
 import aiosqlite
 from pydantic import BaseModel, Field
@@ -154,6 +154,12 @@ class SystemRiskProfile(BaseModel):
     finding_count: int
     agents: dict[str, int] = Field(default_factory=dict)
     top_findings: list[RiskModel] = Field(default_factory=list)
+
+
+class _AggregateProfile(TypedDict):
+    risk: RiskModel
+    category: RiskCategory
+    top: list[RiskModel]
 
 
 class RiskScorer:
@@ -293,8 +299,16 @@ class RiskScorer:
                 (_iso(utcnow()), agent_id),
             )
             await conn.commit()
-        logger.info("outcome_recorded", finding_id=finding_id, agent_id=agent_id, outcome=outcome.value)
+        logger.info(
+            "outcome_recorded", finding_id=finding_id, agent_id=agent_id, outcome=outcome.value
+        )
         return await self.accuracy(agent_id)
+
+    @overload
+    async def accuracy(self, agent_id: str) -> AgentAccuracy: ...
+
+    @overload
+    async def accuracy(self, agent_id: None = None) -> list[AgentAccuracy]: ...
 
     async def accuracy(self, agent_id: str | None = None) -> AgentAccuracy | list[AgentAccuracy]:
         """Return accuracy for one agent, or for every tracked agent."""
@@ -309,13 +323,13 @@ class RiskScorer:
             row = await cursor.fetchone()
             if row is None:
                 return AgentAccuracy(agent_id=agent_id)
-            return AgentAccuracy.from_row(row)
+            return AgentAccuracy.from_row(tuple(row))
         cursor = await conn.execute(
             "SELECT agent_id, findings_scored, true_positives, false_positives, "
             "false_negatives, true_negatives, updated_at FROM agent_accuracy "
             "ORDER BY findings_scored DESC"
         )
-        return [AgentAccuracy.from_row(row) for row in await cursor.fetchall()]
+        return [AgentAccuracy.from_row(tuple(row)) for row in await cursor.fetchall()]
 
     # -- internals -----------------------------------------------------------
 
@@ -331,9 +345,7 @@ class RiskScorer:
         data["likelihood"] = _clamp(risk.likelihood * (0.4 + 0.6 * adjustment))
         return RiskModel.model_validate(data)
 
-    async def _record_score(
-        self, finding: Finding, risk: RiskModel, agent_id: str | None
-    ) -> None:
+    async def _record_score(self, finding: Finding, risk: RiskModel, agent_id: str | None) -> None:
         conn = self._require_conn()
         system_id = finding.provenance.system
         category = self.engine.derive_category(risk).value
@@ -373,7 +385,7 @@ class RiskScorer:
             f"FROM scored_findings WHERE {where} ORDER BY id DESC",
             tuple(params),
         )
-        return list(await cursor.fetchall())
+        return [tuple(row) for row in await cursor.fetchall()]
 
     async def _owning_agent(self, finding_id: str) -> str | None:
         conn = self._require_conn()
@@ -384,9 +396,7 @@ class RiskScorer:
         row = await cursor.fetchone()
         return row[0] if row else None
 
-    def _aggregate(
-        self, models: list[RiskModel], top_k: int
-    ) -> dict[str, RiskModel | RiskCategory | list[RiskModel]]:
+    def _aggregate(self, models: list[RiskModel], top_k: int) -> _AggregateProfile:
         if not models:
             empty = RiskModel()
             return {"risk": empty, "category": self.engine.derive_category(empty), "top": []}

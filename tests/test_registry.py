@@ -45,7 +45,9 @@ def test_update_capabilities_merge_vs_replace():
             capabilities=[Capability(name="inspect", max_level=ActionClass.L0_OBSERVATION)],
         )
     )
-    reg.grant_capability("x", Capability(name="simulate", max_level=ActionClass.L2_CONTROLLED_TESTING))
+    reg.grant_capability(
+        "x", Capability(name="simulate", max_level=ActionClass.L2_CONTROLLED_TESTING)
+    )
     assert agent.has_capability("inspect")
     assert agent.has_capability("simulate")
 
@@ -77,9 +79,5 @@ def test_modified_since(tmp_path_factory):
     from datetime import UTC, datetime, timedelta
 
     reg.register(Agent(id="recent", name="R", created_at=datetime.now(UTC)))
-    reg.register(
-        Agent(id="old", name="O", created_at=datetime.now(UTC) - timedelta(days=10))
-    )
-    assert {a.id for a in reg.modified_since(datetime.now(UTC) - timedelta(days=1))} == {
-        "recent"
-    }
+    reg.register(Agent(id="old", name="O", created_at=datetime.now(UTC) - timedelta(days=10)))
+    assert {a.id for a in reg.modified_since(datetime.now(UTC) - timedelta(days=1))} == {"recent"}

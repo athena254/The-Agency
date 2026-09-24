@@ -34,6 +34,12 @@ At `d59eda7`, the actual CI commands in `.github/workflows/ci.yml` are `ruff che
 
 Split source fixes by file ownership in separate worktrees; preserve broad catches only where a deliberate per-item/transport/finalization boundary must stay alive, with a narrow documented `noqa: BLE001` if unavoidable and a fallback test. No blanket `ignore_missing_imports` or weakened mypy strictness. After integrating reviewed behavioral/type fixes, apply `ruff format src/ tests/` in one dedicated formatting checkpoint, check the complete diff for changed literals/comments, then rerun lint, format check, mypy, the full Python 3.11 suite, and GitHub CI. Do not claim CI green from local success alone.
 
+## Integrated local result (pending remote checks)
+
+The OpenCode and delegated model workers stalled without usable commits; fixes were made and checked in the isolated PR worktree, not the owner's `main`. Strict project-venv mypy reports no issues in 135 source files, and both Ruff lint and format checks pass. The Python 3.11 suite reports 619 passed with 15 warnings. A separate local Python 3.14 run also reports 619 passed with 13 warnings. The warnings include pre-existing aiosqlite workers outliving test event loops, FastAPI `on_event` deprecations, and a pytest collection warning; passing tests do not resolve those issues.
+
+Regression tests cover a demo scan failing closed when its LLM fails, cancellation counting as a bridge-stream failure, and the previously missing SQLite-backed `Lattice.list_open_proposals` API used by the governance route. The formatter changed 88 files; review the resulting formatting-only diff as well as the behavioral edits. Remote CI and the separate security review remain required before anyone marks PR #7 ready or merges it.
+
 ## Next feature (not in this slice)
 
 Authenticated project/thread API needs its own design spec, threat model, acceptance tests, documentation checkpoint, and owner approval before implementation. Skill/workflow runtime wiring follows that boundary.

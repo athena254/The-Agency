@@ -53,7 +53,7 @@ class TelegramHandler:
         # /research <topic> — run the research agent's tool loop
         # (web search → fetch → synthesize → cite → store).
         if command.startswith("/research"):
-            args = text.strip()[len("/research"):].strip()
+            args = text.strip()[len("/research") :].strip()
             response = await self._handle_research(args, sender)
             if chat_id:
                 await self._send_long(chat_id, response)
@@ -74,9 +74,7 @@ class TelegramHandler:
         agent_intent = self._detect_agent_creation_intent(text)
         if agent_intent and self._butler:
             self._log.info("telegram.agent_creation_intent", intent=agent_intent, sender=sender)
-            response = await self._handle_plain_english_agent_creation(
-                agent_intent, sender
-            )
+            response = await self._handle_plain_english_agent_creation(agent_intent, sender)
             self._log.info("telegram.agent_creation_response", response=response[:200])
             if chat_id:
                 await self._adapter.send_message(chat_id, response)
@@ -130,10 +128,7 @@ class TelegramHandler:
             if self._butler:
                 agents = await self._butler.orchestrator.list_agents()
                 lines = [f"• {a.name} — domain: {a.domain}" for a in agents]
-                return (
-                    "🤖 *Registered agents (live from the registry)*\n\n"
-                    + "\n".join(lines)
-                )
+                return "🤖 *Registered agents (live from the registry)*\n\n" + "\n".join(lines)
             return "Butler not running."
         if command == "/status":
             if self._butler:
@@ -178,20 +173,20 @@ class TelegramHandler:
             return "Butler not running."
         if not args.strip():
             return "Usage: /propose-agent <name> <domain> <capability1> [capability2 ...]"
-        
+
         parts = args.strip().split()
         if len(parts) < 3:
             return "Usage: /propose-agent <name> <domain> <capability1> [capability2 ...]"
-        
+
         name = parts[0]
         domain = parts[1]
         capabilities = parts[2:]
-        
+
         orchestrator = self._butler.orchestrator
         lattice = orchestrator._lattice
         if lattice is None:
             return "Lattice not available. Cannot create proposal."
-        
+
         # Submit the proposal
         proposal_id = await lattice.submit_proposal(
             proposer_id=sender,
@@ -200,7 +195,7 @@ class TelegramHandler:
             quorum=0.66,
             ttl_seconds=3600,
         )
-        
+
         # Butler auto-approves (it routes requests, and this is a direct command)
         await orchestrator.resolve_agent_proposal(
             proposal_id=proposal_id,
@@ -208,7 +203,7 @@ class TelegramHandler:
             decision="approve",
             evidence=["Direct command from human user"],
         )
-        
+
         # User auto-approves (they initiated the request)
         await orchestrator.resolve_agent_proposal(
             proposal_id=proposal_id,
@@ -216,7 +211,7 @@ class TelegramHandler:
             decision="approve",
             evidence=["User initiated the agent proposal"],
         )
-        
+
         # Check if proposal passed and agent was spawned
         proposal = await lattice.get_proposal_status(proposal_id)
         if proposal.status == "passed":
@@ -232,8 +227,10 @@ class TelegramHandler:
                     f"• Capabilities: {', '.join(capabilities)}\n"
                     f"• Proposal: {proposal_id[:16]}..."
                 )
-            return f"Proposal passed but agent not found in registry. Proposal: {proposal_id[:16]}..."
-        
+            return (
+                f"Proposal passed but agent not found in registry. Proposal: {proposal_id[:16]}..."
+            )
+
         return f"Proposal submitted: {proposal_id[:16]}... Status: {proposal.status}"
 
     async def _list_proposals(self) -> str:
@@ -244,11 +241,11 @@ class TelegramHandler:
         lattice = orchestrator._lattice
         if lattice is None:
             return "Lattice not available."
-        
+
         proposals = await lattice.list_open_proposals()
         if not proposals:
             return "📋 No open proposals."
-        
+
         lines = []
         for p in proposals:
             lines.append(
@@ -257,7 +254,7 @@ class TelegramHandler:
             )
         return "📋 *Open Proposals*\n\n" + "\n".join(lines)
 
-    def _detect_agent_creation_intent(self, text: str) -> dict | None:
+    def _detect_agent_creation_intent(self, text: str) -> dict[str, Any] | None:
         """Detect if the user wants to create a new agent.
 
         Parses plain English and returns structured intent, or None.
@@ -270,8 +267,14 @@ class TelegramHandler:
 
         lower = text.lower().strip()
         # Remove common filler words
-        lower = re.sub(r"^(hey|hi|hello|please|can you|could you|i want|i'd like|i need)\s*", "", lower)
-        lower = re.sub(r"^(create|make|build|spawn|add|new)\s+(a|an|the)\s+(new\s+)?(agent|bot|one)\s*", "", lower)
+        lower = re.sub(
+            r"^(hey|hi|hello|please|can you|could you|i want|i'd like|i need)\s*", "", lower
+        )
+        lower = re.sub(
+            r"^(create|make|build|spawn|add|new)\s+(a|an|the)\s+(new\s+)?(agent|bot|one)\s*",
+            "",
+            lower,
+        )
         lower = re.sub(r"^(create|make|build|spawn|add|new)\s+(agent|bot)\s*", "", lower)
         lower = re.sub(r"^(agent|bot)\s*", "", lower)
 
@@ -282,17 +285,27 @@ class TelegramHandler:
         result = {}
 
         # Extract name: "called X", "named X", "name is X"
-        name_match = re.search(r"(?:called|named|name is|name)\s+[\"']?([a-zA-Z][a-zA-Z0-9_-]*)", text, re.IGNORECASE)
+        name_match = re.search(
+            r"(?:called|named|name is|name)\s+[\"']?([a-zA-Z][a-zA-Z0-9_-]*)", text, re.IGNORECASE
+        )
         if name_match:
             result["name"] = name_match.group(1)
 
         # Extract domain: "for Y", "in Y", "that does Y"
-        domain_match = re.search(r"(?:for|in|domain|specializ(?:e|es?)\s+in)\s+[\"']?([a-zA-Z][a-zA-Z0-9_-]*)", text, re.IGNORECASE)
+        domain_match = re.search(
+            r"(?:for|in|domain|specializ(?:e|es?)\s+in)\s+[\"']?([a-zA-Z][a-zA-Z0-9_-]*)",
+            text,
+            re.IGNORECASE,
+        )
         if domain_match:
             result["domain"] = domain_match.group(1)
 
         # Extract capabilities BEFORE purpose (so "that does X" doesn't get consumed by purpose)
-        cap_match = re.search(r"(?:that\s+(?:does|can)|can\s+do|with\s+capabilities?|capable\s+of)\s+(.+?)(?:\.|$)", text, re.IGNORECASE)
+        cap_match = re.search(
+            r"(?:that\s+(?:does|can)|can\s+do|with\s+capabilities?|capable\s+of)\s+(.+?)(?:\.|$)",
+            text,
+            re.IGNORECASE,
+        )
         if cap_match:
             caps_text = cap_match.group(1)
             # Replace " and " with "," then split on ","
@@ -311,7 +324,9 @@ class TelegramHandler:
 
         return result if result else {}
 
-    async def _handle_plain_english_agent_creation(self, intent: dict, sender: str) -> str:
+    async def _handle_plain_english_agent_creation(
+        self, intent: dict[str, Any], sender: str
+    ) -> str:
         """Handle agent creation intent from plain English."""
         if not self._butler:
             return "Butler not running."
@@ -390,7 +405,9 @@ class TelegramHandler:
                     f"• Capabilities: {', '.join(capabilities)}\n"
                     f"• Proposal: {proposal_id[:16]}..."
                 )
-            return f"Proposal passed but agent not found in registry. Proposal: {proposal_id[:16]}..."
+            return (
+                f"Proposal passed but agent not found in registry. Proposal: {proposal_id[:16]}..."
+            )
 
         return f"Proposal submitted: {proposal_id[:16]}... Status: {proposal.status}"
 
@@ -400,7 +417,7 @@ class TelegramHandler:
         sender = message.get("from", {}).get("username", "unknown")
 
         if self._butler:
-            return await self._butler.handle_message(text, sender, {})
+            return str(await self._butler.handle_message(text, sender, {}))
         return await self._demo.handle(text, {"sender": sender})
 
     async def send_response(self, chat_id: int, text: str) -> dict[str, Any]:

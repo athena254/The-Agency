@@ -36,14 +36,19 @@ class FakeLLM:
 
 
 def _ddg_handler(request: httpx.Request) -> httpx.Response:
-    return httpx.Response(200, text="""
+    return httpx.Response(
+        200,
+        text="""
     <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Frust">Rust 2026 news</a>
     <a class="result__snippet">Rust releases and RFCs in 2026.</a>
-    """)
+    """,
+    )
 
 
 def _article_handler(request: httpx.Request) -> httpx.Response:
-    return httpx.Response(200, text="<html><body><p>Rust 2026: edition news here.</p></body></html>")
+    return httpx.Response(
+        200, text="<html><body><p>Rust 2026: edition news here.</p></body></html>"
+    )
 
 
 def _transport(handler: Any) -> httpx.MockTransport:
@@ -57,17 +62,17 @@ class TestOrchestratorToolBranch:
     async def test_research_agent_runs_tool_loop(self):
         # Pass the fake through the constructor so BOTH the classic
         # executor and the tool driver see it.
-        fake = FakeLLM([
-            '{"action": {"name": "web_search", "args": {"query": "rust 2026"}}}',
-            '{"action": {"name": "web_fetch", "args": {"url": "https://example.com/rust"}}}',
-            '{"final": "Rust 2026 summary [1]. Sources: https://example.com/rust"}',
-        ])
+        fake = FakeLLM(
+            [
+                '{"action": {"name": "web_search", "args": {"query": "rust 2026"}}}',
+                '{"action": {"name": "web_fetch", "args": {"url": "https://example.com/rust"}}}',
+                '{"final": "Rust 2026 summary [1]. Sources: https://example.com/rust"}',
+            ]
+        )
         orch = AgencyOrchestrator(llm=fake)
         await orch.start()
         try:
-            agent = await orch.register_agent(
-                "researcher", "research", ["research", "tools"]
-            )
+            agent = await orch.register_agent("researcher", "research", ["research", "tools"])
             task = await orch.submit_task(
                 title="Research test",
                 description="rust 2026 news",
@@ -163,11 +168,13 @@ class TestDriverWithRealRegistry:
 
         registry._tools["web_fetch"] = WebFetchTool(transport=_transport(_article_handler))
 
-        fake = FakeLLM([
-            '{"action": {"name": "web_search", "args": {"query": "rust 2026"}}}',
-            '{"action": {"name": "web_fetch", "args": {"url": "https://example.com/rust"}}}',
-            '{"final": "Done: Rust 2026 edition news. Sources: https://example.com/rust"}',
-        ])
+        fake = FakeLLM(
+            [
+                '{"action": {"name": "web_search", "args": {"query": "rust 2026"}}}',
+                '{"action": {"name": "web_fetch", "args": {"url": "https://example.com/rust"}}}',
+                '{"final": "Done: Rust 2026 edition news. Sources: https://example.com/rust"}',
+            ]
+        )
         driver = ToolDriver(registry=registry, llm=fake)
         ctx = ToolContext(agent_id="agent-1", task_id="task-1")
         result = await driver.run(

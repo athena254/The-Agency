@@ -145,8 +145,10 @@ class OpenClawBridge(Bridge):
         if self._client is None:
             import os
 
-            token = self._cfg.token.get_secret_value() if self._cfg.token else os.environ.get(
-                "OPENCLAW_TOKEN", ""
+            token = (
+                self._cfg.token.get_secret_value()
+                if self._cfg.token
+                else os.environ.get("OPENCLAW_TOKEN", "")
             )
             headers = {"Content-Type": "application/json"}
             if token:

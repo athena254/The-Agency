@@ -35,9 +35,7 @@ class ProcessSandboxBackend:
         self._workspaces: dict[str, Path] = {}
         self._lock = threading.Lock()
 
-    def create_container(
-        self, sandbox_id: str, config: SandboxConfig, workspace: Path
-    ) -> str:
+    def create_container(self, sandbox_id: str, config: SandboxConfig, workspace: Path) -> str:
         container_id = f"proc-{sandbox_id}"
         workspace.mkdir(parents=True, exist_ok=True)
         with self._lock:

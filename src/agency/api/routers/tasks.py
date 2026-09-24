@@ -30,6 +30,7 @@ router = APIRouter(tags=["tasks"])
 # Request models (Pydantic v2)
 # --------------------------------------------------------------------------- #
 
+
 class TaskCreateRequest(BaseModel):
     """Payload for ``POST /v1/tasks``."""
 
@@ -67,6 +68,7 @@ class TaskMessageCreateRequest(BaseModel):
 # Dependencies
 # --------------------------------------------------------------------------- #
 
+
 def _manager(request: Request) -> TaskManager:
     manager = getattr(request.app.state, "task_manager", None)
     if manager is None:
@@ -80,6 +82,7 @@ def _manager(request: Request) -> TaskManager:
 # --------------------------------------------------------------------------- #
 # Routes
 # --------------------------------------------------------------------------- #
+
 
 @router.post("", response_model=Task, status_code=status.HTTP_201_CREATED, summary="Create a task")
 async def create_task(payload: TaskCreateRequest, request: Request) -> Task:
@@ -120,12 +123,16 @@ async def get_task(task_id: str, request: Request) -> Task:
     manager = _manager(request)
     task = await manager.get_task(task_id)
     if task is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"unknown task {task_id!r}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"unknown task {task_id!r}"
+        )
     return task
 
 
 @router.patch("/{task_id}/status", response_model=Task, summary="Transition task status")
-async def update_task_status(task_id: str, payload: TaskStatusUpdateRequest, request: Request) -> Task:
+async def update_task_status(
+    task_id: str, payload: TaskStatusUpdateRequest, request: Request
+) -> Task:
     """Transition a task into a new lifecycle state."""
     manager = _manager(request)
     try:
@@ -142,7 +149,9 @@ async def update_task_status(task_id: str, payload: TaskStatusUpdateRequest, req
     status_code=status.HTTP_201_CREATED,
     summary="Append a task message",
 )
-async def add_task_message(task_id: str, payload: TaskMessageCreateRequest, request: Request) -> TaskMessage:
+async def add_task_message(
+    task_id: str, payload: TaskMessageCreateRequest, request: Request
+) -> TaskMessage:
     """Append a structured message to a task's conversation log."""
     manager = _manager(request)
     message = TaskMessage(
@@ -157,7 +166,9 @@ async def add_task_message(task_id: str, payload: TaskMessageCreateRequest, requ
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
 
 
 __all__ = ["TaskCreateRequest", "TaskMessageCreateRequest", "TaskStatusUpdateRequest", "router"]

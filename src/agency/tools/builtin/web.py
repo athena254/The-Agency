@@ -73,14 +73,8 @@ class _DDGResultParser(HTMLParser):
             return
         text = "".join(self._buf).strip()
         if self._capture == "title":
-            self.results.append(
-                {"title": text, "url": _decode_ddg_url(self._href), "snippet": ""}
-            )
-        elif (
-            self._capture == "snippet"
-            and self.results
-            and not self.results[-1]["snippet"]
-        ):
+            self.results.append({"title": text, "url": _decode_ddg_url(self._href), "snippet": ""})
+        elif self._capture == "snippet" and self.results and not self.results[-1]["snippet"]:
             self.results[-1]["snippet"] = text
         self._capture = None
         self._buf = []
@@ -123,13 +117,12 @@ def extract_text(html: str) -> str:
 class WebSearchTool:
     """Search the web via the DuckDuckGo HTML endpoint."""
 
-    def __init__(self, transport: httpx.BaseTransport | None = None) -> None:
+    def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self._transport = transport
         self.spec = ToolSpec(
             name="web_search",
             description=(
-                "Search the web and return up to max_results results "
-                "with title, url, and snippet."
+                "Search the web and return up to max_results results with title, url, and snippet."
             ),
             parameters={
                 "type": "object",
@@ -147,14 +140,10 @@ class WebSearchTool:
         start = time.perf_counter()
         query = args.get("query")
         if not isinstance(query, str) or not query.strip():
-            return ToolResult(
-                tool="web_search", ok=False, error="missing required param: 'query'"
-            )
+            return ToolResult(tool="web_search", ok=False, error="missing required param: 'query'")
         max_results = args.get("max_results", 5)
         if not isinstance(max_results, int) or isinstance(max_results, bool):
-            return ToolResult(
-                tool="web_search", ok=False, error="'max_results' must be an integer"
-            )
+            return ToolResult(tool="web_search", ok=False, error="'max_results' must be an integer")
         max_results = max(1, min(max_results, 20))
 
         url = _DDG_ENDPOINT + "?q=" + urllib.parse.quote_plus(query.strip())
@@ -207,13 +196,12 @@ class WebSearchTool:
 class WebFetchTool:
     """Fetch a URL and return extracted text (capped)."""
 
-    def __init__(self, transport: httpx.BaseTransport | None = None) -> None:
+    def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self._transport = transport
         self.spec = ToolSpec(
             name="web_fetch",
             description=(
-                "Fetch a web page (http/https) and return its text content "
-                "(first 8000 chars)."
+                "Fetch a web page (http/https) and return its text content (first 8000 chars)."
             ),
             parameters={
                 "type": "object",
@@ -228,9 +216,7 @@ class WebFetchTool:
         start = time.perf_counter()
         url = args.get("url")
         if not isinstance(url, str) or not url.strip():
-            return ToolResult(
-                tool="web_fetch", ok=False, error="missing required param: 'url'"
-            )
+            return ToolResult(tool="web_fetch", ok=False, error="missing required param: 'url'")
         url = url.strip()
         if not url.startswith(("http://", "https://")):
             return ToolResult(

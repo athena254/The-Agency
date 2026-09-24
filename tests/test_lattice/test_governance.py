@@ -46,7 +46,11 @@ class FakeLatticeBackend:
     ) -> str:
         node_id = properties.get("proposal_id") or self._next_id("node")
         node_id = str(node_id)
-        self.nodes[node_id] = {"id": node_id, "node_type": node_type, "properties": dict(properties)}
+        self.nodes[node_id] = {
+            "id": node_id,
+            "node_type": node_type,
+            "properties": dict(properties),
+        }
         self.events.append({"event_type": "node_created", "actor": actor, "target_id": node_id})
         return node_id
 
@@ -99,9 +103,7 @@ def governance(backend: FakeLatticeBackend, reputation: ReputationEngine) -> Gov
 
 
 async def test_submit_and_get_proposal(governance: GovernanceEngine) -> None:
-    proposal_id = await governance.submit_proposal(
-        "butler", "spawn_agent", {"role": "researcher"}
-    )
+    proposal_id = await governance.submit_proposal("butler", "spawn_agent", {"role": "researcher"})
     assert proposal_id.startswith("prop_")
     proposal = await governance.get_proposal_status(proposal_id)
     assert isinstance(proposal, ConsensusProposal)
@@ -159,9 +161,7 @@ async def test_weighted_voting_and_quorum(
 async def test_single_approve_meets_ratio_quorum(
     governance: GovernanceEngine,
 ) -> None:
-    proposal_id = await governance.submit_proposal(
-        "butler", "replace_agent", {}, quorum=0.9
-    )
+    proposal_id = await governance.submit_proposal("butler", "replace_agent", {}, quorum=0.9)
     await governance.cast_vote("butler", proposal_id, "approve")
     # Butler alone: 1.0 / (1.0 + 0.0) meets 0.9, so this passes outright.
     proposal = await governance.get_proposal_status(proposal_id)
@@ -169,9 +169,7 @@ async def test_single_approve_meets_ratio_quorum(
 
 
 async def test_mixed_votes_below_quorum_stay_open(governance: GovernanceEngine) -> None:
-    proposal_id = await governance.submit_proposal(
-        "butler", "policy_change", {}, quorum=0.75
-    )
+    proposal_id = await governance.submit_proposal("butler", "policy_change", {}, quorum=0.75)
     # Butler (1.0) approves then a 0.5 agent denies via re-vote-free fresh ids.
     await governance.cast_vote("butler", proposal_id, "deny")
     # Single deny vote: approve ratio 0.0 -> still open (no auto-deny on votes).
@@ -181,9 +179,7 @@ async def test_mixed_votes_below_quorum_stay_open(governance: GovernanceEngine) 
 
 
 async def test_abstain_votes_excluded_from_quorum(governance: GovernanceEngine) -> None:
-    proposal_id = await governance.submit_proposal(
-        "butler", "agent_restart", {}, quorum=0.66
-    )
+    proposal_id = await governance.submit_proposal("butler", "agent_restart", {}, quorum=0.66)
     await governance.cast_vote("butler", proposal_id, "abstain")
     assert await governance.check_quorum(proposal_id) is False
     result = await governance.cast_vote("user", proposal_id, "approve")
@@ -203,9 +199,7 @@ async def test_vote_creates_backend_event(
     before = len(backend.events)
     await governance.cast_vote("butler", proposal_id, "approve")
     assert len(backend.events) > before
-    vote_edges = [
-        e for e in backend.edges.values() if e["edge_type"] == EdgeType.VOTED_ON
-    ]
+    vote_edges = [e for e in backend.edges.values() if e["edge_type"] == EdgeType.VOTED_ON]
     assert len(vote_edges) == 1
     assert vote_edges[0]["properties"]["decision"] == "approve"
 
@@ -221,17 +215,13 @@ async def test_resolve_passed(governance: GovernanceEngine) -> None:
 
 
 async def test_resolve_denied_without_quorum(governance: GovernanceEngine) -> None:
-    proposal_id = await governance.submit_proposal(
-        "butler", "policy_change", {}, quorum=0.99
-    )
+    proposal_id = await governance.submit_proposal("butler", "policy_change", {}, quorum=0.99)
     await governance.cast_vote("butler", proposal_id, "deny")
     assert await governance.resolve_proposal(proposal_id) == "denied"
 
 
 async def test_expired_proposal_handling(governance: GovernanceEngine) -> None:
-    proposal_id = await governance.submit_proposal(
-        "butler", "spawn_agent", {}, ttl_seconds=1
-    )
+    proposal_id = await governance.submit_proposal("butler", "spawn_agent", {}, ttl_seconds=1)
     # Force expiry without sleeping.
     async with governance._lock:  # type: ignore[attr-defined]
         stored = governance._proposals[proposal_id]  # type: ignore[attr-defined]
@@ -257,9 +247,7 @@ async def test_vote_weight_trusted_and_agent(reputation: ReputationEngine) -> No
 
 
 async def test_human_override_passes_immediately(governance: GovernanceEngine) -> None:
-    proposal_id = await governance.submit_proposal(
-        "butler", "replace_agent", {}, quorum=0.99
-    )
+    proposal_id = await governance.submit_proposal("butler", "replace_agent", {}, quorum=0.99)
     result = await governance.cast_vote("user", proposal_id, "approve")
     assert result == {"status": "passed", "quorum_reached": True}
 
@@ -285,9 +273,7 @@ async def test_reputation_sixty_forty_blend(reputation: ReputationEngine) -> Non
     rep = await reputation.record_task_completion("agent-1", False, peer_rating=0.0)
     # success 1/2 = 0.5, peer avg 0.5 -> 0.5
     assert rep.score == pytest.approx(0.5)
-    direct = Reputation(
-        agent_id="x", tasks_completed=3, tasks_failed=1, peer_ratings=[1.0, 1.0]
-    )
+    direct = Reputation(agent_id="x", tasks_completed=3, tasks_failed=1, peer_ratings=[1.0, 1.0])
     assert ReputationEngine.compute_score(direct) == pytest.approx(0.6 * 0.75 + 0.4 * 1.0)
 
 
@@ -320,9 +306,7 @@ async def test_leaderboard_ordering(reputation: ReputationEngine) -> None:
 async def test_concurrent_vote_casting(governance: GovernanceEngine) -> None:
     # Deny votes never trigger auto-resolve, so all 10 concurrent ballots
     # must land exactly once each — this exercises the atomic vote path.
-    proposal_id = await governance.submit_proposal(
-        "butler", "spawn_agent", {}, quorum=0.99
-    )
+    proposal_id = await governance.submit_proposal("butler", "spawn_agent", {}, quorum=0.99)
     voters = [f"voter-{i}" for i in range(10)]
 
     async def _vote(voter: str) -> dict:

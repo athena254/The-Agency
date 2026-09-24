@@ -237,7 +237,7 @@ def create_app(config: ButlerConfig | None = None) -> FastAPI:
         if lat is not None:
             try:
                 lattice_status = await lat.get_status()
-            except Exception:
+            except Exception:  # noqa: BLE001 — report optional Lattice health as unavailable.
                 lattice_status = {"error": "unavailable"}
 
         return HealthResponse(

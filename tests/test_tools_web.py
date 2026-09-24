@@ -18,11 +18,11 @@ def _uddg(url: str) -> str:
 
 DDG_HTML = f"""<html><body>
 <div class="result">
-  <a class="result__a" href="{_uddg('https://example.com/rust-2026')}">Rust 2026 News</a>
+  <a class="result__a" href="{_uddg("https://example.com/rust-2026")}">Rust 2026 News</a>
   <a class="result__snippet" href="x">The latest on Rust in 2026.</a>
 </div>
 <div class="result">
-  <a class="result__a" href="{_uddg('https://example.org/edition')}">Edition Guide</a>
+  <a class="result__a" href="{_uddg("https://example.org/edition")}">Edition Guide</a>
   <a class="result__snippet" href="x">All about editions.</a>
 </div>
 </body></html>"""

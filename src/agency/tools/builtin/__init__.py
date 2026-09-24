@@ -12,7 +12,7 @@ from agency.tools.builtin.sandbox import SandboxExecTool
 from agency.tools.builtin.web import WebFetchTool, WebSearchTool
 
 
-def register_all(registry: Any, transport: httpx.BaseTransport | None = None) -> list[Tool]:
+def register_all(registry: Any, transport: httpx.AsyncBaseTransport | None = None) -> list[Tool]:
     """Instantiate the 5 builtin tools and register them.
 
     ``transport`` (e.g. ``httpx.MockTransport``) is passed to the web tools

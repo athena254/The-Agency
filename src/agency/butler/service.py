@@ -80,7 +80,7 @@ class ButlerService:
         """Reference to the orchestrator's Lattice instance, if available."""
         if self._lattice is not None:
             return self._lattice
-        if hasattr(self._orchestrator, '_lattice'):
+        if hasattr(self._orchestrator, "_lattice"):
             return self._orchestrator._lattice
         return None
 
@@ -143,7 +143,7 @@ class ButlerService:
         await self._memory.initialize()
         await self._orchestrator.start()
         # Pick up the Lattice from orchestrator after it starts
-        if hasattr(self._orchestrator, '_lattice') and self._orchestrator._lattice is not None:
+        if hasattr(self._orchestrator, "_lattice") and self._orchestrator._lattice is not None:
             self._lattice = self._orchestrator._lattice
         await self._ensure_default_agents()
         self._started = True
@@ -172,7 +172,7 @@ class ButlerService:
         try:
             orch_agents = await self._orchestrator.list_agents()
             existing |= {a.domain.strip().lower() for a in orch_agents}
-        except Exception:  # Seeding must never break startup.
+        except Exception:  # noqa: BLE001 — optional seeding must not break startup.
             self._log.warning("butler.seed_list_failed")
         for domain in _DEFAULT_DOMAINS:
             if domain not in existing:
@@ -184,7 +184,7 @@ class ButlerService:
                     )
                     self._router.register_agent(agent)
                     self._log.info("butler.agent_seeded", domain=domain, agent_id=agent.id)
-                except Exception:
+                except Exception:  # noqa: BLE001 — continue seeding other domains.
                     self._log.exception("butler.seed_failed", domain=domain)
         self._seeded = True
 
@@ -193,8 +193,12 @@ class ButlerService:
     # ------------------------------------------------------------------ #
 
     async def handle_message(
-        self, message: str, sender: str, context: dict[str, Any],
-        *, memory_enabled: bool = True,
+        self,
+        message: str,
+        sender: str,
+        context: dict[str, Any],
+        *,
+        memory_enabled: bool = True,
     ) -> str:
         """Validate and execute a turn; anonymous channels disable memory."""
         await self._ensure_started()
@@ -226,7 +230,8 @@ class ButlerService:
             memory_context = (
                 "Earlier conversation:\n"
                 + "\n".join(f"- [{item.role}] {item.content[:300]}" for item in history)
-                if history else ""
+                if history
+                else ""
             )
         elif memory_enabled:
             memory_context = await self._recall_history(sender, text)
@@ -253,7 +258,7 @@ class ButlerService:
             response = f"Request timed out after {self._config.timeout:g}s. Please try again."
             result = "timeout"
             self._log.warning("butler.execute_timeout", sender=sender, error=str(exc))
-        except Exception:
+        except Exception:  # noqa: BLE001 — execution errors become a failed turn.
             response = "Sorry, I could not process that request."
             result = "failed"
             self._log.exception("butler.execute_failed", sender=sender)
@@ -289,7 +294,7 @@ class ButlerService:
                             self._log.info("butler.llm_routed", domain=domain)
                             return agent
                     self._log.warning("butler.llm_unknown_domain", domain=domain)
-            except Exception:
+            except Exception:  # noqa: BLE001 — fallback to deterministic routing.
                 self._log.exception("butler.llm_route_failed")
         return await self._router.route(message, context)
 
@@ -354,7 +359,9 @@ class ButlerService:
         try:
             import ollama  # type: ignore[import-not-found]
         except ImportError as exc:
-            raise RuntimeError("ollama package not installed (pip install theagency[ollama]).") from exc
+            raise RuntimeError(
+                "ollama package not installed (pip install theagency[ollama])."
+            ) from exc
         model = self._config.llm_model or "llama3.1"
         client = ollama.AsyncClient()
         response = await client.generate(model=model, prompt=prompt)
@@ -418,7 +425,7 @@ class ButlerService:
                     environment={"name": "butler"},
                 )
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — best-effort audit persistence.
             self._log.exception("butler.audit_failed", action=action)
 
     async def _recall_history(self, sender: str, message: str) -> str:
@@ -431,7 +438,7 @@ class ButlerService:
             items = await self._memory_retrieval.semantic_search(
                 message, agent_id=f"chat-{sender}", limit=5
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — optional recall cannot block a turn.
             self._log.debug("butler.history_recall_failed", sender=sender)
             return ""
         if not items:
@@ -450,7 +457,7 @@ class ButlerService:
                     tags=["butler", "conversation", agent.domain, f"chat-{sender}"],
                 )
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 — optional memory persistence cannot block a turn.
             self._log.exception("butler.memory_store_failed")
 
 

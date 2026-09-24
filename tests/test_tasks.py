@@ -55,7 +55,9 @@ async def test_duplicate_task_id_rejected():
 async def test_messages_are_exchanged():
     manager = TaskManager()
     task = await manager.create_task(created_by="planner")
-    msg = TaskMessage(task_id="", type="hypothesis", content={"risk": "high"}, created_by="threat-modeler")
+    msg = TaskMessage(
+        task_id="", type="hypothesis", content={"risk": "high"}, created_by="threat-modeler"
+    )
     bound = await manager.add_message(task.task_id, msg)
     assert bound.task_id == task.task_id
 

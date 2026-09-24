@@ -44,9 +44,13 @@ class CircuitBreakerConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     failure_threshold: int = Field(default=5, ge=1, description="Failures to trip open.")
-    recovery_timeout_s: float = Field(default=60.0, gt=0, description="Open dwell before half-open.")
+    recovery_timeout_s: float = Field(
+        default=60.0, gt=0, description="Open dwell before half-open."
+    )
     half_open_max_calls: int = Field(default=1, ge=1, description="Probe calls allowed half-open.")
-    success_threshold: int = Field(default=1, ge=1, description="Successes to close from half-open.")
+    success_threshold: int = Field(
+        default=1, ge=1, description="Successes to close from half-open."
+    )
 
 
 @dataclass
@@ -137,9 +141,7 @@ class CircuitBreaker:
         runtime.state = CircuitState.OPEN
         runtime.opened_at = monotonic()
         runtime.consecutive_successes = 0
-        self._log.warning(
-            "breaker.open", consecutive_failures=runtime.consecutive_failures
-        )
+        self._log.warning("breaker.open", consecutive_failures=runtime.consecutive_failures)
 
     def _dwell_elapsed(self) -> bool:
         return (monotonic() - self._runtime.opened_at) >= self._config.recovery_timeout_s
@@ -231,7 +233,7 @@ class ExternalCoordinator:
             )
         try:
             result = await bridge.execute(task, context)
-        except Exception as exc:  # Transport catastrophe: count + encode.
+        except Exception as exc:  # noqa: BLE001 — bridge transport failures become failed results.
             await breaker.record_failure()
             self._log.exception("coordinator.execute_error", bridge=bridge_name)
             return BridgeResult.failure(f"bridge {bridge_name!r} raised: {exc}")
@@ -270,7 +272,10 @@ class ExternalCoordinator:
         try:
             async for chunk in bridge.stream(task, context):
                 yield chunk
-        except Exception:
+        except asyncio.CancelledError:
+            failed = True
+            raise
+        except Exception:  # Record failures from arbitrary bridge plugins.
             failed = True
             raise
         finally:
@@ -296,7 +301,7 @@ class ExternalCoordinator:
     async def _safe_health(self, name: str) -> bool:
         try:
             return await asyncio.wait_for(self._bridges[name].health_check(), timeout=10.0)
-        except (TimeoutError, Exception):
+        except Exception:  # noqa: BLE001 — one failing bridge must not fail aggregate health.
             self._log.warning("coordinator.health_failed", bridge=name)
             return False
 

@@ -89,8 +89,10 @@ class CodexBridge(Bridge):
                 last_error, status = f"codex request timed out: {exc}", BridgeStatus.TIMEOUT
             except httpx.HTTPStatusError as exc:
                 last_error = f"codex HTTP {exc.response.status_code}: {exc.response.text[:1000]}"
-                status = BridgeStatus.UNAVAILABLE if exc.response.status_code == 429 else (
-                    BridgeStatus.FAILED
+                status = (
+                    BridgeStatus.UNAVAILABLE
+                    if exc.response.status_code == 429
+                    else (BridgeStatus.FAILED)
                 )
                 if exc.response.status_code not in _RETRYABLE_STATUS:
                     break
@@ -156,8 +158,10 @@ class CodexBridge(Bridge):
         if self._client is None:
             import os
 
-            api_key = self._cfg.api_key.get_secret_value() if self._cfg.api_key else os.environ.get(
-                "OPENAI_API_KEY", ""
+            api_key = (
+                self._cfg.api_key.get_secret_value()
+                if self._cfg.api_key
+                else os.environ.get("OPENAI_API_KEY", "")
             )
             headers: dict[str, str] = {"Content-Type": "application/json"}
             if api_key:
@@ -196,7 +200,7 @@ class CodexBridge(Bridge):
 
     def _parse_sse_line(self, line: str) -> list[str]:
         line = line.strip()
-        if not line or line.startswith(":") or line == "[DONE]" :
+        if not line or line.startswith(":") or line == "[DONE]":
             return []
         if line.startswith("data:"):
             line = line[len("data:") :].strip()

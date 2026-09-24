@@ -204,9 +204,10 @@ class GhostFactory:
             raise ValueError("PR title must not be empty")
         body = str(payload.get("body", payload.get("description", "")))
         branch = str(payload.get("branch", "ghost-factory/contribution"))
-        patch_files: dict[str, str] = {
-            str(k): str(v) for k, v in dict(payload.get("files", {})).items()
-        }
+        raw_files: Any = payload.get("files", {})
+        if not isinstance(raw_files, dict):
+            raise TypeError("PR files must be a mapping")
+        patch_files: dict[str, str] = {str(k): str(v) for k, v in raw_files.items()}
         pr_text = (
             f"# {title}\n\nUpstream: {repo_url}\nBranch: `{branch}`\n\n{body}\n\n"
             f"## Files ({len(patch_files)})\n" + "".join(f"- `{name}`\n" for name in patch_files)

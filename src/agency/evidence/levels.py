@@ -41,9 +41,7 @@ class EvidenceLevelManager:
         return level in cls.CHAIN
 
     @classmethod
-    def can_transition(
-        cls, from_level: EvidenceLevel | None, to_level: EvidenceLevel
-    ) -> bool:
+    def can_transition(cls, from_level: EvidenceLevel | None, to_level: EvidenceLevel) -> bool:
         """``True`` only when ``to_level`` is exactly one step up the ladder.
 
         No skipping, no downgrades, no lateral moves: an entry may only move the
@@ -86,9 +84,7 @@ class EvidenceLevelManager:
         return True
 
     @classmethod
-    def entry_advances(
-        cls, current_level: EvidenceLevel | None, entry: EvidenceEntry
-    ) -> bool:
+    def entry_advances(cls, current_level: EvidenceLevel | None, entry: EvidenceEntry) -> bool:
         """Whether appending ``entry`` legitimately raises the finding's level."""
         return cls.can_transition(current_level, entry.level)
 

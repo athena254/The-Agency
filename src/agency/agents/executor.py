@@ -57,7 +57,9 @@ class ExecutionContext(BaseModel):
     backoff_base_s: float = Field(default=0.5, ge=0, description="Base backoff between retries.")
     model: str = Field(default="", description="Preferred model name, if any.")
     agent_id: str | None = Field(default=None, description="Agent executing this task.")
-    subtask_id: str | None = Field(default=None, description="Subtask identifier, if part of a plan.")
+    subtask_id: str | None = Field(
+        default=None, description="Subtask identifier, if part of a plan."
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -113,11 +115,11 @@ class AgentExecutor:
             self._llm = llm.generate
         elif hasattr(llm, "generate"):
             # Duck-typed LLM adapter (e.g. test doubles exposing generate()).
-            self._adapter = llm  # type: ignore[assignment]
-            self._llm = llm.generate  # type: ignore[attr-defined]
+            self._adapter = None
+            self._llm = llm.generate
         else:
             self._adapter = None
-            self._llm = llm  # type: ignore[assignment]
+            self._llm = llm
         self._default_timeout_s = default_timeout_s
         self._default_max_retries = default_max_retries
         self._default_backoff_base_s = default_backoff_base_s

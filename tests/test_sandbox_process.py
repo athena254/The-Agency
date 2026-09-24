@@ -91,9 +91,7 @@ def test_remove_then_exec_raises(tmp_path: Path) -> None:
     backend, _sid, container_id, _ws = _make_backend(tmp_path)
     backend.remove_container(container_id)
     with pytest.raises(SandboxError):
-        backend.exec_command(
-            container_id, [sys.executable, "-c", "print('hi')"], timeout=10
-        )
+        backend.exec_command(container_id, [sys.executable, "-c", "print('hi')"], timeout=10)
 
 
 def test_create_twice_same_id(tmp_path: Path) -> None:
@@ -104,9 +102,7 @@ def test_create_twice_same_id(tmp_path: Path) -> None:
     second = backend.create_container(sandbox_id, SandboxConfig(), workspace)
     try:
         assert first == second == f"proc-{sandbox_id}"
-        result = backend.exec_command(
-            second, [sys.executable, "-c", "print('hello')"], timeout=30
-        )
+        result = backend.exec_command(second, [sys.executable, "-c", "print('hello')"], timeout=30)
         assert result.exit_code == 0
         assert "hello" in result.stdout
     finally:

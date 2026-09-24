@@ -89,9 +89,7 @@ class ReputationEngine:
         if limit <= 0:
             raise ValueError("limit must be > 0.")
         async with self._lock:
-            ranked = sorted(
-                self._reputations.values(), key=lambda r: r.score, reverse=True
-            )
+            ranked = sorted(self._reputations.values(), key=lambda r: r.score, reverse=True)
             return list(ranked[:limit])
 
     @staticmethod

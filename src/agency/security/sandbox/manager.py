@@ -114,7 +114,9 @@ class DockerSandboxBackend:
             raise SandboxError("docker returned an empty container id")
         return container_id
 
-    def exec_command(self, container_id: str, command: Sequence[str], timeout: int) -> ExecutionResult:
+    def exec_command(
+        self, container_id: str, command: Sequence[str], timeout: int
+    ) -> ExecutionResult:
         start = time.perf_counter()
         exit_code: int | None = None
         stdout = ""
@@ -149,9 +151,7 @@ class DockerSandboxBackend:
         )
 
     def inspect_status(self, container_id: str) -> str:
-        code, stdout, stderr = self._run(
-            ["inspect", "-f", "{{.State.Status}}", container_id]
-        )
+        code, stdout, stderr = self._run(["inspect", "-f", "{{.State.Status}}", container_id])
         if code != 0:
             raise SandboxError(f"failed to inspect container: {stderr.strip()}")
         return stdout.strip()
@@ -200,16 +200,12 @@ class SandboxManager:
         sandbox_id = self._new_id()
         cfg = config or self._default_config
         workspace = (
-            Path(cfg.workspace_dir)
-            if cfg.workspace_dir
-            else self._base_workspace_dir / sandbox_id
+            Path(cfg.workspace_dir) if cfg.workspace_dir else self._base_workspace_dir / sandbox_id
         )
         try:
             workspace.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            raise SandboxError(
-                f"failed to create workspace {workspace}: {exc}"
-            ) from exc
+            raise SandboxError(f"failed to create workspace {workspace}: {exc}") from exc
 
         sandbox = Sandbox(
             id=sandbox_id,
@@ -253,9 +249,7 @@ class SandboxManager:
                     error=error,
                 )
 
-        finalized = sandbox.model_copy(
-            update={"status": status, "container_id": container_id}
-        )
+        finalized = sandbox.model_copy(update={"status": status, "container_id": container_id})
         with self._lock:
             self._sandboxes[sandbox_id] = finalized
 
@@ -283,12 +277,8 @@ class SandboxManager:
             raise SandboxError(f"sandbox {sandbox_id} has no container")
         cmd = shlex.split(command) if isinstance(command, str) else list(command)
         backend = self._get_backend()
-        result = backend.exec_command(
-            sandbox.container_id, cmd, sandbox.config.timeout
-        )
-        completed = result.model_copy(
-            update={"sandbox_id": sandbox_id, "command": cmd}
-        )
+        result = backend.exec_command(sandbox.container_id, cmd, sandbox.config.timeout)
+        completed = result.model_copy(update={"sandbox_id": sandbox_id, "command": cmd})
         logger.info(
             "sandbox_executed",
             sandbox_id=sandbox_id,

@@ -53,7 +53,13 @@ class FakeLatticeBackend(LatticeBackend):
 
     async def create_node(self, node_type, properties, actor="system"):
         nid = f"n-{len(self.nodes)}"
-        self.nodes[nid] = {"id": nid, "type": node_type.value, "properties": dict(properties), "created_at": utc_now().isoformat(), "updated_at": utc_now().isoformat()}
+        self.nodes[nid] = {
+            "id": nid,
+            "type": node_type.value,
+            "properties": dict(properties),
+            "created_at": utc_now().isoformat(),
+            "updated_at": utc_now().isoformat(),
+        }
         self._record("node_created", actor, nid, properties)
         return nid
 
@@ -80,11 +86,18 @@ class FakeLatticeBackend(LatticeBackend):
                 if not match:
                     continue
             results.append(dict(n))
-        return results[offset:offset + limit]
+        return results[offset : offset + limit]
 
     async def add_edge(self, source_id, target_id, edge_type, properties=None, actor="system"):
         eid = f"e-{len(self.edges)}"
-        self.edges[eid] = {"id": eid, "source_id": source_id, "target_id": target_id, "type": edge_type.value, "properties": dict(properties or {}), "created_at": utc_now().isoformat()}
+        self.edges[eid] = {
+            "id": eid,
+            "source_id": source_id,
+            "target_id": target_id,
+            "type": edge_type.value,
+            "properties": dict(properties or {}),
+            "created_at": utc_now().isoformat(),
+        }
         return eid
 
     async def get_edges(self, node_id, direction="both", edge_type=None):
@@ -133,7 +146,9 @@ class FakeLatticeBackend(LatticeBackend):
         removed = any(store.pop(i, None) is not None for i in ids)
         return removed
 
-    async def submit_proposal(self, proposer_id, proposal_type, payload, quorum=0.5, ttl_seconds=3600):
+    async def submit_proposal(
+        self, proposer_id, proposal_type, payload, quorum=0.5, ttl_seconds=3600
+    ):
         pid = f"prop-{len(self.proposals)}"
         self.proposals[pid] = ConsensusProposal(
             proposal_id=pid,
@@ -144,14 +159,26 @@ class FakeLatticeBackend(LatticeBackend):
             status="open",
             expires_at=utc_now() + __import__("datetime").timedelta(seconds=ttl_seconds),
         )
-        self._record("proposal_submitted", proposer_id, pid, {"proposal_type": proposal_type, **dict(payload)})
+        self._record(
+            "proposal_submitted",
+            proposer_id,
+            pid,
+            {"proposal_type": proposal_type, **dict(payload)},
+        )
         return pid
 
     async def cast_vote(self, voter_id, proposal_id, decision, evidence=None):
         proposal = self.proposals.get(proposal_id)
         if not proposal:
             raise KeyError(f"Unknown proposal: {proposal_id}")
-        proposal.votes.append(Vote(voter_id=voter_id, proposal_id=proposal_id, decision=decision, evidence=list(evidence or [])))
+        proposal.votes.append(
+            Vote(
+                voter_id=voter_id,
+                proposal_id=proposal_id,
+                decision=decision,
+                evidence=list(evidence or []),
+            )
+        )
         self._record("vote_cast", voter_id, proposal_id, {"decision": decision})
         await self.check_quorum(proposal_id)
         return True
@@ -166,10 +193,14 @@ class FakeLatticeBackend(LatticeBackend):
         return [p for p in self.proposals.values() if p.status == "open"]
 
     async def update_reputation(self, agent_id, success, peer_rating=None):
-        return __import__("agency.lattice.models", fromlist=["Reputation"]).Reputation(agent_id=agent_id)
+        return __import__("agency.lattice.models", fromlist=["Reputation"]).Reputation(
+            agent_id=agent_id
+        )
 
     async def get_reputation(self, agent_id):
-        return __import__("agency.lattice.models", fromlist=["Reputation"]).Reputation(agent_id=agent_id)
+        return __import__("agency.lattice.models", fromlist=["Reputation"]).Reputation(
+            agent_id=agent_id
+        )
 
     async def check_quorum(self, proposal_id):
         proposal = self.proposals.get(proposal_id)
@@ -203,13 +234,23 @@ class FakeLatticeBackend(LatticeBackend):
         return results
 
     async def replay_events(self, from_timestamp, to_timestamp=None):
-        return [e for e in self.events if e.timestamp >= from_timestamp and (to_timestamp is None or e.timestamp <= to_timestamp)]
+        return [
+            e
+            for e in self.events
+            if e.timestamp >= from_timestamp
+            and (to_timestamp is None or e.timestamp <= to_timestamp)
+        ]
 
     async def get_audit_trail(self, node_id):
         return [e for e in self.events if e.target_id == node_id]
 
     async def get_status(self):
-        return {"backend": "fake", "node_count": len(self.nodes), "edge_count": len(self.edges), "event_count": len(self.events)}
+        return {
+            "backend": "fake",
+            "node_count": len(self.nodes),
+            "edge_count": len(self.edges),
+            "event_count": len(self.events),
+        }
 
     async def get_agent_count(self):
         return sum(1 for n in self.nodes.values() if n.get("type") == NodeType.AGENT.value)
@@ -218,27 +259,51 @@ class FakeLatticeBackend(LatticeBackend):
         return []
 
     async def register_agent(self, agent_id, agent_type, capabilities):
-        nid = await self.create_node(NodeType.AGENT, {"agent_id": agent_id, "agent_type": agent_type, "capabilities": capabilities, "status": "active"}, actor=agent_id)
+        nid = await self.create_node(
+            NodeType.AGENT,
+            {
+                "agent_id": agent_id,
+                "agent_type": agent_type,
+                "capabilities": capabilities,
+                "status": "active",
+            },
+            actor=agent_id,
+        )
         return nid
 
     async def create_task(self, agent_id, task_type, payload):
-        return await self.create_node(NodeType.TASK, {"task_type": task_type, "payload": dict(payload), "created_by": agent_id, "status": "open"}, actor=agent_id)
+        return await self.create_node(
+            NodeType.TASK,
+            {
+                "task_type": task_type,
+                "payload": dict(payload),
+                "created_by": agent_id,
+                "status": "open",
+            },
+            actor=agent_id,
+        )
 
     async def complete_task(self, task_id, deliverable):
         return await self.update_node(task_id, {"status": "completed"})
 
     async def link_evidence(self, evidence_id, target_id):
-        return await self.add_edge(evidence_id, target_id, __import__("agency.lattice.models", fromlist=["EdgeType"]).EdgeType.EVIDENCE_FOR)
+        return await self.add_edge(
+            evidence_id,
+            target_id,
+            __import__("agency.lattice.models", fromlist=["EdgeType"]).EdgeType.EVIDENCE_FOR,
+        )
 
     def _record(self, event_type, actor, target_id, payload):
-        self.events.append(LatticeEvent(
-            event_id=f"evt-{len(self.events)}",
-            timestamp=utc_now(),
-            event_type=event_type,
-            actor=actor,
-            target_id=target_id,
-            payload=dict(payload),
-        ))
+        self.events.append(
+            LatticeEvent(
+                event_id=f"evt-{len(self.events)}",
+                timestamp=utc_now(),
+                event_type=event_type,
+                actor=actor,
+                target_id=target_id,
+                payload=dict(payload),
+            )
+        )
 
 
 @pytest.fixture
@@ -280,7 +345,11 @@ async def test_full_spawn_flow(orchestrator, backend, lattice):
     proposal_id = await lattice.submit_proposal(
         proposer_id="test_user",
         proposal_type="spawn_agent",
-        payload={"name": "TestBot", "domain": "testing", "capabilities": ["run_diagnostics", "report"]},
+        payload={
+            "name": "TestBot",
+            "domain": "testing",
+            "capabilities": ["run_diagnostics", "report"],
+        },
         quorum=0.66,
     )
 

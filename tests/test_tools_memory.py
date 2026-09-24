@@ -78,7 +78,9 @@ async def test_write_stores_and_returns_id(file_memory_store: MemoryStore):
 
 async def test_write_with_title_prepends_title(file_memory_store: MemoryStore):
     tool = MemoryWriteTool()
-    result = await tool.run({"content": "body text", "title": "Scan Report"}, _ctx(file_memory_store))
+    result = await tool.run(
+        {"content": "body text", "title": "Scan Report"}, _ctx(file_memory_store)
+    )
     assert result.ok is True
     fetched = await file_memory_store.get(result.output["id"])
     assert fetched is not None
@@ -94,9 +96,7 @@ async def test_write_with_no_store_is_not_ok():
 
 async def test_roundtrip_write_then_query(file_memory_store: MemoryStore):
     ctx = _ctx(file_memory_store)
-    write_result = await MemoryWriteTool().run(
-        {"content": "roundtrip canary zephyrquake"}, ctx
-    )
+    write_result = await MemoryWriteTool().run({"content": "roundtrip canary zephyrquake"}, ctx)
     assert write_result.ok is True
     query_result = await MemoryQueryTool().run({"query": "zephyrquake"}, ctx)
     assert query_result.ok is True

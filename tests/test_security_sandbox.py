@@ -37,8 +37,7 @@ def test_create_sandbox_running(test_sandbox_manager: SandboxManager, fake_backe
 
 
 def test_create_sandbox_custom_config(test_sandbox_manager: SandboxManager):
-    cfg = SandboxConfig(cpu_limit=0.5, memory_limit=256, timeout=60,
-                        env_vars={"FOO": "bar"})
+    cfg = SandboxConfig(cpu_limit=0.5, memory_limit=256, timeout=60, env_vars={"FOO": "bar"})
     sbx = test_sandbox_manager.create_sandbox("agent-9", config=cfg)
     assert sbx.config.cpu_limit == 0.5
     assert sbx.resource_limits.memory_mb == 256
@@ -116,10 +115,10 @@ def test_execution_result_success_property():
     ok = ExecutionResult(sandbox_id="s", command=["a"], exit_code=0)
     assert ok.success is True
     assert ExecutionResult(sandbox_id="s", command=["a"], exit_code=1).success is False
-    assert ExecutionResult(sandbox_id="s", command=["a"], exit_code=0,
-                           timed_out=True).success is False
-    assert ExecutionResult(sandbox_id="s", command=["a"], exit_code=0,
-                           error="x").success is False
+    assert (
+        ExecutionResult(sandbox_id="s", command=["a"], exit_code=0, timed_out=True).success is False
+    )
+    assert ExecutionResult(sandbox_id="s", command=["a"], exit_code=0, error="x").success is False
 
 
 def test_filesystem_and_network_policies_enumerated():

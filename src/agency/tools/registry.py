@@ -101,9 +101,7 @@ class ToolRegistry:
         Default per-tool execution timeout in seconds.
     """
 
-    def __init__(
-        self, audit: Any | None = None, default_timeout_s: float = 30.0
-    ) -> None:
+    def __init__(self, audit: Any | None = None, default_timeout_s: float = 30.0) -> None:
         self._tools: dict[str, Tool] = {}
         self._timeouts: dict[str, float] = {}
         self._audit = audit
@@ -141,9 +139,7 @@ class ToolRegistry:
             raise ValueError("timeout seconds must be > 0.")
         self._timeouts[name] = seconds
 
-    async def call(
-        self, name: str, args: dict[str, Any], ctx: ToolContext
-    ) -> ToolResult:
+    async def call(self, name: str, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         """Call a tool by name with validated args; never raises to caller.
 
         Unknown tools, schema violations, timeouts, and tool exceptions
@@ -192,9 +188,7 @@ class ToolRegistry:
         await self._audit_call(ctx, name, result)
         return result
 
-    async def _audit_call(
-        self, ctx: ToolContext, name: str, result: ToolResult
-    ) -> None:
+    async def _audit_call(self, ctx: ToolContext, name: str, result: ToolResult) -> None:
         """Best-effort audit logging for one tool call."""
         action = "tool.call" if result.ok else "tool.error"
         outcome = "ok" if result.ok else "error"
@@ -245,9 +239,7 @@ class ToolRegistry:
             self._log.warning("tool.audit_failed", tool=name)
 
 
-def build_default_registry(
-    tools: Iterable[Tool] | None = None, **ctx_kwargs: Any
-) -> ToolRegistry:
+def build_default_registry(tools: Iterable[Tool] | None = None, **ctx_kwargs: Any) -> ToolRegistry:
     """Return a ToolRegistry for the Agency tool layer.
 
     Builtin tools are registered by ``agency.tools.builtin`` (wired in a

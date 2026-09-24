@@ -31,6 +31,14 @@ async def clean_singleton():
 # -- singleton factory ------------------------------------------------- #
 
 
+async def test_open_proposals_are_available_from_unified_api(lattice: Lattice) -> None:
+    proposal_id = await lattice.submit_proposal(
+        proposer_id="tester", proposal_type="spawn_agent", payload={"name": "scout"}
+    )
+    proposals = await lattice.list_open_proposals()
+    assert [proposal.proposal_id for proposal in proposals] == [proposal_id]
+
+
 async def test_get_lattice_returns_same_instance(
     clean_singleton: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -41,13 +49,9 @@ async def test_get_lattice_returns_same_instance(
 
 
 async def test_reset_lattice_creates_new_instance(clean_singleton: None) -> None:
-    first = await get_lattice(
-        config=LatticeConfig(backend="sqlite", sqlite_path=":memory:")
-    )
+    first = await get_lattice(config=LatticeConfig(backend="sqlite", sqlite_path=":memory:"))
     await reset_lattice()
-    second = await get_lattice(
-        config=LatticeConfig(backend="sqlite", sqlite_path=":memory:")
-    )
+    second = await get_lattice(config=LatticeConfig(backend="sqlite", sqlite_path=":memory:"))
     assert first is not second
 
 
@@ -55,9 +59,7 @@ async def test_reset_lattice_creates_new_instance(clean_singleton: None) -> None
 
 
 async def test_node_crud_lifecycle(lattice: Lattice) -> None:
-    node_id = await lattice.create_node(
-        NodeType.TASK, {"title": "write report"}, actor="butler"
-    )
+    node_id = await lattice.create_node(NodeType.TASK, {"title": "write report"}, actor="butler")
     assert isinstance(node_id, str) and node_id
 
     node = await lattice.get_node(node_id)
@@ -101,9 +103,7 @@ async def test_edge_operations(lattice: Lattice) -> None:
 
 
 async def test_graph_traversal_three_hops(lattice: Lattice) -> None:
-    nodes = [
-        await lattice.create_node(NodeType.TASK, {"title": f"t{i}"}) for i in range(4)
-    ]
+    nodes = [await lattice.create_node(NodeType.TASK, {"title": f"t{i}"}) for i in range(4)]
     for i in range(3):
         await lattice.add_edge(nodes[i], nodes[i + 1], EdgeType.DEPENDS_ON)
 
@@ -143,9 +143,7 @@ async def test_pathfinding(lattice: Lattice) -> None:
 
 
 async def test_event_sourcing_on_writes(lattice: Lattice) -> None:
-    node_id = await lattice.create_node(
-        NodeType.AGENT, {"agent_id": "a1"}, actor="butler"
-    )
+    node_id = await lattice.create_node(NodeType.AGENT, {"agent_id": "a1"}, actor="butler")
     await lattice.update_node(node_id, {"status": "active"}, actor="butler")
 
     trail = await lattice.get_audit_trail(node_id)
@@ -174,9 +172,7 @@ async def test_agent_registration_convenience(lattice: Lattice) -> None:
 
 async def test_task_lifecycle(lattice: Lattice) -> None:
     await lattice.register_agent("agent-1", "worker", ["code"])
-    task_id = await lattice.create_task(
-        "agent-1", "summarize", {"doc": "spec.md"}
-    )
+    task_id = await lattice.create_task("agent-1", "summarize", {"doc": "spec.md"})
     active = await lattice.get_active_tasks()
     assert any(task["id"] == task_id for task in active)
 
@@ -196,8 +192,7 @@ async def test_evidence_linking(lattice: Lattice) -> None:
 
     edges = await lattice.get_edges(evidence, direction="out")
     assert any(
-        edge["id"] == edge_id and edge["edge_type"] == EdgeType.EVIDENCE_FOR.value
-        for edge in edges
+        edge["id"] == edge_id and edge["edge_type"] == EdgeType.EVIDENCE_FOR.value for edge in edges
     )
 
 

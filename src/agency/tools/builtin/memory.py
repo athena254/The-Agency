@@ -53,19 +53,16 @@ class MemoryQueryTool:
         start = time.perf_counter()
         store = ctx.memory_store
         if store is None:
-            return ToolResult(
-                tool="memory_query", ok=False, error="no memory store available"
-            )
+            return ToolResult(tool="memory_query", ok=False, error="no memory store available")
         query = args.get("query")
         agent_id = args.get("agent_id")
         limit = args.get("limit", 10)
         if not isinstance(limit, int) or isinstance(limit, bool):
-            return ToolResult(
-                tool="memory_query", ok=False, error="'limit' must be an integer"
-            )
+            return ToolResult(tool="memory_query", ok=False, error="'limit' must be an integer")
         limit = max(1, min(limit, 100))
         has_query = isinstance(query, str) and bool(query.strip())
         has_agent = isinstance(agent_id, str) and bool(agent_id.strip())
+        normalized_agent_id = agent_id.strip() if isinstance(agent_id, str) and has_agent else None
         if not has_query and not has_agent:
             return ToolResult(
                 tool="memory_query",
@@ -79,7 +76,7 @@ class MemoryQueryTool:
                 try:
                     items = await store.search_fts(
                         query.strip(),
-                        agent_id=agent_id.strip() if has_agent else None,
+                        agent_id=normalized_agent_id,
                         limit=limit,
                     )
                 except Exception:  # noqa: BLE001 — any FTS failure falls back
@@ -87,7 +84,7 @@ class MemoryQueryTool:
                     logger.warning("tool.memory_query.fts_fallback", query=query)
                     items = await store.search(
                         MemoryQuery(
-                            agent_id=agent_id.strip() if has_agent else None,
+                            agent_id=normalized_agent_id,
                             limit=limit,
                         )
                     )
@@ -137,9 +134,7 @@ class MemoryWriteTool:
         start = time.perf_counter()
         store = ctx.memory_store
         if store is None:
-            return ToolResult(
-                tool="memory_write", ok=False, error="no memory store available"
-            )
+            return ToolResult(tool="memory_write", ok=False, error="no memory store available")
         content = args.get("content")
         if not isinstance(content, str) or not content.strip():
             return ToolResult(
@@ -153,9 +148,7 @@ class MemoryWriteTool:
             text = f"{title.strip()}\n{text}"
         try:
             item = await store.store(
-                MemoryItem(
-                    agent_id=ctx.agent_id, content=text, tier=MemoryTier.NORMAL
-                )
+                MemoryItem(agent_id=ctx.agent_id, content=text, tier=MemoryTier.NORMAL)
             )
         except Exception as exc:  # noqa: BLE001 — store failure is a tool error
             return ToolResult(

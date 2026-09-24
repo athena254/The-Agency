@@ -14,15 +14,17 @@ def _run_attack(test_red_planner, test_red_executor, test_sandbox, approved: boo
 
 
 def _defense_for(test_blue_team, threat_id: str = "th-1"):
-    threat = Threat(id=threat_id, name="sqli", kind=ThreatKind.INJECTION,
-                    severity=ThreatSeverity.HIGH)
+    threat = Threat(
+        id=threat_id, name="sqli", kind=ThreatKind.INJECTION, severity=ThreatSeverity.HIGH
+    )
     test_blue_team.analyze_threat(threat)
     defense = test_blue_team.propose_defenses(threat)[0]
     return test_blue_team.validate_defense(defense.id)
 
 
-def test_passed_attack_confirmed(test_purple_team: PurpleTeam, test_red_planner,
-                                 test_red_executor, test_blue_team, test_sandbox):
+def test_passed_attack_confirmed(
+    test_purple_team: PurpleTeam, test_red_planner, test_red_executor, test_blue_team, test_sandbox
+):
     attack = _run_attack(test_red_planner, test_red_executor, test_sandbox)
     defense = _defense_for(test_blue_team)
     result = test_purple_team.run_attack_defense_test(attack.id, defense.id)
@@ -32,16 +34,18 @@ def test_passed_attack_confirmed(test_purple_team: PurpleTeam, test_red_planner,
     assert len(result.evidence) == len(attack.evidence)
 
 
-def test_blocked_attack_not_vulnerable(test_purple_team: PurpleTeam, test_red_planner,
-                                       test_red_executor, test_blue_team, test_sandbox):
+def test_blocked_attack_not_vulnerable(
+    test_purple_team: PurpleTeam, test_red_planner, test_red_executor, test_blue_team, test_sandbox
+):
     attack = _run_attack(test_red_planner, test_red_executor, test_sandbox, approved=False)
     defense = _defense_for(test_blue_team)
     result = test_purple_team.run_attack_defense_test(attack.id, defense.id)
     assert result.verdict is Verdict.NOT_VULNERABLE
 
 
-def test_validate_finding_without_defense(test_purple_team: PurpleTeam, test_red_planner,
-                                          test_red_executor, test_sandbox):
+def test_validate_finding_without_defense(
+    test_purple_team: PurpleTeam, test_red_planner, test_red_executor, test_sandbox
+):
     attack = _run_attack(test_red_planner, test_red_executor, test_sandbox)
     result = test_purple_team.validate_finding(attack.id)
     assert result.verdict is Verdict.CONFIRMED
@@ -58,8 +62,9 @@ def test_run_attack_defense_unknown_ids(test_purple_team: PurpleTeam):
         test_purple_team.run_attack_defense_test("test-missing", "def-missing")
 
 
-def test_generate_report_counts(test_purple_team: PurpleTeam, test_red_planner,
-                                test_red_executor, test_blue_team, test_sandbox):
+def test_generate_report_counts(
+    test_purple_team: PurpleTeam, test_red_planner, test_red_executor, test_blue_team, test_sandbox
+):
     confirmed = _run_attack(test_red_planner, test_red_executor, test_sandbox)
     blocked = _run_attack(test_red_planner, test_red_executor, test_sandbox, approved=False)
     defense = _defense_for(test_blue_team)

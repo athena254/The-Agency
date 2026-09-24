@@ -46,7 +46,8 @@ async def test_store_crud(test_memory_store: MemoryStore, sample_memory_item: Me
 async def test_search_and_list_filters(test_memory_store: MemoryStore):
     await test_memory_store.store(MemoryItem(agent_id="a", content="alpha", tags=["t1"]))
     await test_memory_store.store(
-        MemoryItem(agent_id="b", content="beta", tags=["t2"], tier=MemoryTier.HOT))
+        MemoryItem(agent_id="b", content="beta", tags=["t2"], tier=MemoryTier.HOT)
+    )
     assert len(await test_memory_store.search(MemoryQuery(agent_id="a"))) == 1
     assert len(await test_memory_store.search(MemoryQuery(tags=["t2"]))) == 1
     assert len(await test_memory_store.search(MemoryQuery(tier=MemoryTier.HOT))) == 1
@@ -57,7 +58,8 @@ async def test_search_and_list_filters(test_memory_store: MemoryStore):
 
 async def test_fts_search(test_memory_store: MemoryStore):
     await test_memory_store.store(
-        MemoryItem(agent_id="a", content="suspicious exfiltration channel detected"))
+        MemoryItem(agent_id="a", content="suspicious exfiltration channel detected")
+    )
     await test_memory_store.store(MemoryItem(agent_id="a", content="totally unrelated weather"))
     results = await test_memory_store.search_fts("exfiltration")
     assert len(results) == 1
@@ -77,8 +79,11 @@ async def test_store_auto_age_demotes_stale(test_memory_store: MemoryStore):
     from datetime import UTC, datetime
 
     stale = MemoryItem(
-        agent_id="a", content="old", tier=MemoryTier.HOT,
-        accessed_at=datetime.now(UTC) - timedelta(days=60))
+        agent_id="a",
+        content="old",
+        tier=MemoryTier.HOT,
+        accessed_at=datetime.now(UTC) - timedelta(days=60),
+    )
     await test_memory_store.store(stale)
     moved = await test_memory_store.auto_age()
     assert moved >= 1
@@ -93,11 +98,11 @@ async def test_engine_promote_demote(test_memory_store: MemoryStore):
     assert (await engine.demote(item.id)).tier is MemoryTier.NORMAL
     assert await engine.promote("missing") is None
     assert await engine.demote("missing") is None
-    hot = await test_memory_store.store(
-        MemoryItem(agent_id="a", content="y", tier=MemoryTier.HOT))
+    hot = await test_memory_store.store(MemoryItem(agent_id="a", content="y", tier=MemoryTier.HOT))
     assert (await engine.promote(hot.id)).tier is MemoryTier.HOT
     cold = await test_memory_store.store(
-        MemoryItem(agent_id="a", content="z", tier=MemoryTier.COLD))
+        MemoryItem(agent_id="a", content="z", tier=MemoryTier.COLD)
+    )
     assert (await engine.demote(cold.id)).tier is MemoryTier.COLD
 
 
@@ -105,9 +110,14 @@ async def test_engine_auto_age_only_demotion(test_memory_store: MemoryStore):
     from datetime import UTC, datetime
 
     engine = TieredMemoryEngine(test_memory_store)
-    stale = await test_memory_store.store(MemoryItem(
-        agent_id="a", content="stale", tier=MemoryTier.HOT,
-        accessed_at=datetime.now(UTC) - timedelta(days=60)))
+    stale = await test_memory_store.store(
+        MemoryItem(
+            agent_id="a",
+            content="stale",
+            tier=MemoryTier.HOT,
+            accessed_at=datetime.now(UTC) - timedelta(days=60),
+        )
+    )
     moved = await engine.auto_age()
     assert moved == 1
     assert (await test_memory_store.get(stale.id)).tier is MemoryTier.COLD
@@ -123,7 +133,8 @@ async def test_engine_periodic_start_stop(test_memory_store: MemoryStore):
 
 async def test_retrieval_engines(test_memory_store: MemoryStore):
     await test_memory_store.store(
-        MemoryItem(agent_id="a", content="port scan against staging host"))
+        MemoryItem(agent_id="a", content="port scan against staging host")
+    )
     engine = RetrievalEngine(test_memory_store)
     assert build_fts_match("port scan")
     assert len(await engine.semantic_search("port scan", agent_id="a")) >= 1

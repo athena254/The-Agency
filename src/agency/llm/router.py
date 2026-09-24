@@ -222,9 +222,7 @@ class LLMRouter:
         return adapter
 
     @staticmethod
-    def _merged_context(
-        context: dict[str, Any] | None, adapter: LLMAdapter
-    ) -> dict[str, Any]:
+    def _merged_context(context: dict[str, Any] | None, adapter: LLMAdapter) -> dict[str, Any]:
         """Copy ``context`` with overrides passed through verbatim.
 
         An explicit ``model`` stays untouched (the adapter resolves it).

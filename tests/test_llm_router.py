@@ -44,17 +44,23 @@ async def test_route_stream_uses_actual_adapter_signature(monkeypatch: pytest.Mo
         yield "two"
 
     monkeypatch.setattr(adapter, "stream", stream)
-    chunks = [chunk async for chunk in _router(adapter).route_stream("short task", {"model": "chosen"})]
+    chunks = [
+        chunk async for chunk in _router(adapter).route_stream("short task", {"model": "chosen"})
+    ]
     assert chunks == ["part", "two"]
     assert seen == [{"model": "chosen"}]
 
 
 @pytest.mark.asyncio
-async def test_provider_preset_alias_is_normalized_for_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_provider_preset_alias_is_normalized_for_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     default = LLMAdapter(provider="echo", model="default")
     selected = LLMAdapter(provider="echo", model="selected")
     router = _router(default)
-    monkeypatch.setattr(router, "_adapter_for_preset", lambda preset: selected if preset == "claude" else None)
+    monkeypatch.setattr(
+        router, "_adapter_for_preset", lambda preset: selected if preset == "claude" else None
+    )
     seen: list[dict[str, Any]] = []
 
     async def generate(_prompt: str, context: dict[str, Any] | None = None) -> str:
@@ -72,10 +78,16 @@ def test_explain_uses_adapter_metadata_and_explicit_model() -> None:
     adapter = LLMAdapter(provider="echo", model="base")
     router = _router(adapter)
     assert router.explain("short task") == {
-        "task_kind": "fast", "provider": "echo", "model": "base", "explicit_override": False
+        "task_kind": "fast",
+        "provider": "echo",
+        "model": "base",
+        "explicit_override": False,
     }
     assert router.explain("short task", {"model": "override"}) == {
-        "task_kind": "fast", "provider": "echo", "model": "override", "explicit_override": True
+        "task_kind": "fast",
+        "provider": "echo",
+        "model": "override",
+        "explicit_override": True,
     }
 
 
@@ -91,7 +103,9 @@ def test_echo_preset_construction_uses_config_keyword(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
-async def test_unconfigured_preset_falls_back_to_local_echo(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_unconfigured_preset_falls_back_to_local_echo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     adapter = LLMAdapter(provider="echo", model="echo")
     router = LLMRouter(adapter=adapter, routes={TaskKind.FAST: ("missing-preset",)})
     monkeypatch.setattr(router, "_adapter_for_preset", lambda _name: None)
@@ -130,7 +144,9 @@ async def test_explicit_provider_remains_binding_with_model_override(
     default = LLMAdapter(provider="echo", model="default")
     selected = LLMAdapter(provider="echo", model="selected")
     router = _router(default)
-    monkeypatch.setattr(router, "_adapter_for_preset", lambda name: selected if name == "local" else None)
+    monkeypatch.setattr(
+        router, "_adapter_for_preset", lambda name: selected if name == "local" else None
+    )
     seen: list[dict[str, Any]] = []
 
     async def generate(_prompt: str, context: dict[str, Any] | None = None) -> str:
@@ -139,7 +155,9 @@ async def test_explicit_provider_remains_binding_with_model_override(
 
     monkeypatch.setattr(selected, "generate", generate)
     monkeypatch.setattr(default, "generate", lambda *_args, **_kwargs: pytest.fail("default used"))
-    assert await router.route("short task", {"provider": "local", "model": "chosen"}) == "from-local"
+    assert (
+        await router.route("short task", {"provider": "local", "model": "chosen"}) == "from-local"
+    )
     assert seen == [{"provider": "echo", "model": "chosen", "strict": True}]
 
 
@@ -148,9 +166,7 @@ async def test_explicit_provider_remains_binding_with_model_override(
 async def test_falsey_explicit_provider_is_rejected_without_remote_fallback(
     monkeypatch: pytest.MonkeyPatch, invalid: Any
 ) -> None:
-    router = LLMRouter(
-        adapter=LLMAdapter(provider="echo"), routes={TaskKind.FAST: ("remote",)}
-    )
+    router = LLMRouter(adapter=LLMAdapter(provider="echo"), routes={TaskKind.FAST: ("remote",)})
     monkeypatch.setattr(
         router, "_adapter_for_preset", lambda _name: pytest.fail("a preset was selected")
     )
@@ -169,7 +185,9 @@ async def test_explicit_local_backend_failure_does_not_echo(
 ) -> None:
     local = LLMAdapter(provider="ollama", model="local")
     router = _router(LLMAdapter(provider="echo"))
-    monkeypatch.setattr(router, "_adapter_for_preset", lambda name: local if name == "local" else None)
+    monkeypatch.setattr(
+        router, "_adapter_for_preset", lambda name: local if name == "local" else None
+    )
 
     async def backend_failure(_prompt: str, _model: str) -> str:
         raise OSError("local unavailable")

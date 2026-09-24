@@ -9,6 +9,7 @@ from agency.telegram.handler import TelegramHandler
 def handler():
     """Create a handler with no butler for intent parsing tests."""
     from agency.telegram.config import TelegramConfig
+
     config = TelegramConfig(bot_token="test", allowed_chat_ids=["123"])
     return TelegramHandler(config=config, butler=None)
 
@@ -25,7 +26,9 @@ class TestDetectAgentCreationIntent:
         assert result.get("name") == "StockBot"
 
     def test_named_agent(self, handler):
-        result = handler._detect_agent_creation_intent("create agent named HealthTracker that tracks medical records")
+        result = handler._detect_agent_creation_intent(
+            "create agent named HealthTracker that tracks medical records"
+        )
         assert result.get("name") == "HealthTracker"
         assert "tracks medical records" in result.get("purpose", "")
 

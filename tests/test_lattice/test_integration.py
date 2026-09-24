@@ -44,9 +44,7 @@ async def test_lattice_importable_and_instantiable() -> None:
 
 
 async def test_factory_singleton_smoke(clean_singleton: None) -> None:
-    first = await get_lattice(
-        config=LatticeConfig(backend="sqlite", sqlite_path=":memory:")
-    )
+    first = await get_lattice(config=LatticeConfig(backend="sqlite", sqlite_path=":memory:"))
     second = await get_lattice()
     assert first is second
 
@@ -93,8 +91,6 @@ async def test_reputation_flow_smoke(lattice: Lattice) -> None:
 async def test_concurrent_operations_smoke(lattice: Lattice) -> None:
     import asyncio
 
-    ids = await asyncio.gather(
-        *(lattice.create_node("task", {"n": i}) for i in range(10))
-    )
+    ids = await asyncio.gather(*(lattice.create_node("task", {"n": i}) for i in range(10)))
     assert len(set(ids)) == 10
     assert len(await lattice.find_nodes("task", limit=50)) == 10
