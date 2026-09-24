@@ -7,6 +7,7 @@ import threading
 import time
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import structlog
 
@@ -64,7 +65,7 @@ class ProcessSandboxBackend:
         timed_out = False
         error: str | None = None
         try:
-            kwargs: dict = {
+            kwargs: dict[str, Any] = {
                 "cwd": workspace,
                 "capture_output": True,
                 "timeout": timeout,

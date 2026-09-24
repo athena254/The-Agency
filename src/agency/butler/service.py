@@ -66,14 +66,14 @@ class ButlerService:
         self._memory_retrieval = RetrievalEngine(self._memory)
         self._threads = thread_store
         self._owns_threads = thread_store is None
-        self._lattice = None  # Will be set from orchestrator
+        self._lattice: Any = None  # Will be set from orchestrator
         self._llm = llm
         self._log = structlog.get_logger(__name__)
         self._started = False
         self._seeded = False
 
     @property
-    def lattice(self):
+    def lattice(self) -> Any:
         """Reference to the orchestrator's Lattice instance, if available."""
         if self._lattice is not None:
             return self._lattice

@@ -59,7 +59,7 @@ def _build_llm_callable(config: ButlerConfig):  # type: ignore[no-untyped-def]
         model=config.llm_model or None,
         load_dotenv=False,
     )
-    adapter = LLMAdapter(llm_config)
+    adapter = LLMAdapter(config=llm_config)
     if adapter.echo_mode:
         return None
     return adapter.generate
@@ -113,7 +113,7 @@ class HealthResponse(BaseModel):
     version: str = Field(default=__version__)
     butler: str = Field(default="running")
     agents: int = Field(default=0)
-    lattice: dict | None = Field(default=None, description="Lattice status if available.")
+    lattice: dict[str, Any] | None = Field(default=None, description="Lattice status if available.")
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -124,7 +124,7 @@ class HealthResponse(BaseModel):
 
 def _get_service(request: Request) -> ButlerService:
     service = getattr(request.app.state, "butler", None)
-    if service is None:
+    if not isinstance(service, ButlerService):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Butler service is not initialised.",
