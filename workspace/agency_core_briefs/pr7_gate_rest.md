@@ -1,0 +1,7 @@
+# PR #7 gate workstream D — remaining strict typing
+
+Read `docs/SPEC_PR7_READINESS.md`, `.github/workflows/ci.yml` and actual source. The draft PR worktree is isolated from owner's uncommitted `main`. Work ONLY in `src/agency/security/**`, `src/agency/agents/**` EXCEPT `src/agency/agents/demo/agent.py`, `src/agency/evidence/**`, `src/agency/addons/**`, `src/agency/forge/**`, `src/agency/config/**`, `src/agency/tools/base.py`, `src/agency/tools/driver.py`, and matching tests. Do NOT edit any other paths, do not push/merge, and no live providers/network requests. Do not hide defects behind broad ignores or loosen strict mypy. Avoid formatting-only edits.
+
+Reproduce owned errors using `C:/Users/alphi/agency-core-build/.venv/Scripts/mypy.exe src/ --show-error-codes --no-error-summary`. Expected owned errors include sandbox manager returns, planner/defender return, agent executor stale ignore / response, evidence store model conversion, ghost factory dict shape, dark factory tool spec, config stale ignore, Forge inspection report. Many missing-stub cascades in a separate temporary 3.11 environment were not reproduced by CI; use project `.venv` for contract fixes. Include tests for changed behavior, not just casts.
+
+Use `PYTHONPATH=C:/Users/alphi/agency-gate-rest/src C:/Users/alphi/agency-core-build/.venv/Scripts/python.exe -m pytest <affected tests>` and `.venv/Scripts/ruff.exe` for scoped checks. No `uv sync` or `uv.lock` change. Commit ONLY owned source/test paths, report before/after diagnostics, tests, SHA and unresolved issues.
