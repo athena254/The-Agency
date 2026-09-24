@@ -151,8 +151,9 @@ def _symlink_or_escape(real_root: Path, candidate: Path) -> str | None:
     """Reject symlinks on the walk and any resolved escape outside the root."""
     if not _is_within(candidate, real_root):
         return "path_escapes_root"
-    # Walk every component before opening; a concurrently mutable checkout
-    # still has a TOCTOU limitation (Forge does not claim a secure sandbox).
+    # Walk every component before opening. On Windows this remains a best-effort
+    # check: os.open lacks dir_fd/O_NOFOLLOW, so a racing parent replacement
+    # cannot be made atomic. Forge is not a sandbox for hostile concurrent writes.
     probe = real_root
     for part in candidate.relative_to(real_root).parts:
         probe = probe / part
@@ -211,13 +212,36 @@ def _inspect_one(real_root: Path, raw: str) -> tuple[FileRecord | None, Rejected
         return None, RejectedRecord(path=raw, reason=f"file_too_large:{st.st_size}")
 
     try:
-        data = candidate.read_bytes()
+        # No unbounded read even if the file grows after lstat. O_NOFOLLOW
+        # protects the final component on platforms that expose it; identity
+        # and path checks catch swaps on platforms (notably Windows) that do not.
+        fd = os.open(candidate, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+        try:
+            opened = os.fstat(fd)
+            if not stat.S_ISREG(opened.st_mode) or (st.st_dev, st.st_ino) != (
+                opened.st_dev, opened.st_ino
+            ):
+                return None, RejectedRecord(path=raw, reason="path_changed_during_read")
+            data = bytearray()
+            while len(data) <= MAX_FILE_BYTES:
+                chunk = os.read(fd, min(64 * 1024, MAX_FILE_BYTES + 1 - len(data)))
+                if not chunk:
+                    break
+                data.extend(chunk)
+            if _symlink_or_escape(real_root, candidate) is not None:
+                return None, RejectedRecord(path=raw, reason="path_changed_during_read")
+            current = os.lstat(candidate)
+            if (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+                return None, RejectedRecord(path=raw, reason="path_changed_during_read")
+        finally:
+            os.close(fd)
     except OSError:
         return None, RejectedRecord(path=raw, reason="unreadable_path")
 
     # st_size and len(data) can differ on concurrent mutation; enforce the cap on both.
     if len(data) > MAX_FILE_BYTES:
         return None, RejectedRecord(path=raw, reason=f"file_too_large:{len(data)}")
+    data = bytes(data)
 
     digest = hashlib.sha256(data).hexdigest()
     display = "/".join(parts)
@@ -300,10 +324,15 @@ def inspect_changes(root: str | Path, changed_paths: list[str]) -> InspectionRep
     rejected: list[RejectedRecord] = []
     seen: set[str] = set()
     for raw in changed_paths:
-        if raw in seen:
+        normalized = raw.replace("\\", "/")
+        canonical = "/".join(p for p in normalized.split("/") if p not in ("", "."))
+        # Deduplicate the same lexical target even with repeated separators or
+        # Windows separators; never collapse traversal into a safe path.
+        key = os.path.normcase(canonical) if os.name == "nt" else canonical
+        if key in seen:
             rejected.append(RejectedRecord(path=raw[:MAX_PATH_CHARS], reason="duplicate_path"))
             continue
-        seen.add(raw)
+        seen.add(key)
         record, denial = _inspect_one(real_root, raw)
         if record is not None:
             files.append(record)

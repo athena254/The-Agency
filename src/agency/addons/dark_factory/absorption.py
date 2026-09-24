@@ -8,7 +8,9 @@ docstrings on public modules.
 from __future__ import annotations
 
 import ast
+import os
 import re
+import stat
 import subprocess
 import tempfile
 from datetime import UTC, datetime
@@ -20,6 +22,74 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 logger = structlog.get_logger(__name__)
 
 _GITHUB_RE = re.compile(r"^https://github\.com/[\w.-]+/[\w.-]+(?:\.git)?$")
+
+
+def _safe_source(root: Path, path: Path) -> tuple[str, os.stat_result]:
+    """Read a regular file without following a symlink in its lexical path.
+
+    O_NOFOLLOW protects the final component where available. Windows lacks
+    dir_fd pinning; this implementation also uses path-based parent checks on
+    POSIX. Pre/post checks cannot eliminate hostile concurrent parent swaps.
+    """
+    try:
+        parts = path.relative_to(root).parts
+    except ValueError as exc:
+        raise OSError("path outside checkout") from exc
+    probe = root
+    for part in parts:
+        probe = probe / part
+        if stat.S_ISLNK(os.lstat(probe).st_mode):
+            raise OSError("symlink path not allowed")
+    before = os.lstat(path)
+    if not stat.S_ISREG(before.st_mode):
+        raise OSError("nonregular source")
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode) or (before.st_dev, before.st_ino) != (
+            opened.st_dev, opened.st_ino
+        ):
+            raise OSError("source changed during open")
+        with os.fdopen(fd, "r", encoding="utf-8") as stream:
+            fd = -1
+            source = stream.read()
+        probe = root
+        for part in parts:
+            probe = probe / part
+            if stat.S_ISLNK(os.lstat(probe).st_mode):
+                raise OSError("symlink path not allowed")
+        after = os.lstat(path)
+        if (after.st_dev, after.st_ino) != (opened.st_dev, opened.st_ino):
+            raise OSError("source changed during read")
+        return source, after
+    finally:
+        if fd != -1:
+            os.close(fd)
+
+
+def _replace_source(root: Path, path: Path, text: str, expected: os.stat_result) -> None:
+    """Replace the directory entry, never write through the original file."""
+    name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix=".agency-", suffix=".tmp", delete=False,
+        ) as temp:
+            name = temp.name
+            temp.write(text)
+        _, current = _safe_source(root, path)
+        if (current.st_dev, current.st_ino, current.st_mtime_ns, current.st_size) != (
+            expected.st_dev, expected.st_ino, expected.st_mtime_ns, expected.st_size
+        ):
+            raise OSError("source changed before rewrite")
+        os.chmod(name, stat.S_IMODE(expected.st_mode))
+        # os.replace replaces the link entry instead of following a final
+        # symlink; parent-directory races remain possible without dir_fd pinning.
+        os.replace(name, path)
+        name = None
+    finally:
+        if name is not None:
+            os.unlink(name)
 
 
 class AbsorptionResult(BaseModel):
@@ -84,7 +154,7 @@ class RepoAbsorber:
         entry_points: list[str] = []
         for path in py_files:
             try:
-                text = path.read_text(encoding="utf-8")
+                text, _ = _safe_source(root, path)
             except (OSError, UnicodeDecodeError):
                 continue
             total_lines += text.count("\n") + 1
@@ -115,20 +185,25 @@ class RepoAbsorber:
             if ".git" in path.parts:
                 continue
             try:
-                original = path.read_text(encoding="utf-8")
+                original, original_stat = _safe_source(root, path)
             except (OSError, UnicodeDecodeError):
                 skipped.append(str(path.relative_to(root)))
                 continue
             updated = self._rewrite_source(original)
             if updated != original:
-                path.write_text(updated, encoding="utf-8")
-                rewritten.append(str(path.relative_to(root)))
+                try:
+                    _replace_source(root, path, updated, original_stat)
+                except (OSError, UnicodeDecodeError):
+                    skipped.append(str(path.relative_to(root)))
+                else:
+                    rewritten.append(str(path.relative_to(root)))
         self._log.info("absorb.rewritten", root=str(root), rewritten=len(rewritten))
         return {"rewritten": rewritten, "skipped": skipped, "count": len(rewritten)}
 
     def validate(self, rewritten_code: str | Path | dict[str, str]) -> dict[str, object]:
         """Validate rewritten code: every unit must at least parse as Python."""
         units: dict[str, str] = {}
+        failures: dict[str, str] = {}
         if isinstance(rewritten_code, dict):
             units = dict(rewritten_code)
         elif isinstance(rewritten_code, Path) or (
@@ -139,33 +214,44 @@ class RepoAbsorber:
                 if ".git" in path.parts:
                     continue
                 try:
-                    units[str(path)] = path.read_text(encoding="utf-8")
+                    units[str(path)], _ = _safe_source(root, path)
                 except (OSError, UnicodeDecodeError) as exc:
-                    units[str(path)] = f"# UNREADABLE: {exc}"
+                    failures[str(path)] = f"unreadable_or_unsafe_source: {exc}"
         else:
             units = {"<inline>": str(rewritten_code)}
-        failures: dict[str, str] = {}
+        checked = len(units) + len(failures)
         for name, source in units.items():
             try:
                 ast.parse(source)
             except SyntaxError as exc:
                 failures[name] = f"{exc.msg} (line {exc.lineno})"
-        report = {"checked": len(units), "failures": failures, "passed": not failures}
-        self._log.info("absorb.validated", checked=len(units), passed=report["passed"])
+        report = {"checked": checked, "failures": failures, "passed": not failures}
+        self._log.info("absorb.validated", checked=report["checked"], passed=report["passed"])
         return report
 
     def commit_changes(
-        self, repo_path: Path | str, message: str = "Absorb into Agency coding conventions"
+        self, repo_path: Path | str, rewritten_paths: list[str],
+        message: str = "Absorb into Agency coding conventions"
     ) -> str:
         """Commit rewritten files. Returns the new commit SHA."""
         root = Path(repo_path)
         if not (root / ".git").is_dir():
             raise ValueError(f"not a git checkout: {root}")
-        for args in (["add", "-A"], ["commit", "-m", message]):
+        if not rewritten_paths:
+            raise ValueError("no rewritten paths to commit")
+        for relative in rewritten_paths:
+            path = Path(relative)
+            if path.is_absolute() or ".." in path.parts or path.suffix != ".py":
+                raise ValueError(f"invalid rewritten path: {relative!r}")
+            _safe_source(root, root / path)
+        for args in (
+            ["add", "--", *rewritten_paths],
+            ["commit", "--only", "-m", message, "--", *rewritten_paths],
+        ):
             result = subprocess.run(
                 ["git", *args], cwd=root, capture_output=True, text=True, timeout=120, check=False
             )
-            if result.returncode != 0 and "nothing to commit" not in result.stdout + result.stderr:
+            if result.returncode != 0:
                 raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
         sha = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -187,8 +273,8 @@ class RepoAbsorber:
         report = self.validate(repo_path)
         committed = False
         sha: str | None = None
-        if report["passed"] and commit:
-            sha = self.commit_changes(repo_path)
+        if report["passed"] and commit and rewrite["rewritten"]:
+            sha = self.commit_changes(repo_path, rewrite["rewritten"])
             committed = True
         return AbsorptionResult(
             repo_url=repo_url,
