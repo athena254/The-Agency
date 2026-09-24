@@ -50,6 +50,12 @@ class TelegramHandler:
             return {"status": "rejected", "reason": "chat not allowed"}
 
         private = message.get("chat", {}).get("type") == "private" and chat_id == user_id
+        if message.get("chat", {}).get("type") in ("group", "supergroup"):
+            if isinstance(chat_id, bool) or not isinstance(chat_id, int):
+                return {"status": "rejected", "reason": "missing Telegram chat ID"}
+            conversation_sender = f"telegram:chat:{chat_id}:user:{user_id}"
+        else:
+            conversation_sender = sender
         try:
             display_name = (self._profiles.get_name(user_id) if private else None) or "Remex"
         except sqlite3.Error:
@@ -76,7 +82,7 @@ class TelegramHandler:
         # (web search → fetch → synthesize → cite → store).
         if command.startswith("/research"):
             args = text.strip()[len("/research") :].strip()
-            response = await self._handle_research(args, sender, display_name)
+            response = await self._handle_research(args, conversation_sender, display_name)
             if chat_id:
                 await self._send_long(chat_id, response)
             return {"status": "ok", "chat_id": chat_id, "command": "/research"}
@@ -105,7 +111,7 @@ class TelegramHandler:
         # Process via Butler if available, else demo agent
         if self._butler:
             response = await self._butler.handle_message(
-                text, sender, {"chat_id": chat_id, "assistant_name": display_name}
+                text, conversation_sender, {"chat_id": chat_id, "assistant_name": display_name}
             )
         else:
             response = await self._demo.handle(text, {"sender": sender, "chat_id": chat_id})
@@ -210,7 +216,8 @@ class TelegramHandler:
                 "• /proposals — Open governance proposals\n"
                 "• /whoami — What this bot is\n"
                 "• /name <nickname> — Your private name for me (/name reset to undo)\n\n"
-                "Or just chat — plain English routes to the right agent."
+                "Or just chat — plain English routes to the right agent.\n"
+                "The Telegram bot account is shared; this name is private to your conversations."
             )
         return "Unknown command."
 
@@ -467,6 +474,11 @@ class TelegramHandler:
         sender = f"telegram:{user_id}"
         chat = message.get("chat", {})
         private = chat.get("type") == "private" and chat.get("id") == user_id
+        if chat.get("type") in ("group", "supergroup"):
+            chat_id = chat.get("id")
+            if isinstance(chat_id, bool) or not isinstance(chat_id, int):
+                raise ValueError("missing Telegram chat ID")
+            sender = f"telegram:chat:{chat_id}:user:{user_id}"
         display_name = (self._profiles.get_name(user_id) if private else None) or "Remex"
         if self._butler:
             return str(

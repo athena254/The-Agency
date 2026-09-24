@@ -13,6 +13,8 @@ def validate_name(name: str) -> str:
     """Return a safe plain/Markdown-compatible presentation name."""
     if not isinstance(name, str):
         raise TypeError("name must be text")
+    if "\n" in name or "\r" in name:
+        raise ValueError("name cannot contain newlines")
     value = name.strip()
     if not _NAME_PATTERN.fullmatch(value) or value.lower() == "reset":
         raise ValueError("name must be 1-32 characters: letters, digits, spaces or hyphens")
@@ -46,7 +48,7 @@ class ProfileStore:
             return None
         try:
             return validate_name(row[0])
-        except ValueError:
+        except (ValueError, TypeError):
             return None
 
     def set_name(self, user_id: int, name: str) -> None:
