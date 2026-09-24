@@ -34,6 +34,7 @@ from agency.security.sandbox.manager import Sandbox, SandboxManager
 # Kernel
 # ------------------------------------------------------------------ #
 
+
 @pytest.fixture
 def test_agent() -> Agent:
     return Agent(
@@ -83,6 +84,7 @@ async def initialized_audit_log(tmp_path) -> AsyncGenerator[AuditLog, None]:
 # ------------------------------------------------------------------ #
 # Memory / Evidence / Risk
 # ------------------------------------------------------------------ #
+
 
 @pytest_asyncio.fixture
 async def test_memory_store() -> AsyncGenerator[MemoryStore, None]:
@@ -135,6 +137,7 @@ def sample_memory_item() -> MemoryItem:
 # Sandbox (mocked backend — no docker required)
 # ------------------------------------------------------------------ #
 
+
 class FakeSandboxBackend:
     """In-memory stand-in for DockerSandboxBackend."""
 
@@ -184,6 +187,7 @@ def test_sandbox(test_sandbox_manager: SandboxManager) -> Sandbox:
 # Red / Blue / Purple
 # ------------------------------------------------------------------ #
 
+
 @pytest.fixture
 def test_red_planner() -> RedTeamPlanner:
     return RedTeamPlanner()
@@ -209,6 +213,7 @@ def test_purple_team(test_red_executor: RedTeamExecutor, test_blue_team: BlueTea
 # ------------------------------------------------------------------ #
 # Bridges (mocked)
 # ------------------------------------------------------------------ #
+
 
 class FakeBridge(Bridge):
     def __init__(self, name: str = "fake", output: str = "done", healthy: bool = True) -> None:
@@ -246,6 +251,7 @@ async def test_coordinator(fake_bridge: FakeBridge) -> ExternalCoordinator:
 # ------------------------------------------------------------------ #
 # Agents (runtime)
 # ------------------------------------------------------------------ #
+
 
 @pytest.fixture
 def test_runtime_registry() -> RuntimeAgentRegistry:

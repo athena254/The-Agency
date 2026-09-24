@@ -260,9 +260,7 @@ class GovernanceEngine:
 
     # -- backend mirroring (best-effort, never raises) ------------------ #
 
-    async def _mirror_proposal(
-        self, proposal: ConsensusProposal, payload: dict[str, Any]
-    ) -> None:
+    async def _mirror_proposal(self, proposal: ConsensusProposal, payload: dict[str, Any]) -> None:
         create_node = getattr(self.lattice, "create_node", None)
         if create_node is None:
             return
@@ -309,9 +307,7 @@ class GovernanceEngine:
     async def _mirror_resolution(self, proposal_id: str) -> None:
         async with self._lock:
             proposal = self._proposals.get(proposal_id)
-            snapshot = (
-                ConsensusProposal.from_dict(proposal.to_dict()) if proposal else None
-            )
+            snapshot = ConsensusProposal.from_dict(proposal.to_dict()) if proposal else None
         if snapshot is not None:
             await self._mirror_resolution_locked(snapshot)
 

@@ -55,14 +55,10 @@ class SandboxExecTool:
         start = time.perf_counter()
         manager = ctx.sandbox_manager
         if manager is None:
-            return ToolResult(
-                tool="sandbox_exec", ok=False, error="no sandbox manager available"
-            )
+            return ToolResult(tool="sandbox_exec", ok=False, error="no sandbox manager available")
         code = args.get("code")
         if not isinstance(code, str) or not code.strip():
-            return ToolResult(
-                tool="sandbox_exec", ok=False, error="missing required param: 'code'"
-            )
+            return ToolResult(tool="sandbox_exec", ok=False, error="missing required param: 'code'")
         language = args.get("language", "python")
         if not isinstance(language, str) or not language.strip():
             language = "python"

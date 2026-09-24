@@ -14,6 +14,12 @@ from agency.llm.config import LLMConfig, ProviderKind, load_named_provider
 logger = structlog.get_logger(__name__)
 
 
+def _provider_name(raw: Any) -> str:
+    """Best-effort provider name without leaking credentials."""
+    value = getattr(raw, "value", raw)
+    return str(value) if value is not None else "unknown"
+
+
 def _preset_usable(config: LLMConfig) -> bool:
     """Whether a preset can actually serve requests in this environment."""
     if config.provider is ProviderKind.ECHO:
@@ -136,29 +142,30 @@ class LLMRouter:
 
     async def route(self, task: str, context: dict[str, Any] | None = None) -> str:
         """Route ``task`` to the best provider and return the full response."""
-        adapter, model = self._select(task, context)
-        # An explicit model override is passed through verbatim; otherwise the
-        # preset adapter already carries the right model so we pass None.
-        override = (context or {}).get("model")
-        return await adapter.generate(task, context, model=override or model)
+        adapter, _ = self._select(task, context)
+        merged = self._merged_context(context, adapter)
+        return await adapter.generate(task, merged)
 
     async def route_stream(
         self, task: str, context: dict[str, Any] | None = None
     ) -> AsyncGenerator[str, None]:
         """Route ``task`` to the best provider and yield output incrementally."""
-        adapter, model = self._select(task, context)
-        override = (context or {}).get("model")
-        async for chunk in adapter.stream(task, context, model=override or model):
+        adapter, _ = self._select(task, context)
+        merged = self._merged_context(context, adapter)
+        async for chunk in adapter.stream(task, merged):
             yield chunk
 
     def explain(self, task: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return the routing decision without executing (for debugging)."""
-        adapter, model = self._select(task, context)
+        adapter, _ = self._select(task, context)
         kind = self._kind_of(task, context)
+        provider = _provider_name(getattr(adapter, "provider", "unknown"))
+        model_raw = (context or {}).get("model") or getattr(adapter, "model", None)
+        model = str(model_raw) if model_raw is not None else None
         return {
             "task_kind": kind.value,
-            "provider": adapter.config.provider.value,
-            "model": model or adapter.config.model,
+            "provider": provider,
+            "model": model,
             "explicit_override": bool((context or {}).get("model")),
         }
 
@@ -176,15 +183,21 @@ class LLMRouter:
 
     def _select(self, task: str, context: dict[str, Any] | None) -> tuple[LLMAdapter, str | None]:
         ctx = context or {}
+        if "provider" in ctx:
+            # A supplied provider is a constraint, even when its value is
+            # falsey. Reject invalid values instead of falling back remotely.
+            preset = ctx["provider"]
+            if not isinstance(preset, str) or not preset.strip():
+                raise ValueError("Requested LLM provider must be a non-empty name")
+            adapter = self._adapter_for_preset(preset)
+            if adapter is None:
+                raise ValueError(f"requested provider {preset!r} is unavailable")
+            self._log.debug("route_explicit_provider", provider=preset)
+            return adapter, None
         if ctx.get("model"):
-            # Explicit override — let the default adapter resolve it.
+            # Model overrides apply to the selected default adapter only.
             self._log.debug("route_explicit_model", model=ctx["model"])
             return self._adapter, None
-        if ctx.get("provider"):
-            adapter = self._adapter_for_preset(str(ctx["provider"]))
-            if adapter is not None:
-                self._log.debug("route_explicit_provider", provider=ctx["provider"])
-                return adapter, None
         kind = self._kind_of(task, ctx)
         for preset in self._routes.get(kind, ()):
             adapter = self._adapter_for_preset(preset)
@@ -204,6 +217,26 @@ class LLMRouter:
             return None
         if not _preset_usable(config):
             return None  # no credentials / SDK for this preset — try the next route.
-        adapter = LLMAdapter(config)
+        adapter = LLMAdapter(config=config)
         self._preset_cache[preset] = adapter
         return adapter
+
+    @staticmethod
+    def _merged_context(context: dict[str, Any] | None, adapter: LLMAdapter) -> dict[str, Any]:
+        """Copy ``context`` with overrides passed through verbatim.
+
+        An explicit ``model`` stays untouched (the adapter resolves it).
+        A ``provider`` preset alias (e.g. ``"claude"``) is normalised to the
+        selected adapter's real backend (e.g. ``"anthropic"``) so the
+        adapter's dispatcher does not fall through to echo and mask a
+        routing decision.
+        """
+        merged = dict(context or {})
+        if "provider" in merged:
+            real = _provider_name(getattr(adapter, "provider", None))
+            if merged["provider"] != real:
+                merged["provider"] = real
+            # Do not disguise an explicitly requested backend failure as an
+            # echo reply, even when the caller supplies strict=False.
+            merged["strict"] = True
+        return merged

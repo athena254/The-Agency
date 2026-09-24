@@ -69,6 +69,7 @@ log = structlog.get_logger(__name__)
 # Response models (Pydantic v2, kernel-anchored where applicable)
 # --------------------------------------------------------------------------- #
 
+
 class HealthResponse(BaseModel):
     """Payload for ``GET /v1/health``."""
 
@@ -93,6 +94,7 @@ class RiskReportResponse(BaseModel):
 # --------------------------------------------------------------------------- #
 # Application factory
 # --------------------------------------------------------------------------- #
+
 
 def _database_path(env_var: str, default: str) -> str:
     return os.environ.get(env_var, default)
@@ -161,7 +163,9 @@ def create_app() -> FastAPI:
     application.include_router(bridges_router.router, prefix="/v1/bridges")
     application.include_router(governance_router.router)
 
-    @application.get("/v1/health", response_model=HealthResponse, tags=["ops"], summary="Health check")
+    @application.get(
+        "/v1/health", response_model=HealthResponse, tags=["ops"], summary="Health check"
+    )
     async def health(request: Request) -> HealthResponse:
         """Liveness probe plus per-component readiness."""
         components: dict[str, bool] = {
@@ -205,7 +209,12 @@ def create_app() -> FastAPI:
 
     @application.get("/", include_in_schema=False)
     async def root() -> dict[str, Any]:
-        return {"service": "agency", "version": __version__, "docs": "/docs", "health": "/v1/health"}
+        return {
+            "service": "agency",
+            "version": __version__,
+            "docs": "/docs",
+            "health": "/v1/health",
+        }
 
     @application.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception) -> JSONResponse:

@@ -29,7 +29,9 @@ class BridgeExecuteRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    task: str = Field(min_length=1, description="Natural-language instruction for the external agent.")
+    task: str = Field(
+        min_length=1, description="Natural-language instruction for the external agent."
+    )
     context: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -89,7 +91,9 @@ async def list_bridges(request: Request) -> list[BridgeInfo]:
 
 
 @router.post("/{name}/execute", response_model=BridgeExecuteResponse, summary="Execute via bridge")
-async def execute_bridge(name: str, payload: BridgeExecuteRequest, request: Request) -> BridgeExecuteResponse:
+async def execute_bridge(
+    name: str, payload: BridgeExecuteRequest, request: Request
+) -> BridgeExecuteResponse:
     """Route ``payload.task`` to the named bridge behind its circuit breaker."""
     coordinator = _coordinator(request)
     try:

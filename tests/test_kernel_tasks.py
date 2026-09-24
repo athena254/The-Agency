@@ -13,7 +13,9 @@ async def test_task_lifecycle():
     assert task.title == "scan"
     assert task.input == {"target": "x"}
     assert await manager.get_task(task.task_id) is not None
-    assert (await manager.update_status(task.task_id, TaskStatus.RUNNING)).status is TaskStatus.RUNNING
+    assert (
+        await manager.update_status(task.task_id, TaskStatus.RUNNING)
+    ).status is TaskStatus.RUNNING
     await manager.update_status(task.task_id, TaskStatus.COMPLETED)
     completed = await manager.get_task(task.task_id)
     assert completed and completed.status is TaskStatus.COMPLETED
@@ -54,15 +56,17 @@ async def test_duplicate_task_id_rejected():
 async def test_messages_are_exchanged_and_bound():
     manager = TaskManager()
     task = await manager.create_task(created_by="planner")
-    msg = TaskMessage(task_id="", type="hypothesis", content={"risk": "high"},
-                      created_by="threat-modeler")
+    msg = TaskMessage(
+        task_id="", type="hypothesis", content={"risk": "high"}, created_by="threat-modeler"
+    )
     bound = await manager.add_message(task.task_id, msg)
     assert bound.task_id == task.task_id
     stored = await manager.get_task(task.task_id)
     assert stored is not None and len(stored.messages) == 1
     with pytest.raises(ValueError):
         await manager.add_message(
-            task.task_id, TaskMessage(task_id="other-task", type="finding", created_by="x"))
+            task.task_id, TaskMessage(task_id="other-task", type="finding", created_by="x")
+        )
     with pytest.raises(KeyError):
         await manager.add_message("missing", TaskMessage(task_id="", type="x", created_by="y"))
 
@@ -107,7 +111,7 @@ async def test_failed_carries_error_and_output():
 
 async def test_priority_validation():
     manager = TaskManager()
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):
         await manager.create_task(created_by="a", priority=99)
 
 

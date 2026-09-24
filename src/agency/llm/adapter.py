@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import AsyncIterator
 from typing import Any
 
 import structlog
@@ -12,6 +13,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = structlog.get_logger(__name__)
+
+
+def _response_text(value: Any) -> str:
+    if not isinstance(value, str):
+        raise TypeError("LLM response content must be text")
+    return value
 
 
 class LLMAdapter:
@@ -123,17 +130,19 @@ class LLMAdapter:
                 return await self._pollinations_generate(prompt, model)
             elif provider == "ollama":
                 return await self._ollama_generate(prompt, model)
-            else:
+            elif provider == "echo":
                 return self._echo_generate(prompt)
+            else:
+                raise ValueError(f"Unsupported LLM provider: {provider!r}")
         except Exception as e:
             self._log.error("llm_error", provider=provider, model=model, error=str(e))
-            if ctx.get("strict"):
-                # Tool loops must never mistake the echo fallback for a
-                # real model response — re-raise so the driver handles it.
-                raise
-            return self._echo_generate(prompt)
+            # A failed model call is never a successful echo reply, even when
+            # the caller requests strict=False. Echo is an explicit provider.
+            raise
 
-    async def stream(self, prompt: str, context: dict[str, Any] | None = None):
+    async def stream(
+        self, prompt: str, context: dict[str, Any] | None = None
+    ) -> AsyncIterator[str]:
         """Stream a response from the LLM."""
         response = await self.generate(prompt, context)
         yield response
@@ -163,7 +172,7 @@ class LLMAdapter:
             resp.raise_for_status()
             data = resp.json()
 
-        return data["choices"][0]["message"]["content"]
+        return _response_text(data["choices"][0]["message"]["content"])
 
     async def _openai_generate(self, prompt: str, model: str) -> str:
         """Generate via OpenAI API."""
@@ -187,7 +196,7 @@ class LLMAdapter:
             resp.raise_for_status()
             data = resp.json()
 
-        return data["choices"][0]["message"]["content"]
+        return _response_text(data["choices"][0]["message"]["content"])
 
     async def _anthropic_generate(self, prompt: str, model: str) -> str:
         """Generate via Anthropic API."""
@@ -211,7 +220,7 @@ class LLMAdapter:
             resp.raise_for_status()
             data = resp.json()
 
-        return data["content"][0]["text"]
+        return _response_text(data["content"][0]["text"])
 
     async def _openrouter_generate(self, prompt: str, model: str) -> str:
         """Generate via OpenRouter API."""
@@ -235,7 +244,7 @@ class LLMAdapter:
             resp.raise_for_status()
             data = resp.json()
 
-        return data["choices"][0]["message"]["content"]
+        return _response_text(data["choices"][0]["message"]["content"])
 
     async def _pollinations_generate(self, prompt: str, model: str) -> str:
         """Generate via Pollinations — keyless and free."""
@@ -304,7 +313,7 @@ class LLMAdapter:
             resp.raise_for_status()
             data = resp.json()
 
-        return data.get("response", "")
+        return _response_text(data.get("response", ""))
 
     def _echo_generate(self, prompt: str) -> str:
         """Echo fallback — returns the prompt."""
@@ -316,7 +325,7 @@ class LLMAdapter:
 
     @property
     def model(self) -> str:
-        return self._model
+        return str(self._model)
 
     @property
     def echo_mode(self) -> bool:

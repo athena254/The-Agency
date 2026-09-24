@@ -19,8 +19,9 @@ from agency.bridges.openclaw.bridge import OpenClawBridge, OpenClawConfig
 
 
 def test_bridge_usage_add():
-    total = BridgeUsage(input_tokens=1, output_tokens=2, total_tokens=3,
-                        estimated_cost_usd=0.1) + BridgeUsage(input_tokens=1)
+    total = BridgeUsage(
+        input_tokens=1, output_tokens=2, total_tokens=3, estimated_cost_usd=0.1
+    ) + BridgeUsage(input_tokens=1)
     assert total.input_tokens == 2
     assert total.total_tokens == 3
 
@@ -52,6 +53,7 @@ async def test_circuit_breaker_closed_to_open_to_half_open():
     assert breaker.state is CircuitState.OPEN
     assert await breaker.allow() is False
     import asyncio
+
     await asyncio.sleep(0.06)
     assert await breaker.allow() is True  # half-open probe admitted
     await breaker.record_success()
@@ -64,6 +66,7 @@ async def test_circuit_breaker_half_open_failure_reopens():
     await breaker.record_failure()
     assert breaker.state is CircuitState.OPEN
     import asyncio
+
     await asyncio.sleep(0.03)
     assert await breaker.allow() is True
     await breaker.record_failure()
@@ -93,8 +96,7 @@ async def test_coordinator_unknown_bridge_raises(test_coordinator):
 
 async def test_coordinator_counts_bridge_failure(test_coordinator, fake_bridge):
     fake_bridge._output = "x"
-    with patch.object(fake_bridge, "execute",
-                       return_value=BridgeResult.failure("task failed")):
+    with patch.object(fake_bridge, "execute", return_value=BridgeResult.failure("task failed")):
         result = await test_coordinator.route_task("t", "fake")
         assert not result.ok
     assert test_coordinator.breaker_state("fake") is CircuitState.CLOSED  # 1 failure < threshold
@@ -108,11 +110,9 @@ async def test_coordinator_transport_exception_encoded(test_coordinator, fake_br
 
 
 async def test_coordinator_open_circuit_short_circuits(test_coordinator, fake_bridge):
-    coord = ExternalCoordinator(
-        CircuitBreakerConfig(failure_threshold=1, recovery_timeout_s=60.0))
+    coord = ExternalCoordinator(CircuitBreakerConfig(failure_threshold=1, recovery_timeout_s=60.0))
     await coord.register_bridge(fake_bridge)
-    with patch.object(fake_bridge, "execute",
-                       return_value=BridgeResult.failure("bad")):
+    with patch.object(fake_bridge, "execute", return_value=BridgeResult.failure("bad")):
         await coord.route_task("t", "fake")
     result = await coord.route_task("t2", "fake")
     assert result.status is BridgeStatus.UNAVAILABLE
@@ -124,7 +124,24 @@ async def test_coordinator_health_and_capabilities(test_coordinator):
     assert caps["fake"]["streaming"] is True
 
 
+async def test_cancelled_bridge_stream_does_not_mark_breaker_healthy(fake_bridge, monkeypatch):
+    import asyncio
+
+    coord = ExternalCoordinator(CircuitBreakerConfig(failure_threshold=1))
+    await coord.register_bridge(fake_bridge)
+
+    async def cancelled(*_args, **_kwargs):
+        raise asyncio.CancelledError()
+        yield "unreachable"
+
+    monkeypatch.setattr(fake_bridge, "stream", cancelled)
+    with pytest.raises(asyncio.CancelledError):
+        _ = [chunk async for chunk in coord.route_stream("task", "fake")]
+    assert coord.breaker_state("fake") is CircuitState.OPEN
+
+
 # --- The four real bridges (transports mocked) --- #
+
 
 def test_claude_bridge_config_and_capabilities():
     bridge = ClaudeCodeBridge(ClaudeConfig())
@@ -154,8 +171,7 @@ def test_openclaw_bridge_config_and_capabilities():
 
 async def test_bridges_execute_mocked():
     claude = ClaudeCodeBridge(ClaudeConfig(max_retries=0))
-    with patch.object(claude, "_run_once",
-                       new=AsyncMock(return_value=("out", BridgeUsage(), {}))):
+    with patch.object(claude, "_run_once", new=AsyncMock(return_value=("out", BridgeUsage(), {}))):
         result = await claude.execute("scan")
         assert result.ok and result.output == "out"
 
@@ -165,13 +181,11 @@ async def test_bridges_execute_mocked():
         await codex.aclose()
 
     hermes = HermesBridge(HermesConfig())
-    with patch.object(hermes, "execute",
-                       new=AsyncMock(return_value=BridgeResult(output="h"))):
+    with patch.object(hermes, "execute", new=AsyncMock(return_value=BridgeResult(output="h"))):
         assert (await hermes.execute("t")).output == "h"
 
     openclaw = OpenClawBridge(OpenClawConfig(base_url="http://localhost:9999"))
-    with patch.object(openclaw, "execute",
-                       new=AsyncMock(return_value=BridgeResult(output="o"))):
+    with patch.object(openclaw, "execute", new=AsyncMock(return_value=BridgeResult(output="o"))):
         assert (await openclaw.execute("t")).output == "o"
         await openclaw.aclose()
 

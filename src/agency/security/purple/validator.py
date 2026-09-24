@@ -123,12 +123,8 @@ class PurpleTeam:
         with self._lock:
             findings = list(self._results.values())
         confirmed = sum(1 for item in findings if item.verdict is Verdict.CONFIRMED)
-        not_vulnerable = sum(
-            1 for item in findings if item.verdict is Verdict.NOT_VULNERABLE
-        )
-        inconclusive = sum(
-            1 for item in findings if item.verdict is Verdict.INCONCLUSIVE
-        )
+        not_vulnerable = sum(1 for item in findings if item.verdict is Verdict.NOT_VULNERABLE)
+        inconclusive = sum(1 for item in findings if item.verdict is Verdict.INCONCLUSIVE)
         return PurpleReport(
             total_findings=len(findings),
             confirmed=confirmed,

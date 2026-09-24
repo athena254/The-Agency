@@ -30,8 +30,9 @@ from agency.kernel.audit import AuditEntry, AuditLog
 from agency.kernel.identity import Agent, Capability, TrustLevel
 from agency.kernel.policies import ActionClass, Permission, PolicyEngine
 from agency.kernel.registry import AgentRegistry
-from agency.kernel.tasks import Task, TaskManager, TaskMessage, TaskStatus
+from agency.kernel.tasks import Task, TaskManager, TaskStatus
 from agency.lattice import get_lattice
+from agency.lattice.api import Lattice
 from agency.llm.adapter import LLMAdapter
 from agency.memory.sms.lifecycle import TieredMemoryEngine
 from agency.memory.sms.models import MemoryItem, MemoryTier
@@ -131,17 +132,15 @@ class AgencyOrchestrator:
         # Process sandbox — works without Docker (weaker isolation, see
         # ProcessSandboxBackend docstring). Docker config can override.
         self._sandbox_manager = SandboxManager(
-            default_config=SandboxConfig(
-                backend=SandboxBackend.PROCESS, timeout=30
-            )
+            default_config=SandboxConfig(backend=SandboxBackend.PROCESS, timeout=30)
         )
 
         # Bridges
         self._bridge_coordinator = ExternalCoordinator()
 
         # Lattice
-        self._lattice = None
-        self._spawned_proposals = set()
+        self._lattice: Lattice | None = None
+        self._spawned_proposals: set[str] = set()
 
         self._started = False
 
@@ -207,7 +206,9 @@ class AgencyOrchestrator:
         agent = Agent(
             name=name,
             domain=domain,
-            capabilities=[Capability(name=c, max_level=ActionClass.L1_SAFE_ANALYSIS) for c in capabilities],
+            capabilities=[
+                Capability(name=c, max_level=ActionClass.L1_SAFE_ANALYSIS) for c in capabilities
+            ],
             trust_level=trust_level,
         )
         self._identity_registry.register(agent)
@@ -221,7 +222,7 @@ class AgencyOrchestrator:
                     agent_type=domain,
                     capabilities=capabilities,
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 — optional Lattice registration.
                 self._log.warning("lattice.agent_register_failed", agent_id=agent.id, exc_info=True)
 
         # Grant default permission for L0-L1 actions
@@ -250,9 +251,11 @@ class AgencyOrchestrator:
         try:
             await self._lattice.get_proposal_status(proposal_id)
             # Also get payload from events if available
-            events = await self._lattice.get_events(target_id=proposal_id, event_type="proposal_submitted")
+            events = await self._lattice.get_events(
+                target_id=proposal_id, event_type="proposal_submitted"
+            )
             proposal_payload = events[-1].payload if events else {}
-        except Exception:
+        except Exception:  # noqa: BLE001 — voting still proceeds without event metadata.
             proposal_payload = {}
 
         result = await self._lattice.cast_vote(
@@ -269,11 +272,16 @@ class AgencyOrchestrator:
 
         return result
 
-    async def _spawn_from_proposal(self, proposal_id: str, proposal_payload: dict | None = None) -> None:
+    async def _spawn_from_proposal(
+        self, proposal_id: str, proposal_payload: dict[str, Any] | None = None
+    ) -> None:
         """Spawn an agent from a passed governance proposal."""
+        lattice = self._lattice
+        if lattice is None:
+            return
         try:
-            proposal = await self._lattice.get_proposal_status(proposal_id)
-        except Exception as exc:
+            proposal = await lattice.get_proposal_status(proposal_id)
+        except Exception as exc:  # noqa: BLE001 — failed lookup must not spawn an agent.
             self._log.warning("lattice.spawn_get_failed", proposal_id=proposal_id, error=str(exc))
             return
 
@@ -284,19 +292,23 @@ class AgencyOrchestrator:
         payload = proposal_payload or {}
         if not payload:
             try:
-                events = await self._lattice.get_events(target_id=proposal_id, event_type="proposal_submitted")
+                events = await lattice.get_events(
+                    target_id=proposal_id, event_type="proposal_submitted"
+                )
                 if events:
                     payload = events[-1].payload
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 — optional event metadata.
+                self._log.warning(
+                    "lattice.spawn_events_failed", proposal_id=proposal_id, exc_info=True
+                )
 
         name = payload.get("name", f"agent-{proposal_id[:8]}")
         if not name:
             name = f"agent-{proposal_id[:8]}"
-        
+
         domain = payload.get("domain", "general")
         capabilities = payload.get("capabilities", [domain, "respond"])
-        
+
         # Validate: Agent requires non-empty name
         if len(name) < 1:
             self._log.warning("lattice.spawn_invalid_name", proposal_id=proposal_id)
@@ -344,7 +356,7 @@ class AgencyOrchestrator:
                     task_type="user_request",
                     payload={"title": title, "description": description, "task_id": task.task_id},
                 )
-            except Exception:
+            except Exception:  # noqa: BLE001 — optional Lattice task mirror.
                 self._log.warning("lattice.task_create_failed", task_id=task.task_id, exc_info=True)
 
         self._log.info("task_submitted", task_id=task.task_id, title=title)
@@ -395,9 +407,10 @@ class AgencyOrchestrator:
         # Ground the LLM in real system state — the actual registered
         # agents and their domains — so it answers as the real system
         # instead of roleplaying fiction.
-        agent_roster = ", ".join(
-            f"{a.name} ({a.domain})" for a in self._identity_registry.list_agents()
-        ) or "none registered"
+        agent_roster = (
+            ", ".join(f"{a.name} ({a.domain})" for a in self._identity_registry.list_agents())
+            or "none registered"
+        )
         system_context = (
             "SYSTEM FACTS (provided by the runtime, not fiction — treat as "
             "ground truth about the software you are running inside):\n"
@@ -420,11 +433,10 @@ class AgencyOrchestrator:
         # and returns a final answer with aggregated evidence.
         tool_ctx_agent = self._identity_registry.get(task.created_by)
         agent_domain = tool_ctx_agent.domain if tool_ctx_agent else None
-        tool_capable = (
-            agent_domain in TOOL_CAPABLE_DOMAINS
-            and self._tool_driver is not None
-        )
+        tool_driver = self._tool_driver
+        tool_capable = agent_domain in TOOL_CAPABLE_DOMAINS and tool_driver is not None
         if tool_capable:
+            assert tool_driver is not None
             if agent_domain == "research":
                 from agency.agents.research import RESEARCH_SYSTEM_PROMPT
 
@@ -444,21 +456,23 @@ class AgencyOrchestrator:
                 )
 
             tool_ctx = self._tool_context(task.created_by, task_id)
-            loop_result = await self._tool_driver.run(
+            loop_result = await tool_driver.run(
                 task=description,
                 system_prompt=system_prompt,
                 ctx=tool_ctx,
                 max_tool_iterations=_TOOL_ITERATIONS.get(agent_domain or "", 4),
             )
-            subtask_results.append({
-                "subtask_id": "tool_loop",
-                "status": "completed" if loop_result.status == "completed" else "failed",
-                "verification": "passed",
-                "risk_category": "none",
-                "output": loop_result.final_answer,
-                "tool_steps": [s.model_dump() for s in loop_result.steps],
-                "tool_evidence": loop_result.evidence,
-            })
+            subtask_results.append(
+                {
+                    "subtask_id": "tool_loop",
+                    "status": "completed" if loop_result.status == "completed" else "failed",
+                    "verification": "passed",
+                    "risk_category": "none",
+                    "output": loop_result.final_answer,
+                    "tool_steps": [s.model_dump() for s in loop_result.steps],
+                    "tool_evidence": loop_result.evidence,
+                }
+            )
             self._log.info(
                 "tool_loop_completed",
                 task_id=task_id,
@@ -470,13 +484,9 @@ class AgencyOrchestrator:
         for subtask in graph.subtasks if not tool_capable else []:
             # Execute
             exec_result = await self._executor.execute(
-                task=TaskMessage(
-                    task_id=task_id,
-                    type="subtask",
-                    content=system_context,
-                    created_by=task.created_by,
-                ),
+                task=system_context,
                 context={"agent_id": task.created_by, "subtask_id": subtask.subtask_id},
+                task_id=task_id,
             )
 
             # Verify
@@ -493,7 +503,9 @@ class AgencyOrchestrator:
                 confidence=verification.score,
                 affected_component=task.title,
                 severity=Severity.LOW,
-                verification_status=VerificationState.VERIFIED if verification.status is VerificationStatus.PASSED else VerificationState.UNVERIFIED,
+                verification_status=VerificationState.VERIFIED
+                if verification.status is VerificationStatus.PASSED
+                else VerificationState.UNVERIFIED,
             )
             await self._evidence_store.add_finding(finding)
 
@@ -501,29 +513,33 @@ class AgencyOrchestrator:
             _, category = self._risk_engine.assess(finding)
 
             # Audit
-            await self._audit_log.append(AuditEntry(
-                timestamp=datetime.now(UTC),
-                agent=task.created_by,
-                task=task_id,
-                target=task.title,
-                authorization="policy_engine",
-                capability="execute",
-                action=f"subtask_{subtask.subtask_id}",
-                result=exec_result.status.value,
-                evidence={"finding_id": finding.id},
-                model="orchestrator",
-                model_version="0.1.0",
-                tool_version="0.1.0",
-                environment={"name": "default"},
-            ))
+            await self._audit_log.append(
+                AuditEntry(
+                    timestamp=datetime.now(UTC),
+                    agent=task.created_by,
+                    task=task_id,
+                    target=task.title,
+                    authorization="policy_engine",
+                    capability="execute",
+                    action=f"subtask_{subtask.subtask_id}",
+                    result=exec_result.status.value,
+                    evidence={"finding_id": finding.id},
+                    model="orchestrator",
+                    model_version="0.1.0",
+                    tool_version="0.1.0",
+                    environment={"name": "default"},
+                )
+            )
 
-            subtask_results.append({
-                "subtask_id": subtask.subtask_id,
-                "status": exec_result.status.value,
-                "verification": verification.status.value,
-                "risk_category": category.value,
-                "output": exec_result.output,
-            })
+            subtask_results.append(
+                {
+                    "subtask_id": subtask.subtask_id,
+                    "status": exec_result.status.value,
+                    "verification": verification.status.value,
+                    "risk_category": category.value,
+                    "output": exec_result.output,
+                }
+            )
 
         # Update task status
         all_completed = all(r["status"] == "completed" for r in subtask_results)
@@ -533,16 +549,20 @@ class AgencyOrchestrator:
         # Surface the real agent output: join subtask outputs (the actual
         # LLM responses) instead of a technical execution summary.
         outputs = [str(r["output"]) for r in subtask_results if r.get("output")]
-        final_output = "\n\n".join(outputs) if outputs else f"Executed {len(subtask_results)} subtasks"
+        final_output = (
+            "\n\n".join(outputs) if outputs else f"Executed {len(subtask_results)} subtasks"
+        )
 
         # Store in memory
-        await self._memory_store.store(MemoryItem(
-            agent_id=task.created_by,
-            content=f"Task '{task.title}' → {final_output[:500]}",
-            tier=MemoryTier.NORMAL,
-            importance=0.7,
-            tags=["task", "execution"],
-        ))
+        await self._memory_store.store(
+            MemoryItem(
+                agent_id=task.created_by,
+                content=f"Task '{task.title}' → {final_output[:500]}",
+                tier=MemoryTier.NORMAL,
+                importance=0.7,
+                tags=["task", "execution"],
+            )
+        )
 
         result = ExecutionResult(
             task_id=task_id,
@@ -593,7 +613,7 @@ class AgencyOrchestrator:
         if self._lattice is not None:
             try:
                 lattice_status = await self._lattice.get_status()
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — health endpoint reports optional Lattice failure.
                 lattice_status = {"error": str(exc)}
 
         return {

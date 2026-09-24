@@ -96,7 +96,7 @@ class TelegramBot:
                 for update in updates:
                     self._offset = update["update_id"] + 1
                     await self._handler.handle_update(update)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — keep polling after a failed update.
                 logger.error("telegram_poll_error", error=str(e))
                 await asyncio.sleep(5)
 

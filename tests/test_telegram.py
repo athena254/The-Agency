@@ -69,6 +69,18 @@ class TestDemoAgent:
         assert "Security Scan" in response or "scan" in response.lower()
 
     @pytest.mark.asyncio
+    async def test_scan_llm_failure_does_not_report_clean(
+        self, demo_agent: DemoAgent, monkeypatch: pytest.MonkeyPatch
+    ):
+        async def fail(*_args, **_kwargs):
+            raise OSError("backend unavailable")
+
+        monkeypatch.setattr(demo_agent._llm, "generate", fail)
+        response = await demo_agent.handle("scan staging", {})
+        assert "could not" in response.lower()
+        assert "no critical findings" not in response.lower()
+
+    @pytest.mark.asyncio
     async def test_remember(self, demo_agent: DemoAgent):
         response = await demo_agent.handle("remember this finding", {})
         assert "Remembered" in response

@@ -63,7 +63,9 @@ def test_permission_scope_rejects_whitespace():
 
 def test_permission_expiry():
     past = datetime.now(UTC) - timedelta(minutes=5)
-    perm = Permission(agent_id="a", target_scope="x", created_at=past, time_limit=timedelta(minutes=1))
+    perm = Permission(
+        agent_id="a", target_scope="x", created_at=past, time_limit=timedelta(minutes=1)
+    )
     assert perm.is_expired()
 
     fresh = Permission(agent_id="a", target_scope="x", time_limit=timedelta(seconds=3600))
@@ -109,7 +111,9 @@ def test_l2_execution_allowed_with_permission():
         )
     )
     assert engine.can_execute(ActionClass.L2_CONTROLLED_TESTING, agent, "staging/api") is True
-    assert engine.can_execute(ActionClass.L2_CONTROLLED_TESTING, agent, "prod/api") is False  # scope
+    assert (
+        engine.can_execute(ActionClass.L2_CONTROLLED_TESTING, agent, "prod/api") is False
+    )  # scope
     assert engine.can_execute(ActionClass.L2_CONTROLLED_TESTING, agent, "staging/other") is True
 
 

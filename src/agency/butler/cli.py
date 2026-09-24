@@ -106,9 +106,7 @@ def start(
     host: str = typer.Option(_DEFAULTS.host, "--host", help="Interface to bind."),
     port: int = typer.Option(_DEFAULTS.port, "--port", help="Port to bind."),
     reload: bool = typer.Option(False, "--reload/--no-reload", help="Enable auto-reload."),
-    daemon: bool = typer.Option(
-        False, "--daemon/--foreground", help="Run detached in background."
-    ),
+    daemon: bool = typer.Option(False, "--daemon/--foreground", help="Run detached in background."),
     log_level: str = typer.Option("info", "--log-level", help="Uvicorn log level."),
     workers: int = typer.Option(1, "--workers", min=1, help="Worker processes."),
 ) -> None:
@@ -116,8 +114,16 @@ def start(
     if daemon:
         PID_FILE.parent.mkdir(parents=True, exist_ok=True)
         cmd = [
-            sys.executable, "-m", "uvicorn", "agency.butler.server:app",
-            "--host", host, "--port", str(port), "--log-level", log_level,
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "agency.butler.server:app",
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "--log-level",
+            log_level,
         ]
         if reload:
             cmd.append("--reload")
@@ -194,7 +200,9 @@ def status(
     status_value = payload.get("status", "unknown") if isinstance(payload, dict) else "unknown"
     style = "green" if status_value == "ok" else "yellow"
     body = json.dumps(payload, indent=2, default=str) if isinstance(payload, dict) else str(payload)
-    console.print(Panel(body, title=f"Butler status: [{style}]{status_value}[/{style}]", expand=False))
+    console.print(
+        Panel(body, title=f"Butler status: [{style}]{status_value}[/{style}]", expand=False)
+    )
 
 
 @app.command("agents")
@@ -217,9 +225,7 @@ def agents(
     table = _table("Butler agents", ["ID", "Name", "Domain", "Trust", "Capabilities"])
     for item in items:
         caps = item.get("capabilities", [])
-        cap_names = ", ".join(
-            c.get("name", "?") if isinstance(c, dict) else str(c) for c in caps
-        )
+        cap_names = ", ".join(c.get("name", "?") if isinstance(c, dict) else str(c) for c in caps)
         table.add_row(
             str(item.get("id", "")),
             str(item.get("name", "")),

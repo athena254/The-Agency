@@ -184,7 +184,9 @@ class ToolDriver:
         max_tool_iterations: int | None = None,
     ) -> ToolLoopResult:
         """Run the tool loop until a final answer, limit, or LLM error."""
-        budget = max_tool_iterations if max_tool_iterations is not None else self._max_tool_iterations
+        budget = (
+            max_tool_iterations if max_tool_iterations is not None else self._max_tool_iterations
+        )
         steps: list[ToolLoopStep] = []
         evidence: dict[str, Any] = {}
         history: list[dict[str, str]] = []

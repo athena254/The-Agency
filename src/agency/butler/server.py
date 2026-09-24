@@ -18,6 +18,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from secrets import token_hex
 from typing import Any
 
 import structlog
@@ -58,7 +59,7 @@ def _build_llm_callable(config: ButlerConfig):  # type: ignore[no-untyped-def]
         model=config.llm_model or None,
         load_dotenv=False,
     )
-    adapter = LLMAdapter(llm_config)
+    adapter = LLMAdapter(config=llm_config)
     if adapter.echo_mode:
         return None
     return adapter.generate
@@ -112,7 +113,7 @@ class HealthResponse(BaseModel):
     version: str = Field(default=__version__)
     butler: str = Field(default="running")
     agents: int = Field(default=0)
-    lattice: dict | None = Field(default=None, description="Lattice status if available.")
+    lattice: dict[str, Any] | None = Field(default=None, description="Lattice status if available.")
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -123,7 +124,7 @@ class HealthResponse(BaseModel):
 
 def _get_service(request: Request) -> ButlerService:
     service = getattr(request.app.state, "butler", None)
-    if service is None:
+    if not isinstance(service, ButlerService):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Butler service is not initialised.",
@@ -182,14 +183,25 @@ def create_app(config: ButlerConfig | None = None) -> FastAPI:
     )
     async def post_message(payload: MessageRequest, request: Request) -> MessageResponse:
         service = _get_service(request)
+        # This public endpoint accepts a caller-supplied sender; until it has
+        # authentication, it must not expose owner-scoped thread histories.
+        if "thread_id" in payload.context:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Thread selection requires an authenticated channel.",
+            )
         if len(payload.message) > service.config.max_message_length:
             raise HTTPException(
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 detail=f"message exceeds {service.config.max_message_length} chars.",
             )
-        agent = await service.route(payload.message, {**payload.context, "sender": payload.sender})
+        # Sender and context are untrusted on this unauthenticated endpoint.
+        # Use a one-turn identity; do not recall or persist sender memory.
+        anonymous_sender = f"http-anonymous-{token_hex(16)}"
+        route_context = {"sender": anonymous_sender}
+        agent = await service.route(payload.message, route_context)
         response = await service.handle_message(
-            payload.message, payload.sender, dict(payload.context)
+            payload.message, anonymous_sender, {}, memory_enabled=False
         )
         return MessageResponse(
             response=response, agent_id=agent.id, agent_name=agent.name, domain=agent.domain
@@ -225,7 +237,7 @@ def create_app(config: ButlerConfig | None = None) -> FastAPI:
         if lat is not None:
             try:
                 lattice_status = await lat.get_status()
-            except Exception:
+            except Exception:  # noqa: BLE001 — report optional Lattice health as unavailable.
                 lattice_status = {"error": "unavailable"}
 
         return HealthResponse(

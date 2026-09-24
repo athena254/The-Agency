@@ -65,7 +65,8 @@ def test_permission_expiry():
         agent_id="a", target_scope="x", time_limit=timedelta(seconds=3600)
     ).is_expired()
     assert Permission(
-        agent_id="a", target_scope="x",
+        agent_id="a",
+        target_scope="x",
         expires_at=datetime.now(UTC) - timedelta(seconds=1),
     ).is_expired()
     assert not Permission(agent_id="a", target_scope="x").is_expired()
@@ -87,7 +88,9 @@ def test_decision_denied_property():
 def test_trust_boundary_blocks():
     engine = PolicyEngine()
     agent = Agent(
-        id="low", name="low", trust_level=TrustLevel.OBSERVED,
+        id="low",
+        name="low",
+        trust_level=TrustLevel.OBSERVED,
         capabilities=[Capability(name="test", max_level=ActionClass.L3_HIGH_IMPACT)],
     )
     engine.issue(Permission(agent_id="low", target_scope="*", capabilities=["test"]))
@@ -100,8 +103,12 @@ def test_l2_allowed_with_permission_and_scope_enforced():
     engine = PolicyEngine()
     agent = _red_agent()
     engine.issue(
-        Permission(agent_id="red-1", target_scope="staging/*",
-                   capabilities=["simulate"], time_limit=timedelta(minutes=30))
+        Permission(
+            agent_id="red-1",
+            target_scope="staging/*",
+            capabilities=["simulate"],
+            time_limit=timedelta(minutes=30),
+        )
     )
     assert engine.can_execute(ActionClass.L2_CONTROLLED_TESTING, agent, "staging/api") is True
     assert engine.can_execute(ActionClass.L2_CONTROLLED_TESTING, agent, "prod/api") is False
@@ -137,36 +144,72 @@ def test_revoked_agent_denied():
 def test_l4_requires_human_approval():
     engine = PolicyEngine()
     agent = _red_agent()
-    engine.issue(Permission(agent_id="red-1", target_scope="prod/api",
-                            capabilities=["clearance"], human_approved=False))
+    engine.issue(
+        Permission(
+            agent_id="red-1",
+            target_scope="prod/api",
+            capabilities=["clearance"],
+            human_approved=False,
+        )
+    )
     assert engine.can_execute(ActionClass.L4_PRODUCTION, agent, "prod/api") is False
-    engine.issue(Permission(agent_id="red-1", target_scope="prod/api",
-                            capabilities=["clearance"], human_approved=True))
+    engine.issue(
+        Permission(
+            agent_id="red-1",
+            target_scope="prod/api",
+            capabilities=["clearance"],
+            human_approved=True,
+        )
+    )
     assert engine.can_execute(ActionClass.L4_PRODUCTION, agent, "prod/api") is True
 
 
 def test_l5_requires_time_bound_human_approval_and_high_trust():
     engine = PolicyEngine()
-    agent = Agent(id="red-1", name="r", domain="security",
-                  trust_level=TrustLevel.HIGH_TRUST,
-                  capabilities=[Capability(name="purge", max_level=ActionClass.L5_DESTRUCTIVE)])
-    engine.issue(Permission(agent_id="red-1", target_scope="prod/api",
-                            capabilities=["purge"], human_approved=True))
+    agent = Agent(
+        id="red-1",
+        name="r",
+        domain="security",
+        trust_level=TrustLevel.HIGH_TRUST,
+        capabilities=[Capability(name="purge", max_level=ActionClass.L5_DESTRUCTIVE)],
+    )
+    engine.issue(
+        Permission(
+            agent_id="red-1", target_scope="prod/api", capabilities=["purge"], human_approved=True
+        )
+    )
     d = engine.evaluate(ActionClass.L5_DESTRUCTIVE, agent, "prod/api")
     assert d.denied
     assert any("human-approved" in r for r in d.reasons)
-    engine.issue(Permission(agent_id="red-1", target_scope="prod/api",
-                            capabilities=["purge"], human_approved=True,
-                            time_limit=timedelta(minutes=10)))
+    engine.issue(
+        Permission(
+            agent_id="red-1",
+            target_scope="prod/api",
+            capabilities=["purge"],
+            human_approved=True,
+            time_limit=timedelta(minutes=10),
+        )
+    )
     assert engine.can_execute(ActionClass.L5_DESTRUCTIVE, agent, "prod/api") is True
 
 
 def test_l5_requires_high_trust():
     engine = PolicyEngine()
-    agent = Agent(id="t", name="x", trust_level=TrustLevel.TRUSTED,
-                  capabilities=[Capability(name="test", max_level=ActionClass.L5_DESTRUCTIVE)])
-    engine.issue(Permission(agent_id="t", target_scope="*", capabilities=["test"],
-                            human_approved=True, time_limit=timedelta(minutes=1)))
+    agent = Agent(
+        id="t",
+        name="x",
+        trust_level=TrustLevel.TRUSTED,
+        capabilities=[Capability(name="test", max_level=ActionClass.L5_DESTRUCTIVE)],
+    )
+    engine.issue(
+        Permission(
+            agent_id="t",
+            target_scope="*",
+            capabilities=["test"],
+            human_approved=True,
+            time_limit=timedelta(minutes=1),
+        )
+    )
     d = engine.evaluate(ActionClass.L5_DESTRUCTIVE, agent, "target")
     assert d.denied
     assert any("trust" in r for r in d.reasons)

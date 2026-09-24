@@ -14,8 +14,13 @@ from agency.security.blue.defender import (
 
 
 def _threat(**kwargs) -> Threat:
-    base = {"id": "th-1", "name": "sql-injection", "kind": ThreatKind.INJECTION,
-            "severity": ThreatSeverity.HIGH, "vector": "input"}
+    base = {
+        "id": "th-1",
+        "name": "sql-injection",
+        "kind": ThreatKind.INJECTION,
+        "severity": ThreatSeverity.HIGH,
+        "vector": "input",
+    }
     base.update(kwargs)
     return Threat(**base)
 
@@ -46,11 +51,9 @@ def test_analyze_unknown_threat_id_raises(test_blue_team: BlueTeam):
 
 
 def test_kind_specific_recommendations(test_blue_team: BlueTeam):
-    exfil = test_blue_team.analyze_threat(
-        _threat(id="t-ex", kind=ThreatKind.EXFILTRATION))
+    exfil = test_blue_team.analyze_threat(_threat(id="t-ex", kind=ThreatKind.EXFILTRATION))
     assert any("egress" in r for r in exfil.recommendations)
-    recon = test_blue_team.analyze_threat(
-        _threat(id="t-re", kind=ThreatKind.RECONNAISSANCE))
+    recon = test_blue_team.analyze_threat(_threat(id="t-re", kind=ThreatKind.RECONNAISSANCE))
     assert recon.recommendations
 
 

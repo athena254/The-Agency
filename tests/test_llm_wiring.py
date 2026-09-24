@@ -41,9 +41,7 @@ async def test_executor_defaults_to_llm_adapter():
 @pytest.mark.asyncio
 async def test_executor_accepts_adapter_instance():
     """Passing an LLMAdapter explicitly must use its generate()."""
-    adapter = LLMAdapter(
-        config=LLMConfig(provider=ProviderKind.ECHO, model="echo")
-    )
+    adapter = LLMAdapter(config=LLMConfig(provider=ProviderKind.ECHO, model="echo"))
     ex = AgentExecutor(llm=adapter)
     assert ex.adapter is adapter
     result = await ex.execute("adapter instance check")
@@ -54,9 +52,7 @@ async def test_executor_accepts_adapter_instance():
 @pytest.mark.asyncio
 async def test_llm_adapter_echo_mode_without_api_keys():
     """Adapter must work with no credentials via echo fallback."""
-    adapter = LLMAdapter(
-        config=LLMConfig(provider=ProviderKind.ECHO, model="echo")
-    )
+    adapter = LLMAdapter(config=LLMConfig(provider=ProviderKind.ECHO, model="echo"))
     assert adapter.echo_mode is True
     text = await adapter.generate("ping", {"system": "terse"})
     assert isinstance(text, str)
@@ -90,10 +86,7 @@ async def test_orchestrator_full_pipeline_uses_adapter(
     # executor called generate()).
     findings = await orchestrator._evidence_store.list_findings()
     assert len(findings) >= 1
-    assert any(
-        (f.evidence or "").strip() or (f.target or "").strip()
-        for f in findings
-    )
+    assert any((f.evidence or "").strip() or (f.target or "").strip() for f in findings)
 
     # Health must report the LLM provider.
     health = await orchestrator.health_check()
@@ -106,9 +99,7 @@ async def test_orchestrator_output_comes_from_adapter_not_hardcoded_echo():
     """Inject a stub adapter; its marker must surface in evidence."""
     marker = "LLM-ADAPTER-RESPONSE-42"
 
-    stub = LLMAdapter(
-        config=LLMConfig(provider=ProviderKind.ECHO, model="echo")
-    )
+    stub = LLMAdapter(config=LLMConfig(provider=ProviderKind.ECHO, model="echo"))
 
     async def fake_generate(prompt: str, context: dict | None = None) -> str:
         return f"{marker}: {prompt}"
@@ -119,9 +110,7 @@ async def test_orchestrator_output_comes_from_adapter_not_hardcoded_echo():
     await orch.start()
     try:
         assert orch.executor.adapter is stub
-        agent = await orch.register_agent(
-            name="stub_probe", domain="test", capabilities=["test"]
-        )
+        agent = await orch.register_agent(name="stub_probe", domain="test", capabilities=["test"])
         task = await orch.submit_task(
             title="Stub probe",
             description="stubbed adapter task",

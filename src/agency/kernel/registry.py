@@ -77,7 +77,9 @@ class AgentRegistry:
                 raise KeyError(f"unknown agent {agent_id!r}")
             return self._agents[agent_id]
 
-    def list_agents(self, *, include_revoked: bool = False, domain: str | None = None) -> list[Agent]:
+    def list_agents(
+        self, *, include_revoked: bool = False, domain: str | None = None
+    ) -> list[Agent]:
         """List registered agents, newest first.
 
         Parameters

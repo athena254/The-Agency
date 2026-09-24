@@ -46,9 +46,7 @@ class ToolSpec:
 
     def __post_init__(self) -> None:
         if not self.name or not _NAME_RE.match(self.name):
-            raise ValueError(
-                f"invalid tool name {self.name!r}: must match ^[a-z][a-z0-9_]*$"
-            )
+            raise ValueError(f"invalid tool name {self.name!r}: must match ^[a-z][a-z0-9_]*$")
 
 
 @dataclass

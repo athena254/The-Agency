@@ -20,7 +20,9 @@ class DemoAgent:
     - Echo mode: Falls back to echo if LLM fails
     """
 
-    def __init__(self, name: str = "demo", prefix: str = "🤖", llm: LLMAdapter | None = None) -> None:
+    def __init__(
+        self, name: str = "demo", prefix: str = "🤖", llm: LLMAdapter | None = None
+    ) -> None:
         self._name = name
         self._prefix = prefix
         self._llm = llm or LLMAdapter()
@@ -99,16 +101,12 @@ class DemoAgent:
         try:
             response = await self._llm.generate(prompt, {"max_tokens": 500})
             return f"{self._prefix} *Security Scan: {target}*\n\n{response}"
-        except Exception:
-            return f"{self._prefix} Scan of '{target}' completed. No critical findings."
+        except Exception:  # noqa: BLE001 — UI boundary must not claim a failed scan is clean.
+            return f"{self._prefix} Could not scan '{target}'; no findings were verified."
 
     def _remember(self, text: str) -> str:
         content = text[8:].strip() or "nothing"
-        return (
-            f"{self._prefix} *Remembered*\n\n"
-            f"Stored: `{content}`\n"
-            "Memory tier: NORMAL"
-        )
+        return f"{self._prefix} *Remembered*\n\nStored: `{content}`\nMemory tier: NORMAL"
 
     async def _chat_with_llm(self, text: str) -> str:
         """Chat using the LLM."""
@@ -116,5 +114,5 @@ class DemoAgent:
         try:
             response = await self._llm.generate(prompt, {"max_tokens": 300})
             return f"{self._prefix} {response}"
-        except Exception:
+        except Exception:  # noqa: BLE001 — demo-only fallback for any LLM backend failure.
             return f"{self._prefix} Echo: {text}"

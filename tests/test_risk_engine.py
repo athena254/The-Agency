@@ -12,9 +12,15 @@ from agency.risk.engine.models import RiskCategory, RiskModel
 
 
 def _finding(**kwargs) -> Finding:
-    base = {"target": "staging/api", "evidence": "sqli", "methodology": "red-team",
-            "confidence": 0.8, "severity": Severity.HIGH,
-            "affected_component": "web", "remediation": "parameterize"}
+    base = {
+        "target": "staging/api",
+        "evidence": "sqli",
+        "methodology": "red-team",
+        "confidence": 0.8,
+        "severity": Severity.HIGH,
+        "affected_component": "web",
+        "remediation": "parameterize",
+    }
     base.update(kwargs)
     return Finding(**base)
 
@@ -22,8 +28,16 @@ def _finding(**kwargs) -> Finding:
 def test_calculate_risk_vector_bounds():
     engine = RiskEngine()
     risk = engine.calculate_risk(_finding())
-    for dim in ("impact", "likelihood", "confidence", "exposure",
-                "exploitability", "detectability", "reversibility", "blast_radius"):
+    for dim in (
+        "impact",
+        "likelihood",
+        "confidence",
+        "exposure",
+        "exploitability",
+        "detectability",
+        "reversibility",
+        "blast_radius",
+    ):
         assert 0.0 <= getattr(risk, dim) <= 1.0
     assert risk.finding_id is not None
     assert risk.affected_assets == ["web"]
@@ -40,10 +54,13 @@ def test_evidence_ladder_raises_exploitability():
     engine = RiskEngine()
     finding = _finding()
     bare = engine.calculate_risk(finding, [])
-    ladder = engine.calculate_risk(finding, [
-        EvidenceEntry(finding_id=finding.id, level=EvidenceLevel.LEVEL_4_REPRODUCED),
-        EvidenceEntry(finding_id=finding.id, level=EvidenceLevel.LEVEL_5_VERIFIED),
-    ])
+    ladder = engine.calculate_risk(
+        finding,
+        [
+            EvidenceEntry(finding_id=finding.id, level=EvidenceLevel.LEVEL_4_REPRODUCED),
+            EvidenceEntry(finding_id=finding.id, level=EvidenceLevel.LEVEL_5_VERIFIED),
+        ],
+    )
     assert ladder.exploitability > bare.exploitability
     assert ladder.detectability > bare.detectability
     assert ladder.evidence["evidence_count"] == 2
@@ -53,33 +70,39 @@ def test_evidence_ladder_raises_exploitability():
 def test_disproven_kills_likelihood():
     engine = RiskEngine()
     normal = engine.calculate_risk(_finding())
-    disproven = engine.calculate_risk(
-        _finding(verification_status=VerificationState.DISPROVEN))
+    disproven = engine.calculate_risk(_finding(verification_status=VerificationState.DISPROVEN))
     assert disproven.likelihood < normal.likelihood
 
 
 def test_reproduction_status_modulates_likelihood():
     engine = RiskEngine()
     base = engine.calculate_risk(_finding()).likelihood
-    assert engine.calculate_risk(
-        _finding(reproduction_status="reproduced 5/5")).likelihood >= base
-    assert engine.calculate_risk(
-        _finding(reproduction_status="not reproduced")).likelihood < base
+    assert engine.calculate_risk(_finding(reproduction_status="reproduced 5/5")).likelihood >= base
+    assert engine.calculate_risk(_finding(reproduction_status="not reproduced")).likelihood < base
 
 
 def test_remediation_improves_reversibility():
     engine = RiskEngine()
-    assert engine.calculate_risk(_finding(remediation="patch")).reversibility > \
-        engine.calculate_risk(_finding(remediation=None)).reversibility
+    assert (
+        engine.calculate_risk(_finding(remediation="patch")).reversibility
+        > engine.calculate_risk(_finding(remediation=None)).reversibility
+    )
 
 
 def test_derive_category_monotonic():
     engine = RiskEngine()
     low_risk = RiskModel(confidence=1.0)  # all zeros -> negligible
     assert engine.derive_category(low_risk) is RiskCategory.NEGLIGIBLE
-    max_risk = RiskModel(impact=1.0, likelihood=1.0, confidence=1.0, exposure=1.0,
-                         exploitability=1.0, detectability=0.0, reversibility=0.0,
-                         blast_radius=1.0)
+    max_risk = RiskModel(
+        impact=1.0,
+        likelihood=1.0,
+        confidence=1.0,
+        exposure=1.0,
+        exploitability=1.0,
+        detectability=0.0,
+        reversibility=0.0,
+        blast_radius=1.0,
+    )
     # With all dimensions at max (except detectability/reversibility which are protective),
     # the weighted score should be high enough for CRITICAL
     assert engine.derive_category(max_risk) is RiskCategory.CRITICAL
@@ -87,8 +110,14 @@ def test_derive_category_monotonic():
 
 def test_uncertainty_dampens_category():
     engine = RiskEngine()
-    certain = RiskModel(impact=0.8, likelihood=0.8, confidence=1.0, exposure=0.6,
-                        exploitability=0.7, blast_radius=0.5)
+    certain = RiskModel(
+        impact=0.8,
+        likelihood=0.8,
+        confidence=1.0,
+        exposure=0.6,
+        exploitability=0.7,
+        blast_radius=0.5,
+    )
     uncertain = certain.model_copy(update={"confidence": 0.0})
     assert engine.derive_category(uncertain).rank <= engine.derive_category(certain).rank
 

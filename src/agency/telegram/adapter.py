@@ -13,6 +13,13 @@ from agency.telegram.config import TelegramConfig
 logger = structlog.get_logger(__name__)
 
 
+def _object_result(data: Any) -> dict[str, Any]:
+    result = data["result"]
+    if not isinstance(result, dict):
+        raise TypeError("Telegram API result must be an object")
+    return result
+
+
 class TelegramAdapter:
     """Async adapter for the Telegram Bot API.
 
@@ -45,9 +52,9 @@ class TelegramAdapter:
         data = resp.json()
         if not data.get("ok"):
             raise RuntimeError(f"Telegram API error: {data}")
-        return data["result"]
+        return _object_result(data)
 
-    async def set_my_commands(self, commands: list[dict[str, str]]) -> dict[str, Any]:
+    async def set_my_commands(self, commands: list[dict[str, str]]) -> bool:
         """Register the bot's command menu (Telegram setMyCommands)."""
         client = await self._get_client()
         resp = await client.post("/setMyCommands", json={"commands": commands})
@@ -55,7 +62,7 @@ class TelegramAdapter:
         data = resp.json()
         if not data.get("ok"):
             raise RuntimeError(f"Telegram API error: {data}")
-        return data["result"]
+        return data.get("result") is True
 
     async def send_message(
         self,
@@ -107,7 +114,10 @@ class TelegramAdapter:
         data = resp.json()
         if not data.get("ok"):
             raise RuntimeError(f"Telegram API error: {data}")
-        return data.get("result", [])
+        results = data.get("result", [])
+        if not isinstance(results, list) or any(not isinstance(item, dict) for item in results):
+            raise ValueError("Telegram API updates must be a list of objects")
+        return results
 
     async def set_webhook(self, url: str, secret_token: str | None = None) -> bool:
         """Set webhook URL."""
@@ -119,7 +129,7 @@ class TelegramAdapter:
         resp = await client.post("/setWebhook", json=payload)
         resp.raise_for_status()
         data = resp.json()
-        return data.get("ok", False)
+        return data.get("ok") is True
 
     async def delete_webhook(self) -> bool:
         """Delete webhook."""
@@ -127,7 +137,7 @@ class TelegramAdapter:
         resp = await client.post("/deleteWebhook")
         resp.raise_for_status()
         data = resp.json()
-        return data.get("ok", False)
+        return data.get("ok") is True
 
     @staticmethod
     def _split_message(text: str, max_length: int) -> list[str]:

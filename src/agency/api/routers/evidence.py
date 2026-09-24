@@ -49,7 +49,9 @@ def _store(request: Request) -> EvidenceStore:
 async def list_findings(
     request: Request,
     target: Annotated[str | None, Query(description="Substring match on target.")] = None,
-    component: Annotated[str | None, Query(description="Substring match on affected component.")] = None,
+    component: Annotated[
+        str | None, Query(description="Substring match on affected component.")
+    ] = None,
     severity: Annotated[Severity | None, Query()] = None,
     verification_status: Annotated[VerificationState | None, Query()] = None,
     min_confidence: Annotated[float, Query(ge=0.0, le=1.0)] = 0.0,
@@ -79,11 +81,15 @@ async def get_finding(finding_id: str, request: Request) -> Finding:
     store = _store(request)
     finding = await store.get_finding(finding_id)
     if finding is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"unknown finding {finding_id!r}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"unknown finding {finding_id!r}"
+        )
     return finding
 
 
-@router.post("", response_model=Finding, status_code=status.HTTP_201_CREATED, summary="Record a finding")
+@router.post(
+    "", response_model=Finding, status_code=status.HTTP_201_CREATED, summary="Record a finding"
+)
 async def create_finding(payload: Finding, request: Request) -> Finding:
     """Persist a new finding."""
     store = _store(request)
@@ -100,7 +106,9 @@ async def evidence_trail(finding_id: str, request: Request) -> list[EvidenceEntr
     """Return the append-only evidence trail for a finding, oldest first."""
     store = _store(request)
     if await store.get_finding(finding_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"unknown finding {finding_id!r}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"unknown finding {finding_id!r}"
+        )
     return await store.evidence_for_finding(finding_id)
 
 

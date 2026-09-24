@@ -8,7 +8,8 @@ from agency.security.red.planner import PlanStatus, RedTeamPlanner, RedTeamPlann
 
 def test_create_plan_pending_approval(test_red_planner: RedTeamPlanner):
     plan = test_red_planner.create_plan(
-        target="staging/api", hypothesis="SSRF via webhook", scope=["staging/*"])
+        target="staging/api", hypothesis="SSRF via webhook", scope=["staging/*"]
+    )
     assert plan.target == "staging/api"
     assert plan.status is PlanStatus.PENDING_APPROVAL
     assert plan.scope == ["staging/*"]
@@ -41,8 +42,10 @@ def test_get_and_list_plans(test_red_planner: RedTeamPlanner):
 
 
 def test_execute_approved_plan_collects_evidence(
-    test_red_planner: RedTeamPlanner, test_red_executor: RedTeamExecutor,
-    test_sandbox_manager, test_sandbox,
+    test_red_planner: RedTeamPlanner,
+    test_red_executor: RedTeamExecutor,
+    test_sandbox_manager,
+    test_sandbox,
 ):
     plan = test_red_planner.create_plan(target="staging/api", hypothesis="h")
     test_red_planner.approve_plan(plan.id)
@@ -60,7 +63,9 @@ def test_execute_approved_plan_collects_evidence(
 
 
 def test_execute_unapproved_plan_blocked(
-    test_red_planner: RedTeamPlanner, test_red_executor: RedTeamExecutor, test_sandbox,
+    test_red_planner: RedTeamPlanner,
+    test_red_executor: RedTeamExecutor,
+    test_sandbox,
 ):
     plan = test_red_planner.create_plan(target="t", hypothesis="h")
     result = test_red_executor.execute_test(plan.id, test_sandbox.id)
@@ -74,7 +79,8 @@ def test_execute_unknown_plan_blocked(test_red_executor: RedTeamExecutor, test_s
 
 
 def test_execute_missing_sandbox_error(
-    test_red_planner: RedTeamPlanner, test_red_executor: RedTeamExecutor,
+    test_red_planner: RedTeamPlanner,
+    test_red_executor: RedTeamExecutor,
 ):
     plan = test_red_planner.create_plan(target="t", hypothesis="h")
     test_red_planner.approve_plan(plan.id)
@@ -83,7 +89,9 @@ def test_execute_missing_sandbox_error(
 
 
 def test_execute_failing_command_marks_failed(
-    test_red_planner: RedTeamPlanner, test_sandbox_manager, fake_backend,
+    test_red_planner: RedTeamPlanner,
+    test_sandbox_manager,
+    fake_backend,
 ):
     fake_backend.exit_code = 2
     fake_backend.stdout = ""
@@ -96,7 +104,9 @@ def test_execute_failing_command_marks_failed(
 
 
 def test_get_and_list_tests(
-    test_red_planner: RedTeamPlanner, test_red_executor: RedTeamExecutor, test_sandbox,
+    test_red_planner: RedTeamPlanner,
+    test_red_executor: RedTeamExecutor,
+    test_sandbox,
 ):
     plan = test_red_planner.create_plan(target="t", hypothesis="h")
     test_red_planner.approve_plan(plan.id)

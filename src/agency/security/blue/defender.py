@@ -127,7 +127,10 @@ CONTROL_TEMPLATES: dict[DefenseType, list[dict[str, Any]]] = {
         {"name": "resource-limits", "config": {"backend": "cgroups", "network_policy": "none"}},
     ],
     DefenseType.RECOVERY: [
-        {"name": "snapshot-restore", "config": {"snapshot": "docker-commit", "restore": "detached-restart"}},
+        {
+            "name": "snapshot-restore",
+            "config": {"snapshot": "docker-commit", "restore": "detached-restart"},
+        },
     ],
 }
 
@@ -172,7 +175,9 @@ class BlueTeam:
     ) -> None:
         self._controls: dict[DefenseType, list[dict[str, Any]]] = {
             dtype: [dict(item) for item in templates]
-            for dtype, templates in (controls if controls is not None else CONTROL_TEMPLATES).items()
+            for dtype, templates in (
+                controls if controls is not None else CONTROL_TEMPLATES
+            ).items()
         }
         self._threats: dict[str, Threat] = {}
         self._analyses: dict[str, ThreatAnalysis] = {}
@@ -198,21 +203,18 @@ class BlueTeam:
         if cached is not None:
             return cached
 
-        logging_channels = [
-            item["name"] for item in self._controls.get(DefenseType.LOGGING, [])
-        ]
+        logging_channels = [item["name"] for item in self._controls.get(DefenseType.LOGGING, [])]
         prevention_active = [
             item["name"] for item in self._controls.get(DefenseType.PREVENTION, [])
         ]
-        isolation_list = [
-            item["name"] for item in self._controls.get(DefenseType.ISOLATION, [])
-        ]
-        recovery_list = [
-            item["name"] for item in self._controls.get(DefenseType.RECOVERY, [])
-        ]
+        isolation_list = [item["name"] for item in self._controls.get(DefenseType.ISOLATION, [])]
+        recovery_list = [item["name"] for item in self._controls.get(DefenseType.RECOVERY, [])]
 
         recommendations = list(_KIND_RECOMMENDATIONS[resolved.kind])
-        if resolved.kind is not ThreatKind.EXFILTRATION and resolved.kind is not ThreatKind.RECONNAISSANCE:
+        if (
+            resolved.kind is not ThreatKind.EXFILTRATION
+            and resolved.kind is not ThreatKind.RECONNAISSANCE
+        ):
             recommendations.append("run a purple validation pass on the finding")
 
         analysis = ThreatAnalysis(
@@ -271,9 +273,7 @@ class BlueTeam:
         else:
             status = DefenseStatus.VALIDATED
             validated_at = _utcnow()
-        validated = defense.model_copy(
-            update={"status": status, "validated_at": validated_at}
-        )
+        validated = defense.model_copy(update={"status": status, "validated_at": validated_at})
         with self._lock:
             self._defenses[defense_id] = validated
         logger.info(

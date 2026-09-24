@@ -90,9 +90,7 @@ class LatticeEvent:
         """Deserialize from :meth:`to_dict` output."""
 
         raw_ts = data["timestamp"]
-        timestamp = (
-            datetime.fromisoformat(raw_ts) if isinstance(raw_ts, str) else raw_ts
-        )
+        timestamp = datetime.fromisoformat(raw_ts) if isinstance(raw_ts, str) else raw_ts
         return cls(
             event_id=data["event_id"],
             timestamp=ensure_utc(timestamp),
@@ -247,9 +245,7 @@ class ConsensusProposal:
         """Deserialize from :meth:`to_dict` output."""
 
         raw_ts = data["expires_at"]
-        expires_at = (
-            datetime.fromisoformat(raw_ts) if isinstance(raw_ts, str) else raw_ts
-        )
+        expires_at = datetime.fromisoformat(raw_ts) if isinstance(raw_ts, str) else raw_ts
         return cls(
             proposal_id=data["proposal_id"],
             proposer_id=data["proposer_id"],

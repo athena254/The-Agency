@@ -69,7 +69,9 @@ class Task(BaseModel):
     input: dict[str, Any] = Field(default_factory=dict)
     output: dict[str, Any] = Field(default_factory=dict, description="Final result on COMPLETED.")
     error: str | None = Field(default=None, description="Failure detail on FAILED.")
-    messages: list[TaskMessage] = Field(default_factory=list, description="Append-only conversation log.")
+    messages: list[TaskMessage] = Field(
+        default_factory=list, description="Append-only conversation log."
+    )
     parent_id: str | None = Field(default=None, description="Parent task id for hierarchy.")
     priority: int = Field(default=0, ge=0, le=10)
     created_at: datetime = Field(default_factory=utcnow)
@@ -162,7 +164,9 @@ class TaskManager:
             self._tasks[task.task_id] = task
             if task.status is TaskStatus.PENDING:
                 self._enqueue(task)
-        self._log.info("task.created", task_id=task.task_id, created_by=created_by, priority=priority)
+        self._log.info(
+            "task.created", task_id=task.task_id, created_by=created_by, priority=priority
+        )
         return task
 
     async def get_task(self, task_id: str) -> Task | None:
@@ -181,7 +185,9 @@ class TaskManager:
             tasks = [task for task in tasks if task.status is status]
         return sorted(tasks, key=lambda task: task.created_at)
 
-    async def update_status(self, task_id: str, status: TaskStatus, *, error: str | None = None) -> Task:
+    async def update_status(
+        self, task_id: str, status: TaskStatus, *, error: str | None = None
+    ) -> Task:
         """Transition a task into a new lifecycle state.
 
         Raises
@@ -255,7 +261,12 @@ class TaskManager:
     @staticmethod
     def _assert_transition(current: TaskStatus, target: TaskStatus) -> None:
         legal: dict[TaskStatus, set[TaskStatus]] = {
-            TaskStatus.PENDING: {TaskStatus.RUNNING, TaskStatus.BLOCKED, TaskStatus.FAILED, TaskStatus.COMPLETED},
+            TaskStatus.PENDING: {
+                TaskStatus.RUNNING,
+                TaskStatus.BLOCKED,
+                TaskStatus.FAILED,
+                TaskStatus.COMPLETED,
+            },
             TaskStatus.RUNNING: {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.BLOCKED},
             TaskStatus.BLOCKED: {TaskStatus.PENDING, TaskStatus.FAILED, TaskStatus.COMPLETED},
             TaskStatus.COMPLETED: set(),

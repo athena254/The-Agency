@@ -44,7 +44,7 @@ def _load_yaml_file(path: str | Path | None) -> dict[str, Any]:
     if not candidate.is_file():
         return {}
     try:
-        import yaml
+        import yaml  # type: ignore[import-untyped]
     except ImportError as exc:  # pragma: no cover - PyYAML is a test/dev dep
         raise RuntimeError("PyYAML is required to read config/lattice.yaml") from exc
     raw: Any = yaml.safe_load(candidate.read_text(encoding="utf-8")) or {}
@@ -168,8 +168,12 @@ def _coerce_types(flat: dict[str, Any]) -> dict[str, Any]:
         if key in flat and not isinstance(flat[key], bool):
             flat[key] = str(flat[key]).strip().lower() in ("1", "true", "yes", "on")
 
-    for key in ("vector_dimension", "event_retention_days", "proposal_ttl_seconds",
-                "reputation_window"):
+    for key in (
+        "vector_dimension",
+        "event_retention_days",
+        "proposal_ttl_seconds",
+        "reputation_window",
+    ):
         _int(key)
     for key in ("default_quorum",):
         _float(key)

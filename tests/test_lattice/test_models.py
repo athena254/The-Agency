@@ -199,16 +199,16 @@ def test_load_config_prefers_env_over_yaml(
     clean_env: None, tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "lattice.yaml"
-    path.write_text("lattice:\n  backend: sqlite\n  sqlite:\n    path: ./data/file.db\n", encoding="utf-8")
+    path.write_text(
+        "lattice:\n  backend: sqlite\n  sqlite:\n    path: ./data/file.db\n", encoding="utf-8"
+    )
     monkeypatch.setenv("LATTICE_SQLITE_PATH", ":memory:")
     config = load_config(path)
     assert config.backend == "sqlite"
     assert config.sqlite_path == ":memory:"
 
 
-def test_load_config_reads_nested_yaml(
-    clean_env: None, tmp_path, sample_config_dict: dict
-) -> None:
+def test_load_config_reads_nested_yaml(clean_env: None, tmp_path, sample_config_dict: dict) -> None:
     import yaml
 
     path = tmp_path / "lattice.yaml"
@@ -224,9 +224,7 @@ def test_validate_config_catches_bad_backend() -> None:
     assert validate_config(config) != []
 
 
-def test_load_config_rejects_invalid_backend(
-    clean_env: None, tmp_path
-) -> None:
+def test_load_config_rejects_invalid_backend(clean_env: None, tmp_path) -> None:
     path = tmp_path / "lattice.yaml"
     path.write_text("lattice:\n  backend: bogus\n", encoding="utf-8")
     with pytest.raises(ValueError):

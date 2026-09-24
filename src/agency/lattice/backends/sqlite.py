@@ -644,9 +644,7 @@ class SQLiteLattice:
         """All tasks ``task_id`` depends on (``DEPENDS_ON``, outgoing)."""
 
         try:
-            return await self.traverse(
-                task_id, EdgeType.DEPENDS_ON, max_depth=100, direction="out"
-            )
+            return await self.traverse(task_id, EdgeType.DEPENDS_ON, max_depth=100, direction="out")
         except Exception as exc:
             logger.exception("get_dependencies failed for %s", task_id)
             raise RuntimeError(f"get_dependencies failed for {task_id}: {exc}") from exc
@@ -655,9 +653,7 @@ class SQLiteLattice:
         """All tasks depending on ``task_id`` (``DEPENDS_ON``, incoming)."""
 
         try:
-            return await self.traverse(
-                task_id, EdgeType.DEPENDS_ON, max_depth=100, direction="in"
-            )
+            return await self.traverse(task_id, EdgeType.DEPENDS_ON, max_depth=100, direction="in")
         except Exception as exc:
             logger.exception("get_dependents failed for %s", task_id)
             raise RuntimeError(f"get_dependents failed for {task_id}: {exc}") from exc
@@ -759,9 +755,7 @@ class SQLiteLattice:
                 db = self._require_db()
                 proposal_id = _new_id()
                 now = utc_now()
-                expires_at = now.fromtimestamp(
-                    now.timestamp() + ttl_seconds, tz=UTC
-                ).isoformat()
+                expires_at = now.fromtimestamp(now.timestamp() + ttl_seconds, tz=UTC).isoformat()
                 await db.execute(
                     """INSERT INTO proposals (id, proposer_id, proposal_type, payload,
                                               quorum, status, created_at, expires_at)
@@ -810,9 +804,7 @@ class SQLiteLattice:
         try:
             async with self._lock:
                 db = self._require_db()
-                cursor = await db.execute(
-                    "SELECT * FROM proposals WHERE id = ?", (proposal_id,)
-                )
+                cursor = await db.execute("SELECT * FROM proposals WHERE id = ?", (proposal_id,))
                 proposal = await cursor.fetchone()
                 if proposal is None:
                     raise KeyError(f"Unknown proposal: {proposal_id}")
@@ -879,9 +871,7 @@ class SQLiteLattice:
 
         try:
             db = self._require_db()
-            cursor = await db.execute(
-                "SELECT * FROM proposals WHERE id = ?", (proposal_id,)
-            )
+            cursor = await db.execute("SELECT * FROM proposals WHERE id = ?", (proposal_id,))
             row = await cursor.fetchone()
             if row is None:
                 raise KeyError(f"Unknown proposal: {proposal_id}")
@@ -915,20 +905,24 @@ class SQLiteLattice:
             logger.exception("get_proposal_status failed for %s", proposal_id)
             raise RuntimeError(f"get_proposal_status failed for {proposal_id}: {exc}") from exc
 
+    async def list_open_proposals(self) -> list[ConsensusProposal]:
+        """Return open proposals and their votes using the existing decoder."""
+        db = self._require_db()
+        cursor = await db.execute("SELECT id FROM proposals WHERE status = 'open' ORDER BY id")
+        return [await self.get_proposal_status(row["id"]) for row in await cursor.fetchall()]
+
     async def check_quorum(self, proposal_id: str) -> bool:
         """Whether a proposal reached quorum (resolves it when it does)."""
 
         try:
             async with self._lock:
                 db = self._require_db()
-                cursor = await db.execute(
-                    "SELECT * FROM proposals WHERE id = ?", (proposal_id,)
-                )
+                cursor = await db.execute("SELECT * FROM proposals WHERE id = ?", (proposal_id,))
                 row = await cursor.fetchone()
                 if row is None:
                     raise KeyError(f"Unknown proposal: {proposal_id}")
                 if row["status"] != "open":
-                    return row["status"] == "passed"
+                    return bool(row["status"] == "passed")
                 if _parse_ts(row["expires_at"]) <= utc_now():
                     await db.execute(
                         "UPDATE proposals SET status = 'expired' WHERE id = ?",
@@ -1058,9 +1052,7 @@ class SQLiteLattice:
 
         try:
             db = self._require_db()
-            cursor = await db.execute(
-                "SELECT * FROM reputations WHERE agent_id = ?", (agent_id,)
-            )
+            cursor = await db.execute("SELECT * FROM reputations WHERE agent_id = ?", (agent_id,))
             row = await cursor.fetchone()
             if row is None:
                 return Reputation(agent_id=agent_id)
@@ -1150,8 +1142,7 @@ class SQLiteLattice:
             targets = [node_id, *edge_ids]
             placeholders = ",".join("?" for _ in targets)
             cursor = await db.execute(
-                f"SELECT * FROM events WHERE target_id IN ({placeholders})"
-                " ORDER BY timestamp ASC",
+                f"SELECT * FROM events WHERE target_id IN ({placeholders}) ORDER BY timestamp ASC",
                 tuple(targets),
             )
             return [self._row_to_event(r) for r in await cursor.fetchall()]
@@ -1180,9 +1171,7 @@ class SQLiteLattice:
             task_count = await self._count(
                 "SELECT COUNT(*) FROM nodes WHERE node_type = ?", ("task",)
             )
-            pending = await self._count(
-                "SELECT COUNT(*) FROM proposals WHERE status = 'open'"
-            )
+            pending = await self._count("SELECT COUNT(*) FROM proposals WHERE status = 'open'")
             db = self._require_db()
             cursor = await db.execute("SELECT MAX(timestamp) FROM events")
             last_row = await cursor.fetchone()
@@ -1210,9 +1199,7 @@ class SQLiteLattice:
         """Number of ``AGENT`` nodes."""
 
         try:
-            return await self._count(
-                "SELECT COUNT(*) FROM nodes WHERE node_type = ?", ("agent",)
-            )
+            return await self._count("SELECT COUNT(*) FROM nodes WHERE node_type = ?", ("agent",))
         except Exception as exc:
             logger.exception("get_agent_count failed")
             raise RuntimeError(f"get_agent_count failed: {exc}") from exc

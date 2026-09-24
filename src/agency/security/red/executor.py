@@ -161,9 +161,7 @@ class RedTeamExecutor:
 
         findings: list[str] = []
         if execution.timed_out:
-            findings.append(
-                f"command timed out after {sandbox.config.timeout}s"
-            )
+            findings.append(f"command timed out after {sandbox.config.timeout}s")
         if execution.error is not None:
             findings.append(execution.error)
         if status is TestStatus.PASSED:
@@ -213,9 +211,7 @@ class RedTeamExecutor:
     def list_tests(self, status: TestStatus | None = None) -> list[TestResult]:
         with self._lock:
             tests = [
-                test
-                for test in self._tests.values()
-                if status is None or test.status is status
+                test for test in self._tests.values() if status is None or test.status is status
             ]
         return sorted(tests, key=lambda test: test.timestamp, reverse=True)
 

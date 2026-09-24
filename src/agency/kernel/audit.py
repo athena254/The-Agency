@@ -40,12 +40,17 @@ class AuditEntry(BaseModel):
     task: str | None = Field(default=None, description="Task id the action belongs to.")
     target: str | None = Field(default=None, description="Scope or resource the action targeted.")
     authorization: str | None = Field(
-        default=None, description="Match of the decision, e.g. 'granted' / 'denied' / permission id."
+        default=None,
+        description="Match of the decision, e.g. 'granted' / 'denied' / permission id.",
     )
     capability: str | None = Field(default=None, description="Capability exercised.")
     action: ActionClass | str | None = Field(default=None, description="Action class attempted.")
-    result: str = Field(default="allowed", description="Outcome, e.g. 'allowed', 'denied', 'failed'.")
-    evidence: dict[str, Any] | None = Field(default=None, description="Supporting evidence payload.")
+    result: str = Field(
+        default="allowed", description="Outcome, e.g. 'allowed', 'denied', 'failed'."
+    )
+    evidence: dict[str, Any] | None = Field(
+        default=None, description="Supporting evidence payload."
+    )
     model: str | None = Field(default=None, description="Model that proposed/executed the action.")
     model_version: str | None = Field(default=None)
     tool_version: str | None = Field(default=None)
@@ -209,7 +214,9 @@ class AuditLog:
             await conn.commit()
         except aiosqlite.IntegrityError as exc:
             if "entry_id" in str(exc):
-                raise ValueError(f"duplicate audit entry_id {entry.entry_id!r} — chain tampering?") from exc
+                raise ValueError(
+                    f"duplicate audit entry_id {entry.entry_id!r} — chain tampering?"
+                ) from exc
             raise
         self._log.info(
             "audit.append",

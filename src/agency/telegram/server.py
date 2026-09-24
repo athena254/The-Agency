@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from secrets import compare_digest
 from typing import Any
 
 import structlog
 from fastapi import FastAPI, Request, Response
+from starlette.requests import ClientDisconnect
 
 from agency.telegram.config import TelegramConfig
 from agency.telegram.handler import TelegramHandler
@@ -24,17 +26,20 @@ def create_app(config: TelegramConfig, handler: TelegramHandler | None = None) -
 
     @app.post("/telegram/webhook")
     async def webhook(request: Request) -> Response:
+        # Authentication precedes body parsing; an unset secret disables the
+        # endpoint instead of silently allowing forged Telegram updates.
+        if not config.webhook_secret:
+            return Response(status_code=503)
+        secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if not compare_digest(secret, config.webhook_secret):
+            logger.warning("telegram_webhook_invalid_secret")
+            return Response(status_code=403)
         try:
             body = await request.json()
-        except Exception:
+        except (ValueError, ClientDisconnect):
             return Response(status_code=400)
-
-        # Verify secret token if configured
-        if config.webhook_secret:
-            secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-            if secret != config.webhook_secret:
-                logger.warning("telegram_webhook_invalid_secret")
-                return Response(status_code=403)
+        if not isinstance(body, dict):
+            return Response(status_code=400)
 
         result = await _handler.handle_update(body)
         return Response(content=str(result), media_type="application/json")

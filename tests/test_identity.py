@@ -8,7 +8,13 @@ from agency.kernel.policies import ActionClass
 
 
 def test_trust_level_ordering():
-    ranks = [TrustLevel.UNKNOWN, TrustLevel.OBSERVED, TrustLevel.VERIFIED, TrustLevel.TRUSTED, TrustLevel.HIGH_TRUST]
+    ranks = [
+        TrustLevel.UNKNOWN,
+        TrustLevel.OBSERVED,
+        TrustLevel.VERIFIED,
+        TrustLevel.TRUSTED,
+        TrustLevel.HIGH_TRUST,
+    ]
     assert [level.rank for level in ranks] == [0, 1, 2, 3, 4]
     assert TrustLevel.HIGH_TRUST.rank >= TrustLevel.TRUSTED.rank
     assert TrustLevel.UNKNOWN.rank <= TrustLevel.UNKNOWN.rank

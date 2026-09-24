@@ -12,6 +12,7 @@ or embedder are available it returns an empty list instead of raising.
 
 from __future__ import annotations
 
+import importlib
 import math
 import uuid
 from collections import deque
@@ -35,15 +36,14 @@ from agency.lattice.models import (
 
 log = structlog.get_logger(__name__)
 
-try:  # Prefer the real engines when their briefs have landed.
-    from agency.lattice.governance import GovernanceEngine as _RealGovernanceEngine
-except ImportError:  # pragma: no cover - fallback stub below
-    _RealGovernanceEngine = None  # type: ignore[assignment]
 
-try:
-    from agency.lattice.reputation import ReputationEngine as _RealReputationEngine
-except ImportError:  # pragma: no cover - fallback stub below
-    _RealReputationEngine = None  # type: ignore[assignment]
+def _optional_engine(module: str, name: str) -> Any:
+    """Load an optional engine from a plugin module, or use the local fallback."""
+    try:
+        return getattr(importlib.import_module(module), name)
+    except ImportError:
+        return None
+
 
 _TERMINAL_TASK_STATES: frozenset[str] = frozenset(
     {"completed", "failed", "cancelled", "denied", "expired"}
@@ -243,8 +243,7 @@ class InMemoryLatticeBackend:
             "edge_added",
             actor,
             edge_id,
-            {"source_id": source_id, "target_id": target_id,
-             "edge_type": edge_type.value},
+            {"source_id": source_id, "target_id": target_id, "edge_type": edge_type.value},
         )
         return edge_id
 
@@ -353,16 +352,12 @@ class InMemoryLatticeBackend:
     async def get_dependencies(self, task_id: str) -> list[str]:
         """All tasks ``task_id`` depends on (``DEPENDS_ON``, outgoing)."""
 
-        return await self.traverse(
-            task_id, EdgeType.DEPENDS_ON, max_depth=100, direction="out"
-        )
+        return await self.traverse(task_id, EdgeType.DEPENDS_ON, max_depth=100, direction="out")
 
     async def get_dependents(self, task_id: str) -> list[str]:
         """All tasks depending on ``task_id`` (``DEPENDS_ON``, incoming)."""
 
-        return await self.traverse(
-            task_id, EdgeType.DEPENDS_ON, max_depth=100, direction="in"
-        )
+        return await self.traverse(task_id, EdgeType.DEPENDS_ON, max_depth=100, direction="in")
 
     # -- 4.4 vector search -------------------------------------------- #
     async def upsert_vector(
@@ -390,9 +385,7 @@ class InMemoryLatticeBackend:
             store = self._vectors.get(collection, {})
             scored: list[dict[str, Any]] = []
             for vector_id, (vector, payload) in store.items():
-                if filters and any(
-                    payload.get(key) != value for key, value in filters.items()
-                ):
+                if filters and any(payload.get(key) != value for key, value in filters.items()):
                     continue
                 scored.append(
                     {
@@ -483,9 +476,7 @@ class InMemoryLatticeBackend:
                 evidence=list(evidence or []),
             )
         )
-        self._record(
-            "vote_cast", voter_id, proposal_id, {"decision": decision}
-        )
+        self._record("vote_cast", voter_id, proposal_id, {"decision": decision})
         await self.check_quorum(proposal_id)
         return True
 
@@ -619,9 +610,7 @@ class InMemoryLatticeBackend:
 
         agent_count = await self.get_agent_count()
         active_tasks = await self.get_active_tasks()
-        pending = sum(
-            1 for proposal in self._proposals.values() if proposal.status == "open"
-        )
+        pending = sum(1 for proposal in self._proposals.values() if proposal.status == "open")
         last_event = self._events[-1].to_dict() if self._events else None
         return {
             "backend": "memory",
@@ -629,9 +618,7 @@ class InMemoryLatticeBackend:
             "node_count": len(self._nodes),
             "edge_count": len(self._edges),
             "agent_count": agent_count,
-            "task_count": len(
-                [n for n in self._nodes.values() if n["node_type"] == "task"]
-            ),
+            "task_count": len([n for n in self._nodes.values() if n["node_type"] == "task"]),
             "active_task_count": len(active_tasks),
             "pending_proposals": pending,
             "event_count": len(self._events),
@@ -643,9 +630,7 @@ class InMemoryLatticeBackend:
     async def get_agent_count(self) -> int:
         """Number of ``AGENT`` nodes."""
 
-        return sum(
-            1 for node in self._nodes.values() if node["type"] == NodeType.AGENT.value
-        )
+        return sum(1 for node in self._nodes.values() if node["type"] == NodeType.AGENT.value)
 
     async def get_active_tasks(self) -> list[dict[str, Any]]:
         """Task nodes not in a terminal state."""
@@ -654,8 +639,7 @@ class InMemoryLatticeBackend:
             dict(node)
             for node in self._nodes.values()
             if node["type"] == NodeType.TASK.value
-            and str(node["properties"].get("status", "open")).lower()
-            not in _TERMINAL_TASK_STATES
+            and str(node["properties"].get("status", "open")).lower() not in _TERMINAL_TASK_STATES
         ]
 
 
@@ -736,10 +720,14 @@ class Lattice:
     def __init__(self, config: LatticeConfig | None = None) -> None:
         self.config: LatticeConfig = config or get_config()
         self.backend: LatticeBackend = self._create_backend()
-        governance_cls = _RealGovernanceEngine or GovernanceEngine
-        reputation_cls = _RealReputationEngine or ReputationEngine
-        self.governance = governance_cls(self.backend)  # type: ignore[operator]
-        self.reputation = reputation_cls(self.backend)  # type: ignore[operator]
+        governance_cls = (
+            _optional_engine("agency.lattice.governance", "GovernanceEngine") or GovernanceEngine
+        )
+        reputation_cls = (
+            _optional_engine("agency.lattice.reputation", "ReputationEngine") or ReputationEngine
+        )
+        self.governance = governance_cls(self.backend)
+        self.reputation = reputation_cls(self.backend)
         log.info("lattice.api.created", backend=self.config.backend)
 
     def _create_backend(self) -> LatticeBackend:
@@ -751,7 +739,7 @@ class Lattice:
                 from agency.lattice.backends.sqlite import SQLiteLattice
 
                 log.info("lattice.api.backend_selected", backend="sqlite")
-                return SQLiteLattice(config=self.config)  # type: ignore[no-any-return]
+                return SQLiteLattice(config=self.config)
             except ImportError:
                 log.info(
                     "lattice.api.backend_fallback",
@@ -760,10 +748,11 @@ class Lattice:
                 )
         elif backend_name == "neo4j":
             try:
-                from agency.lattice.backends.neo4j import Neo4jLattice
+                neo4j_class = importlib.import_module("agency.lattice.backends.neo4j").Neo4jLattice
 
                 log.info("lattice.api.backend_selected", backend="neo4j")
-                return Neo4jLattice(config=self.config)  # type: ignore[no-any-return]
+                backend: LatticeBackend = neo4j_class(config=self.config)
+                return backend
             except ImportError:
                 log.warning(
                     "lattice.api.backend_fallback",
@@ -800,9 +789,7 @@ class Lattice:
     ) -> str:
         """Create a node of ``node_type``; returns its ID."""
 
-        return await self.backend.create_node(
-            _coerce_node_type(node_type), properties, actor
-        )
+        return await self.backend.create_node(_coerce_node_type(node_type), properties, actor)
 
     async def get_node(self, node_id: str) -> dict[str, Any] | None:
         """Fetch a node by ID, or ``None`` when absent."""
@@ -880,9 +867,7 @@ class Lattice:
         coerced = _coerce_edge_type(edge_type) if edge_type is not None else None
         return await self.backend.traverse(start_node, coerced, max_depth, direction)
 
-    async def find_path(
-        self, source: str, target: str, max_depth: int = 5
-    ) -> list[str] | None:
+    async def find_path(self, source: str, target: str, max_depth: int = 5) -> list[str] | None:
         """Shortest path from ``source`` to ``target`` (``None`` if none)."""
 
         return await self.backend.find_path(source, target, max_depth)
@@ -917,9 +902,7 @@ class Lattice:
         """Nearest-neighbour search; ``[]`` when unavailable (graceful)."""
 
         try:
-            return await self.backend.search_vectors(
-                collection, query_vector, limit, filters
-            )
+            return await self.backend.search_vectors(collection, query_vector, limit, filters)
         except Exception:  # noqa: BLE001 - graceful degradation
             log.warning("lattice.api.vector_search_degraded", collection=collection)
             return []
@@ -935,9 +918,7 @@ class Lattice:
 
         try:
             if embedder is not None:
-                return await self.backend.search_by_text(
-                    collection, text, embedder, limit
-                )
+                return await self.backend.search_by_text(collection, text, embedder, limit)
             return await self._metadata_text_search(collection, text, limit)
         except Exception:  # noqa: BLE001 - graceful degradation
             log.warning("lattice.api.text_search_degraded", collection=collection)
@@ -956,9 +937,7 @@ class Lattice:
         for vector_id, (_vector, payload) in store.items():
             haystack = " ".join(str(value) for value in payload.values()).lower()
             if needle in haystack:
-                scored.append(
-                    {"id": vector_id, "score": 1.0, "payload": dict(payload)}
-                )
+                scored.append({"id": vector_id, "score": 1.0, "payload": dict(payload)})
         return scored[:limit]
 
     async def delete_vectors(self, collection: str, ids: list[str]) -> bool:
@@ -978,9 +957,7 @@ class Lattice:
     ) -> str:
         """Open a governance proposal; returns its ID."""
 
-        effective_quorum = (
-            quorum if quorum is not None else self.config.default_quorum
-        )
+        effective_quorum = quorum if quorum is not None else self.config.default_quorum
         effective_ttl = ttl if ttl is not None else ttl_seconds
         return await self.backend.submit_proposal(
             proposer_id, proposal_type, payload, effective_quorum, effective_ttl
@@ -1007,6 +984,10 @@ class Lattice:
             "vote_count": len(proposal.votes),
             "quorum_reached": quorum_reached,
         }
+
+    async def list_open_proposals(self) -> list[ConsensusProposal]:
+        """List open proposals across supported backends."""
+        return await self.backend.list_open_proposals()
 
     async def get_proposal_status(self, proposal_id: str) -> ConsensusProposal:
         """Current proposal state."""

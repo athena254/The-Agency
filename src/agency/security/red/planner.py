@@ -71,9 +71,7 @@ class RedTeamPlanner:
         )
         return plan
 
-    def approve_plan(
-        self, plan_id: str, approved_by: str = "security-admin"
-    ) -> RedTeamPlan:
+    def approve_plan(self, plan_id: str, approved_by: str = "security-admin") -> RedTeamPlan:
         with self._lock:
             plan = self._plans.get(plan_id)
             if plan is None:
@@ -105,9 +103,7 @@ class RedTeamPlanner:
     def list_plans(self, status: PlanStatus | None = None) -> list[RedTeamPlan]:
         with self._lock:
             plans = [
-                plan
-                for plan in self._plans.values()
-                if status is None or plan.status is status
+                plan for plan in self._plans.values() if status is None or plan.status is status
             ]
         return sorted(plans, key=lambda plan: plan.created_at, reverse=True)
 

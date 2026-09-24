@@ -11,11 +11,19 @@ async def test_append_and_query_roundtrip(tmp_path):
     log = AuditLog(tmp_path / "audit.db")
     await log.initialize()
     try:
-        eid = await log.append(AuditEntry(
-            agent="red-1", task="t-1", target="staging/api",
-            authorization="granted", capability="simulate",
-            action=ActionClass.L2_CONTROLLED_TESTING,
-            result="allowed", evidence={"finding": "x"}, model="hermes"))
+        eid = await log.append(
+            AuditEntry(
+                agent="red-1",
+                task="t-1",
+                target="staging/api",
+                authorization="granted",
+                capability="simulate",
+                action=ActionClass.L2_CONTROLLED_TESTING,
+                result="allowed",
+                evidence={"finding": "x"},
+                model="hermes",
+            )
+        )
         assert isinstance(eid, str)
         rows = await log.query(AuditFilter(agent="red-1"))
         assert len(rows) == 1
@@ -32,10 +40,13 @@ async def test_query_filters_and_pagination(tmp_path):
     await log.initialize()
     try:
         for idx in range(5):
-            await log.append(AuditEntry(
-                agent="red-1" if idx % 2 == 0 else "blue-1",
-                action="L1_SAFE_ANALYSIS",
-                result="allowed" if idx % 2 == 0 else "denied"))
+            await log.append(
+                AuditEntry(
+                    agent="red-1" if idx % 2 == 0 else "blue-1",
+                    action="L1_SAFE_ANALYSIS",
+                    result="allowed" if idx % 2 == 0 else "denied",
+                )
+            )
         assert len(await log.query(AuditFilter(agent="red-1"))) == 3
         assert len(await log.query(AuditFilter(result="denied"))) == 2
         assert len(await log.query(AuditFilter(agent="red-1", limit=1))) == 1
@@ -50,10 +61,24 @@ async def test_filter_by_task_target_action(tmp_path):
     log = AuditLog(tmp_path / "audit.db")
     await log.initialize()
     try:
-        await log.append(AuditEntry(agent="a", task="t1", target="prod/api",
-                                    action="L2_CONTROLLED_TESTING", result="allowed"))
-        await log.append(AuditEntry(agent="a", task="t2", target="staging/api",
-                                    action="L2_CONTROLLED_TESTING", result="denied"))
+        await log.append(
+            AuditEntry(
+                agent="a",
+                task="t1",
+                target="prod/api",
+                action="L2_CONTROLLED_TESTING",
+                result="allowed",
+            )
+        )
+        await log.append(
+            AuditEntry(
+                agent="a",
+                task="t2",
+                target="staging/api",
+                action="L2_CONTROLLED_TESTING",
+                result="denied",
+            )
+        )
         assert len(await log.query(AuditFilter(task="t1"))) == 1
         assert len(await log.query(AuditFilter(target="staging/api"))) == 1
         assert len(await log.query(AuditFilter(action="L2_CONTROLLED_TESTING"))) == 2

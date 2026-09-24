@@ -188,6 +188,10 @@ class LatticeBackend(Protocol):
         """Current proposal state (raises ``KeyError`` when unknown)."""
         ...
 
+    async def list_open_proposals(self) -> list[ConsensusProposal]:
+        """List proposals that remain open."""
+        ...
+
     async def update_reputation(
         self,
         agent_id: str,

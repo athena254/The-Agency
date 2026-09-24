@@ -69,7 +69,7 @@ class OpenClawBridge(Bridge):
                 status=BridgeStatus.UNAVAILABLE,
                 duration_s=perf_counter() - start,
             )
-        except (ValueError, KeyError) as exc:
+        except (TypeError, ValueError, KeyError) as exc:
             return BridgeResult.failure(
                 f"openclaw protocol error: {exc}", duration_s=perf_counter() - start
             )
@@ -145,8 +145,10 @@ class OpenClawBridge(Bridge):
         if self._client is None:
             import os
 
-            token = self._cfg.token.get_secret_value() if self._cfg.token else os.environ.get(
-                "OPENCLAW_TOKEN", ""
+            token = (
+                self._cfg.token.get_secret_value()
+                if self._cfg.token
+                else os.environ.get("OPENCLAW_TOKEN", "")
             )
             headers = {"Content-Type": "application/json"}
             if token:
@@ -195,7 +197,7 @@ class OpenClawBridge(Bridge):
         response.raise_for_status()
         data = response.json()
         if not isinstance(data, dict):
-            raise ValueError(f"unexpected status payload: {data!r}")
+            raise TypeError(f"unexpected status payload: {data!r}")
         return data
 
     async def _poll_until_done(

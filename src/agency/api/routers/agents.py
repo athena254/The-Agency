@@ -31,6 +31,7 @@ router = APIRouter(tags=["agents"])
 # Request models (Pydantic v2, kernel-anchored)
 # --------------------------------------------------------------------------- #
 
+
 class AgentCreateRequest(BaseModel):
     """Payload for ``POST /v1/agents``. Mirrors :class:`agency.kernel.identity.Agent`."""
 
@@ -57,6 +58,7 @@ class CapabilityUpdateRequest(BaseModel):
 # Dependencies
 # --------------------------------------------------------------------------- #
 
+
 def _registry(request: Request) -> AgentRegistry:
     registry = getattr(request.app.state, "agent_registry", None)
     if registry is None:
@@ -71,6 +73,7 @@ def _registry(request: Request) -> AgentRegistry:
 # Routes
 # --------------------------------------------------------------------------- #
 
+
 @router.get("", response_model=list[Agent], summary="List agents")
 def list_agents(
     request: Request,
@@ -83,7 +86,9 @@ def list_agents(
     return registry.list_agents(include_revoked=include_revoked, domain=domain)[:limit]
 
 
-@router.post("", response_model=Agent, status_code=status.HTTP_201_CREATED, summary="Register an agent")
+@router.post(
+    "", response_model=Agent, status_code=status.HTTP_201_CREATED, summary="Register an agent"
+)
 def register_agent(payload: AgentCreateRequest, request: Request) -> Agent:
     """Register a new agent identity (grants no permissions by itself)."""
     from agency.kernel.identity import Agent as AgentModel
@@ -103,7 +108,9 @@ def get_agent(agent_id: str, request: Request) -> Agent:
     registry = _registry(request)
     agent = registry.get(agent_id)
     if agent is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"unknown agent {agent_id!r}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"unknown agent {agent_id!r}"
+        )
     return agent
 
 

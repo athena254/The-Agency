@@ -18,32 +18,94 @@ log = structlog.get_logger(__name__)
 
 DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
     "security": (
-        "security", "vulnerability", "vulnerabilities", "exploit", "attack",
-        "threat", "malware", "phishing", "intrusion", "firewall", "sandbox",
-        "pentest", "red team", "blue team", "purple", "harden", "cve", "scan",
+        "security",
+        "vulnerability",
+        "vulnerabilities",
+        "exploit",
+        "attack",
+        "threat",
+        "malware",
+        "phishing",
+        "intrusion",
+        "firewall",
+        "sandbox",
+        "pentest",
+        "red team",
+        "blue team",
+        "purple",
+        "harden",
+        "cve",
+        "scan",
     ),
     "memory": (
-        "memory", "remember", "recall", "forget", "memorize", "reminisce",
-        "conversation history", "what did i say", "what did we discuss",
+        "memory",
+        "remember",
+        "recall",
+        "forget",
+        "memorize",
+        "reminisce",
+        "conversation history",
+        "what did i say",
+        "what did we discuss",
     ),
     "evidence": (
-        "evidence", "finding", "findings", "proof", "artifact", "artifacts",
-        "report", "observation", "verify", "verification", "forensic",
+        "evidence",
+        "finding",
+        "findings",
+        "proof",
+        "artifact",
+        "artifacts",
+        "report",
+        "observation",
+        "verify",
+        "verification",
+        "forensic",
     ),
     "risk": (
-        "risk", "risks", "risky", "assess", "assessment", "impact",
-        "likelihood", "exposure", "threat model", "mitigat", "severity",
+        "risk",
+        "risks",
+        "risky",
+        "assess",
+        "assessment",
+        "impact",
+        "likelihood",
+        "exposure",
+        "threat model",
+        "mitigat",
+        "severity",
     ),
     "research": (
-        "research", "look up", "lookup", "find out", "latest on",
-        "news on", "news about", "search for", "search the web",
-        "what's new", "who is", "what is", "cite", "sources",
+        "research",
+        "look up",
+        "lookup",
+        "find out",
+        "latest on",
+        "news on",
+        "news about",
+        "search for",
+        "search the web",
+        "what's new",
+        "who is",
+        "what is",
+        "cite",
+        "sources",
     ),
     "task": (
-        "task", "todo", "plan", "execute", "schedule", "workflow", "pipeline",
+        "task",
+        "todo",
+        "plan",
+        "execute",
+        "schedule",
+        "workflow",
+        "pipeline",
     ),
     "bridge": (
-        "bridge", "external", "telegram", "discord", "webhook", "integrat",
+        "bridge",
+        "external",
+        "telegram",
+        "discord",
+        "webhook",
+        "integrat",
     ),
 }
 
@@ -134,13 +196,9 @@ class MessageRouter:
                     return agent
             # No agent owns the detected domain: score each agent's own
             # domain keywords against the message and take the best hit.
-            scored = sorted(
-                agents, key=lambda a: self._score(a.domain, message), reverse=True
-            )
+            scored = sorted(agents, key=lambda a: self._score(a.domain, message), reverse=True)
             if self._score(scored[0].domain, message) > 0:
-                self._log.info(
-                    "router.routed", domain=scored[0].domain, agent_id=scored[0].id
-                )
+                self._log.info("router.routed", domain=scored[0].domain, agent_id=scored[0].id)
                 return scored[0]
 
         for agent in agents:
