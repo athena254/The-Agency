@@ -1,8 +1,54 @@
 """Tests for plain-English agent creation intent detection."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from agency.telegram.handler import TelegramHandler
+
+
+@pytest.mark.asyncio
+async def test_username_less_users_have_distinct_butler_memory_identities() -> None:
+    from agency.telegram.config import TelegramConfig
+
+    butler = AsyncMock()
+    butler.handle_message.return_value = "ok"
+    handler = TelegramHandler(TelegramConfig(bot_token="test"), butler=butler)
+    handler._adapter.send_message = AsyncMock()
+    for user_id in (101, 202):
+        await handler.handle_update(
+            {"message": {"chat": {"id": user_id}, "from": {"id": user_id}, "text": "hello"}}
+        )
+    senders = [call.args[1] for call in butler.handle_message.await_args_list]
+    assert senders == ["telegram:101", "telegram:202"]
+
+
+@pytest.mark.asyncio
+async def test_missing_telegram_user_id_cannot_enter_butler_memory() -> None:
+    from agency.telegram.config import TelegramConfig
+
+    butler = AsyncMock()
+    butler.handle_message.return_value = "ok"
+    handler = TelegramHandler(TelegramConfig(bot_token="test"), butler=butler)
+    handler._adapter.send_message = AsyncMock()
+    result = await handler.handle_update(
+        {"message": {"chat": {"id": 123}, "from": {"username": "alice"}, "text": "hello"}}
+    )
+    assert result["status"] == "rejected"
+    butler.handle_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_process_message_uses_stable_user_id_too() -> None:
+    from agency.telegram.config import TelegramConfig
+
+    butler = AsyncMock()
+    butler.handle_message.return_value = "ok"
+    handler = TelegramHandler(TelegramConfig(bot_token="test"), butler=butler)
+    await handler.process_message({"text": "hello", "from": {"id": 505}})
+    assert butler.handle_message.await_args.args[1] == "telegram:505"
+    with pytest.raises(ValueError, match="user ID"):
+        await handler.process_message({"text": "hello", "from": {"username": "alice"}})
 
 
 @pytest.fixture

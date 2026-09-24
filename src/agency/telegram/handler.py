@@ -32,7 +32,10 @@ class TelegramHandler:
 
         chat_id = message.get("chat", {}).get("id")
         text = message.get("text", "")
-        sender = message.get("from", {}).get("username", "unknown")
+        user_id = message.get("from", {}).get("id")
+        if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
+            return {"status": "rejected", "reason": "missing Telegram user ID"}
+        sender = f"telegram:{user_id}"
 
         if not text:
             return {"status": "ignored", "reason": "empty text"}
@@ -414,7 +417,10 @@ class TelegramHandler:
     async def process_message(self, message: dict[str, Any]) -> str:
         """Process a message and return the response text."""
         text = message.get("text", "")
-        sender = message.get("from", {}).get("username", "unknown")
+        user_id = message.get("from", {}).get("id")
+        if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
+            raise ValueError("missing Telegram user ID")
+        sender = f"telegram:{user_id}"
 
         if self._butler:
             return str(await self._butler.handle_message(text, sender, {}))

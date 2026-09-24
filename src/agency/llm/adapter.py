@@ -130,15 +130,15 @@ class LLMAdapter:
                 return await self._pollinations_generate(prompt, model)
             elif provider == "ollama":
                 return await self._ollama_generate(prompt, model)
-            else:
+            elif provider == "echo":
                 return self._echo_generate(prompt)
+            else:
+                raise ValueError(f"Unsupported LLM provider: {provider!r}")
         except Exception as e:
             self._log.error("llm_error", provider=provider, model=model, error=str(e))
-            if ctx.get("strict"):
-                # Tool loops must never mistake the echo fallback for a
-                # real model response — re-raise so the driver handles it.
-                raise
-            return self._echo_generate(prompt)
+            # A failed model call is never a successful echo reply, even when
+            # the caller requests strict=False. Echo is an explicit provider.
+            raise
 
     async def stream(
         self, prompt: str, context: dict[str, Any] | None = None

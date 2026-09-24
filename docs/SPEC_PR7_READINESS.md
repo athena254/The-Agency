@@ -2,7 +2,7 @@
 
 ## Scope and baseline
 
-`architecture/agency-core` contains bounded v1 foundations (threads, skill/workflow registries, Factory, read-only Forge). It is not a full product release. The PR's tests on Python 3.11/3.12 across Ubuntu/Windows and GitHub security scan pass, but repository-wide Ruff and mypy fail. At the starting SHA `a107ccc2db444c683e4c0e66b1adac9e9aa36eda`, Ruff reports 27 findings and mypy 65 errors in 19 files; these are inherited baseline debt, not permission to suppress diagnostics or rewrite architecture.
+`architecture/agency-core` contains bounded v1 foundations (threads, skill/workflow registries, Factory, read-only Forge). It is not a full product release. At the starting SHA `a107ccc2db444c683e4c0e66b1adac9e9aa36eda`, Ruff reported 27 findings and mypy 65 errors in 19 files; these inherited baseline errors have since been corrected, not suppressed. The test matrix, lint, format, mypy, and security scan passed on `9fd7383`; subsequent security hardening requires a new CI run.
 
 ## Objective
 
@@ -11,7 +11,7 @@ Make PR #7 reviewable and, if safe, bring CI to green without changing its featu
 ## Boundaries
 
 - Preserve the owner's uncommitted `main` checkout. All workers use separate worktrees; no worker pushes, merges, or changes branch protection.
-- No new authentication system or autonomous Forge/Factory behavior in this slice. The public Butler HTTP request remains anonymous/stateless until authentication is specified and approved.
+- No general user authentication system or autonomous Forge/Factory behavior in this slice. The public Butler HTTP request remains anonymous/stateless until authentication is specified and approved. The governance HTTP adapter is separately owner-token-gated and disabled when unconfigured; this is not a multi-user auth system.
 - Fix observable bugs rather than concealing them with `noqa`, `type: ignore`, globally weakened checks, or catch-all changes that swallow errors. Where a broad exception is intentional at an application boundary, document the reason narrowly and test the fallback.
 - Keep Ruff, mypy and security review paths separate. Review agents are read-only. Never put credentials in logs, briefs, diffs, or reports.
 
@@ -34,11 +34,22 @@ At `d59eda7`, the actual CI commands in `.github/workflows/ci.yml` are `ruff che
 
 Split source fixes by file ownership in separate worktrees; preserve broad catches only where a deliberate per-item/transport/finalization boundary must stay alive, with a narrow documented `noqa: BLE001` if unavoidable and a fallback test. No blanket `ignore_missing_imports` or weakened mypy strictness. After integrating reviewed behavioral/type fixes, apply `ruff format src/ tests/` in one dedicated formatting checkpoint, check the complete diff for changed literals/comments, then rerun lint, format check, mypy, the full Python 3.11 suite, and GitHub CI. Do not claim CI green from local success alone.
 
-## Integrated local result (pending remote checks)
+## Integrated quality-gate checkpoint
 
 The OpenCode and delegated model workers stalled without usable commits; fixes were made and checked in the isolated PR worktree, not the owner's `main`. Strict project-venv mypy reports no issues in 135 source files, and both Ruff lint and format checks pass. The Python 3.11 suite reports 619 passed with 15 warnings. A separate local Python 3.14 run also reports 619 passed with 13 warnings. The warnings include pre-existing aiosqlite workers outliving test event loops, FastAPI `on_event` deprecations, and a pytest collection warning; passing tests do not resolve those issues.
 
-Regression tests cover a demo scan failing closed when its LLM fails, cancellation counting as a bridge-stream failure, and the previously missing SQLite-backed `Lattice.list_open_proposals` API used by the governance route. The formatter changed 88 files; review the resulting formatting-only diff as well as the behavioral edits. Remote CI and the separate security review remain required before anyone marks PR #7 ready or merges it.
+Regression tests cover a demo scan failing closed when its LLM fails, cancellation counting as a bridge-stream failure, and the previously missing SQLite-backed `Lattice.list_open_proposals` API used by the governance route. The formatter changed 88 files; review the resulting formatting-only diff as well as the behavioral edits. The seven GitHub checks passed on `9fd7383`. New hardening below must pass its own remote checks; do not treat an older green SHA as verification of a new commit.
+
+## Security review follow-up
+
+Read-only scoped review of `9fd7383` found unsafe trust boundaries; CI's security scan had not proved those paths safe. Required corrections before merge consideration:
+
+- Telegram webhook: an unset `TELEGRAM_WEBHOOK_SECRET` disables the endpoint (503), and configured secret is checked before reading the request body (403 on mismatch). This prevents an unauthenticated forged Telegram update from reaching the bot. Operators must provision a Telegram secret and set the same value when registering the webhook; do not log it. The health endpoint does not assert webhook readiness.
+- Telegram identity: Butler sender scope uses the stable Telegram `from.id`, prefixed `telegram:`, never optional/mutable usernames or a shared `unknown`. Updates without a valid user ID are rejected. Existing username-keyed memories are not automatically migrated; do not merge them across identities.
+- Governance HTTP: `AGENCY_GOVERNANCE_TOKEN` must be provisioned by the operator; without it every governance route is disabled (503). All routes require `X-Agency-Governance-Token` (403 otherwise), using constant-time equality. The single token represents only the owner voter `user`: HTTP bodies cannot assert `voter_id` or `proposer`, and forged actor fields are rejected. Serve over a trusted local interface or TLS-terminated proxy; a bearer token over remote plaintext HTTP is not secure. Internal direct Lattice calls remain trusted in-process, not independently authenticated. This is not a general identity system or cryptographic approval provenance.
+- Explicit LLM calls: only the explicit `echo` provider emits echo output. Backend/unknown-provider failure raises instead of returning a success-shaped echo, even for direct adapter callers passing `strict=False`.
+
+Residual boundaries: `SkillRegistry.transition/publish` still accepts caller-provided evidence, not verified approval provenance; only trusted local callers may have a registry reference. The legacy absorber and Forge gate are not sandboxes against hostile concurrent directory swaps on Windows. These limitations are documented, not cleared by this source review; do not enable untrusted callers or autonomous release from these components. Full product security review, authentication for other public API surfaces, and owner approval remain separate.
 
 ## Next feature (not in this slice)
 

@@ -12,6 +12,27 @@ from agency.llm.config import LLMConfig, ProviderKind
 from agency.llm.router import LLMRouter, TaskKind
 
 
+@pytest.mark.asyncio
+async def test_direct_explicit_provider_failure_never_returns_echo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = LLMAdapter(provider="ollama", model="missing")
+
+    async def fail(_prompt: str, _model: str) -> str:
+        raise ConnectionError("local model unavailable")
+
+    monkeypatch.setattr(adapter, "_ollama_generate", fail)
+    with pytest.raises(ConnectionError, match="local model unavailable"):
+        await adapter.generate("private text", {"strict": False})
+
+
+@pytest.mark.asyncio
+async def test_unknown_explicit_provider_is_not_echo() -> None:
+    adapter = LLMAdapter(provider="not-a-provider", model="missing")
+    with pytest.raises(ValueError, match="Unsupported LLM provider"):
+        await adapter.generate("private text")
+
+
 def _router(adapter: LLMAdapter) -> LLMRouter:
     # A non-empty routing map with no usable presets forces the supplied adapter.
     return LLMRouter(adapter=adapter, routes={TaskKind.FAST: ()})
