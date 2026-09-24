@@ -69,7 +69,9 @@ class SkillSpec:
     def __post_init__(self) -> None:
         object.__setattr__(self, "inputs", copy.deepcopy(self.inputs))
         object.__setattr__(self, "outputs", copy.deepcopy(self.outputs))
-        perms = tuple(self.permissions) if isinstance(self.permissions, (list, tuple)) else ()
+        if not isinstance(self.permissions, (list, tuple)):
+            raise TypeError("permissions must be a tuple or list of strings.")
+        perms = tuple(self.permissions)
         object.__setattr__(self, "permissions", perms)
         if isinstance(self.status, str) and not isinstance(self.status, SkillStatus):
             try:
@@ -107,7 +109,7 @@ class SkillSpec:
             description=snapshot.get("description", ""),
             inputs=copy.deepcopy(snapshot.get("inputs", {})),
             outputs=copy.deepcopy(snapshot.get("outputs", {})),
-            permissions=tuple(perms),
+            permissions=perms,
             implementation=snapshot["implementation"],
             provenance=snapshot["provenance"],
             status=status,
@@ -155,7 +157,7 @@ def _validate_spec(spec: SkillSpec, allowed_permissions: frozenset[str]) -> None
         if not isinstance(mapping, dict):
             raise ValueError(f"{label} must be a mapping.")  # noqa: TRY004
         try:
-            serialized = json.dumps(mapping)
+            serialized = json.dumps(mapping, allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"{label} must be JSON serializable: {exc}") from None
         if len(serialized.encode("utf-8")) > MAX_SERIALIZED_BYTES:
@@ -288,10 +290,12 @@ class SkillRegistry:
         if target.value in _EVIDENCE_STATUSES and not _is_nonblank(evidence):
             raise ValueError(f"transition to {target.value} requires nonempty evidence.")
         with self._conn:
-            self._conn.execute(
-                "UPDATE skills SET status = ? WHERE skill_id = ? AND version = ?",
-                (target.value, skill_id, version),
+            updated = self._conn.execute(
+                "UPDATE skills SET status = ? WHERE skill_id = ? AND version = ? AND status = ?",
+                (target.value, skill_id, version, current.status.value),
             )
+            if updated.rowcount != 1:
+                raise ValueError("skill state changed concurrently; transition rejected.")
             self._conn.execute(
                 "INSERT INTO skill_events (skill_id, version, from_status, to_status, evidence, at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",

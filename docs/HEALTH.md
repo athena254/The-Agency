@@ -56,7 +56,7 @@ but production hardness was not established in this pass.
 
 | Component | State | Notes |
 |-----------|-------|-------|
-| Durable threads / workspaces | Partial | `butler/threads.py` persists threads/messages; authenticated HTTP and project UI pending |
+| Durable threads / workspaces | Partial | `butler/threads.py` persists owner-scoped threads/messages for trusted channels; public HTTP is anonymous/stateless pending authentication and project UI |
 | Agent Factory (versioned) | Partial v1 | `factory/service.py` versioned blueprints, approval gate, L0/UNKNOWN identity activation; no evaluation, automatic grants, or restart rehydration |
 | Skill registry / workflow registry + executor | Partial | Versioned registries and a bounded deterministic runner exist; no agent/Forge integration yet |
 | Forge + native coding agent | Partial inspection gate | `forge/inspection.py` read-only inventory/syntax reports; no tests, coding agent, security review or release; legacy prototypes are separate |

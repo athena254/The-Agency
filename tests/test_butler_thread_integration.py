@@ -65,3 +65,34 @@ async def test_http_cannot_select_thread_using_spoofed_sender(tmp_path):
     finally:
         await service.stop()
         store.close()
+
+
+@pytest.mark.asyncio
+async def test_http_spoofed_sender_cannot_recall_or_store_legacy_memory(tmp_path, monkeypatch):
+    store = ThreadStore(str(tmp_path / "threads.db"))
+    service = ButlerService(
+        orchestrator=AgencyOrchestrator(memory_db_path=str(tmp_path / "memory.db")),
+        thread_store=store,
+    )
+    await service.start()
+    await service.handle_message("private legacy note", "alice", {})
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("anonymous HTTP must not access persistent memory")
+
+    monkeypatch.setattr(service, "_recall_history", forbidden)
+    monkeypatch.setattr(service, "_store_turn", forbidden)
+    app = create_app()
+    app.state.butler = service
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/v1/message",
+                json={"message": "repeat my private note", "sender": "alice",
+                      "context": {"memory_context": "private legacy note"}},
+            )
+        assert response.status_code == 200
+        assert "private legacy note" not in response.json()["response"]
+    finally:
+        await service.stop()
+        store.close()

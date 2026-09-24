@@ -43,7 +43,7 @@
 
 | Item | State | Planned next step (per reconciliation spec) |
 |------|-------|----------------------------------------------|
-| Durable thread / workspace / project store | Partial | SQLite thread/workspace store and Butler service path; authenticated API and project model pending |
+| Durable thread / workspace / project store | Partial | SQLite thread/workspace store for trusted callers; public HTTP is anonymous/stateless until authentication, project model pending |
 | Agent Factory (versioned) | Partial v1 | Versioned blueprints, approval, L0/UNKNOWN activation; no evaluation, autonomous creation or restart rehydration |
 | Skill registry (Agency-native) | Partial | Versioned metadata, lifecycle evidence, explicit permissions; skill runtime binding pending |
 | Workflow registry + deterministic executor | Partial | Bounded DAG validation, pinned versions, allowlisted operations; no Agent/Forge integration or crash resume |

@@ -189,8 +189,11 @@ class ButlerService:
     # Core API
     # ------------------------------------------------------------------ #
 
-    async def handle_message(self, message: str, sender: str, context: dict[str, Any]) -> str:
-        """Validate, route, execute and persist one conversational turn."""
+    async def handle_message(
+        self, message: str, sender: str, context: dict[str, Any],
+        *, memory_enabled: bool = True,
+    ) -> str:
+        """Validate and execute a turn; anonymous channels disable memory."""
         await self._ensure_started()
         if not message or not message.strip():
             raise ValueError("message must not be empty.")
@@ -222,8 +225,10 @@ class ButlerService:
                 + "\n".join(f"- [{item.role}] {item.content[:300]}" for item in history)
                 if history else ""
             )
-        else:
+        elif memory_enabled:
             memory_context = await self._recall_history(sender, text)
+        else:
+            memory_context = ""
         if memory_context:
             merged["memory_context"] = memory_context
 
@@ -245,15 +250,15 @@ class ButlerService:
             response = f"Request timed out after {self._config.timeout:g}s. Please try again."
             result = "timeout"
             self._log.warning("butler.execute_timeout", sender=sender, error=str(exc))
-        except Exception as exc:
-            response = f"Sorry, I could not process that request: {exc}"
+        except Exception:
+            response = "Sorry, I could not process that request."
             result = "failed"
             self._log.exception("butler.execute_failed", sender=sender)
 
         if thread_id is not None:
             self.thread_store.append_message(sender, thread_id, "user", text)
             self.thread_store.append_message(sender, thread_id, "assistant", response)
-        else:
+        elif memory_enabled:
             await self._store_turn(sender, agent, text, response)
         await self._audit_append(
             agent=agent.id,

@@ -63,6 +63,41 @@ def test_lifecycle_evidence_survives_restart(tmp_path):
         reopened.close()
 
 
+def test_permissions_string_is_rejected_not_silently_dropped(tmp_path):
+    with pytest.raises(TypeError):
+        _make_spec(permissions="memory.write")
+    with pytest.raises(TypeError):
+        SkillSpec.from_dict({**_make_spec().to_dict(), "permissions": "memory.write"})
+
+
+def test_stale_transition_cannot_regress_retired_skill(tmp_path, monkeypatch):
+    db = str(tmp_path / "skills.db")
+    first = SkillRegistry(db, allowed_permissions=ALLOWED)
+    second = SkillRegistry(db, allowed_permissions=ALLOWED)
+    try:
+        first.register(_make_spec())
+        first.transition("summarize-docs", "1.0.0", SkillStatus.TESTING)
+        first.transition("summarize-docs", "1.0.0", SkillStatus.APPROVED, "review")
+        first.publish("summarize-docs", "1.0.0", "publish")
+        original_get = first.get
+
+        def get_then_retire(skill_id, version):
+            stale = original_get(skill_id, version)
+            second.transition(skill_id, version, SkillStatus.DEPRECATED)
+            second.transition(skill_id, version, SkillStatus.RETIRED)
+            monkeypatch.setattr(first, "get", original_get)
+            return stale
+
+        monkeypatch.setattr(first, "get", get_then_retire)
+        with pytest.raises(ValueError, match="concurrently"):
+            first.transition("summarize-docs", "1.0.0", SkillStatus.DEPRECATED)
+        assert second.get("summarize-docs", "1.0.0").status is SkillStatus.RETIRED
+        assert [e["to_status"] for e in second.list_events("summarize-docs", "1.0.0")][-2:] == ["DEPRECATED", "RETIRED"]
+    finally:
+        first.close()
+        second.close()
+
+
 def test_register_get_roundtrip(tmp_path):
     reg = _registry(tmp_path)
     try:

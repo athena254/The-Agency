@@ -18,6 +18,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from secrets import token_hex
 from typing import Any
 
 import structlog
@@ -194,11 +195,13 @@ def create_app(config: ButlerConfig | None = None) -> FastAPI:
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 detail=f"message exceeds {service.config.max_message_length} chars.",
             )
-        route_context = {**payload.context, "sender": payload.sender}
-        route_context.pop("memory_context", None)
+        # Sender and context are untrusted on this unauthenticated endpoint.
+        # Use a one-turn identity; do not recall or persist sender memory.
+        anonymous_sender = f"http-anonymous-{token_hex(16)}"
+        route_context = {"sender": anonymous_sender}
         agent = await service.route(payload.message, route_context)
         response = await service.handle_message(
-            payload.message, payload.sender, dict(payload.context)
+            payload.message, anonymous_sender, {}, memory_enabled=False
         )
         return MessageResponse(
             response=response, agent_id=agent.id, agent_name=agent.name, domain=agent.domain

@@ -106,7 +106,7 @@ patterns for future Forge/skills work — not a dependency, not auto-imported
 | Sandbox / security / audit / evidence / risk | Partial | `src/agency/security/sandbox/`, `security/red|blue|purple/`, `kernel/audit.py`, `kernel/policies.py`, `evidence/`, `risk/`; isolation guarantees unaudited |
 | API server + CLI | Partial | `src/agency/api/server.py`, `api/routers/`, `src/agency/cli/main.py` (`agency` entry point) |
 | CI workflow | Exists, outcome unverified | `.github/workflows/ci.yml`, `cd.yml` exist; success/live operation not verified here |
-| Threads / workspaces / projects | Partial | `butler/threads.py` persists owner-scoped threads/workspaces; Butler accepts trusted thread context, unauthenticated HTTP denies selection; projects/UI planned |
+| Threads / workspaces / projects | Partial | `butler/threads.py` persists owner-scoped threads/workspaces for trusted callers; unauthenticated HTTP ignores caller identity/context, denies thread selection and stores no history; projects/UI planned |
 | Agent Factory | Partial v1 | `factory/service.py` persists versioned blueprints, approval evidence, L0/UNKNOWN activation and revocation; no autonomous creation/evaluation, permission grants, or restart rehydration |
 | Skill registry / workflow registry + executor | Partial | `skills/registry.py` and `workflows/` implement versioned metadata and a bounded deterministic runner; agent/Forge integration pending |
 | Forge + native coding agent | Partial inspection gate; coding agent planned | `forge/inspection.py` stores read-only inventory/syntax evidence; no tests, security review or release. Legacy dark/ghost factories are separate prototypes |

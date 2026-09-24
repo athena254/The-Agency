@@ -57,7 +57,7 @@ def _check_version(value: str) -> str:
 
 def _dumps_bounded(value: object, max_bytes: int = MAX_JSON_BYTES) -> str:
     try:
-        text = json.dumps(value, sort_keys=True, ensure_ascii=False)
+        text = json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"value is not JSON serializable: {exc}") from None
     if len(text.encode("utf-8")) > max_bytes:
@@ -307,7 +307,10 @@ class WorkflowRegistry:
             raise TypeError("run must be a WorkflowRun.")
         # Each step output has a 64KB cap; a whole run can legitimately
         # contain many such outputs and must not fail at the single-step cap.
-        step_results_json = _dumps_bounded(run.step_results, MAX_JSON_BYTES * MAX_STEPS)
+        # Leave one step-sized envelope for IDs, status, and metadata around
+        # 64 individually bounded outputs; otherwise valid final runs strand
+        # their last persisted state at RUNNING.
+        step_results_json = _dumps_bounded(run.step_results, MAX_JSON_BYTES * (MAX_STEPS + 1))
         self._conn.execute(
             "INSERT OR REPLACE INTO workflow_runs (run_id, workflow_id, version, "
             "actor_id, status, step_results_json, created_at, completed_at) "

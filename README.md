@@ -61,7 +61,7 @@ provenance/evidence (`src/agency/evidence/`), sandbox isolation
 
 | Area | State | Evidence / note |
 |------|-------|-----------------|
-| Butler gateway | Partial | `service.py` routes optional trusted `thread_id` into an owner-scoped SQLite store; unauthenticated HTTP rejects thread selection |
+| Butler gateway | Partial | Trusted channels can use owner-scoped threads; unauthenticated HTTP ignores caller `sender`/context, uses a one-turn anonymous identity and no memory persistence |
 | Orchestrator + task pipeline | Partial | `src/agency/orchestrator.py`, `src/agency/kernel/tasks.py` |
 | Research agent | Exists, partial | `src/agency/agents/research/agent.py` exists (a prior status table wrongly said 0%); end-to-end behavior not verified here |
 | General/demo agents, planner, verifier | Exists, partial | `src/agency/agents/`; capability/eval coverage not claimed |

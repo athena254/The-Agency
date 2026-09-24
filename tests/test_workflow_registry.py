@@ -503,6 +503,34 @@ def test_unknown_workflow_and_run_raise_keyerror(tmp_path) -> None:
     registry.close()
 
 
+def test_nonfinite_output_is_failed_not_persisted(tmp_path) -> None:
+    registry = make_registry(tmp_path)
+    registry.register(WorkflowDefinition("finite", "1.0.0", (WorkflowStep("x", "bad"),)))
+    run = WorkflowExecutor(registry, {"bad": lambda _i, _p: float("nan")}).run(
+        "finite", "1.0.0", {}, "actor"
+    )
+    assert run.status == "FAILED"
+    assert registry.get_run(run.run_id).status == "FAILED"
+    registry.close()
+
+
+def test_64_valid_outputs_do_not_strand_running_state(tmp_path) -> None:
+    registry = make_registry(tmp_path)
+    steps = tuple(WorkflowStep(f"s{i}", "large") for i in range(64))
+    registry.register(WorkflowDefinition("large", "1.0.0", steps))
+    calls = []
+
+    def large(_inputs, _previous):
+        calls.append(1)
+        return "x" * 65_000
+
+    run = WorkflowExecutor(registry, {"large": large}).run("large", "1.0.0", {}, "actor")
+    assert len(calls) == 64
+    assert run.status == "COMPLETED"
+    assert registry.get_run(run.run_id).status == "COMPLETED"
+    registry.close()
+
+
 def test_multiple_bounded_step_outputs_persist_as_one_run(tmp_path) -> None:
     registry = make_registry(tmp_path)
     registry.register(make_definition(steps=(make_step("a"), make_step("b"))))

@@ -191,7 +191,7 @@ class WorkflowExecutor:
                 failed = True
                 break
             try:
-                serialized = json.dumps(output, sort_keys=True, ensure_ascii=False)
+                serialized = json.dumps(output, sort_keys=True, ensure_ascii=False, allow_nan=False)
             except (TypeError, ValueError):
                 step_results[step.step_id] = {
                     "status": "failed",
