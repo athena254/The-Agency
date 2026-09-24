@@ -377,7 +377,7 @@ class ThreadStore:
         conn = self._connection()
         rows = conn.execute(
             "SELECT id, thread_id, role, content, created_at FROM thread_messages"
-            " WHERE thread_id = ? ORDER BY created_at ASC, id ASC",
+            " WHERE thread_id = ? ORDER BY rowid ASC",
             (thread_id,),
         ).fetchall()
         return [ThreadMessage(**dict(row)) for row in rows]

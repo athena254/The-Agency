@@ -8,6 +8,7 @@ input validation, and SQL-injection-as-data handling.
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -46,6 +47,32 @@ def test_restart_persists_workspace_thread_messages(tmp_path: Path) -> None:
         assert [(m.role, m.content) for m in messages] == [
             ("user", "hello"),
             ("assistant", "hi there"),
+        ]
+    finally:
+        reopened.close()
+
+
+def test_equal_timestamps_and_reverse_uuid_still_keep_append_order(tmp_path: Path) -> None:
+    store = _file_store(tmp_path)
+    workspace = store.create_workspace("alice", "W")
+    thread = store.create_thread("alice", workspace.id, "T")
+    first = store.append_message("alice", thread.id, "user", "one")
+    second = store.append_message("alice", thread.id, "assistant", "two")
+    store.close()
+    with sqlite3.connect(str(tmp_path / "threads.db")) as conn:
+        conn.execute(
+            "UPDATE thread_messages SET id = ?, created_at = ? WHERE id = ?",
+            ("zzzz", "2026-01-01T00:00:00+00:00", first.id),
+        )
+        conn.execute(
+            "UPDATE thread_messages SET id = ?, created_at = ? WHERE id = ?",
+            ("aaaa", "2026-01-01T00:00:00+00:00", second.id),
+        )
+    reopened = _file_store(tmp_path)
+    try:
+        assert [(m.role, m.content) for m in reopened.list_messages("alice", thread.id)] == [
+            ("user", "one"),
+            ("assistant", "two"),
         ]
     finally:
         reopened.close()
