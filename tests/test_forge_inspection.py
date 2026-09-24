@@ -28,7 +28,7 @@ def test_pass_valid_python_inventory_and_hash(tmp_path: Path):
     _write(tmp_path, "notes.txt", b"hello\n")
     report = inspect_changes(tmp_path, ["ok.py", "notes.txt"])
     assert report.gate == "PASS"
-    assert report.rejected == []
+    assert report.rejected == ()
     assert set(CAVEATS) <= set(report.caveats)
     by_path = {f.path: f for f in report.files}
     assert by_path["ok.py"].syntax_ok is True
@@ -58,7 +58,7 @@ def test_bad_utf8_python_source_rejected(tmp_path: Path):
     _write(tmp_path, "bin.py", b"\xff\xfe\x00bad = 1\n")
     report = inspect_changes(tmp_path, ["bin.py"])
     assert report.gate == "FAIL"
-    assert report.files == []
+    assert report.files == ()
     assert any("bad_utf8" in r.reason for r in report.rejected)
 
 
@@ -75,7 +75,7 @@ def test_path_traversal_rejected(tmp_path: Path):
     report = inspect_changes(tmp_path, ["../escape.py", "sub/../../evil.py", "/etc/passwd"])
     assert report.gate == "FAIL"
     assert len(report.rejected) == 3
-    assert report.files == []
+    assert report.files == ()
 
 
 def test_absolute_windows_path_rejected(tmp_path: Path):
@@ -132,8 +132,9 @@ def test_file_cap_enforced(tmp_path: Path):
         names.append(_write(tmp_path, f"f{i}.txt", b"x"))
     report = inspect_changes(tmp_path, names)
     assert report.gate == "FAIL"
-    assert report.files == []
-    assert len(report.rejected) == MAX_FILES + 1
+    assert report.files == ()
+    assert len(report.rejected) == 1
+    assert report.rejected[0].reason == f"file_count_exceeds_limit:{MAX_FILES}"
 
 
 def test_oversized_file_rejected(tmp_path: Path):
@@ -187,6 +188,21 @@ def test_no_process_execution_in_feature_source():
     for token in forbidden:
         assert token not in source, f"forbidden token in inspection gate: {token}"
     assert "import importlib" not in source
+
+
+def test_empty_and_unbounded_path_inputs_fail_closed(tmp_path: Path):
+    empty = inspect_changes(tmp_path, [])
+    assert empty.gate == "FAIL"
+    assert isinstance(empty.files, tuple)
+    assert isinstance(empty.caveats, tuple)
+    assert empty.rejected[0].reason == "empty_change_set"
+    huge = inspect_changes(tmp_path, ["a.py"] * 10000)
+    assert huge.gate == "FAIL"
+    assert len(huge.rejected) == 1
+    assert huge.rejected[0].path == "<batch>"
+    long_path = inspect_changes(tmp_path, ["x" * 10000])
+    assert long_path.gate == "FAIL"
+    assert len(long_path.rejected[0].path) <= 512
 
 
 def test_report_carries_bounded_gate_caveats(tmp_path: Path):

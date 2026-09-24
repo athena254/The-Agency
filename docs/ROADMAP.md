@@ -44,10 +44,10 @@
 | Item | State | Planned next step (per reconciliation spec) |
 |------|-------|----------------------------------------------|
 | Durable thread / workspace / project store | Partial | SQLite thread/workspace store and Butler service path; authenticated API and project model pending |
-| Agent Factory (versioned) | Planned | Spec validation → evaluation → versioned registry → deployment gate |
+| Agent Factory (versioned) | Partial v1 | Versioned blueprints, approval, L0/UNKNOWN activation; no evaluation, autonomous creation or restart rehydration |
 | Skill registry (Agency-native) | Partial | Versioned metadata, lifecycle evidence, explicit permissions; skill runtime binding pending |
 | Workflow registry + deterministic executor | Partial | Bounded DAG validation, pinned versions, allowlisted operations; no Agent/Forge integration or crash resume |
-| Forge (integrated) + native coding agent | Planned | Specify before implementing; reuse audited primitives; no complete Forge promised |
+| Forge (integrated) + native coding agent | Partial inspection gate | `forge/inspection.py` has bounded read-only hash/syntax reports; real coding, tests, security review, packaging and release remain planned |
 | Durable governance votes / approvals | Planned | Persist proposals/votes; human-approval flow |
 | Workspace/project UI, branching | Planned | After thread isolation lands |
 | Production deployment, observability, audit | Planned | Docker/K8s, OpenTelemetry, security audit — later phases |
@@ -60,8 +60,8 @@ auto-imported.
 
 1. **Architecture reconciliation** — this docs pass (canonical boundaries, honest statuses).
 2. **Thread context foundation** — store, ownership checks, Butler internal routing implemented; authenticated public API pending.
-3. **Agent Factory prerequisites** — skill and workflow registries implemented as partial foundations; factory pending.
-4. **Forge** — architecture, bounded coding-agent profile, software-factory workflows.
+3. **Agent Factory** — v1 governed identity creation exists; add evaluation, safe permission and restart reconciliation before automatic deployment.
+4. **Forge** — read-only inspection exists; build isolated testing, review, coding agent, artifact store and authorized release in separately verified slices.
 5. **Security and governance hardening** — capability permissions, sandbox audit, approval gates.
 6. **Competitive maturity** — benchmarks, UX, documented differentiation (brief §22).
 

@@ -10,8 +10,8 @@
 
 **ATHENA and The Agency are peer platforms.** ATHENA is **not** a subsystem,
 dependency, parent process, or component of The Agency. The Agency operates
-independently with its own agents, Agent Factory (planned), skills (planned),
-workflows (planned), governance, Butler, and Forge (planned). Any future ATHENA
+independently with its own agents, partial Agent Factory/skills/workflows,
+governance, Butler, and a partial Forge inspection gate. Any future ATHENA
 interaction is an explicit, optional adapter across a trust boundary — never a hidden
 source of truth for Agency state. (Source: consolidated brief §2.)
 
@@ -107,9 +107,9 @@ patterns for future Forge/skills work — not a dependency, not auto-imported
 | API server + CLI | Partial | `src/agency/api/server.py`, `api/routers/`, `src/agency/cli/main.py` (`agency` entry point) |
 | CI workflow | Exists, outcome unverified | `.github/workflows/ci.yml`, `cd.yml` exist; success/live operation not verified here |
 | Threads / workspaces / projects | Partial | `butler/threads.py` persists owner-scoped threads/workspaces; Butler accepts trusted thread context, unauthenticated HTTP denies selection; projects/UI planned |
-| Agent Factory | Planned | Only identity + runtime registries; no versioned factory gate |
+| Agent Factory | Partial v1 | `factory/service.py` persists versioned blueprints, approval evidence, L0/UNKNOWN activation and revocation; no autonomous creation/evaluation, permission grants, or restart rehydration |
 | Skill registry / workflow registry + executor | Partial | `skills/registry.py` and `workflows/` implement versioned metadata and a bounded deterministic runner; agent/Forge integration pending |
-| Forge + native coding agent | Planned | `src/agency/addons/dark_factory/`, `ghost_factory` are standalone prototypes, not an integrated Forge |
+| Forge + native coding agent | Partial inspection gate; coding agent planned | `forge/inspection.py` stores read-only inventory/syntax evidence; no tests, security review or release. Legacy dark/ghost factories are separate prototypes |
 
 No precise completion percentages are stated: the evidence does not warrant them.
 
@@ -139,7 +139,7 @@ substrate; Forge as the Agency-native software factory operated by a bounded cod
 agent; capability-based security, sandboxing, provenance, and audit enforced in code.
 `Athena-global-skills` informs future skill patterns. See brief §§5–22 and the
 reconciliation spec's build slice (thread store → skill registry → workflow
-registry/executor → Agent Factory; Forge and full approvals later).
+registry/executor → Agent Factory v1; full Forge and durable approvals later).
 
 ---
 

@@ -2,7 +2,8 @@
 
 > Human → Butler → orchestrator/agents/tools, with Lattice coordination,
 > memory, policies/audit/sandbox as cross-cutting infrastructure.
-> Agent Factory and Forge are **planned**; thread, skill, and workflow foundations are partial.
+> Agent Factory and Forge now have narrow v1 foundations alongside partial thread,
+> skill, and workflow components. The full governed product is not built.
 
 **Canonical direction:** `docs/SOURCE_CONSOLIDATED_BRIEF.md` (target design, all 51 sections)
 and `docs/SPEC_AGENCY_CORE_RECONCILIATION.md` (code-backed gap matrix and build slice).
@@ -45,8 +46,9 @@ are historical/superseded (see `docs/ARCHITECTURE.md`).
        lattice/)     memory/sms/) (src/agency/kernel/,
                                    src/agency/security/sandbox/)
 
-   PARTIAL: thread/workspace store, skill registry, bounded workflow runner.
-   PLANNED: Agent Factory, integrated Forge, authenticated thread API.
+   PARTIAL: thread/workspace store, skill registry, workflow runner,
+            Agent Factory v1, read-only Forge inspection gate.
+   PLANNED: integrated coding/release Forge, authenticated thread API.
 ```
 
 Cross-cutting (partial, code-enforced where noted): security policies
@@ -68,9 +70,9 @@ provenance/evidence (`src/agency/evidence/`), sandbox isolation
 | Sandbox / security / audit | Partial | Isolation guarantees not audited; do not treat as production-hardened |
 | CI workflow | Exists, outcome unverified | `.github/workflows/ci.yml` (and `cd.yml`) exist; a prior roadmap row wrongly said 0%/planned. Workflow success and live operation were not verified for this docs pass |
 | Threads / workspaces | Partial | `src/agency/butler/threads.py` persists workspaces/threads/messages; project hierarchy, authenticated API and UI remain planned |
-| Agent Factory | Planned | Identity (`kernel/registry.py`) and runtime (`agents/registry.py`) registries exist; no versioned factory with validation/evaluation gate |
+| Agent Factory | Partial v1 | `src/agency/factory/`: versioned blueprints, approval, L0 identity activation/revocation; no autonomous creation/evaluation or runtime restart recovery |
 | Skill registry, workflow registry/executor | Partial | `src/agency/skills/`, `src/agency/workflows/` provide versioned metadata and a bounded allowlisted runner; not yet integrated with an agent/Forge execution path |
-| Forge (integrated software factory) | Planned | `src/agency/addons/dark_factory/` and `ghost_factory` are standalone prototypes, not an integrated Forge; no complete Forge is promised |
+| Forge | Partial v1 | `src/agency/forge/` persists bounded read-only file inventory/syntax reports; no test runner, coding agent, security review, package, or release. Dark/ghost factories remain separate prototypes |
 | External bridges (Claude, Codex, Hermes, OpenClaw) | Partial adapters | `src/agency/bridges/`; optional integrations behind explicit boundaries, never architectural dependencies |
 
 Status words used here are deliberately coarse (Exists / Partial / Planned / Missing).
@@ -140,7 +142,7 @@ historical/superseded rather than deleting them.
   auto-imported from it.
 - Addons and bridges are not labeled production-ready. Prototypes (e.g. dark/ghost
   factory) do not imply a complete Forge.
-- The thread, skill, and workflow modules on this branch are partial foundations, not the mature system.
+- Agent Factory v1, Forge's read-only inspection gate, threads, skills, and workflows are **partial foundations**. Autonomous creation, coding/release, and durable governance are not implemented.
 
 ## License
 

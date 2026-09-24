@@ -11,7 +11,7 @@
 
 **Overall status**: scaffolding exists across the pipeline (Butler → orchestrator →
 agents/tools, Lattice, memory, policies/audit/sandbox), but the differentiators —
-authenticated multi-threaded work, Agent Factory, integrated Forge, durable
+authenticated multi-threaded work, autonomous Agent Factory, integrated Forge, durable
 governance — remain incomplete. Thread, skill and workflow foundations now exist.
 Two prior status tables were factually wrong
 (research agent "0%", CI/CD "0%"); both are corrected below.
@@ -57,9 +57,9 @@ but production hardness was not established in this pass.
 | Component | State | Notes |
 |-----------|-------|-------|
 | Durable threads / workspaces | Partial | `butler/threads.py` persists threads/messages; authenticated HTTP and project UI pending |
-| Agent Factory (versioned) | Planned | No factory gate; follows skill/workflow contracts per reconciliation spec |
+| Agent Factory (versioned) | Partial v1 | `factory/service.py` versioned blueprints, approval gate, L0/UNKNOWN identity activation; no evaluation, automatic grants, or restart rehydration |
 | Skill registry / workflow registry + executor | Partial | Versioned registries and a bounded deterministic runner exist; no agent/Forge integration yet |
-| Forge + native coding agent | Planned | `addons/dark_factory/`, `ghost_factory` are prototypes, not an integrated factory; no complete Forge promised |
+| Forge + native coding agent | Partial inspection gate | `forge/inspection.py` read-only inventory/syntax reports; no tests, coding agent, security review or release; legacy prototypes are separate |
 | CI/CD lineage | Exists, outcome unverified | `.github/workflows/ci.yml`, `cd.yml` exist — prior "planned" rows were wrong; success not verified |
 
 **ATHENA boundary:** ATHENA is a separate peer platform, not an Agency component
@@ -83,7 +83,7 @@ separate pattern source, not a dependency.
 ## Critical Risks
 
 ### Risk 1: Differentiators still missing
-Agent Factory, Forge, authenticated thread API and end-to-end skill/workflow integration
+autonomous Agent Factory, integrated Forge, authenticated thread API and end-to-end skill/workflow integration
 are still missing; existing registry/runner foundations alone are not the finished product.
 **Mitigation**: follow the reconciliation build slice in order; do not claim outputs
 from other branches until they land and pass gates.
@@ -136,7 +136,8 @@ a smoke test before claiming health in numbers.
 | Scaffolding (Butler/orchestrator/agents/tools/Lattice/memory/audit/sandbox) | Partial — code exists, maturity varies |
 | Research agent, CI workflows | Exist — outcomes/behavior unverified here |
 | Thread store, skill registry, workflow runner | Partial foundations; tests pass, full runtime integration pending |
-| Agent Factory, Forge, durable governance | Planned |
+| Agent Factory v1, Forge inspection gate | Partial foundations |
+| Autonomous Agent Factory, full Forge, durable governance | Planned |
 | Production deployment | Planned; no date promised |
 
 Old milestone tables with precise week counts and "on track / behind" deltas are
@@ -145,7 +146,7 @@ withdrawn — they rested on the unverified percentages removed above.
 ## Simple Summary
 
 The Agency has working scaffolding and partial thread, skill, and workflow foundations,
-but its full governed product is not built: Agent Factory, Forge, durable governance,
+but its full governed product is not built: autonomous Agent Factory, integrated Forge, durable governance,
 and authenticated thread access remain planned. Prior docs overstated readiness and
 understated what exists (research agent, CI). Claims remain tied to code evidence.
 

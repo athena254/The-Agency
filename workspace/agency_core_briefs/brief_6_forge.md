@@ -1,0 +1,5 @@
+# Muse Spark 1.3 task — Forge read-only inspection v1
+
+Read `docs/SPEC_FORGE_V1.md`, `docs/SOURCE_CONSOLIDATED_BRIEF.md` §§11–12, and existing `src/agency/addons/dark_factory` enough to understand the boundary. Implement exactly this bounded non-executing inspection gate. Own only `src/agency/forge/__init__.py`, `src/agency/forge/inspection.py`, and `tests/test_forge_inspection.py`. Do not modify existing files or commit.
+
+Reject path traversal, absolute paths, symlinks, oversized counts/files, bad UTF-8 Python source and nonregular paths. No shell, subprocess, eval, exec, imports of inspected source, network, Git mutations or files outside allowed root. Persist reports without source content or secrets. Write tests for denial and restart. Run focused tests and Ruff; report output and limitations. Do not claim this gate is full Forge or security review.

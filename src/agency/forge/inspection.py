@@ -28,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field
 logger = structlog.get_logger(__name__)
 
 MAX_FILES = 64
+MAX_PATH_CHARS = 512
 MAX_FILE_BYTES = 1_048_576  # 1 MiB per file; larger files are rejected, never read fully.
 
 CAVEATS: tuple[str, ...] = ("tests_not_run", "security_review_not_run", "release_not_authorized")
@@ -79,9 +80,9 @@ class InspectionReport(BaseModel):
     created_at: datetime
     root: str
     gate: GateState
-    caveats: list[str] = Field(default_factory=lambda: list(CAVEATS))
-    files: list[FileRecord] = Field(default_factory=list)
-    rejected: list[RejectedRecord] = Field(default_factory=list)
+    caveats: tuple[str, ...] = CAVEATS
+    files: tuple[FileRecord, ...] = ()
+    rejected: tuple[RejectedRecord, ...] = ()
     note: str = Field(
         default="Bounded inventory/syntax gate only; not a security review; "
         "does not authorize merge or deploy."
@@ -129,6 +130,8 @@ def _resolve_root(root: str | Path) -> Path:
 
 
 def _rejects_for_name(value: str) -> str | None:
+    if len(value) > MAX_PATH_CHARS:
+        return "path_too_long"
     if not value or not value.strip():
         return "empty_path"
     if _is_absolute_input(value):
@@ -146,19 +149,19 @@ def _rejects_for_name(value: str) -> str | None:
 
 def _symlink_or_escape(real_root: Path, candidate: Path) -> str | None:
     """Reject symlinks on the walk and any resolved escape outside the root."""
-    current = real_root
-    rel_parts = candidate.relative_to(real_root).parts if _is_within(candidate, real_root) else None
-    # Walk each component from the root with lstat so symlinks are never followed.
+    if not _is_within(candidate, real_root):
+        return "path_escapes_root"
+    # Walk every component before opening; a concurrently mutable checkout
+    # still has a TOCTOU limitation (Forge does not claim a secure sandbox).
     probe = real_root
-    for part in candidate.relative_to(real_root).parts if _is_within(candidate, real_root) else ():
+    for part in candidate.relative_to(real_root).parts:
         probe = probe / part
         try:
             if os.path.islink(probe):
                 return "symlink_not_allowed"
         except OSError:
             return "unreadable_path"
-    _ = current
-    _ = rel_parts
+
     try:
         resolved = Path(os.path.realpath(candidate))
     except OSError:
@@ -185,7 +188,7 @@ def _is_within(candidate: Path, root: Path) -> bool:
 def _inspect_one(real_root: Path, raw: str) -> tuple[FileRecord | None, RejectedRecord | None]:
     reason = _rejects_for_name(raw)
     if reason is not None:
-        return None, RejectedRecord(path=raw, reason=reason)
+        return None, RejectedRecord(path=raw[:MAX_PATH_CHARS], reason=reason)
 
     normalized = raw.replace("\\", "/")
     parts = [p for p in normalized.split("/") if p not in ("", ".")]
@@ -273,18 +276,24 @@ def inspect_changes(root: str | Path, changed_paths: list[str]) -> InspectionRep
     created_at = datetime.now(UTC)
 
     if len(changed_paths) > MAX_FILES:
-        rejected = [
-            RejectedRecord(path=p, reason=f"file_count_exceeds_limit:{MAX_FILES}")
-            for p in changed_paths
-        ]
+        rejected = (RejectedRecord(path="<batch>", reason=f"file_count_exceeds_limit:{MAX_FILES}"),)
         logger.info("forge.inspect_cap", root=str(real_root), count=len(changed_paths))
         return InspectionReport(
             report_id=report_id,
             created_at=created_at,
             root=str(real_root),
             gate="FAIL",
-            files=[],
+            files=(),
             rejected=rejected,
+        )
+
+    if not changed_paths:
+        return InspectionReport(
+            report_id=report_id,
+            created_at=created_at,
+            root=str(real_root),
+            gate="FAIL",
+            rejected=(RejectedRecord(path="<batch>", reason="empty_change_set"),),
         )
 
     files: list[FileRecord] = []
@@ -292,7 +301,7 @@ def inspect_changes(root: str | Path, changed_paths: list[str]) -> InspectionRep
     seen: set[str] = set()
     for raw in changed_paths:
         if raw in seen:
-            rejected.append(RejectedRecord(path=raw, reason="duplicate_path"))
+            rejected.append(RejectedRecord(path=raw[:MAX_PATH_CHARS], reason="duplicate_path"))
             continue
         seen.add(raw)
         record, denial = _inspect_one(real_root, raw)
@@ -315,8 +324,8 @@ def inspect_changes(root: str | Path, changed_paths: list[str]) -> InspectionRep
         created_at=created_at,
         root=str(real_root),
         gate=gate,
-        files=files,
-        rejected=rejected,
+        files=tuple(files),
+        rejected=tuple(rejected),
     )
 
 
