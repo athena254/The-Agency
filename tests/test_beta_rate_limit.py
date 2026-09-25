@@ -150,6 +150,26 @@ def test_monotonic_clock_boundary_and_repeats() -> None:
     assert limiter.allow(101) is True
 
 
+def test_saturated_capacity_fail_closed_without_eviction() -> None:
+    from agency.telegram.rate_limit import BetaRateLimiter
+
+    clock = FakeClock()
+    limiter = BetaRateLimiter(max_requests=1, window_seconds=60.0, max_users=2, clock=clock)
+    assert limiter.allow(101) is True
+    assert limiter.allow(202) is True
+    # saturated: new identity must be denied, not evict an active identity
+    assert limiter.allow(303) is False
+    assert 101 in limiter
+    assert 202 in limiter
+    assert 303 not in limiter
+    # active per-invitee caps must still hold (no fresh allowance via eviction)
+    assert limiter.allow(101) is False
+    assert limiter.allow(202) is False
+    # after the window expires, expired entries are purged and admission resumes
+    clock.advance(61.0)
+    assert limiter.allow(303) is True
+
+
 def test_user_facing_response_constant() -> None:
     from agency.telegram import rate_limit
 
