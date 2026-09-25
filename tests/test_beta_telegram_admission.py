@@ -405,3 +405,114 @@ async def test_beta_handle_update_rejects_malformed_update(upd: Any) -> None:
     h._adapter.send_message.assert_not_awaited()  # type: ignore[attr-defined]
     profile_spy.assert_not_called()
     await h.close()
+
+
+# --- review blocker B-02: ordinary text must never reach _detect_agent_creation_intent or _handle_plain_english_agent_creation ---
+
+
+@pytest.mark.asyncio
+async def test_beta_never_calls_detect_intent_for_ordinary_text() -> None:
+    """B-02: 'my name is Alice' must not reach _detect_agent_creation_intent."""
+    h, butler = _handler()
+    detect_spy = Mock(return_value=None)
+    h._detect_agent_creation_intent = detect_spy  # type: ignore[method-assign]
+    plain_spy = AsyncMock(return_value="SHOULD-NOT-RUN")
+    h._handle_plain_english_agent_creation = plain_spy  # type: ignore[method-assign]
+    result = await h.handle_update(_update(101, "my name is Alice"))
+    assert result["status"] == "ok"
+    detect_spy.assert_not_called()
+    plain_spy.assert_not_awaited()
+    butler.handle_message.assert_awaited_once()
+    await h.close()
+
+
+@pytest.mark.asyncio
+async def test_beta_never_calls_detect_intent_for_stockbot_phrase() -> None:
+    """B-02: 'Please create one called StockBot for finance' must not reach _detect_agent_creation_intent."""
+    h, butler = _handler()
+    detect_spy = Mock(return_value=None)
+    h._detect_agent_creation_intent = detect_spy  # type: ignore[method-assign]
+    plain_spy = AsyncMock(return_value="SHOULD-NOT-RUN")
+    h._handle_plain_english_agent_creation = plain_spy  # type: ignore[method-assign]
+    result = await h.handle_update(_update(101, "Please create one called StockBot for finance"))
+    assert result == {"status": "rejected", "reason": "agent creation disabled"}
+    detect_spy.assert_not_called()
+    plain_spy.assert_not_awaited()
+    butler.handle_message.assert_not_awaited()
+    h._adapter.send_message.assert_awaited_once_with(101, BETA_CREATION_DISABLED)  # type: ignore[attr-defined]
+    await h.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("text", "status"),
+    [("my name is Alice", "ok"), ("Please create one called StockBot for finance", "rejected")],
+)
+async def test_beta_plain_text_no_proposal_or_votes(text: str, status: str) -> None:
+    """B-02: ordinary text must not submit proposals or trigger synthetic votes."""
+    h, butler = _handler()
+    # Spy on lattice to catch submit_proposal/resolve_agent_proposal calls
+    lattice_spy = AsyncMock()
+    butler.orchestrator._lattice = lattice_spy  # type: ignore[attr-defined]
+    butler.orchestrator.list_agents = AsyncMock(return_value=[])
+    result = await h.handle_update(_update(101, text))
+    assert result["status"] == status
+    # No proposal submitted, no votes resolved
+    lattice_spy.submit_proposal.assert_not_awaited()
+    butler.orchestrator.resolve_agent_proposal.assert_not_awaited()
+    if status == "rejected":
+        butler.handle_message.assert_not_awaited()
+    else:
+        butler.handle_message.assert_awaited_once()
+    await h.close()
+
+
+@pytest.mark.asyncio
+async def test_beta_process_message_refuses_create_one_phrase_before_butler() -> None:
+    h, butler = _handler()
+    response = await h.process_message(
+        {
+            "from": {"id": 101},
+            "chat": {"id": 101, "type": "private"},
+            "text": "Please create one called StockBot for finance",
+        }
+    )
+    assert response == BETA_CREATION_DISABLED
+    butler.handle_message.assert_not_awaited()
+    await h.close()
+
+
+# --- review blocker B-16: unknown slash commands must refuse deterministically ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cmd",
+    ["/some_unapproved_command", "/researchoops", "/unknown_cmd", "/research-oops"],
+    ids=["unapproved", "researchoops", "unknown", "research-prefix-bypass"],
+)
+async def test_beta_rejects_unknown_slash_commands_in_handle_update(cmd: str) -> None:
+    """B-16: unsupported slash tokens must return rejection with zero Butler/model/tool calls."""
+    h, butler = _handler()
+    result = await h.handle_update(_update(101, cmd))
+    assert result["status"] == "rejected"
+    assert result.get("reason") == "unsupported command"
+    butler.handle_message.assert_not_awaited()
+    h._adapter.send_message.assert_awaited_once_with(101, "Unsupported command in this beta.")  # type: ignore[attr-defined]
+    await h.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cmd", ["/some_unapproved_command", "/researchoops"])
+async def test_beta_process_message_rejects_unknown_slash_commands(cmd: str) -> None:
+    """B-16: process_message must refuse unsupported slash tokens before Butler."""
+    h, butler = _handler()
+    response = await h.process_message(
+        {"from": {"id": 101}, "chat": {"id": 101, "type": "private"}, "text": cmd}
+    )
+    assert response == "Unsupported command in this beta."
+    butler.handle_message.assert_not_awaited()
+    await h.close()
+
+
+# --- end review blockers ---
