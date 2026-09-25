@@ -349,3 +349,36 @@ test('Enter sends, Shift+Enter does not, and a network error stays visibly faile
   assert.equal(input.value, 'hello');
   controller.stop();
 });
+
+test('session recovery permits only one send while token request is pending', async () => {
+  const routes = happyRoutes();
+  routes['/api/session'] = jsonResponse({ error: 'No session' }, { ok: false, status: 503 });
+  const { controller, calls } = setup(routes);
+  await controller.init();
+  let release;
+  routes['/api/session'] = () => new Promise((resolve) => { release = resolve; });
+  const first = controller.submitMessage('one');
+  assert.equal(controller.state().busy, true);
+  const second = controller.submitMessage('two');
+  assert.equal(await second, false);
+  release(jsonResponse({ csrf_token: 'recovered' }));
+  assert.equal(await first, true);
+  assert.equal(calls.filter(({ url }) => url === '/api/chat').length, 1);
+  controller.stop();
+});
+
+test('reply does not erase a new draft typed while the request is pending', async () => {
+  let release;
+  const routes = happyRoutes();
+  routes['/api/chat'] = () => new Promise((resolve) => { release = resolve; });
+  const { byId, controller } = setup(routes);
+  await controller.init();
+  const input = byId.get('message-input');
+  input.value = 'original';
+  const pending = controller.submitMessage('original');
+  input.value = 'new draft';
+  release(jsonResponse({ response: 'done' }));
+  assert.equal(await pending, true);
+  assert.equal(input.value, 'new draft');
+  controller.stop();
+});

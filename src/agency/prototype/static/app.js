@@ -366,12 +366,15 @@
       if (busy) return false;
       var text = String(raw === null || raw === undefined ? '' : raw).trim();
       if (!text) return false;
+      var submittedDraft = els.messageInput.value;
+      setBusy(true);
 
       if (!csrfToken) {
         try {
           await refreshSession();
         } catch (err) {
           showNotice('No local session yet \u2014 message not sent. ' + errorFrom(err));
+          setBusy(false);
           return false;
         }
       }
@@ -379,7 +382,6 @@
       hideNotice();
       var userMsg = appendMessage('user', text, 'pending');
       var replyMsg = appendMessage('assistant', 'Waiting for reply\u2026', 'pending');
-      setBusy(true);
       var delivered = false;
       try {
         var result = await postChat(text);
@@ -400,8 +402,10 @@
         }
         succeedMessage(replyMsg, reply);
         delivered = true;
-        els.messageInput.value = '';
-        autosize();
+        if (els.messageInput.value === submittedDraft) {
+          els.messageInput.value = '';
+          autosize();
+        }
         return true;
       } catch (err) {
         failMessage(
@@ -418,6 +422,7 @@
     }
 
     function submitFromForm() {
+      if (busy) return pendingSubmit;
       var value = els.messageInput.value;
       if (value.trim() === '') return null;
       pendingSubmit = submitMessage(value);
