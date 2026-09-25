@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from agency.agents.executor import ExecutionStatus
 from agency.butler.config import ButlerConfig
 from agency.butler.router import MessageRouter
 from agency.butler.threads import Thread, ThreadMessage, ThreadStore, Workspace
@@ -49,15 +50,14 @@ _DEFAULT_DOMAINS: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class ButlerReply:
-    """Result of an isolated conversational turn.
-
-    ``status`` is one of ``"completed"``, ``"timeout"`` or a failure value
-    (``"failed"``/``"cancelled"``) so a local adapter can fail closed instead
-    of presenting a failed turn as a successful 200.
-    """
+    """A read-only conversational turn with an explicit execution status."""
 
     text: str
     status: str
+
+
+class ButlerExecutionError(RuntimeError):
+    """Non-completed orchestrator execution without raw output or secrets."""
 
 
 class ButlerService:
@@ -395,6 +395,21 @@ class ButlerService:
             agent_id=agent.id,
         )
         result = await self._orchestrator.execute_task(task.task_id, context=context)
+        if result.status is not ExecutionStatus.COMPLETED:
+            await self._audit_append(
+                agent=agent.id,
+                action="butler.execute",
+                result=result.status.value,
+                target=task.title,
+                evidence={"task_id": task.task_id},
+            )
+            self._log.warning(
+                "butler.execute_failed_status",
+                agent_id=agent.id,
+                task_id=task.task_id,
+                status=result.status.value,
+            )
+            raise ButlerExecutionError(f"Task execution failed with status: {result.status.value}")
         output = result.output if isinstance(result.output, str) else str(result.output)
         await self._audit_append(
             agent=agent.id,
@@ -550,4 +565,4 @@ class ButlerService:
             self._log.exception("butler.memory_store_failed")
 
 
-__all__ = ["ButlerReply", "ButlerService", "LLMCallable"]
+__all__ = ["ButlerExecutionError", "ButlerReply", "ButlerService", "LLMCallable"]
