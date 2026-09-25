@@ -17,7 +17,13 @@ _BETA_FALSE_VALUES = {"", "0", "false", "no", "off"}
 
 def _parse_beta_mode(explicit: bool | str | None) -> bool:
     if explicit is None:
-        return os.environ.get("AGENCY_BETA_MODE", "").strip().lower() in _BETA_TRUE_VALUES
+        raw = os.environ.get("AGENCY_BETA_MODE", "")
+        normalized = raw.strip().lower()
+        if normalized in _BETA_TRUE_VALUES:
+            return True
+        if normalized in _BETA_FALSE_VALUES:
+            return False
+        raise ValueError(f"invalid AGENCY_BETA_MODE value: {raw!r}")
     if isinstance(explicit, bool):
         return explicit
     if isinstance(explicit, str):
@@ -27,7 +33,7 @@ def _parse_beta_mode(explicit: bool | str | None) -> bool:
         if normalized in _BETA_FALSE_VALUES:
             return False
         raise ValueError(f"invalid beta_mode value: {explicit!r}")
-    return bool(explicit)
+    raise ValueError(f"invalid beta_mode value: {explicit!r}")
 
 
 def _parse_env_allowlist(raw: str) -> frozenset[int]:

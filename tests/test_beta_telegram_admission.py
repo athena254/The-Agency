@@ -9,12 +9,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from agency.telegram.config import TelegramConfig
-from agency.telegram.handler import TelegramHandler
+from agency.telegram.handler import BETA_CREATION_DISABLED, TelegramHandler
 
 INVITED = [101, 202]
 
@@ -319,4 +319,89 @@ async def test_nonbeta_legacy_paths_unchanged() -> None:
     # creation routing preserved in non-beta
     r = await h.handle_update(_update(999, "/propose_agent X d c1"))
     assert r["command"] == "/propose-agent"
+    await h.close()
+
+
+# --- review fix: fail closed on invalid beta mode ---
+
+
+@pytest.mark.parametrize("raw", ["treu", "2", "enabled", "truthy", "yes please"])
+def test_beta_rejects_invalid_env_beta_mode(raw: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENCY_BETA_MODE", raw)
+    monkeypatch.setenv("TELEGRAM_ALLOWED_USER_IDS", "101,202")
+    with pytest.raises(ValueError):
+        TelegramConfig(bot_token="t")
+
+
+@pytest.mark.parametrize("bad", [2, 1, 0, 1.5, ["true"]])
+def test_beta_rejects_non_bool_non_str_explicit(bad: Any) -> None:
+    with pytest.raises(ValueError):
+        TelegramConfig(bot_token="t", beta_mode=bad, allowed_user_ids=[101])  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("bad", ["treu", "2", "enabled"])
+def test_beta_rejects_unknown_explicit_string(bad: str) -> None:
+    with pytest.raises(ValueError):
+        TelegramConfig(bot_token="t", beta_mode=bad, allowed_user_ids=[101])
+
+
+# --- review fix: process_message must deny creation shortcuts before side effects ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cmd",
+    ["/propose_agent X d c1", "/propose-agent X d c1", "/proposals"],
+    ids=["underscore", "hyphen", "proposals"],
+)
+async def test_beta_process_message_denies_creation_shortcuts(cmd: str) -> None:
+    h, butler = _handler()
+    profile_spy = Mock(return_value=None)
+    orig_get = h._profiles.get_name
+    h._profiles.get_name = profile_spy  # type: ignore[method-assign]
+    try:
+        result = await h.process_message(
+            {"from": {"id": 101}, "chat": {"id": 101, "type": "private"}, "text": cmd}
+        )
+    finally:
+        h._profiles.get_name = orig_get  # type: ignore[method-assign]
+    assert result == BETA_CREATION_DISABLED
+    butler.handle_message.assert_not_awaited()
+    profile_spy.assert_not_called()
+    await h.close()
+
+
+@pytest.mark.asyncio
+async def test_nonbeta_process_message_keeps_legacy_flow() -> None:
+    h, butler = _handler(TelegramConfig(bot_token="test"), butler="auto")
+    result = await h.process_message(
+        {"from": {"id": 999}, "chat": {"id": 555, "type": "group"}, "text": "/proposals"}
+    )
+    assert result == "ok"
+    butler.handle_message.assert_awaited_once()
+    await h.close()
+
+
+# --- review fix: malformed webhook body fails closed with zero calls ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "upd",
+    [None, [], "message", 123, 3.14, True],
+    ids=["none", "list", "str", "int", "float", "bool"],
+)
+async def test_beta_handle_update_rejects_malformed_update(upd: Any) -> None:
+    h, butler = _handler()
+    profile_spy = Mock(return_value=None)
+    orig_get = h._profiles.get_name
+    h._profiles.get_name = profile_spy  # type: ignore[method-assign]
+    try:
+        result = await h.handle_update(upd)  # type: ignore[arg-type]
+    finally:
+        h._profiles.get_name = orig_get  # type: ignore[method-assign]
+    assert result["status"] == "rejected"
+    butler.handle_message.assert_not_awaited()
+    h._adapter.send_message.assert_not_awaited()  # type: ignore[attr-defined]
+    profile_spy.assert_not_called()
     await h.close()
