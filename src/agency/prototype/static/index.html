@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="The Agency Butler local prototype. Local only, not beta ready.">
+  <title>The Agency — Butler local prototype</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#message-input">Skip to the message box</a>
+
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">The Agency</span>
+        <span class="brand-tag">local prototype</span>
+      </div>
+      <div class="topbar-status">
+        <span id="status-badge" class="badge badge--pending" role="status" aria-live="polite">Connecting&hellip;</span>
+        <span id="status-detail" class="topbar-detail">Checking the local service&hellip;</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="chat" aria-label="Butler conversation">
+        <div id="transcript" class="transcript" role="log" aria-live="polite" aria-relevant="additions text" tabindex="0">
+          <article class="msg msg--system" data-role="system">
+            <header class="msg-head">
+              <span class="msg-who">Local prototype</span>
+            </header>
+            <p class="msg-body">This is a local Butler prototype for this computer only. Anything you type stays in this tab: nothing is saved in this browser. Replies come straight from the local service &mdash; if a request fails you will see the real error here instead of an invented answer.</p>
+          </article>
+        </div>
+
+        <div id="notice" class="notice" role="alert" hidden>
+          <span id="notice-text" class="notice-text"></span>
+          <button type="button" id="notice-dismiss" class="notice-dismiss">Dismiss</button>
+        </div>
+
+        <form id="composer" class="composer" data-state="idle" novalidate>
+          <label class="visually-hidden" for="message-input">Message for the Butler</label>
+          <textarea id="message-input" class="composer-input" name="message" rows="1" autocomplete="off" spellcheck="true" placeholder="Ask the Butler&hellip;" aria-describedby="composer-hint"></textarea>
+          <button type="submit" id="send-button" class="send" disabled>Send</button>
+        </form>
+
+        <p id="composer-hint" class="hint">Enter sends &middot; Shift+Enter adds a new line. Messages are never stored; this is a local prototype, not beta ready.</p>
+      </section>
+
+      <aside class="side" aria-label="Prototype status">
+        <section class="panel">
+          <h2 class="panel-title">Service</h2>
+          <dl class="facts">
+            <div class="fact">
+              <dt>Status</dt>
+              <dd id="fact-status">&mdash;</dd>
+            </div>
+            <div class="fact">
+              <dt>Butler</dt>
+              <dd id="fact-butler">&mdash;</dd>
+            </div>
+            <div class="fact">
+              <dt>Agents</dt>
+              <dd id="fact-agents">&mdash;</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="panel">
+          <h2 class="panel-title">Agents</h2>
+          <ul id="agents-list" class="agents"></ul>
+          <p id="agents-note" class="panel-note">Loading agents from the local service&hellip;</p>
+        </section>
+
+        <section class="panel panel--muted">
+          <h2 class="panel-title">About this build</h2>
+          <p class="panel-note">A local browser prototype served from 127.0.0.1. It uses the same safe conversation path as the Butler: no agent creation, no tools, no public API, no credentials in the page. Not beta ready.</p>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <noscript>
+    <p class="noscript">This prototype needs JavaScript enabled to talk to the local service.</p>
+  </noscript>
+
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>
