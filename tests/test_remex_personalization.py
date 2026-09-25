@@ -142,7 +142,9 @@ async def test_research_command_uses_owners_name_in_tool_prompt_context(tmp_path
         SimpleNamespace(id="research-agent", domain="research")
     ]
     orchestrator.submit_task.return_value = SimpleNamespace(task_id="test-task")
-    orchestrator.execute_task.return_value = SimpleNamespace(output="source result")
+    orchestrator.execute_task.return_value = SimpleNamespace(
+        status="completed", output="source result"
+    )
     butler = SimpleNamespace(orchestrator=orchestrator)
     handler = TelegramHandler(TelegramConfig(bot_token="test"), butler=butler, profile_store=store)
     handler._adapter.send_message = AsyncMock()

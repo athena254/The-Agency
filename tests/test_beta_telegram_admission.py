@@ -226,7 +226,7 @@ async def test_beta_admitted_name_and_research(tmp_path: Any) -> None:
     orchestrator = AsyncMock()
     orchestrator.list_agents.return_value = [SimpleNamespace(id="r", domain="research")]
     orchestrator.submit_task.return_value = SimpleNamespace(task_id="t")
-    orchestrator.execute_task.return_value = SimpleNamespace(output="cited")
+    orchestrator.execute_task.return_value = SimpleNamespace(status="completed", output="cited")
     hb, _ = _handler(butler=SimpleNamespace(orchestrator=orchestrator))
     hb._profiles = ProfileStore(":memory:")
     r = await hb.handle_update(_update(101, "/research planets"))

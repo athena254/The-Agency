@@ -230,6 +230,10 @@ class TelegramHandler:
         result = await orchestrator.execute_task(
             task.task_id, context={"sender": sender, "assistant_name": display_name}
         )
+        if getattr(result, "status", None) != "completed":
+            if getattr(result, "status", None) == "timeout":
+                return "Research timed out. Please try again."
+            return "Research could not be completed. Please try again."
         output = result.output if isinstance(result.output, str) else str(result.output)
         return f"🔍 *Research complete*\n\n{output}"
 
