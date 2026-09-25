@@ -6,6 +6,7 @@ import urllib.parse
 from collections.abc import Callable
 
 import httpx
+from structlog.testing import capture_logs
 
 from agency.tools.base import ToolContext
 from agency.tools.builtin.web import WebFetchTool, WebSearchTool
@@ -144,3 +145,54 @@ async def test_params_schema_missing_url_rejected_by_registry():
     missing_query = await registry.call("web_search", {}, _ctx())
     assert missing_query.ok is False
     assert "query" in (missing_query.error or "")
+
+
+async def test_search_no_private_query_in_logs():
+    """P-W1: synthetic private phrase must not appear in logger info events."""
+    private_phrase = "my secret discount code X7B9z"
+    encoded = urllib.parse.quote_plus(private_phrase)
+    tool = WebSearchTool(transport=_mock(lambda req: httpx.Response(200, text=DDG_HTML)))
+    with capture_logs() as captured:
+        result = await tool.run({"query": private_phrase}, _ctx())
+    assert result.ok is True
+    assert any(e.get("event") == "tool.web_search" for e in captured)
+    assert private_phrase not in repr(captured)
+    assert encoded not in repr(captured)
+
+
+async def test_search_failure_no_private_query():
+    """P-W2: transport exception containing private text must not leak in error diagnostics."""
+    private_phrase = "my secret discount code X7B9z"
+    encoded = urllib.parse.quote_plus(private_phrase)
+
+    def boom(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(private_phrase)
+
+    tool = WebSearchTool(transport=_mock(boom))
+    result = await tool.run({"query": private_phrase}, _ctx())
+    assert result.ok is False
+    assert result.error
+    assert private_phrase not in result.error, (
+        f"private phrase '{private_phrase}' found in error diagnostics"
+    )
+    assert encoded not in result.error, (
+        f"URL-encoded private phrase '{encoded}' found in error diagnostics"
+    )
+
+    def boom_http(request: httpx.Request) -> httpx.Response:
+        raise httpx.HTTPStatusError(
+            private_phrase,
+            request=request,
+            response=httpx.Response(500, text="oops"),
+        )
+
+    tool2 = WebSearchTool(transport=_mock(boom_http))
+    result2 = await tool2.run({"query": private_phrase}, _ctx())
+    assert result2.ok is False
+    assert result2.error
+    assert private_phrase not in result2.error, (
+        f"private phrase '{private_phrase}' found in HTTP error diagnostics"
+    )
+    assert encoded not in result2.error, (
+        f"URL-encoded private phrase '{encoded}' found in HTTP error diagnostics"
+    )

@@ -158,7 +158,7 @@ class WebSearchTool:
             return ToolResult(
                 tool="web_search",
                 ok=False,
-                error=f"search request failed: {exc}",
+                error=f"search request failed: {type(exc).__name__}",
                 duration_ms=int((time.perf_counter() - start) * 1000),
             )
         if response.status_code < 200 or response.status_code >= 300:
@@ -176,10 +176,10 @@ class WebSearchTool:
             return ToolResult(
                 tool="web_search",
                 ok=False,
-                error=f"failed to parse search results: {exc}",
+                error=f"failed to parse search results: {type(exc).__name__}",
                 duration_ms=int((time.perf_counter() - start) * 1000),
             )
-        logger.info("tool.web_search", query=query, result_count=len(results))
+        logger.info("tool.web_search", result_count=len(results))
         return ToolResult(
             tool="web_search",
             ok=True,
