@@ -156,20 +156,24 @@ class TelegramBot:
             self._poll_conn = None
             raise RuntimeError("telegram poll state unavailable; refusing beta start") from exc
 
-    def _persist_offset(self) -> None:
-        """Commit the next offset. At-least-once only: a local commit can never
-        atomically include the Telegram send, so a crash between send and commit
-        may redeliver (duplicate window); handler commands stay idempotent."""
-        if self._poll_conn is None or self._offset is None:
+    def _persist_offset(self, next_offset: int) -> None:
+        """Persist next_offset durably in beta; raise on failure (fail-closed).
+
+        At-least-once only: a local commit can never atomically include the
+        Telegram send, so a crash between send and commit may redeliver
+        (a duplicate reply is unavoidable); handler commands stay idempotent.
+        """
+        if self._poll_conn is None:
             return
         try:
             self._poll_conn.execute(
                 f"INSERT OR REPLACE INTO {_POLL_STATE_TABLE}(key, next_offset) VALUES (?, ?)",
-                (_POLL_STATE_KEY, self._offset),
+                (_POLL_STATE_KEY, next_offset),
             )
             self._poll_conn.commit()
-        except sqlite3.Error:
+        except sqlite3.Error as exc:
             logger.error("telegram_poll_persist_failed")
+            raise RuntimeError("telegram poll state persist failed") from exc
 
     async def start(self) -> None:
         """Start the bot."""
@@ -259,11 +263,24 @@ class TelegramBot:
                 break
             status = result.get("status") if isinstance(result, dict) else None
             if status in _ADVANCING_STATUSES:
-                self._seen.add(update_id)
                 next_offset = update_id + 1
                 if self._offset is None or next_offset > self._offset:
+                    if self._poll_conn is not None:
+                        try:
+                            self._persist_offset(next_offset)
+                        except Exception:  # noqa: BLE001 — durable commit failed.
+                            self._consecutive_failures += 1
+                            delay = self._backoff_delay()
+                            logger.warning(
+                                "telegram_poll_persist_retry",
+                                backoff=delay,
+                                attempt=self._consecutive_failures,
+                                update_id=update_id,
+                            )
+                            await asyncio.sleep(delay)
+                            return "transient"
                     self._offset = next_offset
-                    self._persist_offset()
+                self._seen.add(update_id)
                 if len(self._seen) > _MAX_SEEN_IDS:
                     cutoff = self._offset or 0
                     self._seen = {i for i in self._seen if i >= cutoff}
