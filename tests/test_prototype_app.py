@@ -169,7 +169,7 @@ def test_create_app_without_butler_builds_app() -> None:
 def test_lifespan_starts_and_stops_injected_butler_once() -> None:
     butler = FakeButler()
     app = create_app(butler)
-    with TestClient(app, base_url=LOCAL_BASE):
+    with TestClient(app, base_url=LOCAL_BASE, client=("127.0.0.1", 50000)):
         assert butler.started == 1
         assert butler.stopped == 0
     assert butler.started == 1
@@ -183,7 +183,9 @@ def test_lifespan_starts_and_stops_injected_butler_once() -> None:
 
 def test_health_reports_running_butler_and_agent_count() -> None:
     agents = [_agent("a1", "Alpha", "general"), _agent("a2", "Beta", "security")]
-    with TestClient(create_app(FakeButler(agents)), base_url=LOCAL_BASE) as client:
+    with TestClient(
+        create_app(FakeButler(agents)), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)
+    ) as client:
         response = client.get("/api/health")
     assert response.status_code == 200
     body = response.json()
@@ -195,7 +197,9 @@ def test_health_reports_running_butler_and_agent_count() -> None:
 
 def test_agents_endpoint_returns_service_roster() -> None:
     agents = [_agent("a1", "Alpha", "general"), _agent("a2", "Beta", "security")]
-    with TestClient(create_app(FakeButler(agents)), base_url=LOCAL_BASE) as client:
+    with TestClient(
+        create_app(FakeButler(agents)), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)
+    ) as client:
         response = client.get("/api/agents")
     assert response.status_code == 200
     assert response.json() == {
@@ -207,7 +211,9 @@ def test_agents_endpoint_returns_service_roster() -> None:
 
 
 def test_session_issues_stable_csrf_token() -> None:
-    with TestClient(create_app(FakeButler()), base_url=LOCAL_BASE) as client:
+    with TestClient(
+        create_app(FakeButler()), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)
+    ) as client:
         first = client.get("/api/session")
         second = client.get("/api/session")
     assert first.status_code == 200
@@ -217,7 +223,9 @@ def test_session_issues_stable_csrf_token() -> None:
 
 
 def test_session_rejects_non_loopback_host() -> None:
-    with TestClient(create_app(FakeButler()), base_url=LOCAL_BASE) as client:
+    with TestClient(
+        create_app(FakeButler()), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)
+    ) as client:
         response = client.get("/api/session", headers={"host": "evil.example.com"})
     assert response.status_code == 403
     assert response.json()["error"]
@@ -230,7 +238,7 @@ def test_session_rejects_non_loopback_host() -> None:
 
 def test_chat_uses_isolated_tool_free_path_with_fixed_sender() -> None:
     butler = FakeButler()
-    with TestClient(create_app(butler), base_url=LOCAL_BASE) as client:
+    with TestClient(create_app(butler), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
         token = _csrf(client)
         response = client.post(
             "/api/chat",
@@ -263,7 +271,7 @@ def test_chat_uses_isolated_tool_free_path_with_fixed_sender() -> None:
 )
 def test_chat_rejects_caller_supplied_fields(payload: dict[str, Any]) -> None:
     butler = FakeButler()
-    with TestClient(create_app(butler), base_url=LOCAL_BASE) as client:
+    with TestClient(create_app(butler), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
         token = _csrf(client)
         response = client.post("/api/chat", json=payload, headers=_post_headers(token))
     assert response.status_code == 422
@@ -273,7 +281,7 @@ def test_chat_rejects_caller_supplied_fields(payload: dict[str, Any]) -> None:
 
 def test_chat_rejects_empty_message() -> None:
     butler = FakeButler()
-    with TestClient(create_app(butler), base_url=LOCAL_BASE) as client:
+    with TestClient(create_app(butler), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
         token = _csrf(client)
         response = client.post("/api/chat", json={"message": "   "}, headers=_post_headers(token))
     assert response.status_code == 422
@@ -283,7 +291,7 @@ def test_chat_rejects_empty_message() -> None:
 def test_chat_rejects_overlong_message_without_echoing_it() -> None:
     butler = FakeButler()
     secret_text = "s" * (butler.config.max_message_length + 1)
-    with TestClient(create_app(butler), base_url=LOCAL_BASE) as client:
+    with TestClient(create_app(butler), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
         token = _csrf(client)
         response = client.post(
             "/api/chat", json={"message": secret_text}, headers=_post_headers(token)
@@ -296,7 +304,7 @@ def test_chat_rejects_overlong_message_without_echoing_it() -> None:
 
 def test_chat_rejects_non_loopback_host() -> None:
     butler = FakeButler()
-    with TestClient(create_app(butler), base_url=LOCAL_BASE) as client:
+    with TestClient(create_app(butler), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
         token = _csrf(client)
         response = client.post(
             "/api/chat",
@@ -309,7 +317,7 @@ def test_chat_rejects_non_loopback_host() -> None:
 
 def test_chat_rejects_foreign_origin() -> None:
     butler = FakeButler()
-    with TestClient(create_app(butler), base_url=LOCAL_BASE) as client:
+    with TestClient(create_app(butler), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
         token = _csrf(client)
         response = client.post(
             "/api/chat",
@@ -322,7 +330,7 @@ def test_chat_rejects_foreign_origin() -> None:
 
 def test_chat_rejects_missing_and_wrong_csrf() -> None:
     butler = FakeButler()
-    with TestClient(create_app(butler), base_url=LOCAL_BASE) as client:
+    with TestClient(create_app(butler), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
         missing = client.post("/api/chat", json={"message": "hi"})
         wrong = client.post(
             "/api/chat", json={"message": "hi"}, headers={CSRF_HEADER: "not-the-token"}
@@ -334,7 +342,7 @@ def test_chat_rejects_missing_and_wrong_csrf() -> None:
 
 def test_chat_rejects_non_json_content_type() -> None:
     butler = FakeButler()
-    with TestClient(create_app(butler), base_url=LOCAL_BASE) as client:
+    with TestClient(create_app(butler), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
         token = _csrf(client)
         response = client.post(
             "/api/chat",
@@ -346,7 +354,9 @@ def test_chat_rejects_non_json_content_type() -> None:
 
 
 def test_no_wildcard_cors_headers() -> None:
-    with TestClient(create_app(FakeButler()), base_url=LOCAL_BASE) as client:
+    with TestClient(
+        create_app(FakeButler()), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)
+    ) as client:
         health = client.get("/api/health")
         preflight = client.options(
             "/api/chat",
@@ -374,7 +384,9 @@ def test_static_index_and_assets_are_served_when_present(
     (static_dir / "app.js").write_text("console.log('ok');", encoding="utf-8")
     monkeypatch.setattr(prototype_app, "STATIC_DIR", static_dir)
 
-    with TestClient(create_app(FakeButler()), base_url=LOCAL_BASE) as client:
+    with TestClient(
+        create_app(FakeButler()), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)
+    ) as client:
         root = client.get("/")
         asset = client.get("/assets/app.js")
 
@@ -389,7 +401,9 @@ def test_missing_static_root_returns_json_error(
 ) -> None:
     monkeypatch.setattr(prototype_app, "STATIC_DIR", tmp_path / "missing")
 
-    with TestClient(create_app(FakeButler()), base_url=LOCAL_BASE) as client:
+    with TestClient(
+        create_app(FakeButler()), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)
+    ) as client:
         response = client.get("/")
 
     assert response.status_code == 404
@@ -417,7 +431,7 @@ def test_real_butler_echo_conversation(monkeypatch: pytest.MonkeyPatch) -> None:
         orchestrator=orchestrator,
     )
     app = create_app(service)
-    with TestClient(app, base_url=LOCAL_BASE) as client:
+    with TestClient(app, base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
         health = client.get("/api/health")
         assert health.status_code == 200
         assert health.json()["status"] == "ok"
@@ -444,7 +458,7 @@ def test_real_butler_echo_conversation(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_chat_fails_closed_when_service_lacks_isolated_path() -> None:
     butler = LegacyOnlyButler()
-    with TestClient(create_app(butler), base_url=LOCAL_BASE) as client:
+    with TestClient(create_app(butler), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
         token = _csrf(client)
         response = client.post("/api/chat", json={"message": "hi"}, headers=_post_headers(token))
     assert response.status_code == 503
@@ -455,7 +469,7 @@ def test_chat_fails_closed_when_service_lacks_isolated_path() -> None:
 
 def test_chat_returns_502_when_isolated_status_failed() -> None:
     butler = FakeButler(reply_status="failed", reply_text="internal-boom-detail")
-    with TestClient(create_app(butler), base_url=LOCAL_BASE) as client:
+    with TestClient(create_app(butler), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
         token = _csrf(client)
         response = client.post("/api/chat", json={"message": "hi"}, headers=_post_headers(token))
     assert response.status_code == 502
@@ -463,9 +477,34 @@ def test_chat_returns_502_when_isolated_status_failed() -> None:
     assert "internal-boom-detail" not in response.text
 
 
+def test_chat_refuses_completed_empty_model_reply() -> None:
+    butler = FakeButler(reply_status="completed", reply_text="")
+    with TestClient(create_app(butler), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
+        token = _csrf(client)
+        response = client.post("/api/chat", json={"message": "hi"}, headers=_post_headers(token))
+    assert response.status_code == 502
+    assert response.json()["error"]
+
+
+def test_remote_peer_with_forged_local_host_cannot_obtain_session_or_chat() -> None:
+    butler = FakeButler()
+    with TestClient(
+        create_app(butler), base_url="http://127.0.0.1", client=("203.0.113.8", 50100)
+    ) as client:
+        session = client.get("/api/session")
+        chat = client.post(
+            "/api/chat",
+            json={"message": "hello"},
+            headers=_post_headers("guessed-token"),
+        )
+    assert session.status_code == 403
+    assert chat.status_code == 403
+    assert butler.calls == []
+
+
 def test_chat_returns_504_when_isolated_status_timeout() -> None:
     butler = FakeButler(reply_status="timeout", reply_text="partial-model-text")
-    with TestClient(create_app(butler), base_url=LOCAL_BASE) as client:
+    with TestClient(create_app(butler), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
         token = _csrf(client)
         response = client.post("/api/chat", json={"message": "hi"}, headers=_post_headers(token))
     assert response.status_code == 504
@@ -631,7 +670,7 @@ async def test_legacy_turn_keeps_tool_and_lattice_behavior_for_other_callers(
 
 @pytest.mark.asyncio
 async def test_chat_returns_non_200_when_real_model_fails(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr("agency.orchestrator.get_lattice", _no_lattice)
 
@@ -645,9 +684,11 @@ async def test_chat_returns_non_200_when_real_model_fails(
     orchestrator._executor = AgentExecutor(llm=_boom)
     service = ButlerService(config=ButlerConfig(llm_provider="none"), orchestrator=orchestrator)
     app = create_app(service)
-    with TestClient(app, base_url=LOCAL_BASE) as client:
+    with TestClient(app, base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
         token = _csrf(client)
         response = client.post("/api/chat", json={"message": "hello"}, headers=_post_headers(token))
     assert response.status_code == 502
     assert response.json()["error"]
     assert "boom-secret" not in response.text
+    output = capsys.readouterr()
+    assert "boom-secret" not in output.out + output.err

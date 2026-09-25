@@ -86,6 +86,16 @@ def _is_loopback_host(host_header: str) -> bool:
     return _loopback_hostname(host_header) is not None
 
 
+def _is_loopback_peer(request: Request) -> bool:
+    """Check the connection peer, not a caller-controlled HTTP header."""
+    if request.client is None:
+        return False
+    try:
+        return ipaddress.ip_address(request.client.host).is_loopback
+    except ValueError:
+        return False
+
+
 def _is_local_origin(origin: str) -> bool:
     """Whether an ``Origin`` header is an http(s) loopback origin."""
     try:
@@ -99,7 +109,7 @@ def _is_local_origin(origin: str) -> bool:
 
 async def _require_local_host(request: Request) -> None:
     """Reject DNS-rebinding-style requests with a non-loopback ``Host``."""
-    if not _is_loopback_host(request.headers.get("host", "")):
+    if not _is_loopback_peer(request) or not _is_loopback_host(request.headers.get("host", "")):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This API accepts loopback requests only.",
@@ -272,6 +282,17 @@ def create_app(butler: ButlerService | None = None) -> FastAPI:
     application.state.butler_started = False
     application.state.csrf_token = secrets.token_urlsafe(32)
 
+    @application.middleware("http")
+    async def _local_only(request: Request, call_next: Any) -> Any:
+        # Covers the UI/assets as well as API routes if the server is ever
+        # accidentally bound to a public interface. Host alone is forgeable.
+        if not _is_loopback_peer(request) or not _is_loopback_host(request.headers.get("host", "")):
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={"error": "This prototype accepts loopback requests only."},
+            )
+        return await call_next(request)
+
     @application.exception_handler(HTTPException)
     async def _http_error_handler(request: Request, exc: Exception) -> JSONResponse:
         assert isinstance(exc, HTTPException)
@@ -354,7 +375,13 @@ def create_app(butler: ButlerService | None = None) -> FastAPI:
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="The Butler could not complete the request.",
             )
-        return ChatResponse(response=str(getattr(reply, "text", "")))
+        text = getattr(reply, "text", None)
+        if not isinstance(text, str) or not text.strip():
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="The Butler returned no reply.",
+            )
+        return ChatResponse(response=text)
 
     @application.get("/", include_in_schema=False)
     async def index() -> FileResponse:
