@@ -16,11 +16,13 @@ from agency.telegram.profile_store import ProfileStore
 logger = structlog.get_logger(__name__)
 
 BETA_CREATION_DISABLED = "Agent creation is disabled in this beta."
+BETA_UNSUPPORTED_COMMAND = "Unsupported command in this beta."
 
 _CREATION_ATTEMPT = re.compile(
     r"\b(create|make|build|spawn|add)\b.*\b(agent|bot)\b"
     r"|\b(agent|bot)\b.*\b(create|make|build|spawn|add|new)\b"
-    r"|\bnew\s+(agent|bot)\b",
+    r"|\bnew\s+(agent|bot)\b"
+    r"|\b(create|make|build|spawn|add)\s+(?:(?:a|an|the|new)\s+)?one\s+(called|named|for)\b",
     re.IGNORECASE,
 )
 
@@ -115,30 +117,48 @@ class TelegramHandler:
         # Bot commands are answered deterministically from real system
         # state — never through the LLM, so no fiction is possible.
         command = text.strip().lower()
+        command_token = command.split(None, 1)[0] if command else ""
         if self._config.beta_mode:
-            proposal_token = command.split(None, 1)[0] if command else ""
-            if proposal_token == "/proposals":
+            if command_token == "/proposals":
                 if chat_id:
                     await self._adapter.send_message(chat_id, BETA_CREATION_DISABLED)
                 return {"status": "rejected", "reason": "agent creation disabled"}
-        if command == "/name" or command.startswith("/name "):
+            if command_token in ("/propose-agent", "/propose_agent"):
+                if chat_id:
+                    await self._adapter.send_message(chat_id, BETA_CREATION_DISABLED)
+                return {"status": "rejected", "reason": "agent creation disabled"}
+            if command_token.startswith("/") and command_token not in (
+                "/start",
+                "/help",
+                "/whoami",
+                "/status",
+                "/agents",
+                "/name",
+                "/research",
+            ):
+                if chat_id:
+                    await self._adapter.send_message(chat_id, BETA_UNSUPPORTED_COMMAND)
+                return {"status": "rejected", "reason": "unsupported command"}
+        effective_command = command_token if self._config.beta_mode else command
+        if effective_command == "/name" or command.startswith("/name "):
             response = self._name_command(user_id, text.strip()[len("/name") :].strip(), private)
             if chat_id:
                 await self._adapter.send_message(chat_id, response)
             return {"status": "ok", "chat_id": chat_id, "command": "/name"}
-        if command in ("/agents", "/status", "/whoami", "/proposals", "/start", "/help"):
-            if self._config.beta_mode and command == "/proposals":
-                if chat_id:
-                    await self._adapter.send_message(chat_id, BETA_CREATION_DISABLED)
-                return {"status": "rejected", "reason": "agent creation disabled"}
-            response = await self._system_answer(command, display_name)
+        if effective_command in ("/agents", "/status", "/whoami", "/proposals", "/start", "/help"):
+            response = await self._system_answer(effective_command, display_name)
             if chat_id:
                 await self._adapter.send_message(chat_id, response)
-            return {"status": "ok", "chat_id": chat_id, "command": command}
+            return {"status": "ok", "chat_id": chat_id, "command": effective_command}
 
         # /research <topic> — run the research agent's tool loop
         # (web search → fetch → synthesize → cite → store).
-        if command.startswith("/research"):
+        research_command = (
+            command_token == "/research"
+            if self._config.beta_mode
+            else command.startswith("/research")
+        )
+        if research_command:
             args = text.strip()[len("/research") :].strip()
             response = await self._handle_research(args, conversation_sender, display_name)
             if chat_id:
@@ -147,11 +167,7 @@ class TelegramHandler:
 
         # /propose-agent <name> <domain> <capability1> [capability2 ...]
         # (also /propose_agent — Telegram menus can't contain hyphens)
-        if command.startswith(("/propose-agent", "/propose_agent")):
-            if self._config.beta_mode:
-                if chat_id:
-                    await self._adapter.send_message(chat_id, BETA_CREATION_DISABLED)
-                return {"status": "rejected", "reason": "agent creation disabled"}
+        if not self._config.beta_mode and command.startswith(("/propose-agent", "/propose_agent")):
             args = text.strip().split(maxsplit=1)[1] if " " in text.strip() else ""
             response = await self._handle_propose_agent(args, sender)
             if chat_id:
@@ -166,14 +182,15 @@ class TelegramHandler:
             if chat_id:
                 await self._adapter.send_message(chat_id, BETA_CREATION_DISABLED)
             return {"status": "rejected", "reason": "agent creation disabled"}
-        agent_intent = self._detect_agent_creation_intent(text)
-        if agent_intent and self._butler:
-            self._log.info("telegram.agent_creation_intent", intent=agent_intent, sender=sender)
-            response = await self._handle_plain_english_agent_creation(agent_intent, sender)
-            self._log.info("telegram.agent_creation_response", response=response[:200])
-            if chat_id:
-                await self._adapter.send_message(chat_id, response)
-            return {"status": "ok", "chat_id": chat_id, "intent": "create_agent"}
+        if not self._config.beta_mode:
+            agent_intent = self._detect_agent_creation_intent(text)
+            if agent_intent and self._butler:
+                self._log.info("telegram.agent_creation_intent", intent=agent_intent, sender=sender)
+                response = await self._handle_plain_english_agent_creation(agent_intent, sender)
+                self._log.info("telegram.agent_creation_response", response=response[:200])
+                if chat_id:
+                    await self._adapter.send_message(chat_id, response)
+                return {"status": "ok", "chat_id": chat_id, "intent": "create_agent"}
 
         # Process via Butler if available, else demo agent
         if self._butler:
@@ -553,15 +570,22 @@ class TelegramHandler:
             if beta_reason is not None:
                 raise ValueError(beta_reason)
             beta_text = message.get("text", "")
-            if isinstance(beta_text, str):
-                normalized = beta_text.strip().lower()
-                token = normalized.split(None, 1)[0] if normalized else ""
-                if token == "/proposals" or normalized.startswith(
-                    ("/propose-agent", "/propose_agent")
-                ):
-                    return BETA_CREATION_DISABLED
-                if self._is_agent_creation_attempt(beta_text):
-                    return BETA_CREATION_DISABLED
+            normalized = beta_text.strip().lower()
+            token = normalized.split(None, 1)[0] if normalized else ""
+            if token == "/proposals" or token in ("/propose-agent", "/propose_agent"):
+                return BETA_CREATION_DISABLED
+            if self._is_agent_creation_attempt(beta_text):
+                return BETA_CREATION_DISABLED
+            if token.startswith("/") and token not in (
+                "/start",
+                "/help",
+                "/whoami",
+                "/status",
+                "/agents",
+                "/name",
+                "/research",
+            ):
+                return BETA_UNSUPPORTED_COMMAND
         text = message.get("text", "")
         user_id = message.get("from", {}).get("id")
         if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
