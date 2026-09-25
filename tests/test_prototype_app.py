@@ -15,12 +15,15 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import agency.prototype.app as prototype_app
+from agency.agents.executor import AgentExecutor
 from agency.butler.config import ButlerConfig
-from agency.butler.service import ButlerService
+from agency.butler.service import ButlerReply, ButlerService
 from agency.kernel.identity import Agent
 from agency.llm.adapter import LLMAdapter
+from agency.memory.sms.models import MemoryItem, MemoryTier
 from agency.orchestrator import AgencyOrchestrator
 from agency.prototype.app import create_app
+from agency.tools.driver import ToolLoopResult
 
 LOCAL_BASE = "http://127.0.0.1"
 CSRF_HEADER = "X-Prototype-CSRF"
@@ -44,15 +47,28 @@ class _FakeRouter:
 
 
 class FakeButler:
-    """Duck-typed Butler recording lifecycle and message calls."""
+    """Duck-typed Butler recording lifecycle and both conversation paths.
 
-    def __init__(self, agents: list[Agent] | None = None) -> None:
+    The prototype API must call :meth:`handle_isolated_message`; the legacy
+    :meth:`handle_message` is recorded only so tests can prove the API never
+    falls back to the tool/memory-capable path.
+    """
+
+    def __init__(
+        self,
+        agents: list[Agent] | None = None,
+        *,
+        reply_status: str = "completed",
+        reply_text: str | None = None,
+    ) -> None:
         self.router = _FakeRouter(agents or [])
         self.orchestrator: Any = None
         self.config = _StubConfig()
         self.started = 0
         self.stopped = 0
         self.calls: list[dict[str, Any]] = []
+        self._reply_status = reply_status
+        self._reply_text = reply_text
 
     async def start(self) -> None:
         self.started += 1
@@ -70,12 +86,45 @@ class FakeButler:
     ) -> str:
         self.calls.append(
             {
+                "path": "legacy",
                 "message": message,
                 "sender": sender,
                 "context": context,
                 "memory_enabled": memory_enabled,
             }
         )
+        return f"reply:{message}"
+
+    async def handle_isolated_message(self, message: str, sender: str) -> ButlerReply:
+        self.calls.append({"path": "isolated", "message": message, "sender": sender})
+        text = self._reply_text if self._reply_text is not None else f"reply:{message}"
+        return ButlerReply(text=text, status=self._reply_status)
+
+
+class LegacyOnlyButler:
+    """A service exposing only the legacy, tool-capable ``handle_message``."""
+
+    def __init__(self) -> None:
+        self.router = _FakeRouter([])
+        self.orchestrator: Any = None
+        self.config = _StubConfig()
+        self.calls: list[str] = []
+
+    async def start(self) -> None:
+        return None
+
+    async def stop(self) -> None:
+        return None
+
+    async def handle_message(
+        self,
+        message: str,
+        sender: str,
+        context: dict[str, Any],
+        *,
+        memory_enabled: bool = True,
+    ) -> str:
+        self.calls.append(message)
         return f"reply:{message}"
 
 
@@ -179,7 +228,7 @@ def test_session_rejects_non_loopback_host() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_chat_success_calls_butler_with_fixed_local_sender() -> None:
+def test_chat_uses_isolated_tool_free_path_with_fixed_sender() -> None:
     butler = FakeButler()
     with TestClient(create_app(butler), base_url=LOCAL_BASE) as client:
         token = _csrf(client)
@@ -192,10 +241,9 @@ def test_chat_success_calls_butler_with_fixed_local_sender() -> None:
     assert response.json() == {"response": "reply:hello there"}
     assert len(butler.calls) == 1
     call = butler.calls[0]
+    assert call["path"] == "isolated"
     assert call["message"] == "hello there"
     assert call["sender"] == "local:prototype"
-    assert call["context"] == {}
-    assert call["memory_enabled"] is False
 
 
 # --------------------------------------------------------------------------- #
@@ -387,3 +435,219 @@ def test_real_butler_echo_conversation(monkeypatch: pytest.MonkeyPatch) -> None:
         )
     assert response.status_code == 200
     assert isinstance(response.json()["response"], str) and response.json()["response"]
+
+
+# --------------------------------------------------------------------------- #
+# POST /api/chat — fail closed instead of using the insecure legacy path
+# --------------------------------------------------------------------------- #
+
+
+def test_chat_fails_closed_when_service_lacks_isolated_path() -> None:
+    butler = LegacyOnlyButler()
+    with TestClient(create_app(butler), base_url=LOCAL_BASE) as client:
+        token = _csrf(client)
+        response = client.post("/api/chat", json={"message": "hi"}, headers=_post_headers(token))
+    assert response.status_code == 503
+    assert isinstance(response.json()["error"], str) and response.json()["error"]
+    # The tool/memory-capable legacy path is never used as a fallback.
+    assert butler.calls == []
+
+
+def test_chat_returns_502_when_isolated_status_failed() -> None:
+    butler = FakeButler(reply_status="failed", reply_text="internal-boom-detail")
+    with TestClient(create_app(butler), base_url=LOCAL_BASE) as client:
+        token = _csrf(client)
+        response = client.post("/api/chat", json={"message": "hi"}, headers=_post_headers(token))
+    assert response.status_code == 502
+    assert response.json()["error"]
+    assert "internal-boom-detail" not in response.text
+
+
+def test_chat_returns_504_when_isolated_status_timeout() -> None:
+    butler = FakeButler(reply_status="timeout", reply_text="partial-model-text")
+    with TestClient(create_app(butler), base_url=LOCAL_BASE) as client:
+        token = _csrf(client)
+        response = client.post("/api/chat", json={"message": "hi"}, headers=_post_headers(token))
+    assert response.status_code == 504
+    assert response.json()["error"]
+    assert "partial-model-text" not in response.text
+
+
+# --------------------------------------------------------------------------- #
+# Isolated real Butler path — no tools, no memory, no Lattice mirror
+# --------------------------------------------------------------------------- #
+
+
+async def _no_lattice() -> None:
+    return None
+
+
+def _real_service(monkeypatch: pytest.MonkeyPatch) -> ButlerService:
+    """Build a real Butler over an in-memory orchestrator (echo provider)."""
+    monkeypatch.setattr("agency.orchestrator.get_lattice", _no_lattice)
+    orchestrator = AgencyOrchestrator(
+        memory_db_path=":memory:",
+        llm=LLMAdapter(provider="echo", model="echo"),
+    )
+    return ButlerService(config=ButlerConfig(llm_provider="none"), orchestrator=orchestrator)
+
+
+class _RecordingToolDriver:
+    """Would expose seeded memory if the isolated path ever ran tools."""
+
+    def __init__(self) -> None:
+        self.runs: list[str] = []
+
+    async def run(
+        self,
+        *,
+        task: str,
+        system_prompt: str,
+        ctx: Any,
+        max_tool_iterations: int = 4,
+    ) -> ToolLoopResult:
+        self.runs.append(task)
+        return ToolLoopResult(final_answer="LEAKED-SECRET", status="completed")
+
+
+class _RecordingLattice:
+    """Minimal Lattice double recording ``create_task`` mirror calls."""
+
+    def __init__(self) -> None:
+        self.created: list[dict[str, Any]] = []
+
+    async def create_task(self, *, agent_id: str, task_type: str, payload: dict[str, Any]) -> str:
+        self.created.append({"agent_id": agent_id, "task_type": task_type, "payload": payload})
+        return "lattice-task-node"
+
+    async def close(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_isolated_turn_never_runs_tools_or_touches_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _real_service(monkeypatch)
+    orchestrator = service.orchestrator
+    await service.start()
+    try:
+        # Another sender's private memory that ``memory_query`` could reach.
+        await service._memory.store(
+            MemoryItem(agent_id="chat-victim", content="LEAKED-SECRET", tier=MemoryTier.NORMAL)
+        )
+        driver = _RecordingToolDriver()
+        orchestrator._tool_driver = driver
+
+        reply = await service.handle_isolated_message("hello there", "local:prototype")
+
+        assert reply.status == "completed"
+        assert driver.runs == []
+        assert "LEAKED-SECRET" not in reply.text
+        items = await service._memory.list_all(limit=100)
+        assert [item.content for item in items] == ["LEAKED-SECRET"]
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_isolated_turn_ignores_model_requested_memory_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("agency.orchestrator.get_lattice", _no_lattice)
+
+    class _ToolAttemptingLLM:
+        provider = "test"
+        model = "test"
+        echo_mode = False
+
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        async def generate(self, prompt: str, context: dict[str, Any]) -> str:
+            self.prompts.append(prompt)
+            return '{"action": {"name": "memory_query", "args": {"agent_id": "chat-victim"}}}'
+
+    llm = _ToolAttemptingLLM()
+    orchestrator = AgencyOrchestrator(memory_db_path=":memory:", llm=llm)  # type: ignore[arg-type]
+    service = ButlerService(config=ButlerConfig(llm_provider="none"), orchestrator=orchestrator)
+    await service.start()
+    try:
+        await service._memory.store(
+            MemoryItem(agent_id="chat-victim", content="LEAKED-SECRET", tier=MemoryTier.NORMAL)
+        )
+        reply = await service.handle_isolated_message("recall the notes", "local:prototype")
+        assert reply.status == "completed"
+        assert "LEAKED-SECRET" not in reply.text
+        # The model *did* attempt memory_query; nothing was ever dispatched.
+        assert "memory_query" in reply.text
+        assert llm.prompts and "Telegram" not in llm.prompts[0]
+        items = await service._memory.list_all(limit=100)
+        assert [item.content for item in items] == ["LEAKED-SECRET"]
+    finally:
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_isolated_turn_never_mirrors_text_to_lattice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _real_service(monkeypatch)
+    await service.start()
+    try:
+        lattice = _RecordingLattice()
+        service.orchestrator._lattice = lattice
+        reply = await service.handle_isolated_message("private phrase", "local:prototype")
+        assert reply.status == "completed"
+        assert lattice.created == []
+    finally:
+        service.orchestrator._lattice = None
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_legacy_turn_keeps_tool_and_lattice_behavior_for_other_callers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _real_service(monkeypatch)
+    await service.start()
+    try:
+        lattice = _RecordingLattice()
+        service.orchestrator._lattice = lattice
+        driver = _RecordingToolDriver()
+        service.orchestrator._tool_driver = driver
+
+        response = await service.handle_message("hello there", "telegram:someone", {})
+
+        assert response
+        # Unrelated (legacy) callers keep the previous semantics unchanged.
+        assert driver.runs == ["hello there"]
+        assert len(lattice.created) == 1
+        assert lattice.created[0]["payload"]["description"] == "hello there"
+    finally:
+        service.orchestrator._lattice = None
+        await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_chat_returns_non_200_when_real_model_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("agency.orchestrator.get_lattice", _no_lattice)
+
+    async def _boom(prompt: str, context: dict[str, Any]) -> str:
+        raise ValueError("boom-secret")
+
+    orchestrator = AgencyOrchestrator(
+        memory_db_path=":memory:",
+        llm=LLMAdapter(provider="echo", model="echo"),
+    )
+    orchestrator._executor = AgentExecutor(llm=_boom)
+    service = ButlerService(config=ButlerConfig(llm_provider="none"), orchestrator=orchestrator)
+    app = create_app(service)
+    with TestClient(app, base_url=LOCAL_BASE) as client:
+        token = _csrf(client)
+        response = client.post("/api/chat", json={"message": "hello"}, headers=_post_headers(token))
+    assert response.status_code == 502
+    assert response.json()["error"]
+    assert "boom-secret" not in response.text

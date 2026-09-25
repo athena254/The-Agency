@@ -9,12 +9,16 @@ surface than :mod:`agency.butler.server`:
 ``GET  /api/health``  ``{status, butler, agents}``.
 ``GET  /api/agents``  ``{agents: [{id, name, domain}]}``.
 ``GET  /api/session`` ``{csrf_token}`` for accepted local requests.
-``POST /api/chat``    ``{message}`` -> ``{response}`` for the local sender.
+``POST /api/chat``    ``{message}`` -> ``{response}`` via the isolated,
+                      tool-free, memory-free, non-mirrored Butler path
+                      (``502``/``504``/``503`` on failure).
 
 Every ``/api`` request must carry a loopback ``Host``; ``POST /api/chat``
 additionally requires a non-foreign ``Origin``, the per-process CSRF header
 and a JSON content type. There is no CORS middleware, no caller-supplied
 ``sender``/``context``/tool grant, and no agent creation or thread access.
+Chat runs only through the isolated read-only Butler path: no tool driver, no
+memory read/write, and no Lattice task mirror of the private text.
 Failures return an explicit non-2xx ``{"error": ...}`` without echoing the
 inbound message, model output, or raw exception text.
 """
@@ -328,10 +332,29 @@ def create_app(butler: ButlerService | None = None) -> FastAPI:
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 detail="Message exceeds the maximum allowed length.",
             )
-        response = await service.handle_message(
-            payload.message, LOCAL_SENDER, {}, memory_enabled=False
-        )
-        return ChatResponse(response=str(response))
+        # Fail closed: only the isolated, tool-free, memory-free path is used.
+        # If the service cannot offer it, refuse instead of falling back to the
+        # legacy tool/memory-capable ``handle_message``.
+        isolated = getattr(service, "handle_isolated_message", None)
+        if not callable(isolated):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Prototype chat is unavailable in this configuration.",
+            )
+        reply = await isolated(payload.message, LOCAL_SENDER)
+        status_value = str(getattr(reply, "status", "failed"))
+        if status_value == "timeout":
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="The Butler timed out before it could reply.",
+            )
+        if status_value != "completed":
+            # A failed turn is never a 200; the raw model/error text is not echoed.
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="The Butler could not complete the request.",
+            )
+        return ChatResponse(response=str(getattr(reply, "text", "")))
 
     @application.get("/", include_in_schema=False)
     async def index() -> FileResponse:
