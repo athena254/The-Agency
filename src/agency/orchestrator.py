@@ -43,8 +43,9 @@ from agency.memory.sms.store import MemoryStore
 from agency.risk.engine.engine import RiskEngine
 from agency.security.sandbox.config import SandboxBackend, SandboxConfig
 from agency.security.sandbox.manager import SandboxManager
-from agency.tools.base import ToolContext
+from agency.tools.base import BetaPrincipal, BetaToolPolicy, ToolContext
 from agency.tools.builtin import register_all as register_builtin_tools
+from agency.tools.builtin.web import WebSearchTool
 from agency.tools.driver import ToolDriver
 from agency.tools.registry import ToolRegistry
 
@@ -90,6 +91,15 @@ class AgencyOrchestrator:
         self._config = config or {}
         self._log = structlog.get_logger(__name__)
 
+        # Beta mode is explicit opt-in; validate strictly so a truthy
+        # string ("true"/"1") can never silently enable or disable gates.
+        if "beta_mode" in self._config and not isinstance(self._config["beta_mode"], bool):
+            raise TypeError(
+                f"beta_mode must be bool, got {type(self._config['beta_mode']).__name__}"
+            )
+        self._beta_mode: bool = bool(self._config.get("beta_mode", False))
+        self._audit_db_path: Any = self._config.get("audit_db_path")
+
         # LLM — shared adapter for all agent execution. Falls back to
         # deterministic echo mode when no API keys are configured, so
         # tests and offline runs never require network access.
@@ -114,7 +124,14 @@ class AgencyOrchestrator:
         self._identity_registry = AgentRegistry()
         self._policy_engine = PolicyEngine()
         self._task_manager = TaskManager()
-        self._audit_log = AuditLog(":memory:")
+        # Beta requires an explicit persistent audit path supplied by the
+        # bot integration (outside the tracked repo); nonbeta keeps the
+        # legacy in-memory default. Startup (not __init__) fails closed
+        # when the beta path is absent or ":memory:".
+        if self._beta_mode and isinstance(self._audit_db_path, str) and self._audit_db_path:
+            self._audit_log = AuditLog(self._audit_db_path)
+        else:
+            self._audit_log = AuditLog(":memory:")
 
         # Agents
         self._runtime_registry = RuntimeAgentRegistry()
@@ -162,6 +179,24 @@ class AgencyOrchestrator:
 
     async def start(self) -> None:
         """Start background services."""
+        if self._beta_mode:
+            # Fail closed: beta consequential decisions must persist.
+            if (
+                not isinstance(self._audit_db_path, str)
+                or not self._audit_db_path.strip()
+                or self._audit_db_path.strip() == ":memory:"
+            ):
+                raise ValueError("beta_mode requires explicit persistent audit_db_path")
+            # Rebind when the path was supplied but __init__ could not use
+            # it (defensive; normally already bound above).
+            try:
+                from pathlib import Path as _Path
+
+                current = str(getattr(self._audit_log, "_db_path", ""))
+                if current != self._audit_db_path.strip():
+                    self._audit_log = AuditLog(_Path(self._audit_db_path.strip()))
+            except Exception:  # noqa: BLE001 — initialize surfaces the failure.
+                self._log.warning("orchestrator.audit_rebind_failed", exc_info=True)
         await self._memory_store.initialize()
         await self._evidence_store.initialize()
         await self._audit_log.initialize()
@@ -174,16 +209,42 @@ class AgencyOrchestrator:
         """Wire the tool registry with live services (idempotent)."""
         if self._tool_registry is not None:
             return
-        registry = ToolRegistry(audit=self._audit_log)
-        register_builtin_tools(registry)
-        self._tool_registry = registry
-        self._tool_driver = ToolDriver(registry=registry, llm=self._llm_adapter)
+        if self._beta_mode:
+            # Beta allowlist seam: only pre-reviewed web_search is even
+            # advertised to the LLM (B-05 keeps web_fetch disabled).
+            # BetaToolPolicy additionally denies untrusted callers at
+            # call time; unlisted tools stay unknown (denied, never run).
+            registry = ToolRegistry(audit=self._audit_log, beta_policy=BetaToolPolicy())
+            registry.register(WebSearchTool())
+            self._tool_registry = registry
+        else:
+            registry = ToolRegistry(audit=self._audit_log)
+            register_builtin_tools(registry)
+            self._tool_registry = registry
+        self._tool_driver = ToolDriver(registry=self._tool_registry, llm=self._llm_adapter)
         self._log.info(
             "tool_layer_ready",
             tools=[s.name for s in registry.list_specs()],
         )
 
-    def _tool_context(self, agent_id: str, task_id: str) -> ToolContext:
+    def _beta_principal_from(self, context: dict[str, Any] | None) -> BetaPrincipal | None:
+        """Return the trusted beta principal, or None.
+
+        Only a real ``BetaPrincipal`` object constructed by trusted code
+        (Telegram admission) grants beta access. Plain strings, dicts,
+        ``sender`` labels, or ``metadata`` entries never do.
+        """
+        if not isinstance(context, dict):
+            return None
+        candidate = context.get("beta_principal")
+        return candidate if isinstance(candidate, BetaPrincipal) else None
+
+    def _tool_context(
+        self,
+        agent_id: str,
+        task_id: str,
+        context: dict[str, Any] | None = None,
+    ) -> ToolContext:
         """Build the per-task context with live services injected."""
         return ToolContext(
             agent_id=agent_id,
@@ -192,6 +253,7 @@ class AgencyOrchestrator:
             sandbox_manager=self._sandbox_manager,
             lattice=self._lattice,
             audit=self._audit_log,
+            beta_principal=self._beta_principal_from(context),
         )
 
     async def stop(self) -> None:
@@ -200,6 +262,10 @@ class AgencyOrchestrator:
         if self._lattice is not None:
             await self._lattice.close()
             self._lattice = None
+        try:
+            await self._audit_log.close()
+        except Exception:  # noqa: BLE001 — stop must stay best-effort.
+            self._log.warning("orchestrator.audit_close_failed", exc_info=True)
         self._started = False
         self._log.info("orchestrator_stopped")
 
@@ -405,6 +471,19 @@ class AgencyOrchestrator:
         6. Audit log the full execution
         7. Return ExecutionResult
         """
+        # Beta gate: trusted principal before any task mutation, LLM
+        # call, or memory write. No sender/metadata self-assertion.
+        beta_principal: BetaPrincipal | None = None
+        if self._beta_mode:
+            beta_principal = self._beta_principal_from(context)
+            if (
+                beta_principal is None
+                or isinstance(beta_principal.telegram_user_id, bool)
+                or beta_principal.telegram_user_id <= 0
+                or not beta_principal.private_chat
+            ):
+                raise PermissionError("beta: missing trusted identity")
+
         task = await self._task_manager.get_task(task_id)
         if task is None:
             raise ValueError(f"Task not found: {task_id}")
@@ -477,20 +556,35 @@ class AgencyOrchestrator:
                     f"(real, retrieved from memory):\n{memory_context}"
                 )
 
-            tool_ctx = self._tool_context(task.created_by, task_id)
+            tool_ctx = self._tool_context(task.created_by, task_id, context)
             loop_result = await tool_driver.run(
                 task=description,
                 system_prompt=system_prompt,
                 ctx=tool_ctx,
                 max_tool_iterations=_TOOL_ITERATIONS.get(agent_domain or "", 4),
             )
+            # Beta research integrity: a completed research turn requires
+            # at least one successful web_search. Failed/empty tool work,
+            # parse_error, max_iterations, and llm_error never launder to
+            # a successful research answer. General chat with no tool
+            # calls may still answer.
+            tool_output = loop_result.final_answer
+            loop_completed = loop_result.status == "completed"
+            if self._beta_mode and agent_domain == "research" and loop_completed:
+                has_search = any(s.tool == "web_search" and s.ok for s in loop_result.steps)
+                if not has_search:
+                    loop_completed = False
+                    tool_output = (
+                        "Research failed: no verified web_search evidence. "
+                        "No sources were retrieved."
+                    )
             subtask_results.append(
                 {
                     "subtask_id": "tool_loop",
-                    "status": "completed" if loop_result.status == "completed" else "failed",
+                    "status": "completed" if loop_completed else "failed",
                     "verification": "passed",
                     "risk_category": "none",
-                    "output": loop_result.final_answer,
+                    "output": tool_output,
                     "tool_steps": [s.model_dump() for s in loop_result.steps],
                     "tool_evidence": loop_result.evidence,
                 }
@@ -502,6 +596,33 @@ class AgencyOrchestrator:
                 tool_calls=len(loop_result.steps),
                 llm_calls=loop_result.llm_calls,
             )
+            # Persistent audit for the tool-loop decision (beta needs
+            # reopenable evidence even when zero tools ran). No prompts,
+            # tokens, or conversation content is stored here.
+            try:
+                await self._audit_log.append(
+                    AuditEntry(
+                        timestamp=datetime.now(UTC),
+                        agent=task.created_by,
+                        task=task_id,
+                        target=task.title,
+                        authorization="policy_engine",
+                        capability="execute",
+                        action="task.execute_tool_loop",
+                        result="completed" if loop_completed else "failed",
+                        evidence={
+                            "tool_status": loop_result.status,
+                            "tool_calls": len(loop_result.steps),
+                            "llm_calls": loop_result.llm_calls,
+                        },
+                        model="orchestrator",
+                        model_version="0.1.0",
+                        tool_version="0.1.0",
+                        environment={"name": "default"},
+                    )
+                )
+            except Exception:  # noqa: BLE001 — audit must never break execution.
+                self._log.warning("orchestrator.tool_loop_audit_failed", task_id=task_id)
 
         for subtask in graph.subtasks if not tool_capable else []:
             # Execute
@@ -575,10 +696,16 @@ class AgencyOrchestrator:
             "\n\n".join(outputs) if outputs else f"Executed {len(subtask_results)} subtasks"
         )
 
-        # Store in memory
+        # Store in memory — beta isolates per-owner scope so two
+        # Telegram users never mix rows under one shared agent id.
+        # Nonbeta keeps the legacy task.created_by owner.
+        if self._beta_mode and beta_principal is not None:
+            memory_owner = f"chat-telegram:{beta_principal.telegram_user_id}"
+        else:
+            memory_owner = task.created_by
         await self._memory_store.store(
             MemoryItem(
-                agent_id=task.created_by,
+                agent_id=memory_owner,
                 content=f"Task '{task.title}' → {final_output[:500]}",
                 tier=MemoryTier.NORMAL,
                 importance=0.7,

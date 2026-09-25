@@ -169,8 +169,9 @@ async def test_two_consecutive_malformed_forces_final() -> None:
     llm = FakeLLM(["garbage one", "garbage two"])
     driver = ToolDriver(registry, llm)
     result = await driver.run("task", "sys", make_ctx())
-    assert result.status == "completed"
-    assert result.final_answer == "garbage two"
+    assert result.status == "parse_error"
+    assert result.final_answer == "Could not produce a final answer."
+    assert "garbage two" not in result.final_answer
     assert result.steps == []
     assert result.llm_calls == 2
 
