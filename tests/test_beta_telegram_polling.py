@@ -13,7 +13,7 @@ import asyncio
 import sqlite3
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -424,3 +424,111 @@ async def test_stop_closes_db_safely(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert bot._poll_conn is None
     assert _poll_state(db_path) == 81
     await bot.stop()  # second close is safe
+
+
+# --- durable offset fail-closed: persist first, then advance memory ---
+
+
+@pytest.mark.asyncio
+async def test_beta_persist_failure_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Durable offset is fail-closed: persist first, then advance memory.
+
+    Injects sqlite OperationalError on the durable save after a successful
+    handler result. In-memory offset/seen must not advance, the batch must
+    stop (no later updates handled), backoff sleep must happen (no tight
+    spin), and the next poll must reuse the previous durable offset.
+    At-least-once only: a duplicate reply after crash is unavoidable.
+    """
+    db_path = str(tmp_path / "poll.db")
+    bot = _make_bot(tmp_path, monkeypatch, poll_db=db_path)
+    bot._handler = AsyncMock()
+    bot._handler.handle_update.return_value = {"status": "ok"}
+    bot._handler.close = AsyncMock()
+    bot._handler._adapter.get_updates = AsyncMock(return_value=[_private_update(10, 101, "hello")])
+    bot._running = True
+    assert await bot._poll_batch() == "ok"
+    assert bot._offset == 11
+    assert _poll_state(db_path) == 11
+
+    bot._handler.handle_update.reset_mock()
+    real_conn = bot._poll_conn
+    failing = MagicMock()
+    failing.execute.side_effect = sqlite3.OperationalError("injected persist failure")
+    bot._poll_conn = failing  # type: ignore[assignment]
+    bot._handler._adapter.get_updates = AsyncMock(
+        return_value=[_private_update(11, 101, "retry"), _private_update(12, 101, "next")]
+    )
+    delays: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
+    outcome = await bot._poll_batch()
+    assert outcome == "transient"
+    assert bot._offset == 11
+    assert 11 not in bot._seen
+    assert 12 not in bot._seen
+    assert _poll_state(db_path) == 11
+    # Failure stops the batch: second update is not handled.
+    assert bot._handler.handle_update.await_count == 1
+    # No tight spin: backoff sleep is required.
+    assert len(delays) >= 1
+    assert all(0 < d <= 30 for d in delays)
+    get_updates = bot._handler._adapter.get_updates
+    assert isinstance(get_updates, AsyncMock)
+    assert get_updates.await_args is not None
+    assert get_updates.await_args.kwargs.get("offset") == 11
+
+    # Next poll reuses previous durable offset (does not ack/drop update 11).
+    bot._poll_conn = real_conn
+    seen: list[dict[str, Any]] = []
+
+    async def _capture(**kwargs: Any) -> list[dict[str, Any]]:
+        seen.append(kwargs)
+        return []
+
+    bot._handler._adapter.get_updates = _capture  # type: ignore[method-assign]
+    assert await bot._poll_batch() == "ok"
+    assert seen and seen[0].get("offset") == 11
+    await bot.stop()
+
+
+@pytest.mark.asyncio
+async def test_beta_failed_persist_db_reopen_retains_old_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DB reopen after a failed persist retains the old durable offset."""
+    db_path = str(tmp_path / "poll.db")
+    bot = _make_bot(tmp_path, monkeypatch, poll_db=db_path)
+    bot._handler = AsyncMock()
+    bot._handler.handle_update.return_value = {"status": "ok"}
+    bot._handler.close = AsyncMock()
+    bot._handler._adapter.get_updates = AsyncMock(return_value=[_private_update(30, 101, "hello")])
+    bot._running = True
+    assert await bot._poll_batch() == "ok"
+    assert bot._offset == 31
+    assert _poll_state(db_path) == 31
+
+    real_conn = bot._poll_conn
+    failing = MagicMock()
+    failing.execute.side_effect = sqlite3.OperationalError("injected persist failure")
+    bot._poll_conn = failing  # type: ignore[assignment]
+    bot._handler._adapter.get_updates = AsyncMock(return_value=[_private_update(31, 101, "retry")])
+
+    async def _fake_sleep(delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
+    assert await bot._poll_batch() == "transient"
+    assert bot._offset == 31
+    assert _poll_state(db_path) == 31
+    bot._poll_conn = real_conn
+
+    restarted = _make_bot(tmp_path, monkeypatch, poll_db=db_path)
+    assert restarted._offset == 31
+    assert _poll_state(db_path) == 31
+    await bot.stop()
+    await restarted.stop()
