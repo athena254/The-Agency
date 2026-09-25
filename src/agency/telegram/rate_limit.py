@@ -14,7 +14,7 @@ Scope notes (read before wiring):
   resets every user's budget.
 - State growth is bounded: expired user entries are evicted before every
   new call, and at most ``max_users`` users are tracked (default 1000;
-  least-recently-seen user is dropped when full).
+  new identities are denied fail-closed while saturated).
 - No connection to config metadata or user-supplied chat text: the only
   input is the numeric user ID. Invalid identities (``0``, negatives,
   bools, non-ints) are denied without consuming budget or creating state.
@@ -131,7 +131,6 @@ class BetaRateLimiter:
             self._hits[user_id] = stamps
             return True
         if len(self._hits) >= self._max_users:
-            oldest = next(iter(self._hits))
-            del self._hits[oldest]
+            return False
         self._hits[user_id] = deque([moment], maxlen=self._max_requests)
         return True
