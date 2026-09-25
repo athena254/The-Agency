@@ -164,13 +164,13 @@ async def test_malformed_then_recovery() -> None:
     assert "not valid JSON" in llm.calls[1][0]
 
 
-async def test_two_consecutive_malformed_forces_final() -> None:
+async def test_two_consecutive_malformed_fails_closed() -> None:
     registry = make_registry_with_search()
     llm = FakeLLM(["garbage one", "garbage two"])
     driver = ToolDriver(registry, llm)
     result = await driver.run("task", "sys", make_ctx())
-    assert result.status == "completed"
-    assert result.final_answer == "garbage two"
+    assert result.status == "parse_error"
+    assert result.final_answer == "Could not produce a final answer."
     assert result.steps == []
     assert result.llm_calls == 2
 
