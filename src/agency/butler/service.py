@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from agency.agents.executor import ExecutionStatus
 from agency.butler.config import ButlerConfig
 from agency.butler.router import MessageRouter
 from agency.butler.threads import Thread, ThreadMessage, ThreadStore, Workspace
@@ -44,6 +45,14 @@ _DEFAULT_DOMAINS: tuple[str, ...] = (
     "research",
     "general",
 )
+
+
+class ButlerExecutionError(RuntimeError):
+    """Typed failure for non-completed orchestrator execution.
+
+    Carries only the terminal status (no traceback, output, or secrets) so
+    ``handle_message`` can render an honest error turn.
+    """
 
 
 class ButlerService:
@@ -306,6 +315,21 @@ class ButlerService:
             agent_id=agent.id,
         )
         result = await self._orchestrator.execute_task(task.task_id, context=context)
+        if result.status is not ExecutionStatus.COMPLETED:
+            await self._audit_append(
+                agent=agent.id,
+                action="butler.execute",
+                result=result.status.value,
+                target=task.title,
+                evidence={"task_id": task.task_id},
+            )
+            self._log.warning(
+                "butler.execute_failed_status",
+                agent_id=agent.id,
+                task_id=task.task_id,
+                status=result.status.value,
+            )
+            raise ButlerExecutionError(f"Task execution failed with status: {result.status.value}")
         output = result.output if isinstance(result.output, str) else str(result.output)
         await self._audit_append(
             agent=agent.id,
@@ -461,4 +485,4 @@ class ButlerService:
             self._log.exception("butler.memory_store_failed")
 
 
-__all__ = ["ButlerService", "LLMCallable"]
+__all__ = ["ButlerExecutionError", "ButlerService", "LLMCallable"]
