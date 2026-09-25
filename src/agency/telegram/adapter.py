@@ -14,9 +14,17 @@ logger = structlog.get_logger(__name__)
 
 
 def _object_result(data: Any) -> dict[str, Any]:
+    """Return ``data["result"]`` when it is a JSON object, else fail loudly.
+
+    A malformed Bot API reply is a contract violation, not a programming
+    error: raise ``ValueError`` so callers classify it as bad upstream data.
+    The message never includes the response body (it can carry chat content).
+    """
     result = data["result"]
     if not isinstance(result, dict):
-        raise TypeError("Telegram API result must be an object")
+        # ruff: TRY004 wants TypeError here, but a malformed Bot API reply is
+        # bad upstream data, not a caller passing the wrong type.
+        raise ValueError("Telegram API result must be an object")  # noqa: TRY004
     return result
 
 
@@ -115,8 +123,11 @@ class TelegramAdapter:
         if not data.get("ok"):
             raise RuntimeError(f"Telegram API error: {data}")
         results = data.get("result", [])
+        # getUpdates must return a JSON array of update objects. Reject a
+        # malformed payload (scalar, object, or non-object members) without
+        # putting the response body in the error or any log line.
         if not isinstance(results, list) or any(not isinstance(item, dict) for item in results):
-            raise ValueError("Telegram API updates must be a list of objects")
+            raise ValueError("Telegram API result must be a list of objects")
         return results
 
     async def set_webhook(self, url: str, secret_token: str | None = None) -> bool:
