@@ -135,7 +135,15 @@ class LLMAdapter:
             else:
                 raise ValueError(f"Unsupported LLM provider: {provider!r}")
         except Exception as e:
-            self._log.error("llm_error", provider=provider, model=model, error=str(e))
+            # Never log the exception body: provider errors can echo the request
+            # payload (private prompt/chat content). The class name is enough to
+            # diagnose the failure without leaking user text.
+            self._log.error(
+                "llm_error",
+                provider=provider,
+                model=model,
+                error_class=type(e).__name__,
+            )
             # A failed model call is never a successful echo reply, even when
             # the caller requests strict=False. Echo is an explicit provider.
             raise
