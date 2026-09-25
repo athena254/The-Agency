@@ -69,6 +69,10 @@ class TelegramHandler:
 
     async def handle_update(self, update: dict[str, Any]) -> dict[str, Any]:
         """Handle a single Telegram update."""
+        if not isinstance(update, dict):
+            if self._config.beta_mode:
+                return {"status": "rejected", "reason": "invalid update"}
+            return {"status": "ignored", "reason": "no message"}
         message = update.get("message", {})
         if self._config.beta_mode:
             if not isinstance(message, dict) or not message:
@@ -111,6 +115,12 @@ class TelegramHandler:
         # Bot commands are answered deterministically from real system
         # state — never through the LLM, so no fiction is possible.
         command = text.strip().lower()
+        if self._config.beta_mode:
+            proposal_token = command.split(None, 1)[0] if command else ""
+            if proposal_token == "/proposals":
+                if chat_id:
+                    await self._adapter.send_message(chat_id, BETA_CREATION_DISABLED)
+                return {"status": "rejected", "reason": "agent creation disabled"}
         if command == "/name" or command.startswith("/name "):
             response = self._name_command(user_id, text.strip()[len("/name") :].strip(), private)
             if chat_id:
@@ -543,8 +553,15 @@ class TelegramHandler:
             if beta_reason is not None:
                 raise ValueError(beta_reason)
             beta_text = message.get("text", "")
-            if isinstance(beta_text, str) and self._is_agent_creation_attempt(beta_text):
-                return BETA_CREATION_DISABLED
+            if isinstance(beta_text, str):
+                normalized = beta_text.strip().lower()
+                token = normalized.split(None, 1)[0] if normalized else ""
+                if token == "/proposals" or normalized.startswith(
+                    ("/propose-agent", "/propose_agent")
+                ):
+                    return BETA_CREATION_DISABLED
+                if self._is_agent_creation_attempt(beta_text):
+                    return BETA_CREATION_DISABLED
         text = message.get("text", "")
         user_id = message.get("from", {}).get("id")
         if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
