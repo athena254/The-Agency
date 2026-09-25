@@ -15,6 +15,15 @@ from agency.telegram.profile_store import ProfileStore
 
 logger = structlog.get_logger(__name__)
 
+BETA_CREATION_DISABLED = "Agent creation is disabled in this beta."
+
+_CREATION_ATTEMPT = re.compile(
+    r"\b(create|make|build|spawn|add)\b.*\b(agent|bot)\b"
+    r"|\b(agent|bot)\b.*\b(create|make|build|spawn|add|new)\b"
+    r"|\bnew\s+(agent|bot)\b",
+    re.IGNORECASE,
+)
+
 
 class TelegramHandler:
     """Handles incoming Telegram messages and routes them to the Butler."""
@@ -29,9 +38,44 @@ class TelegramHandler:
         self._profiles = profile_store if profile_store is not None else ProfileStore(":memory:")
         self._log = structlog.get_logger(__name__)
 
+    def _beta_rejection_reason(self, message: dict[str, Any]) -> str | None:
+        """Shared beta preflight: invite/private/text boundary before any side effect."""
+        from_field = message.get("from")
+        from_map = from_field if isinstance(from_field, dict) else {}
+        user_id = from_map.get("id")
+        if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
+            return "missing Telegram user ID"
+        chat_field = message.get("chat")
+        chat_map = chat_field if isinstance(chat_field, dict) else {}
+        if chat_map.get("type") != "private":
+            return "beta requires private chat"
+        chat_id = chat_map.get("id")
+        if isinstance(chat_id, bool) or not isinstance(chat_id, int) or chat_id <= 0:
+            return "missing Telegram chat ID"
+        if chat_id != user_id:
+            return "chat id mismatch"
+        if user_id not in self._config.allowed_user_ids:
+            return "user not invited"
+        text = message.get("text")
+        if not isinstance(text, str) or not text.strip():
+            return "missing text"
+        if len(text) > self._config.max_message_length:
+            return "message too long"
+        return None
+
+    def _is_agent_creation_attempt(self, text: str) -> bool:
+        """Conservative plain-English creation check used only for the beta guard."""
+        return bool(_CREATION_ATTEMPT.search(text))
+
     async def handle_update(self, update: dict[str, Any]) -> dict[str, Any]:
         """Handle a single Telegram update."""
         message = update.get("message", {})
+        if self._config.beta_mode:
+            if not isinstance(message, dict) or not message:
+                return {"status": "rejected", "reason": "no message"}
+            beta_reason = self._beta_rejection_reason(message)
+            if beta_reason is not None:
+                return {"status": "rejected", "reason": beta_reason}
         if not message:
             return {"status": "ignored", "reason": "no message"}
 
@@ -73,6 +117,10 @@ class TelegramHandler:
                 await self._adapter.send_message(chat_id, response)
             return {"status": "ok", "chat_id": chat_id, "command": "/name"}
         if command in ("/agents", "/status", "/whoami", "/proposals", "/start", "/help"):
+            if self._config.beta_mode and command == "/proposals":
+                if chat_id:
+                    await self._adapter.send_message(chat_id, BETA_CREATION_DISABLED)
+                return {"status": "rejected", "reason": "agent creation disabled"}
             response = await self._system_answer(command, display_name)
             if chat_id:
                 await self._adapter.send_message(chat_id, response)
@@ -90,6 +138,10 @@ class TelegramHandler:
         # /propose-agent <name> <domain> <capability1> [capability2 ...]
         # (also /propose_agent — Telegram menus can't contain hyphens)
         if command.startswith(("/propose-agent", "/propose_agent")):
+            if self._config.beta_mode:
+                if chat_id:
+                    await self._adapter.send_message(chat_id, BETA_CREATION_DISABLED)
+                return {"status": "rejected", "reason": "agent creation disabled"}
             args = text.strip().split(maxsplit=1)[1] if " " in text.strip() else ""
             response = await self._handle_propose_agent(args, sender)
             if chat_id:
@@ -99,6 +151,11 @@ class TelegramHandler:
         # Plain-English agent creation: detect intent and handle
         # without LLM. This lets users say "create a new agent
         # called X that does Y" instead of memorizing commands.
+        # Beta denies creation before any governance path.
+        if self._config.beta_mode and self._is_agent_creation_attempt(text):
+            if chat_id:
+                await self._adapter.send_message(chat_id, BETA_CREATION_DISABLED)
+            return {"status": "rejected", "reason": "agent creation disabled"}
         agent_intent = self._detect_agent_creation_intent(text)
         if agent_intent and self._butler:
             self._log.info("telegram.agent_creation_intent", intent=agent_intent, sender=sender)
@@ -206,6 +263,18 @@ class TelegramHandler:
         if command == "/proposals":
             return await self._list_proposals()
         if command in ("/start", "/help"):
+            if self._config.beta_mode:
+                return (
+                    f"🤖 *The Agency — {display_name}*\n\n"
+                    "Commands:\n"
+                    "• /research <topic> — Web research with cited sources\n"
+                    "• /agents — List registered agents\n"
+                    "• /status — Live system health\n"
+                    "• /whoami — What this bot is\n"
+                    "• /name <nickname> — Your private name for me (/name reset to undo)\n\n"
+                    "Or just chat — plain English routes to the right agent.\n"
+                    "The Telegram bot account is shared; this name is private to your conversations."
+                )
             return (
                 f"🤖 *The Agency — {display_name}*\n\n"
                 "Commands:\n"
@@ -467,6 +536,15 @@ class TelegramHandler:
 
     async def process_message(self, message: dict[str, Any]) -> str:
         """Process a message and return the response text."""
+        if self._config.beta_mode:
+            if not isinstance(message, dict) or not message:
+                raise ValueError("no message")
+            beta_reason = self._beta_rejection_reason(message)
+            if beta_reason is not None:
+                raise ValueError(beta_reason)
+            beta_text = message.get("text", "")
+            if isinstance(beta_text, str) and self._is_agent_creation_attempt(beta_text):
+                return BETA_CREATION_DISABLED
         text = message.get("text", "")
         user_id = message.get("from", {}).get("id")
         if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
