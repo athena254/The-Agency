@@ -241,13 +241,12 @@ class TelegramBot:
             delay = self._backoff_delay()
             logger.warning(
                 "telegram_poll_transient",
-                error=str(exc),
+                error_type=type(exc).__name__,
                 backoff=delay,
                 attempt=self._consecutive_failures,
             )
             await asyncio.sleep(delay)
             return "transient"
-        self._consecutive_failures = 0
         for update in updates:
             update_id = _extract_update_id(update)
             if update_id is None:
@@ -259,8 +258,19 @@ class TelegramBot:
             try:
                 result = await self._handler.handle_update(update)
             except Exception as exc:  # noqa: BLE001 — failed send stays pending.
-                logger.error("telegram_poll_handler_error", error=str(exc), update_id=update_id)
-                break
+                # Handler/DB failure: back off, keep offset — Telegram will
+                # redeliver this update on the next getUpdates call.
+                self._consecutive_failures += 1
+                delay = self._backoff_delay()
+                logger.error(
+                    "telegram_poll_handler_error",
+                    error_type=type(exc).__name__,
+                    update_id=update_id,
+                    backoff=delay,
+                    attempt=self._consecutive_failures,
+                )
+                await asyncio.sleep(delay)
+                return "transient"
             status = result.get("status") if isinstance(result, dict) else None
             if status in _ADVANCING_STATUSES:
                 next_offset = update_id + 1
@@ -268,11 +278,12 @@ class TelegramBot:
                     if self._poll_conn is not None:
                         try:
                             self._persist_offset(next_offset)
-                        except Exception:  # noqa: BLE001 — durable commit failed.
+                        except Exception as exc:  # noqa: BLE001 — durable commit failed.
                             self._consecutive_failures += 1
                             delay = self._backoff_delay()
                             logger.warning(
                                 "telegram_poll_persist_retry",
+                                error_type=type(exc).__name__,
                                 backoff=delay,
                                 attempt=self._consecutive_failures,
                                 update_id=update_id,
@@ -287,8 +298,20 @@ class TelegramBot:
                     if len(self._seen) > _MAX_SEEN_IDS:
                         self._seen = set(sorted(self._seen)[-_MAX_SEEN_IDS:])
             else:
-                logger.warning("telegram_poll_not_advanced", status=status, update_id=update_id)
-                break
+                # Non-terminal handler status: back off, keep offset — the
+                # update stays pending for retry, never dropped.
+                self._consecutive_failures += 1
+                delay = self._backoff_delay()
+                logger.warning(
+                    "telegram_poll_not_advanced",
+                    status=status,
+                    update_id=update_id,
+                    backoff=delay,
+                    attempt=self._consecutive_failures,
+                )
+                await asyncio.sleep(delay)
+                return "transient"
+        self._consecutive_failures = 0
         return "ok"
 
     async def _poll(self) -> None:

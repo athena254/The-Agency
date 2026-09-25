@@ -157,7 +157,7 @@ async def test_failed_send_leaves_offset_pending_and_retries(
     update = _private_update(20, 101, "hello")
     bot._handler._adapter.get_updates = AsyncMock(return_value=[update])  # type: ignore[method-assign]
     bot._running = True
-    assert await bot._poll_batch() == "ok"
+    assert await bot._poll_batch() == "transient"  # failed send backs off (P-D1)
     assert bot._offset is None  # failed send must not advance (P-D1)
     assert _poll_state(db_path) is None
     assert await bot._poll_batch() == "ok"
@@ -181,7 +181,7 @@ async def test_error_status_does_not_advance(
     bot._handler._adapter.get_updates = AsyncMock(return_value=[_private_update(30, 101, "hello")])
     bot._handler.close = AsyncMock()
     bot._running = True
-    assert await bot._poll_batch() == "ok"
+    assert await bot._poll_batch() == "transient"  # error status backs off
     assert bot._offset is None
     assert _poll_state(db_path) is None
     assert await bot._poll_batch() == "ok"
@@ -373,7 +373,12 @@ async def test_nonbeta_advances_only_after_success(
     bot._handler._adapter.get_updates = AsyncMock(return_value=[{"update_id": 60}])
     bot._handler.close = AsyncMock()
     bot._running = True
-    assert await bot._poll_batch() == "ok"
+
+    async def _no_sleep(delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
+    assert await bot._poll_batch() == "transient"  # failed handler backs off
     assert bot._offset is None
     assert await bot._poll_batch() == "ok"
     assert bot._offset == 61
