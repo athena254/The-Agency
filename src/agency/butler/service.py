@@ -13,12 +13,14 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from agency.agents.executor import ExecutionStatus
 from agency.butler.config import ButlerConfig
 from agency.butler.router import MessageRouter
 from agency.butler.threads import Thread, ThreadMessage, ThreadStore, Workspace
@@ -44,6 +46,18 @@ _DEFAULT_DOMAINS: tuple[str, ...] = (
     "research",
     "general",
 )
+
+
+@dataclass(frozen=True)
+class ButlerReply:
+    """A read-only conversational turn with an explicit execution status."""
+
+    text: str
+    status: str
+
+
+class ButlerExecutionError(RuntimeError):
+    """Non-completed orchestrator execution without raw output or secrets."""
 
 
 class ButlerService:
@@ -282,6 +296,81 @@ class ButlerService:
         )
         return response
 
+    async def handle_isolated_message(self, message: str, sender: str) -> ButlerReply:
+        """Run a read-only, tool-free, memory-free turn for a local caller.
+
+        Unlike :meth:`handle_message`, this path deliberately does **not**:
+
+        * recall or persist memory (``memory_enabled=False`` alone is not
+          enough — the tool driver could still reach ``memory_query`` /
+          ``memory_write``),
+        * run the tool driver, so no tool is reachable even if the model asks,
+        * mirror the private text to the Lattice,
+        * read or write per-owner threads,
+        * accept caller-supplied context, scope or privilege.
+
+        Only the fixed ``sender`` chosen by the local adapter is forwarded. A
+        :class:`ButlerReply` carries the real execution status so the caller
+        can fail closed instead of showing a failed turn as success.
+        """
+        await self._ensure_started()
+        if not message or not message.strip():
+            raise ValueError("message must not be empty.")
+        text = message.strip()
+        if len(text) > self._config.max_message_length:
+            self._log.warning(
+                "butler.message_truncated",
+                sender=sender,
+                length=len(text),
+                max_length=self._config.max_message_length,
+            )
+            text = text[: self._config.max_message_length]
+
+        # No caller-supplied context is trusted; only the fixed sender.
+        merged: dict[str, Any] = {"sender": sender}
+        started = datetime.now(UTC)
+        agent = await self.route(text, merged)
+        await self._audit_append(
+            agent=agent.id,
+            action="butler.route_isolated",
+            result="routed",
+            target=agent.domain,
+            evidence={"sender": sender, "message_length": len(text)},
+        )
+
+        status = "failed"
+        reply_text = "Sorry, I could not process that request."
+        try:
+            result = await asyncio.wait_for(
+                self._orchestrator.converse_isolated(text, agent.id, context=merged),
+                timeout=self._config.timeout,
+            )
+            status = str(result.status.value)
+            output = result.output
+            reply_text = output if isinstance(output, str) else str(output)
+        except TimeoutError as exc:
+            status = "timeout"
+            reply_text = f"Request timed out after {self._config.timeout:g}s. Please try again."
+            self._log.warning("butler.isolated_timeout", sender=sender, error=str(exc))
+        except Exception:  # noqa: BLE001 — never surface raw exception text or stack.
+            status = "failed"
+            self._log.exception("butler.isolated_failed", sender=sender)
+
+        # Sanitized audit: message/response bodies are never persisted here.
+        await self._audit_append(
+            agent=agent.id,
+            action="butler.handle_isolated_message",
+            result=status,
+            target=agent.domain,
+            evidence={
+                "sender": sender,
+                "message_length": len(text),
+                "response_length": len(reply_text),
+                "duration_s": (datetime.now(UTC) - started).total_seconds(),
+            },
+        )
+        return ButlerReply(text=reply_text, status=status)
+
     async def route(self, message: str, context: dict[str, Any]) -> Agent:
         """Select the handling agent, preferring the LLM when configured."""
         llm = self._llm or self._build_llm_from_config()
@@ -306,6 +395,21 @@ class ButlerService:
             agent_id=agent.id,
         )
         result = await self._orchestrator.execute_task(task.task_id, context=context)
+        if result.status is not ExecutionStatus.COMPLETED:
+            await self._audit_append(
+                agent=agent.id,
+                action="butler.execute",
+                result=result.status.value,
+                target=task.title,
+                evidence={"task_id": task.task_id},
+            )
+            self._log.warning(
+                "butler.execute_failed_status",
+                agent_id=agent.id,
+                task_id=task.task_id,
+                status=result.status.value,
+            )
+            raise ButlerExecutionError(f"Task execution failed with status: {result.status.value}")
         output = result.output if isinstance(result.output, str) else str(result.output)
         await self._audit_append(
             agent=agent.id,
@@ -461,4 +565,4 @@ class ButlerService:
             self._log.exception("butler.memory_store_failed")
 
 
-__all__ = ["ButlerService", "LLMCallable"]
+__all__ = ["ButlerExecutionError", "ButlerReply", "ButlerService", "LLMCallable"]

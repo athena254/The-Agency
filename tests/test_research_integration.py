@@ -7,7 +7,9 @@ no network access is needed.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -130,6 +132,29 @@ class TestResearchTelegramCommand:
     async def test_research_no_butler(self, handler):
         response = await handler._handle_research("rust news", "user")
         assert "Butler not running" in response
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", ["failed", "timeout", "cancelled"])
+    async def test_research_failure_is_not_announced_as_complete(self, handler, status):
+        from agency.agents.executor import ExecutionStatus
+
+        orchestrator = SimpleNamespace(
+            list_agents=AsyncMock(
+                return_value=[SimpleNamespace(id="research-1", domain="research")]
+            ),
+            submit_task=AsyncMock(return_value=SimpleNamespace(task_id="task-1")),
+            execute_task=AsyncMock(
+                return_value=SimpleNamespace(
+                    status=ExecutionStatus(status), output="private upstream error and key"
+                )
+            ),
+        )
+        handler._butler = SimpleNamespace(orchestrator=orchestrator)
+        response = await handler._handle_research("rust news", "telegram:101")
+        assert "Research complete" not in response
+        assert "private upstream error" not in response
+        assert "could not" in response.lower() or "timed out" in response.lower()
+        await handler.close()
 
 
 class TestRouterResearchKeywords:

@@ -14,10 +14,42 @@ logger = structlog.get_logger(__name__)
 
 
 def _object_result(data: Any) -> dict[str, Any]:
+    """Return ``data["result"]`` when it is a JSON object, else fail loudly.
+
+    A malformed Bot API reply is a contract violation, not a programming
+    error: raise ``ValueError`` so callers classify it as bad upstream data.
+    The message never includes the response body (it can carry chat content).
+    """
     result = data["result"]
     if not isinstance(result, dict):
-        raise TypeError("Telegram API result must be an object")
+        # ruff: TRY004 wants TypeError here, but a malformed Bot API reply is
+        # bad upstream data, not a caller passing the wrong type.
+        raise ValueError("Telegram API result must be an object")  # noqa: TRY004
     return result
+
+
+def _checked_data(response: httpx.Response) -> dict[str, Any]:
+    """Validate a Bot API reply without exposing the token URL or body.
+
+    Bot API URLs contain the token; an ordinary httpx status exception prints
+    that URL. A sanitized response preserves the status for poller handling.
+    """
+    if response.status_code < 200 or response.status_code >= 300:
+        safe_request = httpx.Request("GET", "https://api.telegram.org/")
+        safe_response = httpx.Response(response.status_code, request=safe_request)
+        raise httpx.HTTPStatusError(
+            f"Telegram API HTTP status {response.status_code}",
+            request=safe_request,
+            response=safe_response,
+        )
+    try:
+        data = response.json()
+    except (TypeError, ValueError):
+        raise ValueError("Telegram API response is invalid JSON") from None
+    if not isinstance(data, dict):
+        # Malformed upstream JSON is a protocol error, not a caller type error.
+        raise ValueError("Telegram API response must be an object")  # noqa: TRY004
+    return data
 
 
 class TelegramAdapter:
@@ -48,20 +80,18 @@ class TelegramAdapter:
         """Get bot info."""
         client = await self._get_client()
         resp = await client.get("/getMe")
-        resp.raise_for_status()
-        data = resp.json()
+        data = _checked_data(resp)
         if not data.get("ok"):
-            raise RuntimeError(f"Telegram API error: {data}")
+            raise RuntimeError("Telegram API request was rejected")
         return _object_result(data)
 
     async def set_my_commands(self, commands: list[dict[str, str]]) -> bool:
         """Register the bot's command menu (Telegram setMyCommands)."""
         client = await self._get_client()
         resp = await client.post("/setMyCommands", json={"commands": commands})
-        resp.raise_for_status()
-        data = resp.json()
+        data = _checked_data(resp)
         if not data.get("ok"):
-            raise RuntimeError(f"Telegram API error: {data}")
+            raise RuntimeError("Telegram API request was rejected")
         return data.get("result") is True
 
     async def send_message(
@@ -86,10 +116,9 @@ class TelegramAdapter:
                 payload["parse_mode"] = parse_mode or self._config.parse_mode
 
             resp = await client.post("/sendMessage", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
+            data = _checked_data(resp)
             if not data.get("ok"):
-                raise RuntimeError(f"Telegram API error: {data}")
+                raise RuntimeError("Telegram API request was rejected")
             results.append(data["result"])
             # Small delay between chunks to avoid rate limits
             if len(chunks) > 1:
@@ -110,13 +139,15 @@ class TelegramAdapter:
             params["offset"] = offset
 
         resp = await client.get("/getUpdates", params=params)
-        resp.raise_for_status()
-        data = resp.json()
+        data = _checked_data(resp)
         if not data.get("ok"):
-            raise RuntimeError(f"Telegram API error: {data}")
+            raise RuntimeError("Telegram API request was rejected")
         results = data.get("result", [])
+        # getUpdates must return a JSON array of update objects. Reject a
+        # malformed payload (scalar, object, or non-object members) without
+        # putting the response body in the error or any log line.
         if not isinstance(results, list) or any(not isinstance(item, dict) for item in results):
-            raise ValueError("Telegram API updates must be a list of objects")
+            raise ValueError("Telegram API result must be a list of objects")
         return results
 
     async def set_webhook(self, url: str, secret_token: str | None = None) -> bool:
@@ -127,16 +158,14 @@ class TelegramAdapter:
             payload["secret_token"] = secret_token
 
         resp = await client.post("/setWebhook", json=payload)
-        resp.raise_for_status()
-        data = resp.json()
+        data = _checked_data(resp)
         return data.get("ok") is True
 
     async def delete_webhook(self) -> bool:
         """Delete webhook."""
         client = await self._get_client()
         resp = await client.post("/deleteWebhook")
-        resp.raise_for_status()
-        data = resp.json()
+        data = _checked_data(resp)
         return data.get("ok") is True
 
     @staticmethod

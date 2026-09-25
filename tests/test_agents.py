@@ -1,5 +1,7 @@
 """Tests for runtime agents: planner, executor, verifier, loop, registry."""
 
+from typing import Any
+
 import pytest
 
 from agency.agents.executor import AgentExecutor, ExecutionContext, ExecutionStatus
@@ -100,6 +102,34 @@ def test_planner_ready_respects_dependencies(test_runtime_registry: AgentRegistr
 # --- Executor --- #
 
 
+class _LogCapture:
+    """Capture structlog-style calls (structlog bypasses pytest caplog)."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def debug(self, *args: Any, **kwargs: Any) -> None:
+        self.events.append(("debug", args, kwargs))
+
+    def info(self, *args: Any, **kwargs: Any) -> None:
+        self.events.append(("info", args, kwargs))
+
+    def warning(self, *args: Any, **kwargs: Any) -> None:
+        self.events.append(("warning", args, kwargs))
+
+    def error(self, *args: Any, **kwargs: Any) -> None:
+        self.events.append(("error", args, kwargs))
+
+    def exception(self, *args: Any, **kwargs: Any) -> None:
+        self.events.append(("exception", args, kwargs))
+
+    def text(self) -> str:
+        return " ".join(
+            " ".join([str(a) for a in args] + [f"{k}={v}" for k, v in kwargs.items()])
+            for _, args, kwargs in self.events
+        )
+
+
 async def test_executor_success():
     ex = AgentExecutor(llm=lambda prompt, ctx: f"echo:{prompt}")
     result = await ex.execute("hello")
@@ -144,6 +174,55 @@ async def test_executor_timeout():
     ex = AgentExecutor(llm=slow)
     result = await ex.execute("t", ExecutionContext(timeout_s=0.05, max_retries=0))
     assert result.status in (ExecutionStatus.TIMEOUT, ExecutionStatus.FAILED)
+
+
+async def test_executor_non_retryable_failure_logs_no_private_exception_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A private model/prompt phrase in a ValueError must not reach logs."""
+    phrase = "private-user-phrase"
+
+    async def bad(prompt, ctx):
+        raise ValueError(phrase)
+
+    ex = AgentExecutor(llm=bad)
+    logs = _LogCapture()
+    monkeypatch.setattr(ex, "_log", logs)
+
+    result = await ex.execute("t", ExecutionContext(max_retries=3, backoff_base_s=0.0))
+
+    assert result.status is ExecutionStatus.FAILED
+    assert result.attempts == 1  # non-retryable fails fast
+    logged = logs.text()
+    assert phrase not in logged
+    assert "executor.non_retryable" in logged  # diagnostic event name preserved
+    assert "ValueError" in logged  # class-level diagnostic preserved
+    # No traceback dump / raw exception body is emitted.
+    assert all(level != "exception" for level, _, _ in logs.events)
+    assert all("error" not in kwargs and "exc_info" not in kwargs for _, _, kwargs in logs.events)
+
+
+async def test_executor_transient_failure_logs_no_private_exception_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A transient provider failure must not log the raw exception body."""
+    phrase = "private-user-phrase"
+
+    async def flaky(prompt, ctx):
+        raise ConnectionError(phrase)
+
+    ex = AgentExecutor(llm=flaky)
+    logs = _LogCapture()
+    monkeypatch.setattr(ex, "_log", logs)
+
+    result = await ex.execute("t", ExecutionContext(max_retries=0, backoff_base_s=0.0))
+
+    assert result.status is ExecutionStatus.FAILED
+    logged = logs.text()
+    assert phrase not in logged
+    assert "executor.retry" in logged  # diagnostic event name preserved
+    assert "ConnectionError" in logged  # class-level diagnostic preserved
+    assert all("error" not in kwargs and "exc_info" not in kwargs for _, _, kwargs in logs.events)
 
 
 # --- Verifier --- #

@@ -211,7 +211,14 @@ class AgentExecutor:
                         )
                 except _NON_RETRYABLE as exc:
                     last_error = f"{type(exc).__name__}: {exc}"
-                    self._log.exception("executor.non_retryable", task_id=tid)
+                    # Never dump the exception body/traceback: a model failure can
+                    # echo the private prompt. Class + attempt + task id suffice.
+                    self._log.error(
+                        "executor.non_retryable",
+                        task_id=tid,
+                        attempt=attempts,
+                        error_class=type(exc).__name__,
+                    )
                     self._set_status(tid, ExecutionStatus.FAILED)
                     return self._result(
                         tid, ExecutionStatus.FAILED, None, last_error, attempts, started, ctx
@@ -219,7 +226,10 @@ class AgentExecutor:
                 except Exception as exc:  # noqa: BLE001 — transient by definition here
                     last_error = f"{type(exc).__name__}: {exc}"
                     self._log.warning(
-                        "executor.retry", task_id=tid, attempt=attempts, error=last_error
+                        "executor.retry",
+                        task_id=tid,
+                        attempt=attempts,
+                        error_class=type(exc).__name__,
                     )
                     if attempt >= max_retries:
                         self._set_status(tid, ExecutionStatus.FAILED)

@@ -5,6 +5,8 @@
 > **Date:** 2026-09-22
 > **Author:** Hermes Agent + Danny Dis
 
+> **Architecture correction:** This earlier SQLite-first, *central* single-source-of-truth design describes an implementation phase, not the owner's target. The Agency must be fully decentralized: agents collectively govern through peer proposals, affected-consumer input, attributable votes and accountable outcomes; Butler only connects users to that system. See [SPEC_PEER_LATTICE_GOVERNANCE.md](SPEC_PEER_LATTICE_GOVERNANCE.md). Do not call the current single-process governance engine decentralized consensus.
+
 ---
 
 ## 1. Purpose & Scope

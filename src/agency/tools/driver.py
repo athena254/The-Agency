@@ -299,11 +299,11 @@ class ToolDriver:
             parse_failures += 1
             if parse_failures >= 2:
                 return ToolLoopResult(
-                    final_answer=raw_text.strip() or _FALLBACK_PARSE_FAILURE,
+                    final_answer=_FALLBACK_PARSE_FAILURE,
                     steps=steps,
                     evidence=evidence,
                     llm_calls=llm_calls,
-                    status="completed",
+                    status="parse_error",
                 )
             history.append({"assistant": raw_text, "observation": _INVALID_JSON_OBSERVATION})
 
