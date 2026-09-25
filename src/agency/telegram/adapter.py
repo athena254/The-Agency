@@ -28,6 +28,30 @@ def _object_result(data: Any) -> dict[str, Any]:
     return result
 
 
+def _checked_data(response: httpx.Response) -> dict[str, Any]:
+    """Validate a Bot API reply without exposing the token URL or body.
+
+    Bot API URLs contain the token; an ordinary httpx status exception prints
+    that URL. A sanitized response preserves the status for poller handling.
+    """
+    if response.status_code < 200 or response.status_code >= 300:
+        safe_request = httpx.Request("GET", "https://api.telegram.org/")
+        safe_response = httpx.Response(response.status_code, request=safe_request)
+        raise httpx.HTTPStatusError(
+            f"Telegram API HTTP status {response.status_code}",
+            request=safe_request,
+            response=safe_response,
+        )
+    try:
+        data = response.json()
+    except (TypeError, ValueError):
+        raise ValueError("Telegram API response is invalid JSON") from None
+    if not isinstance(data, dict):
+        # Malformed upstream JSON is a protocol error, not a caller type error.
+        raise ValueError("Telegram API response must be an object")  # noqa: TRY004
+    return data
+
+
 class TelegramAdapter:
     """Async adapter for the Telegram Bot API.
 
@@ -56,20 +80,18 @@ class TelegramAdapter:
         """Get bot info."""
         client = await self._get_client()
         resp = await client.get("/getMe")
-        resp.raise_for_status()
-        data = resp.json()
+        data = _checked_data(resp)
         if not data.get("ok"):
-            raise RuntimeError(f"Telegram API error: {data}")
+            raise RuntimeError("Telegram API request was rejected")
         return _object_result(data)
 
     async def set_my_commands(self, commands: list[dict[str, str]]) -> bool:
         """Register the bot's command menu (Telegram setMyCommands)."""
         client = await self._get_client()
         resp = await client.post("/setMyCommands", json={"commands": commands})
-        resp.raise_for_status()
-        data = resp.json()
+        data = _checked_data(resp)
         if not data.get("ok"):
-            raise RuntimeError(f"Telegram API error: {data}")
+            raise RuntimeError("Telegram API request was rejected")
         return data.get("result") is True
 
     async def send_message(
@@ -94,10 +116,9 @@ class TelegramAdapter:
                 payload["parse_mode"] = parse_mode or self._config.parse_mode
 
             resp = await client.post("/sendMessage", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
+            data = _checked_data(resp)
             if not data.get("ok"):
-                raise RuntimeError(f"Telegram API error: {data}")
+                raise RuntimeError("Telegram API request was rejected")
             results.append(data["result"])
             # Small delay between chunks to avoid rate limits
             if len(chunks) > 1:
@@ -118,10 +139,9 @@ class TelegramAdapter:
             params["offset"] = offset
 
         resp = await client.get("/getUpdates", params=params)
-        resp.raise_for_status()
-        data = resp.json()
+        data = _checked_data(resp)
         if not data.get("ok"):
-            raise RuntimeError(f"Telegram API error: {data}")
+            raise RuntimeError("Telegram API request was rejected")
         results = data.get("result", [])
         # getUpdates must return a JSON array of update objects. Reject a
         # malformed payload (scalar, object, or non-object members) without
@@ -138,16 +158,14 @@ class TelegramAdapter:
             payload["secret_token"] = secret_token
 
         resp = await client.post("/setWebhook", json=payload)
-        resp.raise_for_status()
-        data = resp.json()
+        data = _checked_data(resp)
         return data.get("ok") is True
 
     async def delete_webhook(self) -> bool:
         """Delete webhook."""
         client = await self._get_client()
         resp = await client.post("/deleteWebhook")
-        resp.raise_for_status()
-        data = resp.json()
+        data = _checked_data(resp)
         return data.get("ok") is True
 
     @staticmethod
