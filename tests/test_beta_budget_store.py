@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,16 @@ def _make_store(db_path: Path, clock: FakeClock, **over: Any) -> Any:
 
     limits = BudgetLimits(**over) if over else BudgetLimits()
     return BetaBudgetStore(str(db_path), limits=limits, clock=clock)
+
+
+def _orphan_attempt_count(conn: sqlite3.Connection) -> int:
+    return int(
+        conn.execute(
+            "SELECT COUNT(*) FROM model_attempts m LEFT JOIN requests r "
+            "ON m.bot_id = r.bot_id AND m.update_id = r.update_id "
+            "WHERE r.update_id IS NULL"
+        ).fetchone()[0]
+    )
 
 
 # --- BudgetLimits contracts ---
@@ -114,16 +125,20 @@ async def test_reserve_allows_once_duplicate_never_reauthorizes(tmp_path: Path) 
         assert first.allowed is True
         assert first.duplicate is False
         assert first.state == "RESERVED"
+        assert first.capability is not None
+        capability = first.capability
         # redelivery of the same update must not authorize a second execution
         dup = await store.reserve_request("bot1", 10, 101)
         assert dup.allowed is False
         assert dup.duplicate is True
         assert dup.state == "RESERVED"
-        await store.mark_running("bot1", 10, 101)
+        assert dup.capability is None
+        await store.mark_running("bot1", 10, 101, capability=capability)
         dup2 = await store.reserve_request("bot1", 10, 101)
         assert dup2.allowed is False
         assert dup2.duplicate is True
         assert dup2.state == "RUNNING"
+        assert dup2.capability is None
     finally:
         await store.close()
 
@@ -135,14 +150,17 @@ async def test_user_mismatch_on_same_update_denies(tmp_path: Path) -> None:
     try:
         first = await store.reserve_request("bot1", 11, 101)
         assert first.allowed is True
+        assert first.capability is not None
         other = await store.reserve_request("bot1", 11, 202)
         assert other.allowed is False
-        # mismatched user must not be able to advance or finish the reservation
+        assert other.capability is None
+        # mismatched user must not be able to advance or finish the reservation,
+        # even when presenting the capability issued for the owning user
         with pytest.raises((KeyError, ValueError)):
-            await store.mark_running("bot1", 11, 202)
-        assert await store.reserve_model_call("bot1", 11, 202) is False
+            await store.mark_running("bot1", 11, 202, capability=first.capability)
+        assert await store.reserve_model_call("bot1", 11, 202, capability=first.capability) is False
         with pytest.raises((KeyError, ValueError)):
-            await store.finish_request("bot1", 11, 202, success=True)
+            await store.finish_request("bot1", 11, 202, success=True, capability=first.capability)
     finally:
         await store.close()
 
@@ -157,6 +175,17 @@ async def test_unknown_reservation_fails_closed(tmp_path: Path) -> None:
         assert await store.reserve_model_call("bot1", 999, 101) is False
         with pytest.raises((KeyError, ValueError)):
             await store.finish_request("bot1", 999, 101, success=True)
+        # a forged capability never turns an unknown reservation into an execution
+        with pytest.raises((KeyError, ValueError)):
+            await store.mark_running("bot1", 999, 101, capability="forged-capability-value")
+        assert (
+            await store.reserve_model_call("bot1", 999, 101, capability="forged-capability-value")
+            is False
+        )
+        with pytest.raises((KeyError, ValueError)):
+            await store.finish_request(
+                "bot1", 999, 101, success=True, capability="forged-capability-value"
+            )
     finally:
         await store.close()
 
@@ -188,12 +217,14 @@ async def test_request_quota_counts_failed_attempts(tmp_path: Path) -> None:
     store = _make_store(tmp_path / "t.db", clock, requests_per_hour=2, requests_per_day=20)
     await store.initialize()
     try:
-        assert (await store.reserve_request("bot1", 1, 101)).allowed is True
-        await store.mark_running("bot1", 1, 101)
-        await store.finish_request("bot1", 1, 101, success=False)
-        assert (await store.reserve_request("bot1", 2, 101)).allowed is True
-        await store.mark_running("bot1", 2, 101)
-        await store.finish_request("bot1", 2, 101, success=False)
+        first = await store.reserve_request("bot1", 1, 101)
+        assert first.allowed is True
+        await store.mark_running("bot1", 1, 101, capability=first.capability)
+        await store.finish_request("bot1", 1, 101, success=False, capability=first.capability)
+        second = await store.reserve_request("bot1", 2, 101)
+        assert second.allowed is True
+        await store.mark_running("bot1", 2, 101, capability=second.capability)
+        await store.finish_request("bot1", 2, 101, success=False, capability=second.capability)
         # failures consume quota: no refund
         assert (await store.reserve_request("bot1", 3, 101)).allowed is False
     finally:
@@ -239,6 +270,9 @@ async def test_concurrent_two_connections_single_winner(tmp_path: Path) -> None:
         assert len(winners) == 1
         assert len(losers) == 1
         assert losers[0].duplicate is True
+        # only the winner receives an execution capability
+        assert winners[0].capability is not None
+        assert losers[0].capability is None
     finally:
         await a.close()
         await b.close()
@@ -255,11 +289,15 @@ async def test_model_call_requires_running_reservation(tmp_path: Path) -> None:
         # no reservation at all
         assert await store.reserve_model_call("bot1", 50, 101) is False
         # reserved but not running
-        assert (await store.reserve_request("bot1", 51, 101)).allowed is True
+        reserved = await store.reserve_request("bot1", 51, 101)
+        assert reserved.allowed is True
+        assert reserved.capability is not None
+        capability = reserved.capability
         assert await store.reserve_model_call("bot1", 51, 101) is False
+        assert await store.reserve_model_call("bot1", 51, 101, capability=capability) is False
         # running grants
-        await store.mark_running("bot1", 51, 101)
-        assert await store.reserve_model_call("bot1", 51, 101) is True
+        await store.mark_running("bot1", 51, 101, capability=capability)
+        assert await store.reserve_model_call("bot1", 51, 101, capability=capability) is True
     finally:
         await store.close()
 
@@ -269,11 +307,14 @@ async def test_model_per_request_cap(tmp_path: Path) -> None:
     store = _make_store(tmp_path / "t.db", clock, model_calls_per_request=2)
     await store.initialize()
     try:
-        assert (await store.reserve_request("bot1", 60, 101)).allowed is True
-        await store.mark_running("bot1", 60, 101)
-        assert await store.reserve_model_call("bot1", 60, 101) is True
-        assert await store.reserve_model_call("bot1", 60, 101) is True
-        assert await store.reserve_model_call("bot1", 60, 101) is False
+        reserved = await store.reserve_request("bot1", 60, 101)
+        assert reserved.allowed is True
+        assert reserved.capability is not None
+        capability = reserved.capability
+        await store.mark_running("bot1", 60, 101, capability=capability)
+        assert await store.reserve_model_call("bot1", 60, 101, capability=capability) is True
+        assert await store.reserve_model_call("bot1", 60, 101, capability=capability) is True
+        assert await store.reserve_model_call("bot1", 60, 101, capability=capability) is False
     finally:
         await store.close()
 
@@ -283,16 +324,20 @@ async def test_model_hour_cap_counts_failures_no_refund(tmp_path: Path) -> None:
     store = _make_store(tmp_path / "t.db", clock, model_calls_per_hour=2, model_calls_per_day=160)
     await store.initialize()
     try:
-        assert (await store.reserve_request("bot1", 61, 101)).allowed is True
-        await store.mark_running("bot1", 61, 101)
-        assert await store.reserve_model_call("bot1", 61, 101) is True
-        assert await store.reserve_model_call("bot1", 61, 101) is True
-        assert await store.reserve_model_call("bot1", 61, 101) is False
-        await store.finish_request("bot1", 61, 101, success=False)
+        first = await store.reserve_request("bot1", 61, 101)
+        assert first.allowed is True
+        capability = first.capability
+        await store.mark_running("bot1", 61, 101, capability=capability)
+        assert await store.reserve_model_call("bot1", 61, 101, capability=capability) is True
+        assert await store.reserve_model_call("bot1", 61, 101, capability=capability) is True
+        assert await store.reserve_model_call("bot1", 61, 101, capability=capability) is False
+        await store.finish_request("bot1", 61, 101, success=False, capability=capability)
         # new request still blocked on the model hour quota
-        assert (await store.reserve_request("bot1", 62, 101)).allowed is True
-        await store.mark_running("bot1", 62, 101)
-        assert await store.reserve_model_call("bot1", 62, 101) is False
+        second = await store.reserve_request("bot1", 62, 101)
+        assert second.allowed is True
+        capability2 = second.capability
+        await store.mark_running("bot1", 62, 101, capability=capability2)
+        assert await store.reserve_model_call("bot1", 62, 101, capability=capability2) is False
     finally:
         await store.close()
 
@@ -302,22 +347,31 @@ async def test_mark_running_and_finish_state_machine(tmp_path: Path) -> None:
     store = _make_store(tmp_path / "t.db", clock)
     await store.initialize()
     try:
-        assert (await store.reserve_request("bot1", 70, 101)).allowed is True
-        await store.mark_running("bot1", 70, 101)
+        reserved = await store.reserve_request("bot1", 70, 101)
+        assert reserved.allowed is True
+        capability = reserved.capability
+        await store.mark_running("bot1", 70, 101, capability=capability)
         with pytest.raises(ValueError):
-            await store.mark_running("bot1", 70, 101)
-        await store.finish_request("bot1", 70, 101, success=True)
+            await store.mark_running("bot1", 70, 101, capability=capability)
+        await store.finish_request("bot1", 70, 101, success=True, capability=capability)
         with pytest.raises(ValueError):
-            await store.finish_request("bot1", 70, 101, success=True)
+            await store.finish_request("bot1", 70, 101, success=True, capability=capability)
         # terminal reservation still dedups, never reauthorizes
         dup = await store.reserve_request("bot1", 70, 101)
         assert dup.allowed is False
         assert dup.duplicate is True
         assert dup.state == "COMPLETED"
+        assert dup.capability is None
         # model calls after completion are denied
-        assert await store.reserve_model_call("bot1", 70, 101) is False
+        assert await store.reserve_model_call("bot1", 70, 101, capability=capability) is False
         with pytest.raises(TypeError):
-            await store.finish_request("bot1", 70, 101, success="yes")  # type: ignore[arg-type]
+            await store.finish_request(
+                "bot1",
+                70,
+                101,
+                success="yes",
+                capability=capability,  # type: ignore[arg-type]
+            )
     finally:
         await store.close()
 
@@ -332,12 +386,13 @@ async def test_clock_rollback_fails_closed(tmp_path: Path) -> None:
     store = _make_store(tmp_path / "t.db", clock)
     await store.initialize()
     try:
-        assert (await store.reserve_request("bot1", 1, 101)).allowed is True
+        first = await store.reserve_request("bot1", 1, 101)
+        assert first.allowed is True
         clock.now -= 60.0
         with pytest.raises(BudgetUnavailable):
             await store.reserve_request("bot1", 2, 101)
         with pytest.raises(BudgetUnavailable):
-            await store.reserve_model_call("bot1", 1, 101)
+            await store.reserve_model_call("bot1", 1, 101, capability=first.capability)
     finally:
         await store.close()
 
@@ -449,9 +504,12 @@ async def test_schema_stores_no_prompt_or_content(tmp_path: Path) -> None:
     store = _make_store(db, clock)
     await store.initialize()
     try:
-        assert (await store.reserve_request("bot1", 5, 101)).allowed is True
-        await store.mark_running("bot1", 5, 101)
-        assert await store.reserve_model_call("bot1", 5, 101) is True
+        reserved = await store.reserve_request("bot1", 5, 101)
+        assert reserved.allowed is True
+        assert reserved.capability is not None
+        capability = reserved.capability
+        await store.mark_running("bot1", 5, 101, capability=capability)
+        assert await store.reserve_model_call("bot1", 5, 101, capability=capability) is True
     finally:
         await store.close()
     conn = sqlite3.connect(str(db))
@@ -489,6 +547,9 @@ async def test_schema_stores_no_prompt_or_content(tmp_path: Path) -> None:
         assert len(rows) == 1
         blob = " ".join(str(c) for r in rows for c in r).lower()
         assert "hello" not in blob
+        # execution capability is process-local: never persisted to the ledger
+        assert capability not in blob
+        assert capability.lower() not in blob
     finally:
         conn.close()
 
@@ -500,9 +561,14 @@ async def test_pruning_only_removes_terminal_states(tmp_path: Path) -> None:
     await store.initialize()
     try:
         # Terminal request: should be pruned after 48h
-        assert (await store.reserve_request("bot1", 1, 101)).allowed is True
-        await store.mark_running("bot1", 1, 101)
-        await store.finish_request("bot1", 1, 101, success=True)
+        terminal = await store.reserve_request("bot1", 1, 101)
+        assert terminal.allowed is True
+        terminal_capability = terminal.capability
+        await store.mark_running("bot1", 1, 101, capability=terminal_capability)
+        assert (
+            await store.reserve_model_call("bot1", 1, 101, capability=terminal_capability) is True
+        )
+        await store.finish_request("bot1", 1, 101, success=True, capability=terminal_capability)
         clock.advance(49 * 3600.0)
         assert (await store.reserve_request("bot1", 2, 101)).allowed is True
         conn = sqlite3.connect(str(tmp_path / "t.db"))
@@ -510,6 +576,14 @@ async def test_pruning_only_removes_terminal_states(tmp_path: Path) -> None:
             assert (
                 conn.execute("SELECT COUNT(*) FROM requests WHERE update_id = 1").fetchone()[0] == 0
             )
+            # terminal attempts are pruned with their parent: no orphan rows
+            assert (
+                conn.execute("SELECT COUNT(*) FROM model_attempts WHERE update_id = 1").fetchone()[
+                    0
+                ]
+                == 0
+            )
+            assert _orphan_attempt_count(conn) == 0
         finally:
             conn.close()
         # Nonterminal request must survive past 48h
@@ -551,9 +625,13 @@ async def test_nonterminal_survives_48h_restart_still_duplicate(
             assert dup.duplicate is True
             # No new model authorization for the same update_id
             assert await store2.reserve_model_call("bot1", 7, 101) is False
-            # Original user can still mark running and use model calls
-            await store2.mark_running("bot1", 7, 101)
-            assert await store2.reserve_model_call("bot1", 7, 101) is True
+            # A new store instance has no process-local execution capability.
+            with pytest.raises(ValueError):
+                await store2.mark_running("bot1", 7, 101, capability=first.capability)
+            assert (
+                await store2.reserve_model_call("bot1", 7, 101, capability=first.capability)
+                is False
+            )
             # Verify the request row still exists in DB
             conn = sqlite3.connect(str(tmp_path / "t.db"))
             try:
@@ -561,7 +639,7 @@ async def test_nonterminal_survives_48h_restart_still_duplicate(
                     "SELECT state FROM requests WHERE bot_id = ? AND update_id = ?",
                     ("bot1", 7),
                 ).fetchone()
-                assert row is not None and row[0] == "RUNNING"
+                assert row is not None and row[0] == "RESERVED"
             finally:
                 conn.close()
         finally:
@@ -618,7 +696,7 @@ async def test_crash_recovery_never_executes_nonterminal(tmp_path: Path) -> None
     try:
         first = await store.reserve_request("bot1", 15, 101)
         assert first.allowed is True
-        await store.mark_running("bot1", 15, 101)
+        await store.mark_running("bot1", 15, 101, capability=first.capability)
         # Crash recovery must not re-execute; returns duplicate
         recovered = await store.crash_recovery("bot1", 15, 101)
         assert recovered.allowed is False
@@ -682,3 +760,89 @@ async def test_inspect_reservation_missing_returns_none(tmp_path: Path) -> None:
         assert await store.inspect_reservation("bot1", 999) is None
     finally:
         await store.close()
+
+
+async def test_running_replay_on_new_store_cannot_reserve_model(tmp_path: Path) -> None:
+    clock = FakeClock()
+    db = tmp_path / "running.db"
+    first_store = _make_store(db, clock)
+    await first_store.initialize()
+    reservation = await first_store.reserve_request("bot1", 888, 101)
+    assert reservation.capability is not None
+    await first_store.mark_running("bot1", 888, 101, capability=reservation.capability)
+    await first_store.close()
+
+    second_store = _make_store(db, clock)
+    await second_store.initialize()
+    try:
+        replay = await second_store.reserve_request("bot1", 888, 101)
+        assert replay.allowed is False
+        assert replay.capability is None
+        assert await second_store.reserve_model_call("bot1", 888, 101) is False
+        assert (
+            await second_store.reserve_model_call(
+                "bot1", 888, 101, capability=reservation.capability
+            )
+            is False
+        )
+        with pytest.raises(ValueError):
+            await second_store.finish_request(
+                "bot1", 888, 101, success=True, capability=reservation.capability
+            )
+    finally:
+        await second_store.close()
+
+
+async def test_close_during_worker_never_returns_model_authorization(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _make_store(tmp_path / "close.db", clock)
+    await store.initialize()
+    reservation = await store.reserve_request("bot1", 901, 101)
+    await store.mark_running("bot1", 901, 101, capability=reservation.capability)
+    entered = threading.Event()
+    release = threading.Event()
+    original = store._reserve_model_call_sync
+
+    def paused(*args: Any) -> bool:
+        entered.set()
+        if not release.wait(timeout=5):
+            raise AssertionError("test worker was not released")
+        return original(*args)
+
+    store._reserve_model_call_sync = paused
+    call = asyncio.create_task(
+        store.reserve_model_call("bot1", 901, 101, capability=reservation.capability)
+    )
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        await store.close()
+    finally:
+        release.set()
+    assert await call is False
+
+
+async def test_close_during_request_worker_never_issues_capability(tmp_path: Path) -> None:
+    from agency.telegram.budget_store import BudgetUnavailable
+
+    clock = FakeClock()
+    store = _make_store(tmp_path / "request-close.db", clock)
+    await store.initialize()
+    entered = threading.Event()
+    release = threading.Event()
+    original = store._reserve_request_sync
+
+    def paused(*args: Any) -> Any:
+        entered.set()
+        if not release.wait(timeout=5):
+            raise AssertionError("test request worker was not released")
+        return original(*args)
+
+    store._reserve_request_sync = paused
+    call = asyncio.create_task(store.reserve_request("bot1", 902, 101))
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        await store.close()
+    finally:
+        release.set()
+    with pytest.raises(BudgetUnavailable):
+        await call
