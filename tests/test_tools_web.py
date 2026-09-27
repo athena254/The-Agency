@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import socket
+import threading
 import urllib.parse
 from collections.abc import Callable
+from asyncio import Event
 
 import httpx
 from structlog.testing import capture_logs
@@ -47,9 +51,11 @@ def _mock(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.MockTrans
     return httpx.MockTransport(handler)
 
 
-def _fetch(transport: httpx.MockTransport) -> WebFetchTool:
+def _fetch(
+    transport: httpx.MockTransport, dns_resolver: Callable[[str], list[str]] | None = None
+) -> WebFetchTool:
     # The HTTP response and DNS answer are both test fixtures, never live network.
-    return WebFetchTool(transport=transport, dns_resolver=lambda _: ["8.8.8.8"])
+    return WebFetchTool(transport=transport, dns_resolver=dns_resolver or (lambda _: ["8.8.8.8"]))
 
 
 async def test_search_parses_results_and_decodes_uddg():
@@ -201,3 +207,62 @@ async def test_search_failure_no_private_query():
     assert encoded not in result2.error, (
         f"URL-encoded private phrase '{encoded}' found in HTTP error diagnostics"
     )
+
+
+async def test_slow_resolver_times_out_closed() -> None:
+    """DNS preflight that hangs must be bounded by a short timeout and fail closed."""
+    block = threading.Event()
+
+    def slow_resolver(host: str) -> list[str]:
+        del host
+        block.wait()  # never returns until explicitly released
+        return ["8.8.8.8"]
+
+    tool = _fetch(
+        transport=_mock(lambda req: httpx.Response(200, text="x")), dns_resolver=slow_resolver
+    )
+    result = await tool.run({"url": "https://example.com/article"}, _ctx())
+    assert result.ok is False
+    assert result.error is not None
+    assert "timeout" in result.error.lower() or "blocked" in result.error.lower()
+
+
+async def test_slow_resolver_does_not_block_event_loop() -> None:
+    """A slow resolver must not prevent other async tasks from running."""
+    block = threading.Event()
+
+    def slow_resolver(host: str) -> list[str]:
+        del host
+        block.wait()
+        return ["8.8.8.8"]
+
+    tool = _fetch(
+        transport=_mock(lambda req: httpx.Response(200, text="x")), dns_resolver=slow_resolver
+    )
+    task = asyncio.create_task(tool.run({"url": "https://example.com/article"}, _ctx()))
+    await asyncio.sleep(0.05)  # let the event loop start the task
+    # The event loop must remain responsive; another task should complete
+    completed: list[str] = []
+
+    async def other_task() -> None:
+        completed.append("done")
+
+    await asyncio.wait_for(other_task(), timeout=0.1)
+    assert completed == ["done"]
+    block.set()  # unblock the slow resolver
+    await asyncio.wait_for(task, timeout=2.0)
+
+
+async def test_dns_timeout_fails_closed_on_error() -> None:
+    """Resolver that raises an exception must fail closed, not hang."""
+
+    def failing_resolver(host: str) -> list[str]:
+        del host
+        raise socket.gaierror("mocked DNS timeout")
+
+    tool = _fetch(
+        transport=_mock(lambda req: httpx.Response(200, text="x")), dns_resolver=failing_resolver
+    )
+    result = await tool.run({"url": "https://example.com/article"}, _ctx())
+    assert result.ok is False
+    assert result.error is not None

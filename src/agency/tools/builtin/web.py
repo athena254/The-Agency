@@ -5,6 +5,7 @@ Stdlib + httpx only — HTML is parsed with :mod:`html.parser`, no bs4.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 import time
@@ -35,6 +36,9 @@ _DnsResolver = Callable[[str], list[str]]
 
 _MAX_FETCH_REDIRECTS = 3
 
+_FETCH_DNS_TIMEOUT = 5.0  # seconds
+_MAX_FETCH_CONCURRENT = 10
+
 _BLOCKED_SUFFIXES = (
     ".localhost",
     ".local",
@@ -54,6 +58,78 @@ def _default_resolve(host: str) -> list[str]:
     """Resolve ``host`` to IP strings via the system resolver."""
     infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
     return [str(info[4][0]) for info in infos]
+
+
+async def _validate_fetch_url_async(
+    url: str, resolver: _DnsResolver, semaphore: asyncio.Semaphore | None = None
+) -> str:
+    """Async version of :func:`_validate_fetch_url` that offloads DNS to a worker thread.
+
+    All structural URL validation runs synchronously (fast). Only the DNS resolution
+    call is offloaded via :func:`asyncio.to_thread` and bounded by
+    :data:`_FETCH_DNS_TIMEOUT`. Fails closed on timeout or error.
+
+    Residual risk: this is a preflight check only (TOCTOU/DNS-rebind). It does
+    NOT pin the address used by httpx, so it cannot prove safety for untrusted
+    URLs on its own. ``web_fetch`` must stay beta-disabled until an
+    enforceable proxy/egress rule or HTTPS domain allowlist plus host-network
+    review exists.
+    """
+    for ch in url:
+        if ord(ch) <= 31 or ord(ch) == 127:
+            raise ValueError("control character in url blocked")
+    cleaned = url.strip()
+    if not cleaned:
+        raise ValueError("missing required param: 'url'")
+    if any(ch.isspace() for ch in cleaned):
+        raise ValueError("whitespace in url blocked")
+    try:
+        parsed = urllib.parse.urlparse(cleaned)
+    except ValueError as exc:
+        raise ValueError(f"malformed url blocked: {exc}") from exc
+    if parsed.scheme.lower() != "https":
+        raise ValueError("'url' must use https://")
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("missing hostname blocked")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("credentials in url blocked")
+    if "@" in (parsed.netloc or ""):
+        raise ValueError("userinfo syntax blocked")
+    try:
+        normalized = httpx.URL(cleaned)
+    except Exception as exc:
+        raise ValueError(f"malformed url blocked: {exc}") from exc
+    if normalized.host.lower().rstrip(".") != hostname.lower().rstrip("."):
+        raise ValueError("odd host syntax blocked")
+    reason = _hostname_block_reason(hostname)
+    if reason is not None:
+        raise ValueError(reason)
+    try:
+        if semaphore is not None:
+            async with semaphore:
+                addresses = await asyncio.wait_for(
+                    asyncio.to_thread(resolver, hostname), timeout=_FETCH_DNS_TIMEOUT
+                )
+        else:
+            addresses = await asyncio.wait_for(
+                asyncio.to_thread(resolver, hostname), timeout=_FETCH_DNS_TIMEOUT
+            )
+    except TimeoutError:
+        raise ValueError("DNS resolution timed out")
+    except Exception as exc:
+        raise ValueError(f"DNS resolution failed or blocked: {exc}") from exc
+    if not addresses:
+        raise ValueError("DNS resolution failed or blocked: no addresses")
+    for raw in addresses:
+        ip_text = raw.split("%")[0]
+        try:
+            ip = ipaddress.ip_address(ip_text)
+        except ValueError as exc:
+            raise ValueError(f"unparsable resolved address blocked: {raw}") from exc
+        if not ip.is_global:
+            raise ValueError(f"resolved address {ip_text} blocked (not global)")
+    return cleaned
 
 
 def _parse_numeric_ipv4(host: str) -> ipaddress.IPv4Address | None:
@@ -150,63 +226,8 @@ def _hostname_block_reason(host: str) -> str | None:
 
 
 def _validate_fetch_url(url: str, resolver: _DnsResolver) -> str:
-    """Validate one fetch hop; return the stripped URL or raise ValueError.
-
-    Enforces HTTPS-only, no credentials, no control chars, no IP literals /
-    localhost / internal suffixes, plus DNS resolution where every resolved
-    address must be globally routable. DNS failure fails closed.
-
-    Residual risk: this is a preflight check only (TOCTOU/DNS-rebind). It does
-    NOT pin the address used by httpx, so it cannot prove safety for untrusted
-    URLs on its own. ``web_fetch`` must stay beta-disabled until an
-    enforceable proxy/egress rule or HTTPS domain allowlist plus host-network
-    review exists.
-    """
-    for ch in url:
-        if ord(ch) <= 31 or ord(ch) == 127:
-            raise ValueError("control character in url blocked")
-    cleaned = url.strip()
-    if not cleaned:
-        raise ValueError("missing required param: 'url'")
-    if any(ch.isspace() for ch in cleaned):
-        raise ValueError("whitespace in url blocked")
-    try:
-        parsed = urllib.parse.urlparse(cleaned)
-    except ValueError as exc:
-        raise ValueError(f"malformed url blocked: {exc}") from exc
-    if parsed.scheme.lower() != "https":
-        raise ValueError("'url' must use https://")
-    hostname = parsed.hostname
-    if not hostname:
-        raise ValueError("missing hostname blocked")
-    if parsed.username is not None or parsed.password is not None:
-        raise ValueError("credentials in url blocked")
-    if "@" in (parsed.netloc or ""):
-        raise ValueError("userinfo syntax blocked")
-    try:
-        normalized = httpx.URL(cleaned)
-    except Exception as exc:
-        raise ValueError(f"malformed url blocked: {exc}") from exc
-    if normalized.host.lower().rstrip(".") != hostname.lower().rstrip("."):
-        raise ValueError("odd host syntax blocked")
-    reason = _hostname_block_reason(hostname)
-    if reason is not None:
-        raise ValueError(reason)
-    try:
-        addresses = resolver(hostname)
-    except Exception as exc:
-        raise ValueError(f"DNS resolution failed or blocked: {exc}") from exc
-    if not addresses:
-        raise ValueError("DNS resolution failed or blocked: no addresses")
-    for raw in addresses:
-        ip_text = raw.split("%")[0]
-        try:
-            ip = ipaddress.ip_address(ip_text)
-        except ValueError as exc:
-            raise ValueError(f"unparsable resolved address blocked: {raw}") from exc
-        if not ip.is_global:
-            raise ValueError(f"resolved address {ip_text} blocked (not global)")
-    return cleaned
+    """Deprecated: use :func:`_validate_fetch_url_async`. Sync wrapper for backward compatibility."""
+    return asyncio.run(_validate_fetch_url_async(url, resolver))
 
 
 def _decode_ddg_url(href: str) -> str:
@@ -391,6 +412,7 @@ class WebFetchTool:
     ) -> None:
         self._transport = transport
         self._resolver: _DnsResolver = dns_resolver or _default_resolve
+        self._semaphore: asyncio.Semaphore = asyncio.Semaphore(_MAX_FETCH_CONCURRENT)
         self.spec = ToolSpec(
             name="web_fetch",
             description=(
@@ -412,7 +434,9 @@ class WebFetchTool:
         if not isinstance(url, str) or not url.strip():
             return ToolResult(tool="web_fetch", ok=False, error="missing required param: 'url'")
         try:
-            current_url = _validate_fetch_url(url.strip(), self._resolver)
+            current_url = await _validate_fetch_url_async(
+                url.strip(), self._resolver, self._semaphore
+            )
         except ValueError as exc:
             return ToolResult(
                 tool="web_fetch",
@@ -449,7 +473,9 @@ class WebFetchTool:
                                 )
                             next_url = urllib.parse.urljoin(current_url, location)
                             try:
-                                current_url = _validate_fetch_url(next_url, self._resolver)
+                                current_url = await _validate_fetch_url_async(
+                                    next_url, self._resolver, self._semaphore
+                                )
                             except ValueError as exc:
                                 return ToolResult(
                                     tool="web_fetch",
