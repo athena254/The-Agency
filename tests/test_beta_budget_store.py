@@ -493,23 +493,192 @@ async def test_schema_stores_no_prompt_or_content(tmp_path: Path) -> None:
         conn.close()
 
 
-async def test_pruning_caps_at_48h_and_keeps_live_windows(tmp_path: Path) -> None:
+async def test_pruning_only_removes_terminal_states(tmp_path: Path) -> None:
+    """Terminal requests age out after 48h; nonterminal must never be pruned by age."""
     clock = FakeClock()
     store = _make_store(tmp_path / "t.db", clock)
     await store.initialize()
     try:
+        # Terminal request: should be pruned after 48h
         assert (await store.reserve_request("bot1", 1, 101)).allowed is True
-        clock.advance(49 * 3600.0)  # beyond 48h dedup retention
-        # old row pruned; quota freed because only >48h rows are deleted
+        await store.mark_running("bot1", 1, 101)
+        await store.finish_request("bot1", 1, 101, success=True)
+        clock.advance(49 * 3600.0)
         assert (await store.reserve_request("bot1", 2, 101)).allowed is True
         conn = sqlite3.connect(str(tmp_path / "t.db"))
         try:
-            old = conn.execute("SELECT COUNT(*) FROM requests WHERE update_id = 1").fetchone()[0]
-            assert old == 0
+            assert (
+                conn.execute("SELECT COUNT(*) FROM requests WHERE update_id = 1").fetchone()[0] == 0
+            )
         finally:
             conn.close()
-        # within live windows nothing is pruned early
-        clock.advance(3600.0)
+        # Nonterminal request must survive past 48h
         assert (await store.reserve_request("bot1", 3, 101)).allowed is True
+        clock.advance(49 * 3600.0)
+        assert (await store.reserve_request("bot1", 4, 101)).allowed is True
+        conn2 = sqlite3.connect(str(tmp_path / "t.db"))
+        try:
+            assert (
+                conn2.execute("SELECT COUNT(*) FROM requests WHERE update_id = 3").fetchone()[0]
+                == 1
+            )
+        finally:
+            conn2.close()
+    finally:
+        await store.close()
+
+
+async def test_nonterminal_survives_48h_restart_still_duplicate(
+    tmp_path: Path,
+) -> None:
+    """Hermetic test: advance 49h, restart, same nonterminal ID remains duplicate, no new model auth."""
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock)
+    await store.initialize()
+    try:
+        first = await store.reserve_request("bot1", 7, 101)
+        assert first.allowed is True
+        assert first.state == "RESERVED"
+        # Advance 49h (beyond 48h retention)
+        clock.advance(49 * 3600.0)
+        # Restart with new store instance
+        store2 = _make_store(tmp_path / "t.db", clock)
+        await store2.initialize()
+        try:
+            # Same ID must remain a duplicate, never re-authorized
+            dup = await store2.reserve_request("bot1", 7, 101)
+            assert dup.allowed is False
+            assert dup.duplicate is True
+            # No new model authorization for the same update_id
+            assert await store2.reserve_model_call("bot1", 7, 101) is False
+            # Original user can still mark running and use model calls
+            await store2.mark_running("bot1", 7, 101)
+            assert await store2.reserve_model_call("bot1", 7, 101) is True
+            # Verify the request row still exists in DB
+            conn = sqlite3.connect(str(tmp_path / "t.db"))
+            try:
+                row = conn.execute(
+                    "SELECT state FROM requests WHERE bot_id = ? AND update_id = ?",
+                    ("bot1", 7),
+                ).fetchone()
+                assert row is not None and row[0] == "RUNNING"
+            finally:
+                conn.close()
+        finally:
+            await store2.close()
+    finally:
+        await store.close()
+
+
+async def test_user_mismatch_on_duplicate_denies_without_revealing_state(
+    tmp_path: Path,
+) -> None:
+    """Same (bot_id,update_id) with different user_id must not reveal prior state."""
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock)
+    await store.initialize()
+    try:
+        first = await store.reserve_request("bot1", 12, 101)
+        assert first.allowed is True
+        # Different user tries same bot_id+update_id
+        other = await store.reserve_request("bot1", 12, 202)
+        assert other.allowed is False
+        # Must not be treated as duplicate (not the same identity)
+        assert other.duplicate is False
+        # Must NOT reveal the prior state
+        assert other.state not in ("RESERVED", "RUNNING", "COMPLETED", "FAILED")
+        # Mismatched user cannot advance or finish
+        with pytest.raises((KeyError, ValueError)):
+            await store.mark_running("bot1", 12, 202)
+        assert await store.reserve_model_call("bot1", 12, 202) is False
+        with pytest.raises((KeyError, ValueError)):
+            await store.finish_request("bot1", 12, 202, success=True)
+    finally:
+        await store.close()
+
+
+async def test_reject_memory_db_path(tmp_path: Path) -> None:
+    """:memory: db_path must be rejected as nondurable."""
+    from agency.telegram.budget_store import BetaBudgetStore
+
+    with pytest.raises(ValueError):
+        BetaBudgetStore(":memory:")
+    # Error must not disclose the path
+    with pytest.raises(ValueError) as ei:
+        BetaBudgetStore(":memory:")
+    assert ":memory:" not in str(ei.value)
+    assert "persistent" in str(ei.value).lower() or "file" in str(ei.value).lower()
+
+
+async def test_crash_recovery_never_executes_nonterminal(tmp_path: Path) -> None:
+    """Crash recovery must return duplicate/unknown for nonterminal reservations and never re-execute."""
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock)
+    await store.initialize()
+    try:
+        first = await store.reserve_request("bot1", 15, 101)
+        assert first.allowed is True
+        await store.mark_running("bot1", 15, 101)
+        # Crash recovery must not re-execute; returns duplicate
+        recovered = await store.crash_recovery("bot1", 15, 101)
+        assert recovered.allowed is False
+        assert recovered.duplicate is True
+        assert recovered.state == "RUNNING"
+        # Same update_id can never be re-authorized by reserve_request
+        dup = await store.reserve_request("bot1", 15, 101)
+        assert dup.allowed is False
+        assert dup.duplicate is True
+        # Crash recovery itself does not execute or change state;
+        # model calls still work because request is legitimately RUNNING.
+        # Key assertion: crash_recovery did NOT advance state to COMPLETED.
+        assert await store.inspect_reservation("bot1", 15) == "RUNNING"
+    finally:
+        await store.close()
+
+
+async def test_crash_recovery_unknown_for_missing_reservation(tmp_path: Path) -> None:
+    """Crash recovery for unknown reservation returns unknown, never allowed."""
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock)
+    await store.initialize()
+    try:
+        recovered = await store.crash_recovery("bot1", 999, 101)
+        assert recovered.allowed is False
+        assert recovered.duplicate is False
+    finally:
+        await store.close()
+
+
+async def test_inspect_reservation_read_only(tmp_path: Path) -> None:
+    """inspect_reservation is read-only: does not modify, prune, or change state."""
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock)
+    await store.initialize()
+    try:
+        assert (await store.reserve_request("bot1", 20, 101)).allowed is True
+        # Inspect without advancing
+        state = await store.inspect_reservation("bot1", 20)
+        assert state == "RESERVED"
+        # Advance and inspect again: state unchanged (no auto-transition)
+        clock.advance(3600.0)
+        state2 = await store.inspect_reservation("bot1", 20)
+        assert state2 == "RESERVED"
+        # Count requests unchanged
+        conn = sqlite3.connect(str(tmp_path / "t.db"))
+        try:
+            assert conn.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 1
+        finally:
+            conn.close()
+    finally:
+        await store.close()
+
+
+async def test_inspect_reservation_missing_returns_none(tmp_path: Path) -> None:
+    """inspect_reservation returns None for unknown update_id."""
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock)
+    await store.initialize()
+    try:
+        assert await store.inspect_reservation("bot1", 999) is None
     finally:
         await store.close()
