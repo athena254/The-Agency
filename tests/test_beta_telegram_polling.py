@@ -247,9 +247,7 @@ async def test_duplicate_replay_not_rehandled(
     bot._running = True
     assert await bot._poll_batch() == "ok"
     assert bot._handler._handle_polled_update.await_count == 1
-    assert bot._handler._handle_polled_update.await_args.args == (
-        batch[0], 50, bot._polling_marker
-    )
+    assert bot._handler._handle_polled_update.await_args.args == (batch[0], 50, bot._polling_marker)
     bot._handler.handle_update.assert_not_awaited()
     assert bot._offset == 51
     # Redelivery of the same persisted offset window is skipped, not re-handled.
