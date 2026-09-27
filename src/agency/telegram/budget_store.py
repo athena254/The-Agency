@@ -117,6 +117,8 @@ class BetaBudgetStore:
             raise TypeError(f"db_path must be a str, got {type(db_path).__name__}")
         if not db_path.strip():
             raise ValueError("db_path must be nonempty")
+        if db_path.strip() == ":memory:":
+            raise ValueError("db_path must be a persistent file path")
         if limits is not None and not isinstance(limits, BudgetLimits):
             raise TypeError("limits must be a BudgetLimits or None")
         if clock is not None and not callable(clock):
@@ -216,8 +218,16 @@ class BetaBudgetStore:
     @staticmethod
     def _prune_txn(conn: sqlite3.Connection, now: float) -> None:
         cutoff = now - _RETENTION_SECONDS
-        conn.execute("DELETE FROM requests WHERE created_at < ?", (cutoff,))
-        conn.execute("DELETE FROM model_attempts WHERE created_at < ?", (cutoff,))
+        conn.execute(
+            "DELETE FROM requests WHERE created_at < ? AND state IN ('COMPLETED', 'FAILED')",
+            (cutoff,),
+        )
+        conn.execute(
+            "DELETE FROM model_attempts WHERE created_at < ? "
+            "AND (bot_id, update_id) IN "
+            "(SELECT bot_id, update_id FROM requests WHERE state IN ('COMPLETED', 'FAILED'))",
+            (cutoff,),
+        )
 
     def _reserve_request_sync(self, bot_id: str, update_id: int, user_id: int) -> Reservation:
         conn = self._connect()
@@ -232,6 +242,9 @@ class BetaBudgetStore:
                     (bot_id, update_id),
                 ).fetchone()
                 if existing is not None:
+                    if int(existing[1]) != user_id:
+                        conn.execute("COMMIT")
+                        return Reservation(allowed=False, duplicate=False, state="DENIED")
                     conn.execute("COMMIT")
                     return Reservation(allowed=False, duplicate=True, state=str(existing[0]))
                 hour = conn.execute(
@@ -425,7 +438,78 @@ class BetaBudgetStore:
             except sqlite3.Error:
                 pass
 
+    def _inspect_reservation_sync(self, bot_id: str, update_id: int) -> str | None:
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT state FROM requests WHERE bot_id = ? AND update_id = ?",
+                (bot_id, update_id),
+            ).fetchone()
+            conn.execute("COMMIT")
+            return str(row[0]) if row is not None else None
+        except (sqlite3.Error, OSError) as exc:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise BudgetUnavailable(_UNAVAILABLE) from exc
+        finally:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+
+    def _crash_recovery_sync(self, bot_id: str, update_id: int, user_id: int) -> Reservation:
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT state, user_id FROM requests WHERE bot_id = ? AND update_id = ?",
+                (bot_id, update_id),
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                return Reservation(allowed=False, duplicate=False, state="UNKNOWN")
+            if int(row[1]) != user_id:
+                conn.execute("COMMIT")
+                return Reservation(allowed=False, duplicate=False, state="DENIED")
+            state = str(row[0])
+            conn.execute("COMMIT")
+            return Reservation(allowed=False, duplicate=True, state=state)
+        except (sqlite3.Error, OSError) as exc:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise BudgetUnavailable(_UNAVAILABLE) from exc
+        finally:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+
     # -- async API --
+
+    async def inspect_reservation(self, bot_id: str, update_id: int) -> str | None:
+        """Read-only inspection of reservation state. Does not modify or prune."""
+        _validate_bot_id(bot_id)
+        _validate_update_id(update_id)
+        if self._closed:
+            raise BudgetUnavailable(_UNAVAILABLE)
+        return await asyncio.to_thread(self._inspect_reservation_sync, bot_id, update_id)
+
+    async def crash_recovery(self, bot_id: str, update_id: int, user_id: int) -> Reservation:
+        """Crash recovery: return duplicate/unknown for existing reservations
+        without executing again. Stage1b integration must reconcile RUNNING
+        against provider/Telegram before any manual retry; never auto-prune
+        or auto-mark another process's live request as crashed."""
+        _validate_bot_id(bot_id)
+        _validate_update_id(update_id)
+        _validate_user_id(user_id)
+        if self._closed:
+            raise BudgetUnavailable(_UNAVAILABLE)
+        return await asyncio.to_thread(self._crash_recovery_sync, bot_id, update_id, user_id)
 
     async def initialize(self) -> None:
         await asyncio.to_thread(self._init_sync)
