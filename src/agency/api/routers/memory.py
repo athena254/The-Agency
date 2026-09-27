@@ -12,15 +12,16 @@ from __future__ import annotations
 from typing import cast
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from agency.api.authority import require_peer_authority
 from agency.memory.sms.models import MemoryItem
 from agency.memory.sms.retrieval import RetrievalEngine
 
 log = structlog.get_logger(__name__)
 
-router = APIRouter(tags=["memory"])
+router = APIRouter(tags=["memory"], dependencies=[Depends(require_peer_authority)])
 
 
 class MemorySearchResponse(BaseModel):

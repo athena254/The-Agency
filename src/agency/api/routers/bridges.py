@@ -14,14 +14,15 @@ from __future__ import annotations
 from typing import Any, cast
 
 import structlog
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from agency.api.authority import require_peer_authority
 from agency.bridges.coordinator import BridgeNotFoundError, ExternalCoordinator
 
 log = structlog.get_logger(__name__)
 
-router = APIRouter(tags=["bridges"])
+router = APIRouter(tags=["bridges"], dependencies=[Depends(require_peer_authority)])
 
 
 class BridgeExecuteRequest(BaseModel):

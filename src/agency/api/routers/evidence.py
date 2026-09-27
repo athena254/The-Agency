@@ -15,15 +15,16 @@ from __future__ import annotations
 from typing import Annotated, cast
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from agency.api.authority import require_peer_authority
 from agency.evidence.store.models import EvidenceEntry, Finding, Severity, VerificationState
 from agency.evidence.store.store import EvidenceStore, FindingsFilter
 
 log = structlog.get_logger(__name__)
 
-router = APIRouter(tags=["evidence"])
+router = APIRouter(tags=["evidence"], dependencies=[Depends(require_peer_authority)])
 
 
 class FindingListResponse(BaseModel):

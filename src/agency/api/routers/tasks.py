@@ -16,14 +16,15 @@ from __future__ import annotations
 from typing import Annotated, Any, cast
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from agency.api.authority import require_peer_authority
 from agency.kernel.tasks import Task, TaskManager, TaskMessage, TaskStatus
 
 log = structlog.get_logger(__name__)
 
-router = APIRouter(tags=["tasks"])
+router = APIRouter(tags=["tasks"], dependencies=[Depends(require_peer_authority)])
 
 
 # --------------------------------------------------------------------------- #
