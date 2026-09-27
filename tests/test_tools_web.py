@@ -7,7 +7,6 @@ import socket
 import threading
 import urllib.parse
 from collections.abc import Callable
-from asyncio import Event
 
 import httpx
 from structlog.testing import capture_logs
@@ -221,10 +220,14 @@ async def test_slow_resolver_times_out_closed() -> None:
     tool = _fetch(
         transport=_mock(lambda req: httpx.Response(200, text="x")), dns_resolver=slow_resolver
     )
-    result = await tool.run({"url": "https://example.com/article"}, _ctx())
-    assert result.ok is False
-    assert result.error is not None
-    assert "timeout" in result.error.lower() or "blocked" in result.error.lower()
+    try:
+        result = await tool.run({"url": "https://example.com/article"}, _ctx())
+        assert result.ok is False
+        assert result.error is not None
+        assert "timeout" in result.error.lower() or "blocked" in result.error.lower()
+    finally:
+        # wait_for cancels the coroutine, not the worker thread.
+        block.set()
 
 
 async def test_slow_resolver_does_not_block_event_loop() -> None:

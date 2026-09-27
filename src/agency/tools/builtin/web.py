@@ -63,73 +63,47 @@ def _default_resolve(host: str) -> list[str]:
 async def _validate_fetch_url_async(
     url: str, resolver: _DnsResolver, semaphore: asyncio.Semaphore | None = None
 ) -> str:
-    """Async version of :func:`_validate_fetch_url` that offloads DNS to a worker thread.
+    """Bound worker occupancy as well as caller latency; never enable beta fetch.
 
-    All structural URL validation runs synchronously (fast). Only the DNS resolution
-    call is offloaded via :func:`asyncio.to_thread` and bounded by
-    :data:`_FETCH_DNS_TIMEOUT`. Fails closed on timeout or error.
-
-    Residual risk: this is a preflight check only (TOCTOU/DNS-rebind). It does
-    NOT pin the address used by httpx, so it cannot prove safety for untrusted
-    URLs on its own. ``web_fetch`` must stay beta-disabled until an
-    enforceable proxy/egress rule or HTTPS domain allowlist plus host-network
-    review exists.
+    Timed-out threads cannot be stopped, so their semaphore slots stay held
+    until the resolver actually finishes. Subsequent callers time out closed.
+    This only fixes event-loop blocking, not DNS rebinding / connection pinning.
     """
-    for ch in url:
-        if ord(ch) <= 31 or ord(ch) == 127:
-            raise ValueError("control character in url blocked")
-    cleaned = url.strip()
-    if not cleaned:
-        raise ValueError("missing required param: 'url'")
-    if any(ch.isspace() for ch in cleaned):
-        raise ValueError("whitespace in url blocked")
-    try:
-        parsed = urllib.parse.urlparse(cleaned)
-    except ValueError as exc:
-        raise ValueError(f"malformed url blocked: {exc}") from exc
-    if parsed.scheme.lower() != "https":
-        raise ValueError("'url' must use https://")
-    hostname = parsed.hostname
-    if not hostname:
-        raise ValueError("missing hostname blocked")
-    if parsed.username is not None or parsed.password is not None:
-        raise ValueError("credentials in url blocked")
-    if "@" in (parsed.netloc or ""):
-        raise ValueError("userinfo syntax blocked")
-    try:
-        normalized = httpx.URL(cleaned)
-    except Exception as exc:
-        raise ValueError(f"malformed url blocked: {exc}") from exc
-    if normalized.host.lower().rstrip(".") != hostname.lower().rstrip("."):
-        raise ValueError("odd host syntax blocked")
-    reason = _hostname_block_reason(hostname)
-    if reason is not None:
-        raise ValueError(reason)
-    try:
-        if semaphore is not None:
-            async with semaphore:
-                addresses = await asyncio.wait_for(
-                    asyncio.to_thread(resolver, hostname), timeout=_FETCH_DNS_TIMEOUT
-                )
-        else:
-            addresses = await asyncio.wait_for(
-                asyncio.to_thread(resolver, hostname), timeout=_FETCH_DNS_TIMEOUT
-            )
-    except TimeoutError:
-        raise ValueError("DNS resolution timed out")
-    except Exception as exc:
-        raise ValueError(f"DNS resolution failed or blocked: {exc}") from exc
-    if not addresses:
-        raise ValueError("DNS resolution failed or blocked: no addresses")
-    for raw in addresses:
-        ip_text = raw.split("%")[0]
+    if semaphore is None:
         try:
-            ip = ipaddress.ip_address(ip_text)
-        except ValueError as exc:
-            raise ValueError(f"unparsable resolved address blocked: {raw}") from exc
-        if not ip.is_global:
-            raise ValueError(f"resolved address {ip_text} blocked (not global)")
-    return cleaned
+            return await asyncio.wait_for(
+                asyncio.to_thread(_validate_fetch_url, url, resolver),
+                timeout=_FETCH_DNS_TIMEOUT,
+            )
+        except TimeoutError as exc:
+            raise ValueError("DNS resolution timed out") from exc
+    try:
+        await asyncio.wait_for(semaphore.acquire(), timeout=_FETCH_DNS_TIMEOUT)
+    except TimeoutError as exc:
+        raise ValueError("DNS capacity unavailable") from exc
+    try:
+        task = asyncio.create_task(asyncio.to_thread(_validate_fetch_url, url, resolver))
+    except BaseException:
+        semaphore.release()
+        raise
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), timeout=_FETCH_DNS_TIMEOUT)
+    except TimeoutError as exc:
+        raise ValueError("DNS resolution timed out") from exc
+    finally:
+        if task.done():
+            semaphore.release()
+        else:
+
+            def release_when_done(completed: asyncio.Task[str]) -> None:
+                try:
+                    completed.result()  # consume an error after timeout/cancellation
+                except BaseException:  # noqa: BLE001 — cleanup includes cancellation
+                    logger.warning("web_fetch.dns_worker_failed")
+                finally:
+                    semaphore.release()
+
+            task.add_done_callback(release_when_done)
 
 
 def _parse_numeric_ipv4(host: str) -> ipaddress.IPv4Address | None:
@@ -226,8 +200,52 @@ def _hostname_block_reason(host: str) -> str | None:
 
 
 def _validate_fetch_url(url: str, resolver: _DnsResolver) -> str:
-    """Deprecated: use :func:`_validate_fetch_url_async`. Sync wrapper for backward compatibility."""
-    return asyncio.run(_validate_fetch_url_async(url, resolver))
+    """Validate one fetch hop; preflight only, not connection pinning."""
+    for ch in url:
+        if ord(ch) <= 31 or ord(ch) == 127:
+            raise ValueError("control character in url blocked")
+    cleaned = url.strip()
+    if not cleaned:
+        raise ValueError("missing required param: 'url'")
+    if any(ch.isspace() for ch in cleaned):
+        raise ValueError("whitespace in url blocked")
+    try:
+        parsed = urllib.parse.urlparse(cleaned)
+    except ValueError as exc:
+        raise ValueError("malformed url blocked") from exc
+    if parsed.scheme.lower() != "https":
+        raise ValueError("'url' must use https://")
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("missing hostname blocked")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("credentials in url blocked")
+    if "@" in (parsed.netloc or ""):
+        raise ValueError("userinfo syntax blocked")
+    try:
+        normalized = httpx.URL(cleaned)
+    except Exception as exc:
+        raise ValueError("malformed url blocked") from exc
+    if normalized.host.lower().rstrip(".") != hostname.lower().rstrip("."):
+        raise ValueError("odd host syntax blocked")
+    reason = _hostname_block_reason(hostname)
+    if reason is not None:
+        raise ValueError(reason)
+    try:
+        addresses = resolver(hostname)
+    except Exception as exc:
+        raise ValueError("DNS resolution failed or blocked") from exc
+    if not addresses:
+        raise ValueError("DNS resolution failed or blocked")
+    for raw in addresses:
+        ip_text = raw.split("%")[0]
+        try:
+            ip = ipaddress.ip_address(ip_text)
+        except ValueError as exc:
+            raise ValueError("unparsable resolved address blocked") from exc
+        if not ip.is_global:
+            raise ValueError("resolved address blocked (not global)")
+    return cleaned
 
 
 def _decode_ddg_url(href: str) -> str:
