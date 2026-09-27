@@ -14,7 +14,12 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from agency.telegram.config import TelegramConfig
-from agency.telegram.handler import BETA_CREATION_DISABLED, TelegramHandler
+from agency.telegram.handler import (
+    BETA_CREATION_DISABLED,
+    BETA_MODEL_DISABLED,
+    BETA_UNSUPPORTED_COMMAND,
+    TelegramHandler,
+)
 
 INVITED = [101, 202]
 
@@ -187,54 +192,78 @@ async def test_beta_no_telegram_response_to_unauthorized() -> None:
     await h.close()
 
 
-# --- admitted surface: /name /status chat /research ---
+# --- public dictionaries are untrusted; model paths stay disabled on polling ---
 
 
 @pytest.mark.asyncio
-async def test_beta_admitted_chat_and_status() -> None:
+@pytest.mark.parametrize("text", ["hello", "/name Atlas", "/research planets"])
+async def test_beta_public_model_and_write_paths_require_trusted_polling(text: str) -> None:
     h, butler = _handler()
-    r = await h.handle_update(_update(101, "hello"))
-    assert r["status"] == "ok"
-    butler.handle_message.assert_awaited_once()
-    sender = butler.handle_message.await_args.args[1]
-    assert sender == "telegram:101"
-
-    h2_butler = AsyncMock()
-    h2_butler.handle_message.return_value = "ok"
-    h2_butler.orchestrator.health_check = AsyncMock(return_value={})
-    h2, _ = _handler(butler=h2_butler)
-    r = await h2.handle_update(_update(202, "/status"))
-    assert r["status"] == "ok"
-    h2._adapter.send_message.assert_awaited()  # type: ignore[attr-defined]
+    result = await h.handle_update(_update(101, text))
+    assert result == {"status": "rejected", "reason": "trusted polling required"}
+    assert h._profiles.get_name(101) is None
+    butler.handle_message.assert_not_awaited()
+    butler.orchestrator.submit_task.assert_not_awaited()
+    butler.orchestrator.execute_task.assert_not_awaited()
+    h._adapter.send_message.assert_not_awaited()  # type: ignore[attr-defined]
     await h.close()
-    await h2.close()
 
 
 @pytest.mark.asyncio
-async def test_beta_admitted_name_and_research(tmp_path: Any) -> None:
-    from agency.telegram.profile_store import ProfileStore
-
-    store = ProfileStore(str(tmp_path / "p.db"))
-    h, _ = _handler()
-    h._profiles = store
-    await h.handle_update(_update(101, "/name Atlas"))
-    assert store.get_name(101) == "Atlas"
-    # uninvited cannot write names
-    await h.handle_update(_update(999, "/name Spoof"))
-    assert store.get_name(999) is None
-
-    orchestrator = AsyncMock()
-    orchestrator.list_agents.return_value = [SimpleNamespace(id="r", domain="research")]
-    orchestrator.submit_task.return_value = SimpleNamespace(task_id="t")
-    orchestrator.execute_task.return_value = SimpleNamespace(status="completed", output="cited")
-    hb, _ = _handler(butler=SimpleNamespace(orchestrator=orchestrator))
-    hb._profiles = ProfileStore(":memory:")
-    r = await hb.handle_update(_update(101, "/research planets"))
-    assert r["status"] == "ok"
-    orchestrator.execute_task.assert_awaited_once()
+async def test_beta_invited_status_is_deterministic_without_model() -> None:
+    h, butler = _handler()
+    butler.orchestrator.health_check = AsyncMock(return_value={})
+    result = await h.handle_update(_update(202, "/status"))
+    assert result == {"status": "ok", "chat_id": 202, "command": "/status"}
+    h._adapter.send_message.assert_awaited_once()  # type: ignore[attr-defined]
+    butler.handle_message.assert_not_awaited()
     await h.close()
-    await hb.close()
-    store.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["hello", "/research planets"])
+async def test_beta_trusted_polling_disables_model_paths_without_side_effects(text: str) -> None:
+    marker = object()
+    butler = AsyncMock()
+    h = TelegramHandler(_beta_config(), butler=butler, polling_marker=marker)
+    h._adapter.send_message = AsyncMock()  # type: ignore[method-assign]
+    h._handle_research = AsyncMock(return_value="SHOULD-NOT-RUN")  # type: ignore[method-assign]
+    try:
+        result = await h._handle_polled_update({"update_id": 12, **_update(101, text)}, 12, marker)
+        assert result == {"status": "rejected", "reason": "beta model path disabled"}
+        h._adapter.send_message.assert_awaited_once_with(101, BETA_MODEL_DISABLED)  # type: ignore[attr-defined]
+        butler.handle_message.assert_not_awaited()
+        h._handle_research.assert_not_awaited()  # type: ignore[attr-defined]
+        assert h._profiles.get_name(101) is None
+    finally:
+        await h.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("text", "reply"),
+    [
+        ("/propose_agent X d c1", BETA_CREATION_DISABLED),
+        ("Please create one called StockBot for finance", BETA_CREATION_DISABLED),
+        ("/researchoops", BETA_UNSUPPORTED_COMMAND),
+    ],
+)
+async def test_beta_trusted_polling_refuses_creation_and_unsupported_commands(
+    text: str, reply: str
+) -> None:
+    marker = object()
+    butler = AsyncMock()
+    h = TelegramHandler(_beta_config(), butler=butler, polling_marker=marker)
+    h._adapter.send_message = AsyncMock()  # type: ignore[method-assign]
+    h._handle_plain_english_agent_creation = AsyncMock()  # type: ignore[method-assign]
+    try:
+        result = await h._handle_polled_update({"update_id": 12, **_update(101, text)}, 12, marker)
+        assert result["status"] == "rejected"
+        h._adapter.send_message.assert_awaited_once_with(101, reply)  # type: ignore[attr-defined]
+        butler.handle_message.assert_not_awaited()
+        h._handle_plain_english_agent_creation.assert_not_awaited()  # type: ignore[attr-defined]
+    finally:
+        await h.close()
 
 
 # --- P-T3: creation denied, help hides it, non-beta preserved ---
@@ -247,10 +276,9 @@ async def test_beta_denies_propose_variants_before_governance(cmd: str) -> None:
     propose_spy = AsyncMock(return_value="SHOULD-NOT-RUN")
     h._handle_propose_agent = propose_spy  # type: ignore[method-assign]
     result = await h.handle_update(_update(101, cmd))
-    assert result["status"] == "rejected"
+    assert result == {"status": "rejected", "reason": "trusted polling required"}
     propose_spy.assert_not_awaited()
-    sent = h._adapter.send_message.await_args.args[1]  # type: ignore[attr-defined]
-    assert "disabled" in sent.lower()
+    h._adapter.send_message.assert_not_awaited()  # type: ignore[attr-defined]
     butler.handle_message.assert_not_awaited()
     await h.close()
 
@@ -265,20 +293,20 @@ async def test_beta_denies_plain_english_creation(text: str) -> None:
     plain_spy = AsyncMock(return_value="SHOULD-NOT-RUN")
     h._handle_plain_english_agent_creation = plain_spy  # type: ignore[method-assign]
     result = await h.handle_update(_update(101, text))
-    assert result["status"] == "rejected"
+    assert result == {"status": "rejected", "reason": "trusted polling required"}
     plain_spy.assert_not_awaited()
-    sent = h._adapter.send_message.await_args.args[1]  # type: ignore[attr-defined]
-    assert "disabled" in sent.lower()
+    h._adapter.send_message.assert_not_awaited()  # type: ignore[attr-defined]
     butler.handle_message.assert_not_awaited()
     await h.close()
 
 
 @pytest.mark.asyncio
-async def test_beta_ordinary_chat_not_blocked_as_creation() -> None:
+async def test_beta_public_ordinary_chat_is_untrusted_not_creation() -> None:
     h, butler = _handler()
     result = await h.handle_update(_update(101, "hello there"))
-    assert result["status"] == "ok"
-    butler.handle_message.assert_awaited_once()
+    assert result == {"status": "rejected", "reason": "trusted polling required"}
+    butler.handle_message.assert_not_awaited()
+    h._adapter.send_message.assert_not_awaited()  # type: ignore[attr-defined]
     await h.close()
 
 
@@ -420,10 +448,11 @@ async def test_beta_never_calls_detect_intent_for_ordinary_text() -> None:
     plain_spy = AsyncMock(return_value="SHOULD-NOT-RUN")
     h._handle_plain_english_agent_creation = plain_spy  # type: ignore[method-assign]
     result = await h.handle_update(_update(101, "my name is Alice"))
-    assert result["status"] == "ok"
+    assert result == {"status": "rejected", "reason": "trusted polling required"}
     detect_spy.assert_not_called()
     plain_spy.assert_not_awaited()
-    butler.handle_message.assert_awaited_once()
+    butler.handle_message.assert_not_awaited()
+    h._adapter.send_message.assert_not_awaited()  # type: ignore[attr-defined]
     await h.close()
 
 
@@ -436,35 +465,29 @@ async def test_beta_never_calls_detect_intent_for_stockbot_phrase() -> None:
     plain_spy = AsyncMock(return_value="SHOULD-NOT-RUN")
     h._handle_plain_english_agent_creation = plain_spy  # type: ignore[method-assign]
     result = await h.handle_update(_update(101, "Please create one called StockBot for finance"))
-    assert result == {"status": "rejected", "reason": "agent creation disabled"}
+    assert result == {"status": "rejected", "reason": "trusted polling required"}
     detect_spy.assert_not_called()
     plain_spy.assert_not_awaited()
     butler.handle_message.assert_not_awaited()
-    h._adapter.send_message.assert_awaited_once_with(101, BETA_CREATION_DISABLED)  # type: ignore[attr-defined]
+    h._adapter.send_message.assert_not_awaited()  # type: ignore[attr-defined]
     await h.close()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("text", "status"),
-    [("my name is Alice", "ok"), ("Please create one called StockBot for finance", "rejected")],
+    "text", ["my name is Alice", "Please create one called StockBot for finance"]
 )
-async def test_beta_plain_text_no_proposal_or_votes(text: str, status: str) -> None:
-    """B-02: ordinary text must not submit proposals or trigger synthetic votes."""
+async def test_beta_public_plain_text_no_proposal_or_votes(text: str) -> None:
+    """B-02: untrusted text must not submit proposals or trigger synthetic votes."""
     h, butler = _handler()
-    # Spy on lattice to catch submit_proposal/resolve_agent_proposal calls
     lattice_spy = AsyncMock()
     butler.orchestrator._lattice = lattice_spy  # type: ignore[attr-defined]
-    butler.orchestrator.list_agents = AsyncMock(return_value=[])
     result = await h.handle_update(_update(101, text))
-    assert result["status"] == status
-    # No proposal submitted, no votes resolved
+    assert result == {"status": "rejected", "reason": "trusted polling required"}
     lattice_spy.submit_proposal.assert_not_awaited()
     butler.orchestrator.resolve_agent_proposal.assert_not_awaited()
-    if status == "rejected":
-        butler.handle_message.assert_not_awaited()
-    else:
-        butler.handle_message.assert_awaited_once()
+    butler.handle_message.assert_not_awaited()
+    h._adapter.send_message.assert_not_awaited()  # type: ignore[attr-defined]
     await h.close()
 
 
@@ -496,10 +519,9 @@ async def test_beta_rejects_unknown_slash_commands_in_handle_update(cmd: str) ->
     """B-16: unsupported slash tokens must return rejection with zero Butler/model/tool calls."""
     h, butler = _handler()
     result = await h.handle_update(_update(101, cmd))
-    assert result["status"] == "rejected"
-    assert result.get("reason") == "unsupported command"
+    assert result == {"status": "rejected", "reason": "trusted polling required"}
     butler.handle_message.assert_not_awaited()
-    h._adapter.send_message.assert_awaited_once_with(101, "Unsupported command in this beta.")  # type: ignore[attr-defined]
+    h._adapter.send_message.assert_not_awaited()  # type: ignore[attr-defined]
     await h.close()
 
 
