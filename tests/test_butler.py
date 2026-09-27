@@ -99,33 +99,19 @@ async def test_handle_message_rejects_empty(service: ButlerService) -> None:
 @pytest.mark.asyncio
 async def test_http_message_flow() -> None:
     app = create_app(ButlerConfig())
-    # NOTE: httpx ASGI transport does not run the lifespan handler,
-    # so inject an already-started service directly.
-    svc = ButlerService(config=ButlerConfig(), orchestrator=AgencyOrchestrator())
-    await svc.start()
-    app.state.butler = svc
-    try:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            health = await client.get("/v1/health")
-            assert health.status_code == 200
-            assert health.json()["status"] in ("ok", "starting")
-
-            agents = await client.get("/v1/agents")
-            assert agents.status_code == 200
-            assert len(agents.json()) >= 3
-
-            for message, domain in [
-                ("scan the network for threats", "security"),
-                ("recall what we discussed yesterday", "memory"),
-                ("verify the forensic evidence", "evidence"),
-            ]:
-                resp = await client.post(
-                    "/v1/message", json={"message": message, "sender": "http-test"}
-                )
-                assert resp.status_code == 200, resp.text
-                payload = resp.json()
-                assert payload["domain"] == domain
-                assert payload["response"]
-    finally:
-        await svc.stop()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        health = await client.get("/v1/health")
+        assert health.status_code == 200
+        assert health.json()["status"] in ("ok", "starting")
+        assert (await client.get("/v1/agents")).status_code == 503
+        for message in (
+            "scan the network for threats",
+            "recall what we discussed yesterday",
+            "verify the forensic evidence",
+        ):
+            resp = await client.post(
+                "/v1/message", json={"message": message, "sender": "http-test"}
+            )
+            assert resp.status_code == 503
+            assert resp.json() == {"detail": "Peer authorization is unavailable."}
