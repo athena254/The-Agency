@@ -57,3 +57,25 @@ async def test_http_failure_preserves_status_without_token_or_body(status: int) 
         assert _is_poll_conflict(error) is (status == 409)
     finally:
         await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_long_poll_read_timeout_exceeds_requested_wait() -> None:
+    """HTTP must outlive Telegram's long-poll wait, including network overhead."""
+    observed: list[float] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        observed.append(request.extensions["timeout"]["read"])
+        return httpx.Response(200, json={"ok": True, "result": []})
+
+    adapter = TelegramAdapter(TelegramConfig(bot_token="FAKE_TOKEN", timeout=30))
+    adapter._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(respond),
+        base_url="https://api.telegram.org/botFAKE_TOKEN",
+        timeout=30,
+    )
+    try:
+        assert await adapter.get_updates(timeout=30) == []
+        assert observed[0] > 30
+    finally:
+        await adapter.close()
