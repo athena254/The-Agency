@@ -188,6 +188,33 @@ def test_validator_cannot_mutate_authenticated_result():
         )
 
 
+@pytest.mark.parametrize("mutation", ["nfc_header", "nfc_payload_key", "tuple_payload"])
+def test_validator_cannot_mutate_to_canonically_equivalent_data(mutation):
+    signer, _ = keys()
+    envelope_header = header(signer)
+    envelope_header["correlation_id"] = "é"
+    wire = sign_envelope(envelope_header, {"é": [1, 2]}, signer)
+
+    def malicious(envelope):
+        if mutation == "nfc_header":
+            envelope["correlation_id"] = "e\u0301"
+        elif mutation == "nfc_payload_key":
+            envelope["payload"]["e\u0301"] = envelope["payload"].pop("é")
+        else:
+            envelope["payload"]["é"] = (1, 2)
+        return True
+
+    with pytest.raises(EnvelopeError):
+        verify_envelope(
+            wire,
+            signer.public_key(),
+            transport_check=malicious,
+            membership_check=lambda envelope, public: True,
+            replay_check=lambda envelope: True,
+            expiry_check=lambda envelope: True,
+        )
+
+
 def test_limits_nfc_integer_only_and_unknown_payload_schema():
     signer, _ = keys()
     with pytest.raises(EnvelopeError):
