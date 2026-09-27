@@ -48,6 +48,7 @@ def _make_bot(
 ) -> TelegramBot:
     """Construct a real TelegramBot isolated from repo data files."""
     monkeypatch.setenv("REMEX_PROFILE_DB_PATH", str(tmp_path / "profiles.db"))
+    monkeypatch.setenv("TELEGRAM_BETA_BUDGET_DB_PATH", str(tmp_path / "budget.db"))
     if beta:
         cfg = _beta_config()
         db_path = str(tmp_path / "poll.db") if poll_db == "auto" else poll_db
@@ -96,6 +97,7 @@ def _poll_state(db_path: str) -> int | None:
 
 def test_beta_demands_poll_db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("REMEX_PROFILE_DB_PATH", str(tmp_path / "profiles.db"))
+    monkeypatch.setenv("TELEGRAM_BETA_BUDGET_DB_PATH", str(tmp_path / "budget.db"))
     monkeypatch.delenv("TELEGRAM_POLL_DB_PATH", raising=False)
     with pytest.raises(ValueError, match="TELEGRAM_POLL_DB_PATH"):
         TelegramBot(token="test", config=_beta_config(), poll_db_path=None)
@@ -105,6 +107,18 @@ def test_beta_demands_poll_db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     bot = TelegramBot(token="test", config=TelegramConfig(bot_token="test"))
     assert bot._offset is None
     assert bot._poll_conn is None
+
+
+def test_beta_demands_persistent_budget_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REMEX_PROFILE_DB_PATH", str(tmp_path / "profiles.db"))
+    for invalid in ("", "  ", ":memory:"):
+        with pytest.raises(ValueError, match="TELEGRAM_BETA_BUDGET_DB_PATH"):
+            TelegramBot(
+                token="test",
+                config=_beta_config(),
+                poll_db_path=str(tmp_path / "poll.db"),
+                beta_budget_db_path=invalid,
+            )
 
 
 # --- success advances, persists, and survives restart ---
@@ -174,7 +188,7 @@ async def test_error_status_does_not_advance(
     db_path = str(tmp_path / "poll.db")
     bot = _make_bot(tmp_path, monkeypatch, poll_db=db_path)
     bot._handler = AsyncMock()
-    bot._handler.handle_update.side_effect = [
+    bot._handler._handle_polled_update.side_effect = [
         {"status": "error", "reason": "profile unavailable"},
         {"status": "ok"},
     ]
@@ -207,7 +221,7 @@ async def test_rejected_and_ignored_advance(
     assert _poll_state(db_path) == 41
     # Ignored advances too (explicit terminal outcome, no retry).
     bot._handler = AsyncMock()
-    bot._handler.handle_update.return_value = {"status": "ignored", "reason": "no message"}
+    bot._handler._handle_polled_update.return_value = {"status": "ignored", "reason": "no message"}
     bot._handler._adapter.get_updates = AsyncMock(return_value=[{"update_id": 41, "message": {}}])
     bot._handler.close = AsyncMock()
     assert await bot._poll_batch() == "ok"
@@ -226,18 +240,22 @@ async def test_duplicate_replay_not_rehandled(
     db_path = str(tmp_path / "poll.db")
     bot = _make_bot(tmp_path, monkeypatch, poll_db=db_path)
     bot._handler = AsyncMock()
-    bot._handler.handle_update.return_value = {"status": "ok"}
+    bot._handler._handle_polled_update.return_value = {"status": "ok"}
     batch = [_private_update(50, 101, "/name Atlas"), _private_update(50, 101, "/name Atlas")]
     bot._handler._adapter.get_updates = AsyncMock(return_value=batch)
     bot._handler.close = AsyncMock()
     bot._running = True
     assert await bot._poll_batch() == "ok"
-    assert bot._handler.handle_update.await_count == 1
+    assert bot._handler._handle_polled_update.await_count == 1
+    assert bot._handler._handle_polled_update.await_args.args == (
+        batch[0], 50, bot._polling_marker
+    )
+    bot._handler.handle_update.assert_not_awaited()
     assert bot._offset == 51
     # Redelivery of the same persisted offset window is skipped, not re-handled.
     bot._handler._adapter.get_updates = AsyncMock(return_value=batch)
     assert await bot._poll_batch() == "ok"
-    assert bot._handler.handle_update.await_count == 1
+    assert bot._handler._handle_polled_update.await_count == 1
     assert bot._offset == 51
     assert _poll_state(db_path) == 51
     await bot.stop()
@@ -340,7 +358,7 @@ async def test_malformed_update_ids_fail_safely(
     db_path = str(tmp_path / "poll.db")
     bot = _make_bot(tmp_path, monkeypatch, poll_db=db_path)
     bot._handler = AsyncMock()
-    bot._handler.handle_update.return_value = {"status": "ok"}
+    bot._handler._handle_polled_update.return_value = {"status": "ok"}
     bot._handler._adapter.get_updates = AsyncMock(
         return_value=[
             {"message": {}},
@@ -354,7 +372,7 @@ async def test_malformed_update_ids_fail_safely(
     bot._handler.close = AsyncMock()
     bot._running = True
     assert await bot._poll_batch() == "ok"
-    bot._handler.handle_update.assert_not_awaited()
+    bot._handler._handle_polled_update.assert_not_awaited()
     assert bot._offset is None
     assert _poll_state(db_path) is None
     await bot.stop()
@@ -446,7 +464,7 @@ async def test_beta_persist_failure_fail_closed(
     db_path = str(tmp_path / "poll.db")
     bot = _make_bot(tmp_path, monkeypatch, poll_db=db_path)
     bot._handler = AsyncMock()
-    bot._handler.handle_update.return_value = {"status": "ok"}
+    bot._handler._handle_polled_update.return_value = {"status": "ok"}
     bot._handler.close = AsyncMock()
     bot._handler._adapter.get_updates = AsyncMock(return_value=[_private_update(10, 101, "hello")])
     bot._running = True
@@ -454,7 +472,7 @@ async def test_beta_persist_failure_fail_closed(
     assert bot._offset == 11
     assert _poll_state(db_path) == 11
 
-    bot._handler.handle_update.reset_mock()
+    bot._handler._handle_polled_update.reset_mock()
     real_conn = bot._poll_conn
     failing = MagicMock()
     failing.execute.side_effect = sqlite3.OperationalError("injected persist failure")
@@ -475,7 +493,7 @@ async def test_beta_persist_failure_fail_closed(
     assert 12 not in bot._seen
     assert _poll_state(db_path) == 11
     # Failure stops the batch: second update is not handled.
-    assert bot._handler.handle_update.await_count == 1
+    assert bot._handler._handle_polled_update.await_count == 1
     # No tight spin: backoff sleep is required.
     assert len(delays) >= 1
     assert all(0 < d <= 30 for d in delays)
@@ -506,7 +524,7 @@ async def test_beta_failed_persist_db_reopen_retains_old_value(
     db_path = str(tmp_path / "poll.db")
     bot = _make_bot(tmp_path, monkeypatch, poll_db=db_path)
     bot._handler = AsyncMock()
-    bot._handler.handle_update.return_value = {"status": "ok"}
+    bot._handler._handle_polled_update.return_value = {"status": "ok"}
     bot._handler.close = AsyncMock()
     bot._handler._adapter.get_updates = AsyncMock(return_value=[_private_update(30, 101, "hello")])
     bot._running = True

@@ -54,7 +54,7 @@ async def test_handler_exception_backs_off_and_keeps_offset(
     db_path = str(tmp_path / "poll.db")
     bot = _make_bot(tmp_path, monkeypatch, poll_db=db_path)
     bot._handler = AsyncMock()
-    bot._handler.handle_update.side_effect = RuntimeError("PRIVATE-USER-TEXT")
+    bot._handler._handle_polled_update.side_effect = RuntimeError("PRIVATE-USER-TEXT")
     bot._handler._adapter.get_updates = AsyncMock(  # type: ignore[method-assign]
         return_value=[_private_update(10, 101, "hello")]
     )
@@ -75,14 +75,14 @@ async def test_handler_exception_backs_off_and_keeps_offset(
     assert 0 < delays[0] <= _MAX_BACKOFF
 
     # Failure count reset on the next successful batch.
-    bot._handler.handle_update.side_effect = None
-    bot._handler.handle_update.return_value = {"status": "ok"}
+    bot._handler._handle_polled_update.side_effect = None
+    bot._handler._handle_polled_update.return_value = {"status": "ok"}
     assert await bot._poll_batch() == "ok"
     assert bot._offset == 11
     assert _poll_state(db_path) == 11
     assert bot._consecutive_failures == 0
     # Same update was retried, not skipped.
-    assert bot._handler.handle_update.await_count == 2
+    assert bot._handler._handle_polled_update.await_count == 2
     await bot.stop()
 
 
@@ -92,7 +92,7 @@ async def test_handler_exception_backoff_grows_bounded(
 ) -> None:
     bot = _make_bot(tmp_path, monkeypatch)
     bot._handler = AsyncMock()
-    bot._handler.handle_update.side_effect = RuntimeError("send failed")
+    bot._handler._handle_polled_update.side_effect = RuntimeError("send failed")
     bot._handler._adapter.get_updates = AsyncMock(  # type: ignore[method-assign]
         return_value=[_private_update(20, 101, "hello")]
     )
@@ -121,7 +121,7 @@ async def test_nonterminal_status_backs_off_and_keeps_offset(
     db_path = str(tmp_path / "poll.db")
     bot = _make_bot(tmp_path, monkeypatch, poll_db=db_path)
     bot._handler = AsyncMock()
-    bot._handler.handle_update.side_effect = [
+    bot._handler._handle_polled_update.side_effect = [
         {"status": "error", "reason": "profile unavailable"},
         {"status": "ok"},
     ]
@@ -141,7 +141,7 @@ async def test_nonterminal_status_backs_off_and_keeps_offset(
     assert await bot._poll_batch() == "ok"
     assert bot._offset == 31
     assert _poll_state(db_path) == 31
-    assert bot._handler.handle_update.await_count == 2
+    assert bot._handler._handle_polled_update.await_count == 2
     await bot.stop()
 
 
@@ -155,7 +155,7 @@ async def test_db_persist_failure_backs_off_without_losing_offset(
     db_path = str(tmp_path / "poll.db")
     bot = _make_bot(tmp_path, monkeypatch, poll_db=db_path)
     bot._handler = AsyncMock()
-    bot._handler.handle_update.return_value = {"status": "ok"}
+    bot._handler._handle_polled_update.return_value = {"status": "ok"}
     bot._handler.close = AsyncMock()
     bot._handler._adapter.get_updates = AsyncMock(  # type: ignore[method-assign]
         return_value=[_private_update(10, 101, "hello")]
@@ -166,7 +166,7 @@ async def test_db_persist_failure_backs_off_without_losing_offset(
     assert _poll_state(db_path) == 11
 
     # Inject a durable persist failure after a successful handler result.
-    bot._handler.handle_update.reset_mock()
+    bot._handler._handle_polled_update.reset_mock()
     real_conn = bot._poll_conn
     failing = MagicMock()
     failing.execute.side_effect = sqlite3.OperationalError("injected persist failure")
@@ -181,7 +181,7 @@ async def test_db_persist_failure_backs_off_without_losing_offset(
     assert bot._offset == 11
     assert 11 not in bot._seen
     assert _poll_state(db_path) == 11
-    assert bot._handler.handle_update.await_count == 1
+    assert bot._handler._handle_polled_update.await_count == 1
     assert len(delays) == 1
     assert 0 < delays[0] <= _MAX_BACKOFF
 
@@ -204,7 +204,7 @@ async def test_poll_loop_persists_failure_without_tight_spin_or_skip(
 
     bot = _make_bot(tmp_path, monkeypatch)
     bot._handler = AsyncMock()
-    bot._handler.handle_update.side_effect = RuntimeError("persistently failing")
+    bot._handler._handle_polled_update.side_effect = RuntimeError("persistently failing")
     bot._handler._adapter.get_updates = AsyncMock(  # type: ignore[method-assign]
         return_value=[_private_update(40, 101, "hello")]
     )
@@ -242,7 +242,7 @@ async def test_recovery_after_failures_resumes_from_pending_offset(
     db_path = str(tmp_path / "poll.db")
     bot = _make_bot(tmp_path, monkeypatch, poll_db=db_path)
     bot._handler = AsyncMock()
-    bot._handler.handle_update.side_effect = RuntimeError("down")
+    bot._handler._handle_polled_update.side_effect = RuntimeError("down")
     bot._handler._adapter.get_updates = AsyncMock(  # type: ignore[method-assign]
         return_value=[_private_update(50, 101, "hello")]
     )
@@ -253,19 +253,19 @@ async def test_recovery_after_failures_resumes_from_pending_offset(
 
     # New update arrives while 50 is still pending: it must not be handled
     # or acked ahead of the stuck one.
-    bot._handler.handle_update.reset_mock()
+    bot._handler._handle_polled_update.reset_mock()
     bot._handler._adapter.get_updates = AsyncMock(  # type: ignore[method-assign]
         return_value=[_private_update(50, 101, "hello"), _private_update(51, 101, "later")]
     )
     assert await bot._poll_batch() == "transient"
-    assert bot._handler.handle_update.await_count == 1  # only update 50 retried
+    assert bot._handler._handle_polled_update.await_count == 1  # only update 50 retried
     assert bot._offset is None
 
     # Handler recovers: both updates process in order, batch advances.
-    bot._handler.handle_update.side_effect = None
-    bot._handler.handle_update.return_value = {"status": "ok"}
+    bot._handler._handle_polled_update.side_effect = None
+    bot._handler._handle_polled_update.return_value = {"status": "ok"}
     assert await bot._poll_batch() == "ok"
-    assert bot._handler.handle_update.await_count == 3
+    assert bot._handler._handle_polled_update.await_count == 3
     assert bot._offset == 52
     assert _poll_state(db_path) == 52
     await bot.stop()
@@ -280,7 +280,7 @@ async def test_transient_outcome_is_reported_not_ok(
 ) -> None:
     bot = _make_bot(tmp_path, monkeypatch)
     bot._handler = AsyncMock()
-    bot._handler.handle_update.side_effect = RuntimeError("boom")
+    bot._handler._handle_polled_update.side_effect = RuntimeError("boom")
     bot._handler._adapter.get_updates = AsyncMock(  # type: ignore[method-assign]
         return_value=[_private_update(60, 101, "hello")]
     )
