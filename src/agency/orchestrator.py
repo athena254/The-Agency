@@ -43,7 +43,7 @@ from agency.memory.sms.store import MemoryStore
 from agency.risk.engine.engine import RiskEngine
 from agency.security.sandbox.config import SandboxBackend, SandboxConfig
 from agency.security.sandbox.manager import SandboxManager
-from agency.tools.base import ToolContext
+from agency.tools.base import BetaPrincipal, ToolContext
 from agency.tools.builtin import register_all as register_builtin_tools
 from agency.tools.driver import ToolDriver
 from agency.tools.registry import ToolRegistry
@@ -183,8 +183,12 @@ class AgencyOrchestrator:
             tools=[s.name for s in registry.list_specs()],
         )
 
-    def _tool_context(self, agent_id: str, task_id: str) -> ToolContext:
-        """Build the per-task context with live services injected."""
+    def _tool_context(
+        self, agent_id: str, task_id: str, *, beta_principal: BetaPrincipal | None = None
+    ) -> ToolContext:
+        """Build per-task context; never infer authority from caller context."""
+        if beta_principal is not None and not isinstance(beta_principal, BetaPrincipal):
+            raise TypeError("beta_principal must be a BetaPrincipal")
         return ToolContext(
             agent_id=agent_id,
             task_id=task_id,
@@ -192,6 +196,7 @@ class AgencyOrchestrator:
             sandbox_manager=self._sandbox_manager,
             lattice=self._lattice,
             audit=self._audit_log,
+            beta_principal=beta_principal,
         )
 
     async def stop(self) -> None:
@@ -426,9 +431,17 @@ class AgencyOrchestrator:
         )
 
     async def execute_task(
-        self, task_id: str, context: dict[str, Any] | None = None
+        self,
+        task_id: str,
+        context: dict[str, Any] | None = None,
+        *,
+        beta_principal: BetaPrincipal | None = None,
     ) -> ExecutionResult:
         """Execute a task through the full pipeline.
+
+        The explicit principal is trusted input from a future authenticated
+        admission adapter, not proof of authorization. This registry remains
+        legacy-open; do not enable beta execution on this plumbing alone.
 
         Pipeline:
         1. Get task from TaskManager
@@ -439,6 +452,12 @@ class AgencyOrchestrator:
         6. Audit log the full execution
         7. Return ExecutionResult
         """
+        if beta_principal is not None and not isinstance(beta_principal, BetaPrincipal):
+            raise TypeError("beta_principal must be a BetaPrincipal")
+        if beta_principal is not None:
+            # This registry is legacy-open. A typed identity is not a grant;
+            # refuse before task lookup/status, model, memory, or tool work.
+            raise RuntimeError("beta execution disabled: policy, budget and audit gates missing")
         task = await self._task_manager.get_task(task_id)
         if task is None:
             raise ValueError(f"Task not found: {task_id}")
@@ -493,7 +512,7 @@ class AgencyOrchestrator:
                     f"(real, retrieved from memory):\n{memory_context}"
                 )
 
-            tool_ctx = self._tool_context(task.created_by, task_id)
+            tool_ctx = self._tool_context(task.created_by, task_id, beta_principal=beta_principal)
             loop_result = await tool_driver.run(
                 task=description,
                 system_prompt=system_prompt,

@@ -30,6 +30,7 @@ from agency.memory.sms.models import MemoryItem, MemoryTier
 from agency.memory.sms.retrieval import RetrievalEngine
 from agency.memory.sms.store import MemoryStore
 from agency.orchestrator import AgencyOrchestrator
+from agency.tools.base import BetaPrincipal
 
 if TYPE_CHECKING:
     from agency.lattice.api import Lattice
@@ -213,8 +214,15 @@ class ButlerService:
         context: dict[str, Any],
         *,
         memory_enabled: bool = True,
+        beta_principal: BetaPrincipal | None = None,
     ) -> str:
-        """Validate and execute a turn; anonymous channels disable memory."""
+        """Validate and execute a turn; anonymous channels disable memory.
+
+        Only trusted in-process admission may supply ``beta_principal``. This
+        path does not authenticate Telegram or enforce beta budgets/policy.
+        """
+        if beta_principal is not None and not isinstance(beta_principal, BetaPrincipal):
+            raise TypeError("beta_principal must be a BetaPrincipal")
         await self._ensure_started()
         if not message or not message.strip():
             raise ValueError("message must not be empty.")
@@ -229,6 +237,7 @@ class ButlerService:
             text = text[: self._config.max_message_length]
 
         merged: dict[str, Any] = {**context, "sender": sender}
+        merged.pop("beta_principal", None)  # Context is data, never an identity channel.
         merged.pop("memory_context", None)  # Recalled memory is never caller-supplied.
         thread_id = merged.get("thread_id")
         if thread_id is not None:
@@ -264,9 +273,11 @@ class ButlerService:
         )
 
         try:
-            response = await asyncio.wait_for(
-                self.execute(agent, text, merged), timeout=self._config.timeout
-            )
+            if beta_principal is None:
+                execution = self.execute(agent, text, merged)
+            else:
+                execution = self.execute(agent, text, merged, beta_principal=beta_principal)
+            response = await asyncio.wait_for(execution, timeout=self._config.timeout)
             result = "completed"
         except TimeoutError as exc:
             response = f"Request timed out after {self._config.timeout:g}s. Please try again."
@@ -387,14 +398,33 @@ class ButlerService:
                 self._log.exception("butler.llm_route_failed")
         return await self._router.route(message, context)
 
-    async def execute(self, agent: Agent, message: str, context: dict[str, Any]) -> str:
-        """Run ``message`` for ``agent`` through the orchestrator pipeline."""
+    async def execute(
+        self,
+        agent: Agent,
+        message: str,
+        context: dict[str, Any],
+        *,
+        beta_principal: BetaPrincipal | None = None,
+    ) -> str:
+        """Run a turn; only an explicitly supplied typed identity travels onward.
+
+        This is plumbing, not authorization. HTTP callers never supply this
+        argument, and beta execution still requires transport, budget, audit
+        and registry gates before it may be enabled.
+        """
+        if beta_principal is not None and not isinstance(beta_principal, BetaPrincipal):
+            raise TypeError("beta_principal must be a BetaPrincipal")
         task = await self._orchestrator.submit_task(
             title=f"Butler message from {context.get('sender', 'unknown')}",
             description=message,
             agent_id=agent.id,
         )
-        result = await self._orchestrator.execute_task(task.task_id, context=context)
+        if beta_principal is None:
+            result = await self._orchestrator.execute_task(task.task_id, context=context)
+        else:
+            result = await self._orchestrator.execute_task(
+                task.task_id, context=context, beta_principal=beta_principal
+            )
         if result.status is not ExecutionStatus.COMPLETED:
             await self._audit_append(
                 agent=agent.id,
