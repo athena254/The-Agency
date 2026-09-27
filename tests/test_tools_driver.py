@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from agency.tools.base import ToolContext, ToolResult, ToolSpec
+from agency.tools.base import BetaPrincipal, ToolContext, ToolResult, ToolSpec
 from agency.tools.driver import ToolDriver, _extract_json
 
 
@@ -201,6 +201,94 @@ async def test_tool_error_loop_continues() -> None:
     assert "boom failed" in llm.calls[1][0]
 
 
+async def test_beta_audit_failure_cannot_become_completed_answer() -> None:
+    registry = FakeRegistry()
+    registry._beta_policy = object()  # type: ignore[attr-defined] — strict registry test double
+    registry.add_spec(
+        "web_search",
+        handler=lambda args: ToolResult(
+            tool="web_search",
+            ok=False,
+            error="beta audit unavailable",
+            evidence={"status": "INDETERMINATE"},
+        ),
+    )
+    llm = FakeLLM(
+        [
+            '{"action": {"name": "web_search", "args": {"query": "secret"}}}',
+            '{"final": "Search completed"}',
+        ]
+    )
+    ctx = make_ctx()
+    ctx.beta_principal = BetaPrincipal(telegram_user_id=123, private_chat=True)
+    result = await ToolDriver(registry, llm).run("research", "sys", ctx)
+    assert result.status == "audit_error"
+    assert result.final_answer == "Beta audit unavailable."
+    assert result.llm_calls == 1
+    assert len(llm.calls) == 1
+    assert len(result.steps) == 1
+    assert result.steps[0].args == {}
+    assert result.steps[0].tool == "beta_denied"
+
+
+async def test_missing_beta_identity_policy_denial_cannot_become_completed_answer() -> None:
+    registry = FakeRegistry()
+    registry._beta_policy = object()  # type: ignore[attr-defined] — strict registry test double
+    registry.add_spec(
+        "web_search",
+        handler=lambda args: ToolResult(
+            tool="web_search", ok=False, error="beta policy denied: missing trusted identity"
+        ),
+    )
+    llm = FakeLLM(['{"action": {"name": "web_search", "args": {}}}', '{"final": "done anyway"}'])
+    result = await ToolDriver(registry, llm).run("research", "sys", make_ctx())
+    assert result.status == "tool_error"
+    assert result.final_answer == "Beta tool unavailable."
+    assert llm.calls == []
+
+
+async def test_strict_registry_without_principal_never_calls_model_or_tool() -> None:
+    registry = FakeRegistry()
+    registry._beta_policy = object()  # type: ignore[attr-defined] — strict registry test double
+    registry.add_spec("web_search")
+    llm = FakeLLM(['{"final": "unsourced success"}'])
+    result = await ToolDriver(registry, llm).run("private task", "sys", make_ctx())
+    assert result.status == "tool_error"
+    assert result.final_answer == "Beta tool unavailable."
+    assert llm.calls == []
+    assert registry.calls == []
+
+
+async def test_nonbeta_failed_status_evidence_remains_ordinary_tool_error() -> None:
+    registry = FakeRegistry()
+    registry.add_spec(
+        "flaky",
+        handler=lambda args: ToolResult(
+            tool="flaky", ok=False, error="unavailable", evidence={"status": "FAILED"}
+        ),
+    )
+    llm = FakeLLM(['{"action": {"name": "flaky", "args": {}}}', '{"final": "handled"}'])
+    result = await ToolDriver(registry, llm).run("task", "sys", make_ctx())
+    assert result.status == "completed"
+    assert result.final_answer == "handled"
+
+
+async def test_strict_registry_exception_without_principal_cannot_become_success() -> None:
+    class BrokenBetaRegistry(FakeRegistry):
+        _beta_policy = object()
+
+        async def call(self, name: str, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+            raise RuntimeError("private audit path")
+
+    registry = BrokenBetaRegistry()
+    registry.add_spec("web_search")
+    llm = FakeLLM(['{"action": {"name": "web_search", "args": {}}}', '{"final": "success"}'])
+    result = await ToolDriver(registry, llm).run("task", "sys", make_ctx())
+    assert result.status == "tool_error"
+    assert result.final_answer == "Beta tool unavailable."
+    assert llm.calls == []
+
+
 async def test_unknown_tool_loop_continues() -> None:
     registry = FakeRegistry()
     llm = FakeLLM(
@@ -263,6 +351,39 @@ async def test_llm_raises() -> None:
     assert result.status == "llm_error"
     assert result.final_answer == "LLM error: connection lost"
     assert result.steps == []
+
+
+async def test_beta_model_failure_does_not_echo_private_provider_error() -> None:
+    registry = make_registry_with_search()
+    registry._beta_policy = object()  # type: ignore[attr-defined] — strict registry test double
+    llm = FakeLLM([RuntimeError("private prompt and token in provider failure")])
+    ctx = make_ctx()
+    ctx.beta_principal = BetaPrincipal(telegram_user_id=123, private_chat=True)
+    result = await ToolDriver(registry, llm).run("private prompt", "sys", ctx)
+    assert result.status == "llm_error"
+    assert result.final_answer == "Model unavailable."
+
+
+async def test_strict_registry_missing_principal_model_error_is_redacted() -> None:
+    registry = FakeRegistry()
+    registry._beta_policy = object()  # type: ignore[attr-defined] — strict registry test double
+    llm = FakeLLM([RuntimeError("private provider token")])
+    result = await ToolDriver(registry, llm).run("private task", "sys", make_ctx())
+    assert result.status == "tool_error"
+    assert result.final_answer == "Beta tool unavailable."
+    assert llm.calls == []
+
+
+async def test_beta_principal_cannot_run_on_legacy_open_registry() -> None:
+    registry = make_registry_with_search()
+    llm = FakeLLM(['{"action": {"name": "web_search", "args": {}}}'])
+    ctx = make_ctx()
+    ctx.beta_principal = BetaPrincipal(telegram_user_id=123, private_chat=True)
+    result = await ToolDriver(registry, llm).run("private task", "sys", ctx)
+    assert result.status == "tool_error"
+    assert result.final_answer == "Beta tool unavailable."
+    assert registry.calls == []
+    assert llm.calls == []
 
 
 async def test_llm_raises_after_steps_preserved() -> None:

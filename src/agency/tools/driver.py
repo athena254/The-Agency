@@ -194,11 +194,17 @@ class ToolDriver:
         parse_failures = 0
         tool_calls = 0
         task_id = getattr(ctx, "task_id", "")
+        strict_registry = getattr(self._registry, "_beta_policy", None) is not None
+        beta_path = strict_registry or ctx.beta_principal is not None
+        if beta_path and (not strict_registry or ctx.beta_principal is None):
+            return ToolLoopResult(final_answer="Beta tool unavailable.", status="tool_error")
 
         specs: list[Any] = []
         try:
             specs = list(self._registry.list_specs())
         except Exception as exc:  # noqa: BLE001 — driver must still run
+            if beta_path:
+                return ToolLoopResult(final_answer="Beta tool unavailable.", status="tool_error")
             self._log.warning("driver.list_specs_failed", error=str(exc))
 
         while True:
@@ -207,7 +213,7 @@ class ToolDriver:
                 raw = await self._llm.generate(prompt, {"task_id": task_id, "strict": True})
             except Exception as exc:  # noqa: BLE001 — surfaced as llm_error
                 return ToolLoopResult(
-                    final_answer=f"LLM error: {exc}",
+                    final_answer=("Model unavailable." if beta_path else f"LLM error: {exc}"),
                     steps=steps,
                     evidence=evidence,
                     llm_calls=llm_calls,
@@ -241,6 +247,40 @@ class ToolDriver:
                     result = await self._registry.call(tool_name, args, ctx)
                 except Exception as exc:  # noqa: BLE001 — surfaced as a failed step
                     result = _failed_result(tool_name, f"{type(exc).__name__}: {exc}")
+                error_text = getattr(result, "error", None)
+                audit_status = getattr(result, "evidence", {}).get("status")
+                # Strict registry still fails closed when identity is absent
+                # or registry.call raises. Ordinary tools may use the same
+                # evidence status names without implying a beta audit gate.
+                beta_failure = beta_path
+                if beta_failure and not getattr(result, "ok", False):
+                    # A beta denial, audit failure or uncertain post-call outcome
+                    # cannot be turned into a successful model-written final.
+                    # Do not echo tool errors or sensitive args to the caller.
+                    audit_error = error_text == "beta audit unavailable" or audit_status in (
+                        "FAILED",
+                        "INDETERMINATE",
+                    )
+                    return ToolLoopResult(
+                        final_answer=(
+                            "Beta audit unavailable." if audit_error else "Beta tool unavailable."
+                        ),
+                        steps=[
+                            ToolLoopStep(
+                                tool="beta_denied",
+                                args={},
+                                ok=False,
+                                error=(
+                                    "beta audit unavailable"
+                                    if audit_error
+                                    else "beta policy denied"
+                                ),
+                            ),
+                        ],
+                        evidence={},
+                        llm_calls=llm_calls,
+                        status="audit_error" if audit_error else "tool_error",
+                    )
                 steps.append(
                     ToolLoopStep(
                         tool=tool_name,
@@ -267,7 +307,9 @@ class ToolDriver:
                         )
                     except Exception as exc:  # noqa: BLE001
                         return ToolLoopResult(
-                            final_answer=f"LLM error: {exc}",
+                            final_answer=(
+                                "Model unavailable." if beta_path else f"LLM error: {exc}"
+                            ),
                             steps=steps,
                             evidence=evidence,
                             llm_calls=llm_calls,
