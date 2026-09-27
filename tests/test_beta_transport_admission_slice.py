@@ -93,6 +93,28 @@ async def test_beta_model_paths_never_reach_butler_even_via_poll(
 
 
 @pytest.mark.asyncio
+async def test_trusted_status_and_model_denials_consume_one_durable_request_each(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    b = bot(tmp_path, monkeypatch)
+    b._handler._budget = BetaBudgetStore(
+        str(tmp_path / "budget.db"), limits=BudgetLimits(requests_per_hour=2)
+    )
+    for number, text in ((40, "/status"), (41, "hello"), (42, "/status")):
+        b._handler._adapter.get_updates = AsyncMock(return_value=[update(101, text, number)])
+        assert await b._poll_batch() == "ok"
+    with sqlite3.connect(tmp_path / "budget.db") as conn:
+        rows = conn.execute(
+            "SELECT update_id, state FROM requests WHERE user_id = 101 ORDER BY update_id"
+        ).fetchall()
+    assert rows == [(40, "COMPLETED"), (41, "FAILED")]
+    b._butler.handle_message.assert_not_awaited()
+    assert b._handler._adapter.send_message.await_count == 3
+    assert "budget" in b._handler._adapter.send_message.await_args.args[1].lower()
+    await b.stop()
+
+
+@pytest.mark.asyncio
 async def test_quota_denies_before_profile_write_and_db_error_denies(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
