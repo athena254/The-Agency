@@ -47,6 +47,11 @@ def _mock(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.MockTrans
     return httpx.MockTransport(handler)
 
 
+def _fetch(transport: httpx.MockTransport) -> WebFetchTool:
+    # The HTTP response and DNS answer are both test fixtures, never live network.
+    return WebFetchTool(transport=transport, dns_resolver=lambda _: ["8.8.8.8"])
+
+
 async def test_search_parses_results_and_decodes_uddg():
     tool = WebSearchTool(transport=_mock(lambda req: httpx.Response(200, text=DDG_HTML)))
     result = await tool.run({"query": "rust 2026"}, _ctx())
@@ -94,7 +99,7 @@ async def test_search_zero_results_is_ok_empty():
 
 
 async def test_fetch_extracts_text_strips_scripts_collapses_whitespace():
-    tool = WebFetchTool(transport=_mock(lambda req: httpx.Response(200, text=ARTICLE_HTML)))
+    tool = _fetch(transport=_mock(lambda req: httpx.Response(200, text=ARTICLE_HTML)))
     result = await tool.run({"url": "https://example.com/article"}, _ctx())
     assert result.ok is True
     text = result.output["text"]
@@ -108,7 +113,7 @@ async def test_fetch_extracts_text_strips_scripts_collapses_whitespace():
 
 
 async def test_fetch_404_is_not_ok():
-    tool = WebFetchTool(transport=_mock(lambda req: httpx.Response(404, text="missing")))
+    tool = _fetch(transport=_mock(lambda req: httpx.Response(404, text="missing")))
     result = await tool.run({"url": "https://example.com/gone"}, _ctx())
     assert result.ok is False
     assert "404" in (result.error or "")
@@ -120,7 +125,7 @@ async def test_fetch_caps_bytes_and_chars():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text=big)
 
-    tool = WebFetchTool(transport=_mock(handler))
+    tool = _fetch(transport=_mock(handler))
     result = await tool.run({"url": "https://example.com/big"}, _ctx())
     assert result.ok is True
     assert result.output["bytes_read"] <= 200 * 1024
@@ -129,7 +134,7 @@ async def test_fetch_caps_bytes_and_chars():
 
 
 async def test_fetch_rejects_non_http_url():
-    tool = WebFetchTool(transport=_mock(lambda req: httpx.Response(200, text="x")))
+    tool = _fetch(transport=_mock(lambda req: httpx.Response(200, text="x")))
     result = await tool.run({"url": "ftp://example.com/file"}, _ctx())
     assert result.ok is False
     assert "http" in (result.error or "")
@@ -137,7 +142,7 @@ async def test_fetch_rejects_non_http_url():
 
 async def test_params_schema_missing_url_rejected_by_registry():
     registry = ToolRegistry()
-    registry.register(WebFetchTool(transport=_mock(lambda req: httpx.Response(200, text="x"))))
+    registry.register(_fetch(transport=_mock(lambda req: httpx.Response(200, text="x"))))
     registry.register(WebSearchTool(transport=_mock(lambda req: httpx.Response(200, text=""))))
     missing_url = await registry.call("web_fetch", {}, _ctx())
     assert missing_url.ok is False

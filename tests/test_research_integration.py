@@ -191,7 +191,10 @@ class TestDriverWithRealRegistry:
         # WebFetchTool with the article handler.
         from agency.tools.builtin.web import WebFetchTool
 
-        registry._tools["web_fetch"] = WebFetchTool(transport=_transport(_article_handler))
+        registry._tools["web_fetch"] = WebFetchTool(
+            transport=_transport(_article_handler),
+            dns_resolver=lambda _: ["8.8.8.8"],
+        )
 
         fake = FakeLLM(
             [
