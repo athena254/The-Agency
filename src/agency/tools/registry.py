@@ -9,7 +9,16 @@ from typing import Any
 
 import structlog
 
-from agency.tools.base import Tool, ToolContext, ToolError, ToolResult, ToolSpec
+from agency.tools.base import (
+    BetaToolPolicy,
+    Tool,
+    ToolContext,
+    ToolError,
+    ToolPolicy,
+    ToolPolicyDecision,
+    ToolResult,
+    ToolSpec,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -87,6 +96,17 @@ def _validate_args(spec: ToolSpec, args: dict[str, Any]) -> str | None:
     return _validate_value(schema, args, "args")
 
 
+def _coerce_policy_verdict(verdict: bool | ToolPolicyDecision) -> tuple[bool, str]:
+    """Normalize a policy return into (allowed, reason)."""
+    if isinstance(verdict, bool):
+        return verdict, ""
+    if isinstance(verdict, ToolPolicyDecision):
+        return verdict.allowed, verdict.reason
+    allowed = bool(getattr(verdict, "allowed", False))
+    reason = str(getattr(verdict, "reason", "") or "")
+    return allowed, reason
+
+
 class ToolRegistry:
     """Named-tool store with validation, timeouts, and audit logging.
 
@@ -99,13 +119,24 @@ class ToolRegistry:
         a fallback. When None (or on audit failure), structlog only.
     default_timeout_s:
         Default per-tool execution timeout in seconds.
+    beta_policy:
+        Optional per-call preflight hook checked after schema validation
+        and before ``tool.run``. ``None`` (default) keeps legacy-open
+        behavior. A denial returns ``ToolResult(ok=False, ...)`` and is
+        audited; policy errors fail closed.
     """
 
-    def __init__(self, audit: Any | None = None, default_timeout_s: float = 30.0) -> None:
+    def __init__(
+        self,
+        audit: Any | None = None,
+        default_timeout_s: float = 30.0,
+        beta_policy: ToolPolicy | None = None,
+    ) -> None:
         self._tools: dict[str, Tool] = {}
         self._timeouts: dict[str, float] = {}
         self._audit = audit
         self._default_timeout_s = default_timeout_s
+        self._beta_policy = beta_policy
         self._log = structlog.get_logger(__name__)
 
     def register(self, tool: Tool) -> None:
@@ -156,6 +187,24 @@ class ToolRegistry:
             result = ToolResult(tool=name, ok=False, error=f"invalid args: {violation}")
             await self._audit_call(ctx, name, result)
             return result
+
+        if self._beta_policy is not None:
+            try:
+                verdict = self._beta_policy(tool.spec, args, ctx)
+            except Exception as exc:  # noqa: BLE001 — policy errors fail closed
+                result = ToolResult(
+                    tool=name,
+                    ok=False,
+                    error=f"beta policy denied: policy error: {type(exc).__name__}: {exc}",
+                )
+                await self._audit_call(ctx, name, result)
+                return result
+            allowed, reason = _coerce_policy_verdict(verdict)
+            if not allowed:
+                detail = reason or "not allowed"
+                result = ToolResult(tool=name, ok=False, error=f"beta policy denied: {detail}")
+                await self._audit_call(ctx, name, result)
+                return result
 
         timeout = self._timeouts.get(name, self._default_timeout_s)
         start = time.perf_counter()
@@ -255,4 +304,4 @@ def build_default_registry(tools: Iterable[Tool] | None = None, **ctx_kwargs: An
     return registry
 
 
-__all__ = ["ToolRegistry", "build_default_registry"]
+__all__ = ["BetaToolPolicy", "ToolRegistry", "build_default_registry"]
