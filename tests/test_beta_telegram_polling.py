@@ -400,6 +400,34 @@ async def test_nonbeta_advances_only_after_success(
 
 
 @pytest.mark.asyncio
+async def test_nonbeta_name_write_failure_keeps_legacy_single_delivery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bot = _make_bot(tmp_path, monkeypatch, beta=False)
+    payload = _private_update(80, 101, "/name Atlas")
+    bot._handler._adapter.get_updates = AsyncMock(return_value=[payload])
+    bot._handler._adapter.send_message = AsyncMock()
+    writes = 0
+
+    def failed_write(user_id: int, name: str) -> None:
+        nonlocal writes
+        writes += 1
+        raise sqlite3.OperationalError("synthetic profile failure")
+
+    bot._handler._profiles.set_name = failed_write
+    try:
+        assert await bot._poll_batch() == "ok"
+        assert bot._offset == 81
+        assert await bot._poll_batch() == "ok"
+        assert writes == 1
+        bot._handler._adapter.send_message.assert_awaited_once_with(
+            101, "Could not save your name. Please try again."
+        )
+    finally:
+        await bot.stop()
+
+
+@pytest.mark.asyncio
 async def test_transient_errors_backoff_bounded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

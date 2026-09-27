@@ -272,7 +272,10 @@ class TelegramHandler:
             )
             if chat_id:
                 await self._adapter.send_message(chat_id, response)
-            return {"status": "ok" if saved else "error", "chat_id": chat_id, "command": "/name"}
+            # Legacy polling advances after delivering a failure reply. Only
+            # beta must expose the failed write to its durable request ledger.
+            status = "error" if self._config.beta_mode and not saved else "ok"
+            return {"status": status, "chat_id": chat_id, "command": "/name"}
         if effective_command in ("/agents", "/status", "/whoami", "/proposals", "/start", "/help"):
             response = await self._system_answer(effective_command, display_name)
             if chat_id:
