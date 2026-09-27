@@ -62,12 +62,14 @@ class BetaPrincipal:
     """
 
     telegram_user_id: int
-    private_chat: bool = True
+    private_chat: bool
 
     def __post_init__(self) -> None:
         uid = self.telegram_user_id
         if isinstance(uid, bool) or not isinstance(uid, int) or uid <= 0:
             raise ValueError(f"invalid telegram_user_id {uid!r}: must be a positive int")
+        if type(self.private_chat) is not bool:
+            raise ValueError(f"invalid private_chat {self.private_chat!r}: must be a bool")
 
 
 @dataclass
@@ -170,10 +172,12 @@ class BetaToolPolicy:
         principal = ctx.beta_principal
         if principal is None:
             return ToolPolicyDecision(False, "beta: missing trusted identity")
+        if not isinstance(principal, BetaPrincipal):
+            return ToolPolicyDecision(False, "beta: missing trusted identity")
         uid = principal.telegram_user_id
         if isinstance(uid, bool) or not isinstance(uid, int) or uid <= 0:
             return ToolPolicyDecision(False, "beta: missing trusted identity")
-        if not principal.private_chat:
+        if principal.private_chat is not True:
             return ToolPolicyDecision(False, "beta: group/channel scope denied")
         if spec.name in self._MEMORY_TOOLS:
             return ToolPolicyDecision(False, f"beta: memory tools disabled in beta: {spec.name}")
@@ -191,15 +195,9 @@ class BetaToolPolicy:
                 return ToolPolicyDecision(False, "beta: web_search query required")
             if len(query.strip()) > self._max_query_chars:
                 return ToolPolicyDecision(False, "beta: web_search query too long")
-            if "max_results" in args:
-                mr = args.get("max_results")
-                if (
-                    not isinstance(mr, int)
-                    or isinstance(mr, bool)
-                    or mr < 1
-                    or mr > self._max_results
-                ):
-                    return ToolPolicyDecision(False, "beta: web_search max_results out of bounds")
+            mr = args.get("max_results", 5)
+            if not isinstance(mr, int) or isinstance(mr, bool) or mr < 1 or mr > self._max_results:
+                return ToolPolicyDecision(False, "beta: web_search max_results out of bounds")
         return ToolPolicyDecision(True, f"beta: allowed {spec.name}")
 
 

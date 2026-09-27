@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from typing import Any
 
+import pytest
 import pytest_asyncio
 
 from agency.memory.sms.models import MemoryItem
@@ -368,3 +369,38 @@ async def test_malformed_policy_verdict_fails_closed() -> None:
     result = await registry.call("web_search", {"query": "hi"}, _trusted_ctx())
     assert result.ok is False
     assert tool.run_calls == 0
+
+
+def test_beta_principal_requires_explicit_private_chat() -> None:
+    """Stage 1a: private-chat scope must be explicitly supplied as strict bool."""
+    with pytest.raises(TypeError):
+        BetaPrincipal(telegram_user_id=12345)  # type: ignore[call-arg]
+    with pytest.raises(ValueError):
+        BetaPrincipal(telegram_user_id=12345, private_chat="false")  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        BetaPrincipal(telegram_user_id=12345, private_chat=1)  # type: ignore[arg-type]
+
+
+async def test_beta_denies_omitted_max_results_when_cap_below_default() -> None:
+    """Stage 1a: omitted max_results uses effective default 5; cap 4 must deny."""
+    registry = ToolRegistry(beta_policy=BetaToolPolicy(max_results=4))
+    stub = CountingTool(_search_spec())
+    registry.register(stub)
+    result = await registry.call("web_search", {"query": "hello"}, _trusted_ctx())
+    assert result.ok is False
+    assert "max_results" in (result.error or "").lower()
+    assert stub.run_calls == 0
+
+
+def test_beta_policy_denies_forged_principal_instance() -> None:
+    """Stage 1a: duck-typed principal without BetaPrincipal type must deny."""
+
+    class _Forged:
+        telegram_user_id = 12345
+        private_chat = True
+
+    policy = BetaToolPolicy()
+    ctx = ToolContext(agent_id="agent-1", task_id="task-1", beta_principal=_Forged())  # type: ignore[arg-type]
+    decision = policy(_search_spec(), {"query": "hello"}, ctx)
+    assert isinstance(decision, ToolPolicyDecision)
+    assert decision.allowed is False
