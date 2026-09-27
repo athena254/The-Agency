@@ -199,3 +199,38 @@ async def test_bridges_health_check_bool():
     openclaw = OpenClawBridge(OpenClawConfig(base_url="http://localhost:9999"))
     assert isinstance(await openclaw.health_check(), bool)
     await openclaw.aclose()
+
+
+async def test_openclaw_non_dict_status_rejected():
+    """Non-dict status payloads must raise TypeError (protocol violation)."""
+    from unittest.mock import MagicMock
+
+    bridge = OpenClawBridge(OpenClawConfig(base_url="http://localhost:9999"))
+    response = MagicMock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = ["not", "a", "dict"]
+    client = MagicMock()
+    client.get = AsyncMock(return_value=response)
+    with pytest.raises(TypeError, match="unexpected status payload"):
+        await bridge._get_status(client, "run-1")  # type: ignore[arg-type]
+    await bridge.aclose()
+
+
+async def test_openclaw_non_dict_status_maps_to_protocol_failure():
+    """TypeError from status polling must surface as FAILED protocol error."""
+    bridge = OpenClawBridge(
+        OpenClawConfig(base_url="http://localhost:9999", timeout_s=5.0, poll_interval_s=0.01)
+    )
+    with (
+        patch.object(bridge, "_submit", new=AsyncMock(return_value="run-1")),
+        patch.object(
+            bridge,
+            "_get_status",
+            new=AsyncMock(side_effect=TypeError("unexpected status payload: []")),
+        ),
+    ):
+        result = await bridge.execute("hi")
+    assert not result.ok
+    assert result.status is BridgeStatus.FAILED
+    assert result.error is not None and "protocol error" in result.error
+    await bridge.aclose()
