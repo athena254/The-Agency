@@ -28,16 +28,16 @@ async def test_governance_vote_requires_configured_token_and_verified_owner(
             forged = {"proposal_id": proposal_id, "voter_id": "butler", "decision": "approve"}
             assert (await client.post(url, json=forged)).status_code == 503
             monkeypatch.setenv("AGENCY_GOVERNANCE_TOKEN", "local-test-token")
-            assert (await client.post(url, json=forged)).status_code == 403
+            assert (await client.post(url, json=forged)).status_code == 503
             headers = {"X-Agency-Governance-Token": "local-test-token"}
-            assert (await client.post(url, json=forged, headers=headers)).status_code == 422
+            assert (await client.post(url, json=forged, headers=headers)).status_code == 503
             assert (await lattice.get_proposal_status(proposal_id)).votes == []
             response = await client.post(
                 url, json={"proposal_id": proposal_id, "decision": "approve"}, headers=headers
             )
-            assert response.status_code == 200
+            assert response.status_code == 503
             votes = (await lattice.get_proposal_status(proposal_id)).votes
-            assert [vote.voter_id for vote in votes] == ["user"]
+            assert votes == []
     finally:
         await lattice.close()
 
@@ -53,15 +53,15 @@ async def test_governance_proposer_is_authenticated_owner(monkeypatch: pytest.Mo
         app.include_router(router)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             headers = {"X-Agency-Governance-Token": "local-test-token"}
-            assert (await client.get("/v1/governance/proposals")).status_code == 403
+            assert (await client.get("/v1/governance/proposals")).status_code == 503
             payload = {"name": "test", "proposer": "butler"}
             assert (
                 await client.post("/v1/governance/propose", json=payload, headers=headers)
-            ).status_code == 422
+            ).status_code == 503
             response = await client.post(
                 "/v1/governance/propose", json={"name": "test"}, headers=headers
             )
-            assert response.status_code == 200
-            assert response.json()["proposer"] == "user"
+            assert response.status_code == 503
+            assert await lattice.list_open_proposals() == []
     finally:
         await lattice.close()

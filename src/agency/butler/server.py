@@ -178,6 +178,21 @@ def create_app(config: ButlerConfig | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    @application.middleware("http")
+    async def deny_unverified_authority(request: Request, call_next: Any) -> Any:
+        # A mounted child receives a root-prefixed ASGI path. Only GET health
+        # is public until peer identity and scoped reads are implemented.
+        path = request.scope["path"]
+        root = request.scope.get("root_path", "")
+        if root and path.startswith(root + "/"):
+            path = path[len(root) :]
+        if request.method != "GET" or path != "/v1/health":
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={"detail": "Peer authorization is unavailable."},
+            )
+        return await call_next(request)
+
     @application.post(
         "/v1/message", response_model=MessageResponse, tags=["butler"], summary="Send a message"
     )

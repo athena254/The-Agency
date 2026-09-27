@@ -61,7 +61,7 @@ async def test_http_cannot_select_thread_using_spoofed_sender(tmp_path):
                 "/v1/message",
                 json={"message": "private", "sender": "alice", "context": {"thread_id": thread.id}},
             )
-            assert response.status_code == 403
+            assert response.status_code == 503
             assert service.list_thread_messages("alice", thread.id) == []
     finally:
         await service.stop()
@@ -95,8 +95,8 @@ async def test_http_spoofed_sender_cannot_recall_or_store_legacy_memory(tmp_path
                     "context": {"memory_context": "private legacy note"},
                 },
             )
-        assert response.status_code == 200
-        assert "private legacy note" not in response.json()["response"]
+        assert response.status_code == 503
+        assert response.json() == {"detail": "Peer authorization is unavailable."}
     finally:
         await service.stop()
         store.close()

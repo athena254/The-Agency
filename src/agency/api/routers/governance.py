@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-from secrets import compare_digest
 from typing import Any, Literal
 
 import structlog
@@ -16,13 +14,8 @@ log = structlog.get_logger(__name__)
 
 
 def _require_owner(request: Request) -> None:
-    """Fail closed until the deployment provisions an owner-only API token."""
-    expected = os.environ.get("AGENCY_GOVERNANCE_TOKEN", "")
-    if not expected:
-        raise HTTPException(status_code=503, detail="Governance HTTP is not configured")
-    supplied = request.headers.get("X-Agency-Governance-Token", "")
-    if not compare_digest(supplied, expected):
-        raise HTTPException(status_code=403, detail="Governance access denied")
+    """An owner token is not a signed peer grant; disable this router."""
+    raise HTTPException(status_code=503, detail="Peer authorization is unavailable.")
 
 
 router = APIRouter(

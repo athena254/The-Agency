@@ -156,6 +156,21 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @application.middleware("http")
+    async def deny_unverified_authority(request: Request, call_next: Any) -> Any:
+        # The ASGI path can include root_path when mounted behind a prefix.
+        # Only GET health is public; every other path/method fails closed.
+        path = request.scope["path"]
+        root = request.scope.get("root_path", "")
+        if root and path.startswith(root + "/"):
+            path = path[len(root) :]
+        if request.method != "GET" or path != "/v1/health":
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={"detail": "Peer authorization is unavailable."},
+            )
+        return await call_next(request)
+
     application.include_router(tasks_router.router, prefix="/v1/tasks")
     application.include_router(agents_router.router, prefix="/v1/agents")
     application.include_router(memory_router.router, prefix="/v1/memory")
