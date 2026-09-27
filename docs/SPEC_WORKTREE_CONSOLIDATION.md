@@ -15,10 +15,18 @@ Consolidate the committed `feature/mvp-prototype` lineage and reviewed non-runti
 
 1. MVP dirty stream: bring the pending Telegram creation guard, command-menu changes, beta gap-log update and regression tests from the snapshot into `consolidation/agency-home`. Verify both beta and non-beta entry paths reject synthetic governance without hitting the Butler or Lattice.
 2. Root dirty stream: review the root snapshot independently against the MVP baseline. Port only justified behavior (initial candidate: OpenClaw malformed status handling) to a separate `consolidation/root-delta` branch with a focused test. Document reasons for any skipped config/lint/lockfile changes. This stream must not edit Telegram or beta test files.
-3. Integration: merge the reviewed root-delta commit into the home branch, run offline unit suite and CI's lint, format, mypy checks; then fast-forward canonical `main` when its dirty source files have been safely reconciled from the snapshot. Confirm file hashes/status and test result in the canonical folder.
+3. Branch inventory: compare the other local branches to MVP by ancestry and patch identity. Most are ancestors or equivalent patches; preserve branch refs, not stale whole-tree snapshots. Independently review and port unique `feat/beta-tool-policy` and `feat/beta-web-security` work into isolated branches. The `feat/beta-integrity` change is already present in MVP (`ce66f64`).
+4. Integration: cherry-pick the reviewed independent commits into the home branch, run offline unit suite and CI's lint, format, mypy checks; then fast-forward canonical `main` when its dirty source files have been safely reconciled from the snapshot. Confirm file hashes/status and test result in the canonical folder.
+
+## Accepted and deferred work
+
+- The MVP dirty Telegram change and tests prevent synthetic Butler/user governance votes in all modes. The root OpenClaw dirty `ValueError` → `TypeError` edit was not ported: MVP already raises `TypeError` and catches it correctly; the old edit would have made it uncaught. Two regression tests were ported instead.
+- Root dirty Ruff blanket suppressions, redundant inline suppressions, unmotivated lockfile re-resolution, and an exploratory Pollinations probe were saved outside the repository but not included in production. The root Git stash records the tracked edits for possible review; no stash was applied atop newer MVP code.
+- The tool-policy `ToolRegistry.call()` hook and SSRF preflight/redirect checks were ported with tests. The beta tool policy is **not connected** to the production orchestrator; `web_fetch` DNS preflight has a rebinding gap and is **not approved for beta use**.
+- `feat/beta-integration` commit `0d86444` remains a WIP branch, not a safe whole-branch merge: it requires trusted Telegram principal propagation and fails to block execution on audit-write failure. Its orchestrator and integration tests need a separate review and wiring checkpoint before production. This is a deliberate non-merge, not lost data.
 
 ## Acceptance and boundaries
 
-- Canonical folder contains all committed MVP history plus both accepted dirty streams; no lost original user source/doc/test changes.
+- Canonical folder contains all committed MVP history and reviewed, tested changes; superseded, unsafe, or unfinished work remains recoverable in its original branch, snapshot, or stash. No claim is made that every experimental branch is production-ready.
 - Offline tests run with `AGENCY_LLM_PROVIDER=echo AGENCY_LLM_MODEL=echo`; quality gate failures are reported, not hidden.
 - Runtime DBs, active Telegram poller, credentials, and remote branches remain unchanged. 'Merged' means local Git integration into canonical `main`, not pushed or deployed. The existing beta and peer-governance blockers remain blockers.
