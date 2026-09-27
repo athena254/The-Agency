@@ -14,10 +14,12 @@ from __future__ import annotations
 import asyncio
 import math
 import os
+import secrets
 import sqlite3
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from typing import ClassVar
 
 _HOUR_SECONDS = 3600.0
@@ -73,6 +75,7 @@ class Reservation:
     allowed: bool
     duplicate: bool
     state: str
+    capability: str | None = dataclass_field(default=None, repr=False, compare=False)
 
 
 def _validate_bot_id(bot_id: str) -> str:
@@ -127,6 +130,14 @@ class BetaBudgetStore:
         self._limits = limits if limits is not None else BudgetLimits()
         self._clock: Callable[[], float] = clock if clock is not None else time.time
         self._closed = False
+        # Process-local execution ownership. Never persisted or included in repr/logs.
+        self._owners: dict[tuple[str, int, int], str] = {}
+
+    def _owns(self, bot_id: str, update_id: int, user_id: int, capability: str | None) -> bool:
+        if self._closed or not isinstance(capability, str) or not capability:
+            return False
+        expected = self._owners.get((bot_id, update_id, user_id))
+        return expected is not None and secrets.compare_digest(expected, capability)
 
     # -- internal helpers (sync, run in threads) --
 
@@ -219,13 +230,18 @@ class BetaBudgetStore:
     def _prune_txn(conn: sqlite3.Connection, now: float) -> None:
         cutoff = now - _RETENTION_SECONDS
         conn.execute(
-            "DELETE FROM requests WHERE created_at < ? AND state IN ('COMPLETED', 'FAILED')",
+            "DELETE FROM model_attempts WHERE created_at < ? AND ("
+            "NOT EXISTS (SELECT 1 FROM requests r WHERE r.bot_id = model_attempts.bot_id "
+            "AND r.update_id = model_attempts.update_id) OR EXISTS ("
+            "SELECT 1 FROM requests r WHERE r.bot_id = model_attempts.bot_id "
+            "AND r.update_id = model_attempts.update_id "
+            "AND r.state IN ('COMPLETED', 'FAILED')))",
             (cutoff,),
         )
         conn.execute(
-            "DELETE FROM model_attempts WHERE created_at < ? "
-            "AND (bot_id, update_id) IN "
-            "(SELECT bot_id, update_id FROM requests WHERE state IN ('COMPLETED', 'FAILED'))",
+            "DELETE FROM requests WHERE created_at < ? AND state IN ('COMPLETED', 'FAILED') "
+            "AND NOT EXISTS (SELECT 1 FROM model_attempts m WHERE m.bot_id = requests.bot_id "
+            "AND m.update_id = requests.update_id)",
             (cutoff,),
         )
 
@@ -523,37 +539,61 @@ class BetaBudgetStore:
         reservation = await asyncio.to_thread(
             self._reserve_request_sync, bot_id, update_id, user_id
         )
+        # A worker may commit after close(); never issue an execution grant then.
+        if self._closed:
+            raise BudgetUnavailable(_UNAVAILABLE)
         if reservation.state not in _VALID_STATES and reservation.state != "DENIED":
             raise BudgetUnavailable(_UNAVAILABLE)
+        if reservation.allowed and not reservation.duplicate and reservation.state == "RESERVED":
+            capability = secrets.token_urlsafe(32)
+            self._owners[(bot_id, update_id, user_id)] = capability
+            return Reservation(True, False, "RESERVED", capability)
         return reservation
 
-    async def mark_running(self, bot_id: str, update_id: int, user_id: int) -> None:
+    async def mark_running(
+        self, bot_id: str, update_id: int, user_id: int, *, capability: str | None = None
+    ) -> None:
         _validate_bot_id(bot_id)
         _validate_update_id(update_id)
         _validate_user_id(user_id)
-        if self._closed:
-            raise BudgetUnavailable(_UNAVAILABLE)
+        if not self._owns(bot_id, update_id, user_id, capability):
+            raise ValueError("execution ownership denied")
         await asyncio.to_thread(self._mark_running_sync, bot_id, update_id, user_id)
 
-    async def reserve_model_call(self, bot_id: str, update_id: int, user_id: int) -> bool:
+    async def reserve_model_call(
+        self, bot_id: str, update_id: int, user_id: int, *, capability: str | None = None
+    ) -> bool:
         _validate_bot_id(bot_id)
         _validate_update_id(update_id)
         _validate_user_id(user_id)
-        if self._closed:
-            raise BudgetUnavailable(_UNAVAILABLE)
-        return await asyncio.to_thread(self._reserve_model_call_sync, bot_id, update_id, user_id)
+        if not self._owns(bot_id, update_id, user_id, capability):
+            return False
+        reserved = await asyncio.to_thread(
+            self._reserve_model_call_sync, bot_id, update_id, user_id
+        )
+        # close() can revoke ownership while a SQLite worker is in flight.
+        # The attempt may be counted, but it must not authorize a provider call.
+        return reserved and self._owns(bot_id, update_id, user_id, capability)
 
     async def finish_request(
-        self, bot_id: str, update_id: int, user_id: int, *, success: bool
+        self,
+        bot_id: str,
+        update_id: int,
+        user_id: int,
+        *,
+        success: bool,
+        capability: str | None = None,
     ) -> None:
         _validate_bot_id(bot_id)
         _validate_update_id(update_id)
         _validate_user_id(user_id)
         if type(success) is not bool:
             raise TypeError(f"success must be a bool, got {type(success).__name__}")
-        if self._closed:
-            raise BudgetUnavailable(_UNAVAILABLE)
+        if not self._owns(bot_id, update_id, user_id, capability):
+            raise ValueError("execution ownership denied")
         await asyncio.to_thread(self._finish_request_sync, bot_id, update_id, user_id, success)
+        self._owners.pop((bot_id, update_id, user_id), None)
 
     async def close(self) -> None:
         self._closed = True
+        self._owners.clear()
