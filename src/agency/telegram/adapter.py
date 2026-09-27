@@ -138,7 +138,14 @@ class TelegramAdapter:
         if offset is not None:
             params["offset"] = offset
 
-        resp = await client.get("/getUpdates", params=params)
+        # Telegram may hold the request for the full long-poll interval.
+        # Allow network/processing overhead beyond that interval, without
+        # lengthening the timeouts for other Bot API methods.
+        poll_timeout = httpx.Timeout(
+            self._config.timeout,
+            read=max(self._config.timeout, timeout + 15.0),
+        )
+        resp = await client.get("/getUpdates", params=params, timeout=poll_timeout)
         data = _checked_data(resp)
         if not data.get("ok"):
             raise RuntimeError("Telegram API request was rejected")
