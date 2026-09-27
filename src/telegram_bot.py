@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import sqlite3
 import sys
@@ -24,6 +25,7 @@ from agency.agents.demo.agent import DemoAgent
 from agency.butler.config import ButlerConfig
 from agency.butler.service import ButlerService
 from agency.orchestrator import AgencyOrchestrator
+from agency.telegram.budget_store import BetaBudgetStore
 from agency.telegram.config import TelegramConfig
 from agency.telegram.handler import TelegramHandler
 from agency.telegram.profile_store import ProfileStore
@@ -83,18 +85,38 @@ class TelegramBot:
         *,
         config: TelegramConfig | None = None,
         poll_db_path: str | None = None,
+        beta_budget_db_path: str | None = None,
     ) -> None:
         self._config = (
             config
             if config is not None
             else TelegramConfig(bot_token=token, webhook_url=webhook_url)
         )
+        if self._config.beta_mode and self._config.webhook_url:
+            raise ValueError("beta webhook is disabled until Butler lifecycle and audit are wired")
+        self._polling_marker = object()
+        budget_path = (
+            beta_budget_db_path
+            if beta_budget_db_path is not None
+            else os.environ.get("TELEGRAM_BETA_BUDGET_DB_PATH", "")
+        )
+        if self._config.beta_mode and (
+            not budget_path.strip() or budget_path.strip() == ":memory:"
+        ):
+            raise ValueError("beta requires persistent TELEGRAM_BETA_BUDGET_DB_PATH")
+        self._budget = BetaBudgetStore(budget_path) if self._config.beta_mode else None
+        # The token is never persisted in the ledger; its digest separates bot
+        # namespaces if a ledger path is accidentally shared.
+        self._budget_bot_id = hashlib.sha256(token.encode()).hexdigest()
         self._orchestrator = AgencyOrchestrator()
         self._demo = DemoAgent()
         self._butler = ButlerService(config=ButlerConfig(), orchestrator=self._orchestrator)
         self._handler = TelegramHandler(
             self._config,
             butler=self._butler,
+            budget=self._budget,
+            bot_id=self._budget_bot_id,
+            polling_marker=self._polling_marker,
             profile_store=ProfileStore(
                 os.environ.get("REMEX_PROFILE_DB_PATH", "data/remex_profiles.db")
             ),
@@ -174,6 +196,10 @@ class TelegramBot:
     async def start(self) -> None:
         """Start the bot."""
         logger.info("telegram_bot_starting")
+        if self._config.beta_mode:
+            if self._budget is None:
+                raise RuntimeError("beta budget unavailable")
+            await self._budget.initialize()
         await self._orchestrator.start()
         await self._butler.start()
         self._running = True
@@ -209,6 +235,8 @@ class TelegramBot:
         finally:
             self._poll_conn = None
         await self._handler.close()
+        if self._budget is not None:
+            await self._budget.close()
         await self._butler.stop()
         await self._orchestrator.stop()
         logger.info("telegram_bot_stopped")
@@ -252,7 +280,12 @@ class TelegramBot:
                 logger.info("telegram_poll_duplicate_skipped", update_id=update_id)
                 continue
             try:
-                result = await self._handler.handle_update(update)
+                if self._config.beta_mode:
+                    result = await self._handler._handle_polled_update(
+                        update, update_id, self._polling_marker
+                    )
+                else:
+                    result = await self._handler.handle_update(update)
             except Exception as exc:  # noqa: BLE001 — failed send stays pending.
                 # Handler/DB failure: back off, keep offset — Telegram will
                 # redeliver this update on the next getUpdates call.
