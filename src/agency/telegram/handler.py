@@ -15,12 +15,12 @@ from agency.telegram.profile_store import ProfileStore
 
 logger = structlog.get_logger(__name__)
 
-BETA_CREATION_DISABLED = "Agent creation is disabled in this beta."
+BETA_CREATION_DISABLED = "Agent creation is disabled until peer governance is available."
 BETA_UNSUPPORTED_COMMAND = "Unsupported command in this beta."
 
 _CREATION_ATTEMPT = re.compile(
-    r"\b(create|make|build|spawn|add)\b.*\b(agent|bot)\b"
-    r"|\b(agent|bot)\b.*\b(create|make|build|spawn|add|new)\b"
+    r"\b(create|make|build|spawn|add|set\s+up|spin\s+up|stand\s+up|launch)\b.*\b(agent|bot)\b"
+    r"|\b(agent|bot)\b.*\b(create|make|build|spawn|add|new|set\s+up|spin\s+up|stand\s+up|launch)\b"
     r"|\bnew\s+(agent|bot)\b"
     r"|\b(create|make|build|spawn|add)\s+(?:(?:a|an|the|new)\s+)?one\s+(called|named|for)\b",
     re.IGNORECASE,
@@ -118,16 +118,20 @@ class TelegramHandler:
         # state — never through the LLM, so no fiction is possible.
         command = text.strip().lower()
         command_token = command.split(None, 1)[0] if command else ""
-        if self._config.beta_mode:
-            if command_token == "/proposals":
-                if chat_id:
-                    await self._adapter.send_message(chat_id, BETA_CREATION_DISABLED)
-                return {"status": "rejected", "reason": "agent creation disabled"}
-            if command_token in ("/propose-agent", "/propose_agent"):
-                if chat_id:
-                    await self._adapter.send_message(chat_id, BETA_CREATION_DISABLED)
-                return {"status": "rejected", "reason": "agent creation disabled"}
-            if command_token.startswith("/") and command_token not in (
+        command_base = command_token.split("@", 1)[0]
+        if command_base in ("/proposals", "/propose-agent", "/propose_agent"):
+            if chat_id:
+                await self._adapter.send_message(chat_id, BETA_CREATION_DISABLED)
+            return {"status": "rejected", "reason": "agent creation disabled"}
+        if self._is_agent_creation_attempt(text):
+            if chat_id:
+                await self._adapter.send_message(chat_id, BETA_CREATION_DISABLED)
+            return {"status": "rejected", "reason": "agent creation disabled"}
+        if (
+            self._config.beta_mode
+            and command_token.startswith("/")
+            and command_token
+            not in (
                 "/start",
                 "/help",
                 "/whoami",
@@ -135,10 +139,11 @@ class TelegramHandler:
                 "/agents",
                 "/name",
                 "/research",
-            ):
-                if chat_id:
-                    await self._adapter.send_message(chat_id, BETA_UNSUPPORTED_COMMAND)
-                return {"status": "rejected", "reason": "unsupported command"}
+            )
+        ):
+            if chat_id:
+                await self._adapter.send_message(chat_id, BETA_UNSUPPORTED_COMMAND)
+            return {"status": "rejected", "reason": "unsupported command"}
         effective_command = command_token if self._config.beta_mode else command
         if effective_command == "/name" or command.startswith("/name "):
             response = self._name_command(user_id, text.strip()[len("/name") :].strip(), private)
@@ -165,32 +170,7 @@ class TelegramHandler:
                 await self._send_long(chat_id, response)
             return {"status": "ok", "chat_id": chat_id, "command": "/research"}
 
-        # /propose-agent <name> <domain> <capability1> [capability2 ...]
-        # (also /propose_agent — Telegram menus can't contain hyphens)
-        if not self._config.beta_mode and command.startswith(("/propose-agent", "/propose_agent")):
-            args = text.strip().split(maxsplit=1)[1] if " " in text.strip() else ""
-            response = await self._handle_propose_agent(args, sender)
-            if chat_id:
-                await self._adapter.send_message(chat_id, response)
-            return {"status": "ok", "chat_id": chat_id, "command": "/propose-agent"}
-
-        # Plain-English agent creation: detect intent and handle
-        # without LLM. This lets users say "create a new agent
-        # called X that does Y" instead of memorizing commands.
-        # Beta denies creation before any governance path.
-        if self._config.beta_mode and self._is_agent_creation_attempt(text):
-            if chat_id:
-                await self._adapter.send_message(chat_id, BETA_CREATION_DISABLED)
-            return {"status": "rejected", "reason": "agent creation disabled"}
-        if not self._config.beta_mode:
-            agent_intent = self._detect_agent_creation_intent(text)
-            if agent_intent and self._butler:
-                self._log.info("telegram.agent_creation_intent", intent=agent_intent, sender=sender)
-                response = await self._handle_plain_english_agent_creation(agent_intent, sender)
-                self._log.info("telegram.agent_creation_response", response=response[:200])
-                if chat_id:
-                    await self._adapter.send_message(chat_id, response)
-                return {"status": "ok", "chat_id": chat_id, "intent": "create_agent"}
+        # Creation is refused before the Butler/LLM path until peer governance exists.
 
         # Process via Butler if available, else demo agent
         if self._butler:
@@ -291,29 +271,13 @@ class TelegramHandler:
                 "did. Use /agents to see them, /status for system health. "
                 "The Telegram bot account is shared; this name is private to your conversations."
             )
-        if command == "/proposals":
-            return await self._list_proposals()
         if command in ("/start", "/help"):
-            if self._config.beta_mode:
-                return (
-                    f"🤖 *The Agency — {display_name}*\n\n"
-                    "Commands:\n"
-                    "• /research <topic> — Web research with cited sources\n"
-                    "• /agents — List registered agents\n"
-                    "• /status — Live system health\n"
-                    "• /whoami — What this bot is\n"
-                    "• /name <nickname> — Your private name for me (/name reset to undo)\n\n"
-                    "Or just chat — plain English routes to the right agent.\n"
-                    "The Telegram bot account is shared; this name is private to your conversations."
-                )
             return (
                 f"🤖 *The Agency — {display_name}*\n\n"
                 "Commands:\n"
                 "• /research <topic> — Web research with cited sources\n"
                 "• /agents — List registered agents\n"
                 "• /status — Live system health\n"
-                "• /propose_agent <name> <domain> <cap...> — Governance spawn\n"
-                "• /proposals — Open governance proposals\n"
                 "• /whoami — What this bot is\n"
                 "• /name <nickname> — Your private name for me (/name reset to undo)\n\n"
                 "Or just chat — plain English routes to the right agent.\n"
@@ -322,70 +286,9 @@ class TelegramHandler:
         return "Unknown command."
 
     async def _handle_propose_agent(self, args: str, sender: str) -> str:
-        """Handle /propose-agent <name> <domain> <capability1> [capability2 ...]."""
-        if not self._butler:
-            return "Butler not running."
-        if not args.strip():
-            return "Usage: /propose-agent <name> <domain> <capability1> [capability2 ...]"
-
-        parts = args.strip().split()
-        if len(parts) < 3:
-            return "Usage: /propose-agent <name> <domain> <capability1> [capability2 ...]"
-
-        name = parts[0]
-        domain = parts[1]
-        capabilities = parts[2:]
-
-        orchestrator = self._butler.orchestrator
-        lattice = orchestrator._lattice
-        if lattice is None:
-            return "Lattice not available. Cannot create proposal."
-
-        # Submit the proposal
-        proposal_id = await lattice.submit_proposal(
-            proposer_id=sender,
-            proposal_type="spawn_agent",
-            payload={"name": name, "domain": domain, "capabilities": capabilities},
-            quorum=0.66,
-            ttl_seconds=3600,
-        )
-
-        # Butler auto-approves (it routes requests, and this is a direct command)
-        await orchestrator.resolve_agent_proposal(
-            proposal_id=proposal_id,
-            voter_id="butler",
-            decision="approve",
-            evidence=["Direct command from human user"],
-        )
-
-        # User auto-approves (they initiated the request)
-        await orchestrator.resolve_agent_proposal(
-            proposal_id=proposal_id,
-            voter_id="user",
-            decision="approve",
-            evidence=["User initiated the agent proposal"],
-        )
-
-        # Check if proposal passed and agent was spawned
-        proposal = await lattice.get_proposal_status(proposal_id)
-        if proposal.status == "passed":
-            # Get the newly spawned agent
-            agents = await orchestrator.list_agents()
-            new_agent = next((a for a in agents if a.name == name and a.domain == domain), None)
-            if new_agent:
-                return (
-                    f"✅ Agent spawned successfully!\n\n"
-                    f"• Name: {new_agent.name}\n"
-                    f"• ID: {new_agent.id}\n"
-                    f"• Domain: {new_agent.domain}\n"
-                    f"• Capabilities: {', '.join(capabilities)}\n"
-                    f"• Proposal: {proposal_id[:16]}..."
-                )
-            return (
-                f"Proposal passed but agent not found in registry. Proposal: {proposal_id[:16]}..."
-            )
-
-        return f"Proposal submitted: {proposal_id[:16]}... Status: {proposal.status}"
+        """Reject legacy creation until affected-peer governance exists."""
+        _ = args, sender
+        return BETA_CREATION_DISABLED
 
     async def _list_proposals(self) -> str:
         """List all open governance proposals."""
@@ -481,89 +384,9 @@ class TelegramHandler:
     async def _handle_plain_english_agent_creation(
         self, intent: dict[str, Any], sender: str
     ) -> str:
-        """Handle agent creation intent from plain English."""
-        if not self._butler:
-            return "Butler not running."
-
-        name = intent.get("name")
-        domain = intent.get("domain", "general")
-        capabilities = intent.get("capabilities", [])
-        purpose = intent.get("purpose", "")
-
-        # Build capabilities from purpose if none given
-        if not capabilities and purpose:
-            # Convert "analyze financial data" to ["analyze", "financial_data"]
-            words = purpose.replace("-", " ").split()
-            capabilities = [w[:20] for w in words[:3] if len(w) > 2]
-        if not capabilities:
-            capabilities = [domain, "respond"]
-
-        # If no name, tell user we need one
-        if not name:
-            return (
-                "I can create a new agent for you through governance. "
-                "To proceed, I need at minimum a name.\n\n"
-                "Examples:\n"
-                '• "Create an agent called StockBot for finance"\n'
-                '• "New bot named HealthTracker that tracks medical records"\n'
-                '• "Spawn a CryptoAgent for cryptocurrency analysis"\n\n'
-                "What would you like to call it?"
-            )
-
-        orchestrator = self._butler.orchestrator
-        lattice = orchestrator._lattice
-        if lattice is None:
-            return "Lattice not available. Cannot create proposal."
-
-        # Submit the proposal
-        self._log.info("lattice.spawn_submit", name=name, domain=domain, capabilities=capabilities)
-        proposal_id = await lattice.submit_proposal(
-            proposer_id=sender,
-            proposal_type="spawn_agent",
-            payload={"name": name, "domain": domain, "capabilities": capabilities},
-            quorum=0.66,
-            ttl_seconds=3600,
-        )
-        self._log.info("lattice.spawn_proposal_created", proposal_id=proposal_id)
-
-        # Butler and user auto-approve
-        await orchestrator.resolve_agent_proposal(
-            proposal_id=proposal_id,
-            voter_id="butler",
-            decision="approve",
-            evidence=["Direct request from human user via plain English"],
-        )
-        self._log.info("lattice.spawn_butler_voted", proposal_id=proposal_id)
-        await orchestrator.resolve_agent_proposal(
-            proposal_id=proposal_id,
-            voter_id="user",
-            decision="approve",
-            evidence=["User initiated the agent proposal"],
-        )
-        self._log.info("lattice.spawn_user_voted", proposal_id=proposal_id)
-
-        proposal = await lattice.get_proposal_status(proposal_id)
-        self._log.info("lattice.spawn_proposal_status", status=proposal.status)
-        if proposal.status == "passed":
-            agents = await orchestrator.list_agents()
-            self._log.info("lattice.spawn_agents_count", count=len(agents))
-            for a in agents:
-                self._log.info("lattice.spawn_agent", name=a.name, domain=a.domain, id=a.id)
-            new_agent = next((a for a in agents if a.name == name and a.domain == domain), None)
-            if new_agent:
-                return (
-                    f"✅ Agent spawned successfully!\n\n"
-                    f"• Name: {new_agent.name}\n"
-                    f"• ID: {new_agent.id}\n"
-                    f"• Domain: {new_agent.domain}\n"
-                    f"• Capabilities: {', '.join(capabilities)}\n"
-                    f"• Proposal: {proposal_id[:16]}..."
-                )
-            return (
-                f"Proposal passed but agent not found in registry. Proposal: {proposal_id[:16]}..."
-            )
-
-        return f"Proposal submitted: {proposal_id[:16]}... Status: {proposal.status}"
+        """Reject legacy natural-language creation without synthetic votes."""
+        _ = intent, sender
+        return BETA_CREATION_DISABLED
 
     async def process_message(self, message: dict[str, Any]) -> str:
         """Process a message and return the response text."""
@@ -595,6 +418,14 @@ class TelegramHandler:
         if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
             raise ValueError("missing Telegram user ID")
         sender = f"telegram:{user_id}"
+        command_token = text.strip().lower().split(maxsplit=1)[0] if text.strip() else ""
+        command_base = command_token.split("@", 1)[0]
+        if command_base in (
+            "/proposals",
+            "/propose-agent",
+            "/propose_agent",
+        ) or self._is_agent_creation_attempt(text):
+            return BETA_CREATION_DISABLED
         chat = message.get("chat", {})
         private = chat.get("type") == "private" and chat.get("id") == user_id
         if chat.get("type") in ("group", "supergroup"):

@@ -35,8 +35,8 @@ _POLL_STATE_KEY = "offset"
 # Terminal handler outcomes: safe to advance past. Anything else ("error",
 # exception, unknown) stays pending for retry.
 _ADVANCING_STATUSES = frozenset({"ok", "ignored", "rejected"})
-# Hidden from the Telegram command menu while beta admission disables creation.
-_BETA_HIDDEN_COMMANDS = frozenset({"propose_agent", "proposals"})
+# Hidden until peer governance can verify affected-consumer participation.
+_DISABLED_GOVERNANCE_COMMANDS = frozenset({"propose_agent", "proposals"})
 _MAX_SEEN_IDS = 1000
 _MAX_BACKOFF_SECONDS = 30.0
 
@@ -72,8 +72,6 @@ class TelegramBot:
         {"command": "status", "description": "Live system health"},
         {"command": "agents", "description": "List registered agents"},
         {"command": "research", "description": "Research a topic: /research <topic>"},
-        {"command": "propose_agent", "description": "Propose a new agent via governance"},
-        {"command": "proposals", "description": "List open governance proposals"},
         {"command": "whoami", "description": "What this bot is"},
         {"command": "name", "description": "Set your private name for this assistant"},
     ]
@@ -123,10 +121,8 @@ class TelegramBot:
             self._open_poll_db()
 
     def commands_for_mode(self) -> list[dict[str, str]]:
-        """Command menu for the current mode; beta hides disabled creation entries."""
-        if self._config.beta_mode:
-            return [c for c in self.COMMANDS if c["command"] not in _BETA_HIDDEN_COMMANDS]
-        return list(self.COMMANDS)
+        """Hide governance commands until peer voting is actually available."""
+        return [c for c in self.COMMANDS if c["command"] not in _DISABLED_GOVERNANCE_COMMANDS]
 
     def _open_poll_db(self) -> None:
         """Open the poll-state DB and resume the persisted offset. Safe to retry."""

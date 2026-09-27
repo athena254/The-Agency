@@ -294,7 +294,7 @@ async def test_beta_proposals_list_disabled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_beta_help_hides_creation_and_nonbeta_keeps_it() -> None:
+async def test_help_hides_creation_in_all_modes() -> None:
     hb, _ = _handler()
     await hb.handle_update(_update(101, "/help"))
     beta_help = hb._adapter.send_message.await_args.args[1]  # type: ignore[attr-defined]
@@ -305,7 +305,8 @@ async def test_beta_help_hides_creation_and_nonbeta_keeps_it() -> None:
     hn._adapter.send_message = AsyncMock()  # type: ignore[method-assign]
     await hn.handle_update({"message": {"chat": {"id": 101}, "from": {"id": 101}, "text": "/help"}})
     legacy_help = hn._adapter.send_message.await_args.args[1]
-    assert "propose_agent" in legacy_help
+    assert "propose_agent" not in legacy_help
+    assert "proposals" not in legacy_help
     await hn.close()
 
 
@@ -316,9 +317,9 @@ async def test_nonbeta_legacy_paths_unchanged() -> None:
     r = await h.handle_update(_update(999, "hello", chat_type="group", chat_id=555))
     assert r["status"] == "ok"
     assert butler.handle_message.await_args.args[1] == "telegram:chat:555:user:999"
-    # creation routing preserved in non-beta
+    # Legacy chat remains available, but synthetic creation votes are refused.
     r = await h.handle_update(_update(999, "/propose_agent X d c1"))
-    assert r["command"] == "/propose-agent"
+    assert r == {"status": "rejected", "reason": "agent creation disabled"}
     await h.close()
 
 
@@ -372,13 +373,13 @@ async def test_beta_process_message_denies_creation_shortcuts(cmd: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_nonbeta_process_message_keeps_legacy_flow() -> None:
+async def test_nonbeta_process_message_refuses_legacy_governance() -> None:
     h, butler = _handler(TelegramConfig(bot_token="test"), butler="auto")
     result = await h.process_message(
         {"from": {"id": 999}, "chat": {"id": 555, "type": "group"}, "text": "/proposals"}
     )
-    assert result == "ok"
-    butler.handle_message.assert_awaited_once()
+    assert result == BETA_CREATION_DISABLED
+    butler.handle_message.assert_not_awaited()
     await h.close()
 
 

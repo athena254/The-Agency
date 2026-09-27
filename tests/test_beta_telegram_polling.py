@@ -295,10 +295,10 @@ async def test_competing_poller_stops_with_safe_message(
     await bot.stop()
 
 
-# --- P-D5: menu filtering preserves non-beta ---
+# --- P-D5: governance commands stay hidden in all modes ---
 
 
-def test_menu_filtering_beta_hides_creation_nonbeta_keeps(
+def test_menu_filtering_hides_unimplemented_governance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     beta = _make_bot(tmp_path, monkeypatch)
@@ -306,13 +306,10 @@ def test_menu_filtering_beta_hides_creation_nonbeta_keeps(
     assert "propose_agent" not in beta_names
     assert "proposals" not in beta_names
     assert "status" in beta_names and "name" in beta_names
-    # Class-level menu (non-beta default) is untouched.
-    assert "propose_agent" in [c["command"] for c in TelegramBot.COMMANDS]
-    assert "proposals" in [c["command"] for c in TelegramBot.COMMANDS]
-
+    # The registered menu in both modes must not advertise unavailable actions.
     plain = _make_bot(tmp_path, monkeypatch, beta=False)
     plain_names = [c["command"] for c in plain.commands_for_mode()]
-    assert "propose_agent" in plain_names and "proposals" in plain_names
+    assert "propose_agent" not in plain_names and "proposals" not in plain_names
 
 
 @pytest.mark.asyncio
