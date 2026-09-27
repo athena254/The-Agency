@@ -267,10 +267,12 @@ class TelegramHandler:
             return {"status": "rejected", "reason": "unsupported command"}
         effective_command = command_token if self._config.beta_mode else command
         if effective_command == "/name" or command.startswith("/name "):
-            response = self._name_command(user_id, text.strip()[len("/name") :].strip(), private)
+            response, saved = self._name_command(
+                user_id, text.strip()[len("/name") :].strip(), private
+            )
             if chat_id:
                 await self._adapter.send_message(chat_id, response)
-            return {"status": "ok", "chat_id": chat_id, "command": "/name"}
+            return {"status": "ok" if saved else "error", "chat_id": chat_id, "command": "/name"}
         if effective_command in ("/agents", "/status", "/whoami", "/proposals", "/start", "/help"):
             response = await self._system_answer(effective_command, display_name)
             if chat_id:
@@ -343,24 +345,25 @@ class TelegramHandler:
         for i in range(0, max(len(text), 1), limit):
             await self._adapter.send_message(chat_id, text[i : i + limit])
 
-    def _name_command(self, user_id: int, value: str, private: bool) -> str:
-        """Update this Telegram user's local presentation name only."""
+    def _name_command(self, user_id: int, value: str, private: bool) -> tuple[str, bool]:
+        """Return a reply and whether profile storage completed without error."""
         if not private:
-            return "Please use /name in a private chat with this bot."
+            return "Please use /name in a private chat with this bot.", True
         if not value:
             current = self._profiles.get_name(user_id) or "Remex"
-            return f"My name here is {current}. Use /name <nickname> or /name reset."
+            return f"My name here is {current}. Use /name <nickname> or /name reset.", True
         try:
             if value.lower() == "reset":
                 self._profiles.reset_name(user_id)
-                return "Name reset to Remex for your conversations."
+                return "Name reset to Remex for your conversations.", True
             self._profiles.set_name(user_id, value)
         except ValueError:
-            return "Name must be 1–32 characters: letters, digits, spaces or hyphens."
-        except Exception:  # noqa: BLE001 — never claim a failed database write succeeded.
-            self._log.exception("telegram.name_save_failed", user_id=user_id)
-            return "Could not save your name. Please try again."
-        return f"You can call me {value.strip()} in your conversations."
+            return "Name must be 1–32 characters: letters, digits, spaces or hyphens.", True
+        except Exception as exc:  # noqa: BLE001 — never claim a failed database write succeeded.
+            # SQLite/driver errors can contain private input; log only the class.
+            self._log.error("telegram.name_save_failed", error_class=type(exc).__name__)
+            return "Could not save your name. Please try again.", False
+        return f"You can call me {value.strip()} in your conversations.", True
 
     async def _system_answer(self, command: str, display_name: str = "Remex") -> str:
         """Deterministic answers built from real system state."""

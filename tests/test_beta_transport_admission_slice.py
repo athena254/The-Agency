@@ -80,6 +80,40 @@ async def test_polling_name_reserved_once_and_replay_does_not_rewrite(
 
 
 @pytest.mark.asyncio
+async def test_failed_profile_write_records_failed_request_not_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    b = bot(tmp_path, monkeypatch)
+    writes = 0
+
+    def broken_write(user_id: int, name: str) -> None:
+        nonlocal writes
+        writes += 1
+        raise sqlite3.OperationalError("synthetic private database error")
+
+    b._handler._profiles.set_name = broken_write
+    b._handler._adapter.get_updates = AsyncMock(return_value=[update(101, "/name Atlas", 15)])
+    try:
+        assert await b._poll_batch() == "transient"
+        assert await b._poll_batch() == "ok"  # Failed reservation replays without a second write.
+        assert writes == 1
+        assert b._handler._profiles.get_name(101) is None
+        assert b._handler._adapter.send_message.await_args_list[0].args[1] == (
+            "Could not save your name. Please try again."
+        )
+        with sqlite3.connect(tmp_path / "budget.db") as conn:
+            state = conn.execute(
+                "SELECT state FROM requests WHERE user_id = ? AND update_id = ?", (101, 15)
+            ).fetchone()
+        assert state == ("FAILED",)
+        logged = capsys.readouterr().out
+        assert "synthetic private database error" not in logged
+        assert "Atlas" not in logged
+    finally:
+        await b.stop()
+
+
+@pytest.mark.asyncio
 async def test_beta_model_paths_never_reach_butler_even_via_poll(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
