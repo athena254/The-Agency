@@ -5,8 +5,11 @@ Stdlib + httpx only — HTML is parsed with :mod:`html.parser`, no bs4.
 
 from __future__ import annotations
 
+import ipaddress
+import socket
 import time
 import urllib.parse
+from collections.abc import Callable
 from html.parser import HTMLParser
 from typing import Any
 
@@ -27,6 +30,183 @@ _DDG_ENDPOINT = "https://html.duckduckgo.com/html/"
 
 _MAX_FETCH_BYTES = 200 * 1024  # 200 KB response cap
 _MAX_FETCH_CHARS = 8000  # text chars returned
+
+_DnsResolver = Callable[[str], list[str]]
+
+_MAX_FETCH_REDIRECTS = 3
+
+_BLOCKED_SUFFIXES = (
+    ".localhost",
+    ".local",
+    ".internal",
+    ".lan",
+    ".localdomain",
+    ".intranet",
+    ".corp",
+    ".home",
+    ".invalid",
+)
+
+_REDIRECT_STATUSES = (301, 302, 303, 307, 308)
+
+
+def _default_resolve(host: str) -> list[str]:
+    """Resolve ``host`` to IP strings via the system resolver."""
+    infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    return [str(info[4][0]) for info in infos]
+
+
+def _parse_numeric_ipv4(host: str) -> ipaddress.IPv4Address | None:
+    """Decode decimal/octal/hex IPv4 forms (e.g. ``2130706433``, ``0x7f.0.0.1``).
+
+    Returns the IPv4 address when ``host`` is an all-numeric obscured form,
+    else None. Standard dotted-decimal is handled by :mod:`ipaddress` itself;
+    this catches evasion forms that some stacks interpret via ``inet_aton``.
+    """
+    if ":" in host:
+        return None
+    lowered = host.lower().rstrip(".")
+    if not lowered:
+        return None
+    # Single decimal integer, e.g. "2130706433".
+    if lowered.isdigit():
+        try:
+            value = int(lowered, 10)
+        except ValueError:
+            return None
+        if 0 <= value <= 0xFFFFFFFF:
+            return ipaddress.IPv4Address(value)
+        return None
+    if "." not in lowered:
+        return None
+    parts = lowered.split(".")
+    if not 1 <= len(parts) <= 4:
+        return None
+    values: list[int] = []
+    for part in parts:
+        if not part:
+            return None
+        try:
+            if part.startswith("0x"):
+                values.append(int(part, 16))
+            elif part.startswith("0") and len(part) > 1 and part.isdigit():
+                values.append(int(part, 8))
+            elif part.isdigit():
+                values.append(int(part, 10))
+            else:
+                return None
+        except ValueError:
+            return None
+    try:
+        if len(values) == 1:
+            if not 0 <= values[0] <= 0xFFFFFFFF:
+                return None
+            return ipaddress.IPv4Address(values[0])
+        if len(values) == 2:
+            a, b = values
+            if not (0 <= a <= 0xFF and 0 <= b <= 0xFFFFFF):
+                return None
+            return ipaddress.IPv4Address((a << 24) | b)
+        if len(values) == 3:
+            a, b, c = values
+            if not (0 <= a <= 0xFF and 0 <= b <= 0xFF and 0 <= c <= 0xFFFF):
+                return None
+            return ipaddress.IPv4Address((a << 24) | (b << 16) | c)
+        a, b, c, d = values
+        for octet in values:
+            if not 0 <= octet <= 0xFF:
+                return None
+        return ipaddress.IPv4Address(f"{a}.{b}.{c}.{d}")
+    except ipaddress.AddressValueError:
+        return None
+
+
+def _hostname_block_reason(host: str) -> str | None:
+    """Return a block reason for literal/internal hostnames, else None."""
+    normalized = host.lower().rstrip(".")
+    if not normalized:
+        return "missing hostname"
+    if normalized == "localhost" or normalized.endswith(".localhost"):
+        return "localhost blocked"
+    for suffix in _BLOCKED_SUFFIXES:
+        if normalized.endswith(suffix):
+            return f"internal suffix {suffix!r} blocked"
+    if "." not in normalized and normalized != "localhost":
+        # Single-label names (intranet hosts) fail closed.
+        try:
+            ipaddress.ip_address(normalized)
+        except ValueError:
+            if _parse_numeric_ipv4(normalized) is not None:
+                return "obscured numeric IP form blocked"
+            return "single-label hostname blocked"
+    try:
+        ipaddress.ip_address(normalized)
+        return "IP literal blocked"
+    except ValueError:
+        pass
+    if _parse_numeric_ipv4(normalized) is not None:
+        return "obscured numeric IP form blocked"
+    return None
+
+
+def _validate_fetch_url(url: str, resolver: _DnsResolver) -> str:
+    """Validate one fetch hop; return the stripped URL or raise ValueError.
+
+    Enforces HTTPS-only, no credentials, no control chars, no IP literals /
+    localhost / internal suffixes, plus DNS resolution where every resolved
+    address must be globally routable. DNS failure fails closed.
+
+    Residual risk: this is a preflight check only (TOCTOU/DNS-rebind). It does
+    NOT pin the address used by httpx, so it cannot prove safety for untrusted
+    URLs on its own. ``web_fetch`` must stay beta-disabled until an
+    enforceable proxy/egress rule or HTTPS domain allowlist plus host-network
+    review exists.
+    """
+    for ch in url:
+        if ord(ch) <= 31 or ord(ch) == 127:
+            raise ValueError("control character in url blocked")
+    cleaned = url.strip()
+    if not cleaned:
+        raise ValueError("missing required param: 'url'")
+    if any(ch.isspace() for ch in cleaned):
+        raise ValueError("whitespace in url blocked")
+    try:
+        parsed = urllib.parse.urlparse(cleaned)
+    except ValueError as exc:
+        raise ValueError(f"malformed url blocked: {exc}") from exc
+    if parsed.scheme.lower() != "https":
+        raise ValueError("'url' must use https://")
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("missing hostname blocked")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("credentials in url blocked")
+    if "@" in (parsed.netloc or ""):
+        raise ValueError("userinfo syntax blocked")
+    try:
+        normalized = httpx.URL(cleaned)
+    except Exception as exc:
+        raise ValueError(f"malformed url blocked: {exc}") from exc
+    if normalized.host.lower().rstrip(".") != hostname.lower().rstrip("."):
+        raise ValueError("odd host syntax blocked")
+    reason = _hostname_block_reason(hostname)
+    if reason is not None:
+        raise ValueError(reason)
+    try:
+        addresses = resolver(hostname)
+    except Exception as exc:
+        raise ValueError(f"DNS resolution failed or blocked: {exc}") from exc
+    if not addresses:
+        raise ValueError("DNS resolution failed or blocked: no addresses")
+    for raw in addresses:
+        ip_text = raw.split("%")[0]
+        try:
+            ip = ipaddress.ip_address(ip_text)
+        except ValueError as exc:
+            raise ValueError(f"unparsable resolved address blocked: {raw}") from exc
+        if not ip.is_global:
+            raise ValueError(f"resolved address {ip_text} blocked (not global)")
+    return cleaned
 
 
 def _decode_ddg_url(href: str) -> str:
@@ -194,14 +374,28 @@ class WebSearchTool:
 
 
 class WebFetchTool:
-    """Fetch a URL and return extracted text (capped)."""
+    """Fetch an HTTPS URL and return extracted text (capped).
 
-    def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    SSRF hardening is best-effort preflight only: structural HTTPS validation,
+    IP-literal/localhost/internal-suffix rejection, per-hop DNS checks, manual
+    redirect validation (max 3 hops, no automatic follows). DNS preflight does
+    NOT pin the address used by httpx (TOCTOU/rebind residual), so
+    ``web_fetch`` must remain beta-disabled until a proxy/egress rule or HTTPS
+    domain allowlist plus host-network review exists.
+    """
+
+    def __init__(
+        self,
+        transport: httpx.AsyncBaseTransport | None = None,
+        dns_resolver: _DnsResolver | None = None,
+    ) -> None:
         self._transport = transport
+        self._resolver: _DnsResolver = dns_resolver or _default_resolve
         self.spec = ToolSpec(
             name="web_fetch",
             description=(
-                "Fetch a web page (http/https) and return its text content (first 8000 chars)."
+                "Fetch a web page (https only, public hosts) and return its text "
+                "content (first 8000 chars)."
             ),
             parameters={
                 "type": "object",
@@ -217,37 +411,68 @@ class WebFetchTool:
         url = args.get("url")
         if not isinstance(url, str) or not url.strip():
             return ToolResult(tool="web_fetch", ok=False, error="missing required param: 'url'")
-        url = url.strip()
-        if not url.startswith(("http://", "https://")):
+        try:
+            current_url = _validate_fetch_url(url.strip(), self._resolver)
+        except ValueError as exc:
             return ToolResult(
                 tool="web_fetch",
                 ok=False,
-                error="'url' must start with http:// or https://",
+                error=f"blocked: {exc}",
+                duration_ms=int((time.perf_counter() - start) * 1000),
             )
         try:
-            async with (
-                httpx.AsyncClient(
-                    transport=self._transport,
-                    timeout=15.0,
-                    follow_redirects=True,
-                    headers={"User-Agent": _DESKTOP_UA},
-                ) as client,
-                client.stream("GET", url) as response,
-            ):
-                status = response.status_code
-                final_url = str(response.url)
-                if status < 200 or status >= 300:
-                    return ToolResult(
-                        tool="web_fetch",
-                        ok=False,
-                        error=f"fetch failed with status {status} for {final_url}",
-                        duration_ms=int((time.perf_counter() - start) * 1000),
-                    )
-                body = bytearray()
-                async for chunk in response.aiter_bytes(chunk_size=16384):
-                    body.extend(chunk)
-                    if len(body) >= _MAX_FETCH_BYTES:
-                        del body[_MAX_FETCH_BYTES:]
+            async with httpx.AsyncClient(
+                transport=self._transport,
+                timeout=15.0,
+                follow_redirects=False,
+                headers={"User-Agent": _DESKTOP_UA},
+            ) as client:
+                hops = 0
+                while True:
+                    async with client.stream("GET", current_url) as response:
+                        status = response.status_code
+                        if status in _REDIRECT_STATUSES:
+                            location = response.headers.get("location")
+                            if not location:
+                                return ToolResult(
+                                    tool="web_fetch",
+                                    ok=False,
+                                    error=f"fetch failed with status {status} for {current_url}",
+                                    duration_ms=int((time.perf_counter() - start) * 1000),
+                                )
+                            if hops >= _MAX_FETCH_REDIRECTS:
+                                return ToolResult(
+                                    tool="web_fetch",
+                                    ok=False,
+                                    error="blocked: too many redirects",
+                                    duration_ms=int((time.perf_counter() - start) * 1000),
+                                )
+                            next_url = urllib.parse.urljoin(current_url, location)
+                            try:
+                                current_url = _validate_fetch_url(next_url, self._resolver)
+                            except ValueError as exc:
+                                return ToolResult(
+                                    tool="web_fetch",
+                                    ok=False,
+                                    error=f"blocked redirect: {exc}",
+                                    duration_ms=int((time.perf_counter() - start) * 1000),
+                                )
+                            hops += 1
+                            continue
+                        final_url = str(response.url)
+                        if status < 200 or status >= 300:
+                            return ToolResult(
+                                tool="web_fetch",
+                                ok=False,
+                                error=f"fetch failed with status {status} for {final_url}",
+                                duration_ms=int((time.perf_counter() - start) * 1000),
+                            )
+                        body = bytearray()
+                        async for chunk in response.aiter_bytes(chunk_size=16384):
+                            body.extend(chunk)
+                            if len(body) >= _MAX_FETCH_BYTES:
+                                del body[_MAX_FETCH_BYTES:]
+                                break
                         break
         except httpx.HTTPError as exc:
             return ToolResult(
