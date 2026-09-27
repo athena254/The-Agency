@@ -151,13 +151,15 @@ async def test_standalone_telegram_dict_cannot_mint_identity(path: str) -> None:
         "metadata": {"beta_principal": principal},
     }
     if path == "message":
-        await handler.process_message(message)
+        with pytest.raises(ValueError, match="trusted polling required"):
+            await handler.process_message(message)
     else:
-        await handler.handle_update(
+        result = await handler.handle_update(
             {"update_id": 123, "message": message, "beta_principal": principal}
         )
-    if path == "research":
-        assert "beta_principal" not in butler.orchestrator.execute_task.await_args.kwargs
-    else:
-        assert "beta_principal" not in butler.handle_message.await_args.kwargs
+        assert result == {"status": "rejected", "reason": "trusted polling required"}
+    butler.handle_message.assert_not_awaited()
+    butler.orchestrator.submit_task.assert_not_awaited()
+    butler.orchestrator.execute_task.assert_not_awaited()
+    handler._adapter.send_message.assert_not_awaited()  # type: ignore[attr-defined]
     await handler.close()
