@@ -218,11 +218,13 @@ class ButlerService:
     ) -> str:
         """Validate and execute a turn; anonymous channels disable memory.
 
-        Only trusted in-process admission may supply ``beta_principal``. This
-        path does not authenticate Telegram or enforce beta budgets/policy.
+        Only trusted in-process admission may supply ``beta_principal``. Beta
+        execution is dormant: reject it before startup, routing or persistence.
         """
         if beta_principal is not None and not isinstance(beta_principal, BetaPrincipal):
             raise TypeError("beta_principal must be a BetaPrincipal")
+        if beta_principal is not None:
+            raise RuntimeError("beta execution disabled: policy, budget and audit gates missing")
         await self._ensure_started()
         if not message or not message.strip():
             raise ValueError("message must not be empty.")
@@ -273,10 +275,7 @@ class ButlerService:
         )
 
         try:
-            if beta_principal is None:
-                execution = self.execute(agent, text, merged)
-            else:
-                execution = self.execute(agent, text, merged, beta_principal=beta_principal)
+            execution = self.execute(agent, text, merged)
             response = await asyncio.wait_for(execution, timeout=self._config.timeout)
             result = "completed"
         except TimeoutError as exc:
@@ -406,25 +405,21 @@ class ButlerService:
         *,
         beta_principal: BetaPrincipal | None = None,
     ) -> str:
-        """Run a turn; only an explicitly supplied typed identity travels onward.
+        """Run a turn; refuse beta before creating a task on the legacy registry.
 
-        This is plumbing, not authorization. HTTP callers never supply this
-        argument, and beta execution still requires transport, budget, audit
-        and registry gates before it may be enabled.
+        This typed argument is reserved for future authenticated admission,
+        budget and policy gates. Context and sender are never identity grants.
         """
         if beta_principal is not None and not isinstance(beta_principal, BetaPrincipal):
             raise TypeError("beta_principal must be a BetaPrincipal")
+        if beta_principal is not None:
+            raise RuntimeError("beta execution disabled: policy, budget and audit gates missing")
         task = await self._orchestrator.submit_task(
             title=f"Butler message from {context.get('sender', 'unknown')}",
             description=message,
             agent_id=agent.id,
         )
-        if beta_principal is None:
-            result = await self._orchestrator.execute_task(task.task_id, context=context)
-        else:
-            result = await self._orchestrator.execute_task(
-                task.task_id, context=context, beta_principal=beta_principal
-            )
+        result = await self._orchestrator.execute_task(task.task_id, context=context)
         if result.status is not ExecutionStatus.COMPLETED:
             await self._audit_append(
                 agent=agent.id,
