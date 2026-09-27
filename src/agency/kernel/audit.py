@@ -311,6 +311,17 @@ class AuditLog:
         return f"AuditLog(path={str(self._db_path)!r})"
 
 
+_PENDING_BETA_CALL = """SELECT 1 FROM audit_entries AS intent
+               WHERE intent.result = 'pending'
+                 AND json_extract(intent.evidence, '$.phase') = 'intent'
+                 AND NOT EXISTS (
+                   SELECT 1 FROM audit_entries AS outcome
+                   WHERE json_extract(outcome.evidence, '$.phase') = 'outcome'
+                     AND json_extract(outcome.evidence, '$.call_id') =
+                         json_extract(intent.evidence, '$.call_id')
+                 ) LIMIT 1"""
+
+
 class BetaAuditLog(AuditLog):
     """Disk-backed beta audit with SQLite WAL + synchronous FULL commits.
 
@@ -328,22 +339,64 @@ class BetaAuditLog(AuditLog):
     async def has_pending_calls(self) -> bool:
         """Detect beta intents with no matching outcome, including after restart."""
         conn = self._require_ready()
-        cursor = await conn.execute(
-            """SELECT 1 FROM audit_entries AS intent
-               WHERE intent.result = 'pending'
-                 AND json_extract(intent.evidence, '$.phase') = 'intent'
-                 AND NOT EXISTS (
-                   SELECT 1 FROM audit_entries AS outcome
-                   WHERE json_extract(outcome.evidence, '$.phase') = 'outcome'
-                     AND json_extract(outcome.evidence, '$.call_id') =
-                         json_extract(intent.evidence, '$.call_id')
-                 ) LIMIT 1"""
-        )
+        cursor = await conn.execute(_PENDING_BETA_CALL)
         return await cursor.fetchone() is not None
 
-    async def append_beta(self, entry: AuditEntry) -> str:
-        """Commit exactly once; acknowledge only a readable FULL-sync row."""
-        conn = self._require_ready()
+    async def claim_intent(self, entry: AuditEntry) -> bool:
+        """Atomically refuse pending work or commit a verified beta intent."""
+        self._require_ready()
+        if (
+            entry.result != "pending"
+            or not entry.evidence
+            or entry.evidence.get("phase") != "intent"
+        ):
+            raise ValueError("claim requires a beta intent")
+        await self._verify_beta_connection(self._require_ready())
+        async with aiosqlite.connect(self._db_path) as conn:
+            await conn.execute("PRAGMA synchronous=FULL")
+            await self._verify_beta_connection(conn)
+            await conn.execute("BEGIN IMMEDIATE")
+            cursor = await conn.execute(_PENDING_BETA_CALL)
+            if await cursor.fetchone() is not None:
+                await conn.rollback()
+                return False
+            await self._insert_claimed_intent(conn, entry)
+            cursor = await conn.execute(
+                "SELECT result, evidence FROM audit_entries WHERE entry_id = ?", (entry.entry_id,)
+            )
+            if await cursor.fetchone() != (entry.result, _json(entry.evidence)):
+                raise RuntimeError("beta audit intent was not acknowledged")
+            return True
+
+    @staticmethod
+    async def _insert_claimed_intent(conn: aiosqlite.Connection, entry: AuditEntry) -> None:
+        """Commit one intent inside the caller's immediate transaction."""
+        await conn.execute(
+            "INSERT INTO audit_entries "
+            "(entry_id, timestamp, agent, task, target, authorization, capability, "
+            " action, result, evidence, model, model_version, tool_version, environment) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                entry.entry_id,
+                entry.as_ts(),
+                entry.agent,
+                entry.task,
+                entry.target,
+                entry.authorization,
+                entry.capability,
+                _enum_value(entry.action),
+                entry.result,
+                _json(entry.evidence),
+                entry.model,
+                entry.model_version,
+                entry.tool_version,
+                _json(entry.environment),
+            ),
+        )
+        await conn.commit()
+
+    @staticmethod
+    async def _verify_beta_connection(conn: aiosqlite.Connection) -> None:
         journal = await conn.execute("PRAGMA journal_mode")
         if await journal.fetchone() != ("wal",):
             raise RuntimeError("beta audit is not using WAL")
@@ -354,6 +407,11 @@ class BetaAuditLog(AuditLog):
         rows = await databases.fetchall()
         if not any(row[1] == "main" and row[2] for row in rows):
             raise RuntimeError("beta audit has no disk-backed main database")
+
+    async def append_beta(self, entry: AuditEntry) -> str:
+        """Commit exactly once; acknowledge only a readable FULL-sync row."""
+        conn = self._require_ready()
+        await self._verify_beta_connection(conn)
         entry_id = await super().append(entry)
         cursor = await conn.execute(
             "SELECT result, evidence FROM audit_entries WHERE entry_id = ?", (entry_id,)

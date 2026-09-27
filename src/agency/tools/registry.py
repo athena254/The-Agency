@@ -245,40 +245,25 @@ class ToolRegistry:
                 await self._audit_call(ctx, name, result)
                 return result
             audit = self._audit if self._audit is not None else ctx.audit
-            try:
-                if type(audit) is not BetaAuditLog:
-                    self._beta_suspended = True
-                    return ToolResult(
-                        tool=name,
-                        ok=False,
-                        error=_BETA_AUDIT_ERROR,
-                        evidence={"status": "INDETERMINATE"},
-                    )
-                if await BetaAuditLog.has_pending_calls(audit):
-                    # A pending intent may belong to an active concurrent call.
-                    # Refuse this call, but do not latch suspension: retry may
-                    # proceed once the active call durably writes its outcome.
-                    # A truly orphaned intent continues to deny after restart.
-                    return ToolResult(
-                        tool=name,
-                        ok=False,
-                        error=_BETA_AUDIT_ERROR,
-                        evidence={"status": "INDETERMINATE"},
-                    )
-            except Exception:  # noqa: BLE001 — unreadable ledger closes admission
+            if type(audit) is not BetaAuditLog:
                 self._beta_suspended = True
-                return ToolResult(tool=name, ok=False, error=_BETA_AUDIT_ERROR)
+                return ToolResult(
+                    tool=name,
+                    ok=False,
+                    error=_BETA_AUDIT_ERROR,
+                    evidence={"status": "INDETERMINATE"},
+                )
             call_id = uuid4().hex
-            persisted = await self._beta_persist(
-                ctx,
-                name,
-                action="tool.call",
-                outcome="pending",
-                phase="intent",
-                extra={},
-                call_id=call_id,
-            )
-            if not persisted:
+            claim = await self._beta_claim(audit, name, call_id)
+            if claim is False:
+                # A live call may still write its outcome; do not latch.
+                return ToolResult(
+                    tool=name,
+                    ok=False,
+                    error=_BETA_AUDIT_ERROR,
+                    evidence={"status": "INDETERMINATE"},
+                )
+            if claim is None:
                 self._beta_suspended = True
                 self._log.warning("tool.beta_audit_unavailable", tool=name, phase="intent")
                 return ToolResult(
@@ -352,6 +337,23 @@ class ToolRegistry:
             return result
         await self._audit_call(ctx, name, result)
         return result
+
+    async def _beta_claim(self, audit: BetaAuditLog, name: str, call_id: str) -> bool | None:
+        """True only for acknowledged admission, False for pending, None for outage."""
+        entry = AuditEntry(
+            target=name,
+            action="tool.call",
+            result="pending",
+            evidence={"call_id": call_id, "tool": name, "phase": "intent"},
+        )
+        try:
+            return await BetaAuditLog.claim_intent(audit, entry)
+        except asyncio.CancelledError:
+            # The claim may have committed. Never execute or retry it.
+            self._beta_suspended = True
+            raise
+        except Exception:  # noqa: BLE001 — never leak storage details
+            return None
 
     async def _beta_persist(
         self,
