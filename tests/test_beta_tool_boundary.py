@@ -17,6 +17,7 @@ availability. Non-beta calls keep best-effort audit semantics.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -748,6 +749,45 @@ async def test_beta_outcome_append_exception_returns_failure_not_success(
     assert "synthetic-storage-path" not in (result.error or "")
 
 
+async def test_beta_failed_intent_append_suspends_next_call(
+    beta_log: BetaAuditLog, monkeypatch
+) -> None:
+    original = AuditLog.append
+    calls = 0
+
+    async def fail_once(self: AuditLog, entry: AuditEntry) -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("private-storage-failure")
+        return await original(self, entry)
+
+    monkeypatch.setattr(AuditLog, "append", fail_once)
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
+    tool = CountingTool(_search_spec())
+    registry.register(tool)
+    first = await registry.call("web_search", {"query": "first"}, _trusted_ctx())
+    assert first.ok is False and first.error == _BETA_AUDIT_ERROR
+    second = await registry.call("web_search", {"query": "second"}, _trusted_ctx())
+    assert second.ok is False and second.error == _BETA_AUDIT_ERROR
+    assert calls == 1 and tool.run_calls == 0
+
+
+async def test_beta_failed_outcome_append_suspends_next_call(
+    beta_log: BetaAuditLog, monkeypatch
+) -> None:
+    _fail_outcome(beta_log, monkeypatch)
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
+    tool = CountingTool(_search_spec())
+    registry.register(tool)
+    first = await registry.call("web_search", {"query": "first"}, _trusted_ctx())
+    assert first.ok is False and first.evidence.get("status") == "INDETERMINATE"
+    second = await registry.call("web_search", {"query": "second"}, _trusted_ctx())
+    assert second.ok is False and second.error == _BETA_AUDIT_ERROR
+    assert tool.run_calls == 1
+    assert await beta_log.count() == 1
+
+
 async def test_beta_timeout_is_audited_before_returning(beta_log: BetaAuditLog) -> None:
     """Timeout outcome still needs a persisted record, intent first."""
     registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy(), default_timeout_s=0.05)
@@ -886,6 +926,145 @@ async def test_beta_audit_payload_has_no_query_args_or_result_text(
         assert "args" not in entry.evidence
         assert "query" not in entry.evidence
         assert "output" not in entry.evidence
+
+
+async def test_beta_calls_have_opaque_distinct_correlated_ids(beta_log: BetaAuditLog) -> None:
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
+    stub = CountingTool(_search_spec())
+    registry.register(stub)
+    ctx = _trusted_ctx(agent_id="agent-1", task_id="task-1")
+    for _ in range(2):
+        assert (await registry.call("web_search", {"query": "hello"}, ctx)).ok
+    rows = await beta_log.query()
+    assert len(rows) == 4
+    pairs: dict[str, set[str]] = {}
+    for row in rows:
+        assert row.evidence is not None
+        call_id = row.evidence["call_id"]
+        assert isinstance(call_id, str) and len(call_id) >= 32
+        pairs.setdefault(call_id, set()).add(row.evidence["phase"])
+        assert row.agent is None and row.task is None
+    assert len(pairs) == 2
+    assert all(phases == {"intent", "outcome"} for phases in pairs.values())
+    blob = repr(rows)
+    for identity in ("agent-1", "task-1"):
+        assert identity not in blob
+        assert hashlib.sha256(identity.encode()).hexdigest() not in blob
+
+
+async def test_beta_cancellation_keeps_pending_intent_and_suspends_work(
+    beta_log: BetaAuditLog,
+) -> None:
+    started = asyncio.Event()
+
+    class BlockingTool(CountingTool):
+        async def run(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+            self.run_calls += 1
+            started.set()
+            await asyncio.Event().wait()
+            return ToolResult(tool=self.spec.name, ok=True, output="should not complete")
+
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
+    tool = BlockingTool(_search_spec())
+    registry.register(tool)
+    task = asyncio.create_task(registry.call("web_search", {"query": "secret"}, _trusted_ctx()))
+    await asyncio.wait_for(started.wait(), 2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, 2)
+    rows = await beta_log.query()
+    assert len(rows) == 1
+    assert rows[0].result == "pending"
+    assert rows[0].evidence and rows[0].evidence["phase"] == "intent"
+    assert rows[0].evidence["call_id"]
+    again = await registry.call("web_search", {"query": "next"}, _trusted_ctx())
+    assert again.ok is False and again.error == _BETA_AUDIT_ERROR
+    assert tool.run_calls == 1
+    assert await beta_log.count() == 1
+
+
+async def test_beta_cancellation_during_outcome_append_never_claims_success(
+    beta_log: BetaAuditLog, monkeypatch
+) -> None:
+    outcome_started = asyncio.Event()
+    original = AuditLog.append
+
+    async def stall_outcome(self: AuditLog, entry: AuditEntry) -> str:
+        if entry.evidence and entry.evidence.get("phase") == "outcome":
+            outcome_started.set()
+            await asyncio.Event().wait()
+        return await original(self, entry)
+
+    monkeypatch.setattr(AuditLog, "append", stall_outcome)
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
+    tool = CountingTool(_search_spec())
+    registry.register(tool)
+    task = asyncio.create_task(registry.call("web_search", {"query": "first"}, _trusted_ctx()))
+    await asyncio.wait_for(outcome_started.wait(), 2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, 2)
+    assert tool.run_calls == 1
+    assert [row.result for row in await beta_log.query()] == ["pending"]
+    result = await registry.call("web_search", {"query": "second"}, _trusted_ctx())
+    assert result.ok is False and result.error == _BETA_AUDIT_ERROR
+    assert tool.run_calls == 1
+
+
+async def test_beta_cancel_after_outcome_commit_suspends_same_registry(
+    beta_log: BetaAuditLog, monkeypatch
+) -> None:
+    committed = asyncio.Event()
+    original = BetaAuditLog.append_beta
+
+    async def commit_then_stall(self: BetaAuditLog, entry: AuditEntry) -> str:
+        entry_id = await original(self, entry)
+        if entry.evidence and entry.evidence.get("phase") == "outcome" and not committed.is_set():
+            committed.set()
+            await asyncio.Event().wait()
+        return entry_id
+
+    monkeypatch.setattr(BetaAuditLog, "append_beta", commit_then_stall)
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
+    tool = CountingTool(_search_spec())
+    registry.register(tool)
+    task = asyncio.create_task(registry.call("web_search", {"query": "first"}, _trusted_ctx()))
+    await asyncio.wait_for(committed.wait(), 2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, 2)
+    assert await beta_log.count() == 2
+    result = await registry.call("web_search", {"query": "second"}, _trusted_ctx())
+    assert result.ok is False and result.error == _BETA_AUDIT_ERROR
+    assert tool.run_calls == 1
+
+
+async def test_beta_reopened_pending_call_blocks_new_work(tmp_path) -> None:
+    path = tmp_path / "audit.db"
+    previous = BetaAuditLog(path)
+    await previous.initialize()
+    await previous.append_beta(
+        AuditEntry(
+            target="web_search",
+            action="tool.call",
+            result="pending",
+            evidence={"call_id": "a" * 32, "tool": "web_search", "phase": "intent"},
+        )
+    )
+    await previous.close()
+    reopened = BetaAuditLog(path)
+    await reopened.initialize()
+    try:
+        registry = ToolRegistry(audit=reopened, beta_policy=BetaToolPolicy())
+        tool = CountingTool(_search_spec())
+        registry.register(tool)
+        result = await registry.call("web_search", {"query": "next"}, _trusted_ctx())
+        assert result.ok is False and result.error == _BETA_AUDIT_ERROR
+        assert result.evidence.get("status") == "INDETERMINATE"
+        assert tool.run_calls == 0
+        assert await reopened.count() == 1
+    finally:
+        await reopened.close()
 
 
 async def test_beta_success_requires_persisted_intent_then_outcome(tmp_path) -> None:

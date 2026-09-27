@@ -325,6 +325,22 @@ class BetaAuditLog(AuditLog):
             raise ValueError("beta audit requires a concrete disk path")
         super().__init__(db_path, _synchronous="FULL")
 
+    async def has_pending_calls(self) -> bool:
+        """Detect beta intents with no matching outcome, including after restart."""
+        conn = self._require_ready()
+        cursor = await conn.execute(
+            """SELECT 1 FROM audit_entries AS intent
+               WHERE intent.result = 'pending'
+                 AND json_extract(intent.evidence, '$.phase') = 'intent'
+                 AND NOT EXISTS (
+                   SELECT 1 FROM audit_entries AS outcome
+                   WHERE json_extract(outcome.evidence, '$.phase') = 'outcome'
+                     AND json_extract(outcome.evidence, '$.call_id') =
+                         json_extract(intent.evidence, '$.call_id')
+                 ) LIMIT 1"""
+        )
+        return await cursor.fetchone() is not None
+
     async def append_beta(self, entry: AuditEntry) -> str:
         """Commit exactly once; acknowledge only a readable FULL-sync row."""
         conn = self._require_ready()

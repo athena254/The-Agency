@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import time
 from collections.abc import Iterable
 from typing import Any
+from uuid import uuid4
 
 import structlog
 
@@ -138,12 +138,15 @@ class ToolRegistry:
     Arbitrary append-shaped fakes and ordinary NORMAL-sync AuditLog instances
     cannot authorize execution. Storage failures return the fixed error
     without retrying a possibly committed append. Beta records omit args,
-    query, output, free-form errors and raw context identifiers. Denials,
-    unknown tools and schema violations never execute; their audit writes
-    are best effort and cannot turn a denial into an authorization.
-    A failed outcome append reports ``INDETERMINATE``: external effects cannot
-    be rolled back. This seam does not implement task-level recovery or
-    admission suspension. Without ``beta_policy`` audit stays best effort.
+    query, output, free-form errors and raw or hashed context identifiers;
+    a random per-call ID correlates intent and outcome. Denials, unknown tools
+    and schema violations never execute; their audit writes are best effort
+    and cannot turn a denial into an authorization. An unpaired pending intent
+    suspends new beta calls, including after reopening the audit store, until
+    separately reconciled. Cancellation never becomes a success: if the
+    outcome is not durably acknowledged, the intent remains pending.
+    This seam does not implement task-level recovery or caller-level failure
+    propagation. Without ``beta_policy`` audit stays best effort.
     """
 
     def __init__(
@@ -157,6 +160,7 @@ class ToolRegistry:
         self._audit = audit
         self._default_timeout_s = default_timeout_s
         self._beta_policy = beta_policy
+        self._beta_suspended = False
         self._log = structlog.get_logger(__name__)
 
     def register(self, tool: Tool) -> None:
@@ -217,6 +221,13 @@ class ToolRegistry:
             return result
 
         if self._beta_policy is not None:
+            if self._beta_suspended:
+                return ToolResult(
+                    tool=name,
+                    ok=False,
+                    error=_BETA_AUDIT_ERROR,
+                    evidence={"status": "INDETERMINATE"},
+                )
             try:
                 verdict = self._beta_policy(tool.spec, args, ctx)
             except Exception as exc:  # noqa: BLE001 — policy errors fail closed
@@ -233,10 +244,31 @@ class ToolRegistry:
                 result = ToolResult(tool=name, ok=False, error=f"beta policy denied: {detail}")
                 await self._audit_call(ctx, name, result)
                 return result
+            audit = self._audit if self._audit is not None else ctx.audit
+            try:
+                if type(audit) is not BetaAuditLog or await BetaAuditLog.has_pending_calls(audit):
+                    self._beta_suspended = True
+                    return ToolResult(
+                        tool=name,
+                        ok=False,
+                        error=_BETA_AUDIT_ERROR,
+                        evidence={"status": "INDETERMINATE"},
+                    )
+            except Exception:  # noqa: BLE001 — unreadable ledger closes admission
+                self._beta_suspended = True
+                return ToolResult(tool=name, ok=False, error=_BETA_AUDIT_ERROR)
+            call_id = uuid4().hex
             persisted = await self._beta_persist(
-                ctx, name, action="tool.call", outcome="pending", phase="intent", extra={}
+                ctx,
+                name,
+                action="tool.call",
+                outcome="pending",
+                phase="intent",
+                extra={},
+                call_id=call_id,
             )
             if not persisted:
+                self._beta_suspended = True
                 self._log.warning("tool.beta_audit_unavailable", tool=name, phase="intent")
                 return ToolResult(
                     tool=name,
@@ -257,6 +289,11 @@ class ToolRegistry:
                 result = raw
             else:
                 result = ToolResult(tool=name, ok=True, output=raw, duration_ms=duration_ms)
+        except asyncio.CancelledError:
+            if self._beta_policy is not None:
+                # No completion can be asserted: the intent remains pending.
+                self._beta_suspended = True
+            raise
         except TimeoutError:
             duration_ms = int((time.perf_counter() - start) * 1000)
             result = ToolResult(
@@ -286,10 +323,12 @@ class ToolRegistry:
                 outcome="ok" if result.ok else "error",
                 phase="outcome",
                 extra=extra,
+                call_id=call_id,
             )
             if not persisted:
                 # Outward effects may already have happened; they cannot be
                 # rolled back, so the honest status is INDETERMINATE.
+                self._beta_suspended = True
                 self._log.warning("tool.beta_audit_unavailable", tool=name, phase="outcome")
                 return ToolResult(
                     tool=name,
@@ -312,6 +351,7 @@ class ToolRegistry:
         outcome: str,
         phase: str,
         extra: dict[str, Any],
+        call_id: str | None = None,
     ) -> bool:
         """Persist through the concrete disk-backed beta store, exactly once.
 
@@ -323,24 +363,22 @@ class ToolRegistry:
         if type(audit) is not BetaAuditLog:
             return False
         try:
-            agent_id = hashlib.sha256(ctx.agent_id.encode("utf-8")).hexdigest()
-            task_id = hashlib.sha256(ctx.task_id.encode("utf-8")).hexdigest()
             evidence: dict[str, Any] = {
-                "agent_id": agent_id,
-                "task_id": task_id,
+                "call_id": call_id or uuid4().hex,
                 "tool": name,
                 "phase": phase,
             }
             evidence.update(extra)
             entry = AuditEntry(
-                agent=agent_id,
-                task=task_id,
                 target=name,
                 action=action,
                 result=outcome,
                 evidence=evidence,
             )
             return await BetaAuditLog.append_beta(audit, entry) == entry.entry_id
+        except asyncio.CancelledError:
+            self._beta_suspended = True
+            raise
         except Exception:  # noqa: BLE001 — never leak storage details
             return False
 
