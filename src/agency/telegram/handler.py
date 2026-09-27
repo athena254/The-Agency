@@ -10,6 +10,7 @@ import structlog
 
 from agency.agents.demo.agent import DemoAgent
 from agency.telegram.adapter import TelegramAdapter
+from agency.telegram.budget_store import BetaBudgetStore, BudgetUnavailable
 from agency.telegram.config import TelegramConfig
 from agency.telegram.profile_store import ProfileStore
 
@@ -17,6 +18,12 @@ logger = structlog.get_logger(__name__)
 
 BETA_CREATION_DISABLED = "Agent creation is disabled until peer governance is available."
 BETA_UNSUPPORTED_COMMAND = "Unsupported command in this beta."
+BETA_MODEL_DISABLED = "Model requests are unavailable in this beta."
+BETA_BUDGET_DENIED = "Request limit reached or budget unavailable."
+BETA_REPLAY = "Request already received; status uncertain. Please do not resend it."
+# These commands have no model calls or profile writes. Deliberately exempt
+# from the model-bearing request ledger; only invited private chats qualify.
+_BETA_EXEMPT_COMMANDS = frozenset({"/start", "/help", "/whoami", "/status", "/agents"})
 
 _CREATION_ATTEMPT = re.compile(
     r"\b(create|make|build|spawn|add|set\s+up|spin\s+up|stand\s+up|launch)\b.*\b(agent|bot)\b"
@@ -31,9 +38,19 @@ class TelegramHandler:
     """Handles incoming Telegram messages and routes them to the Butler."""
 
     def __init__(
-        self, config: TelegramConfig, butler: Any = None, profile_store: ProfileStore | None = None
+        self,
+        config: TelegramConfig,
+        butler: Any = None,
+        profile_store: ProfileStore | None = None,
+        *,
+        budget: BetaBudgetStore | None = None,
+        bot_id: str | None = None,
+        polling_marker: object | None = None,
     ) -> None:
         self._config = config
+        self._budget = budget
+        self._bot_id = bot_id
+        self._polling_marker = polling_marker
         self._butler = butler
         self._adapter = TelegramAdapter(config)
         self._demo = DemoAgent()
@@ -56,6 +73,8 @@ class TelegramHandler:
             return "missing Telegram chat ID"
         if chat_id != user_id:
             return "chat id mismatch"
+        if self._config.allowed_chat_ids and chat_id not in self._config.allowed_chat_ids:
+            return "chat not allowed"
         if user_id not in self._config.allowed_user_ids:
             return "user not invited"
         text = message.get("text")
@@ -69,8 +88,82 @@ class TelegramHandler:
         """Conservative plain-English creation check used only for the beta guard."""
         return bool(_CREATION_ATTEMPT.search(text))
 
+    async def _handle_polled_update(
+        self, update: dict[str, Any], update_id: int, marker: object
+    ) -> dict[str, Any]:
+        """Ingress from the poller only. JSON fields never supply the marker."""
+        if not self._config.beta_mode:
+            return await self.handle_update(update)
+        if (
+            self._polling_marker is None
+            or marker is not self._polling_marker
+            or type(update_id) is not int
+            or update_id < 0
+            or type(update.get("update_id")) is not int
+            or update["update_id"] != update_id
+        ):
+            return {"status": "rejected", "reason": "trusted polling required"}
+        message = update.get("message")
+        if not isinstance(message, dict) or (reason := self._beta_rejection_reason(message)):
+            return {
+                "status": "rejected",
+                "reason": reason if isinstance(message, dict) else "no message",
+            }
+        text = message["text"]
+        token = text.strip().lower().split(None, 1)[0]
+        # Safe deterministic replies are exempt; never route into a model.
+        if (
+            token in _BETA_EXEMPT_COMMANDS
+            or token in ("/proposals", "/propose-agent", "/propose_agent")
+            or self._is_agent_creation_attempt(text)
+            or (token.startswith("/") and token not in ("/name", "/research"))
+        ):
+            return await self._handle_update(update, marker=marker)
+        if token != "/name":
+            await self._adapter.send_message(message["chat"]["id"], BETA_MODEL_DISABLED)
+            return {"status": "rejected", "reason": "beta model path disabled"}
+        if self._budget is None or self._bot_id is None:
+            return {"status": "rejected", "reason": "budget unavailable"}
+        user_id = message["from"]["id"]
+        try:
+            await self._budget.initialize()
+            reservation = await self._budget.reserve_request(self._bot_id, update_id, user_id)
+            if not reservation.allowed:
+                if reservation.duplicate:
+                    await self._adapter.send_message(message["chat"]["id"], BETA_REPLAY)
+                    return {"status": "rejected", "reason": "duplicate update"}
+                await self._adapter.send_message(message["chat"]["id"], BETA_BUDGET_DENIED)
+                return {"status": "rejected", "reason": "budget denied"}
+            await self._budget.mark_running(
+                self._bot_id, update_id, user_id, capability=reservation.capability
+            )
+            # A send failure leaves RUNNING; replay cannot repeat the profile write.
+            result = await self._handle_update(
+                update, marker=marker, quota_capability=reservation.capability
+            )
+            await self._budget.finish_request(
+                self._bot_id,
+                update_id,
+                user_id,
+                success=result["status"] == "ok",
+                capability=reservation.capability,
+            )
+            return result
+        except (BudgetUnavailable, ValueError, TypeError):
+            return {"status": "rejected", "reason": "budget unavailable"}
+
     async def handle_update(self, update: dict[str, Any]) -> dict[str, Any]:
-        """Handle a single Telegram update."""
+        """Public dict path has no transport provenance or beta capability."""
+        return await self._handle_update(update, marker=None)
+
+    async def _handle_update(
+        self,
+        update: dict[str, Any],
+        *,
+        marker: object | None,
+        quota_capability: str | None = None,
+    ) -> dict[str, Any]:
+        """Handle a single Telegram update after optional trusted admission."""
         if not isinstance(update, dict):
             if self._config.beta_mode:
                 return {"status": "rejected", "reason": "invalid update"}
@@ -82,6 +175,32 @@ class TelegramHandler:
             beta_reason = self._beta_rejection_reason(message)
             if beta_reason is not None:
                 return {"status": "rejected", "reason": beta_reason}
+            beta_text = message["text"]
+            beta_token = beta_text.strip().lower().split(None, 1)[0]
+            if beta_token not in _BETA_EXEMPT_COMMANDS:
+                if marker is not self._polling_marker or marker is None:
+                    return {"status": "rejected", "reason": "trusted polling required"}
+                if beta_token == "/name" and (
+                    self._budget is None
+                    or self._bot_id is None
+                    or type(update.get("update_id")) is not int
+                    or not self._budget._owns(
+                        self._bot_id,
+                        update["update_id"],
+                        message["from"]["id"],
+                        quota_capability,
+                    )
+                ):
+                    return {"status": "rejected", "reason": "budget unavailable"}
+                # Model-bearing work remains blocked until every provider
+                # attempt and its audit completion are wired end to end.
+                if beta_token == "/research" or (
+                    beta_token != "/name"
+                    and not self._is_agent_creation_attempt(beta_text)
+                    and beta_token not in ("/proposals", "/propose-agent", "/propose_agent")
+                    and not beta_token.startswith("/")
+                ):
+                    return {"status": "rejected", "reason": "beta model path disabled"}
         if not message:
             return {"status": "ignored", "reason": "no message"}
 
@@ -413,6 +532,10 @@ class TelegramHandler:
                 "/research",
             ):
                 return BETA_UNSUPPORTED_COMMAND
+            # This API accepts caller-supplied dictionaries, not Telegram
+            # transport evidence. Even deterministic commands route through
+            # Butler here, so deny rather than create a principal from from.id.
+            raise ValueError("trusted polling required")
         text = message.get("text", "")
         user_id = message.get("from", {}).get("id")
         if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:

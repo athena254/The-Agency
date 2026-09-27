@@ -19,6 +19,8 @@ logger = structlog.get_logger(__name__)
 
 def create_app(config: TelegramConfig, handler: TelegramHandler | None = None) -> FastAPI:
     """Create FastAPI app for Telegram webhook."""
+    if config.beta_mode:
+        raise ValueError("beta webhook disabled until Butler lifecycle and budget/audit are wired")
     app = FastAPI(title="The Agency — Telegram Webhook")
     _handler = (
         handler
