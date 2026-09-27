@@ -1,0 +1,515 @@
+"""Durable beta budget ledger — hermetic foundation tests (offline, deterministic).
+
+Telegram gateway quota only; never peer governance. All DBs are ``tmp_path``
+test files; no live network, no provider calls, no prompt/content storage.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import sqlite3
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+
+class FakeClock:
+    """Injectable wall-clock returning epoch seconds."""
+
+    def __init__(self, start: float = 1_700_000_000.0) -> None:
+        self.now = float(start)
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += float(seconds)
+
+
+def _make_store(db_path: Path, clock: FakeClock, **over: Any) -> Any:
+    from agency.telegram.budget_store import BetaBudgetStore, BudgetLimits
+
+    limits = BudgetLimits(**over) if over else BudgetLimits()
+    return BetaBudgetStore(str(db_path), limits=limits, clock=clock)
+
+
+# --- BudgetLimits contracts ---
+
+
+def test_limits_defaults_are_provisional_ceilings() -> None:
+    from agency.telegram.budget_store import BudgetLimits
+
+    lim = BudgetLimits()
+    assert lim.requests_per_hour == 5
+    assert lim.requests_per_day == 20
+    assert lim.model_calls_per_hour == 40
+    assert lim.model_calls_per_day == 160
+    assert lim.model_calls_per_request == 8
+
+
+def test_limits_reject_bool_nonint_and_nonpositive() -> None:
+    from agency.telegram.budget_store import BudgetLimits
+
+    for field in (
+        "requests_per_hour",
+        "requests_per_day",
+        "model_calls_per_hour",
+        "model_calls_per_day",
+        "model_calls_per_request",
+    ):
+        for bad in (True, False, 0, -1, "5", 5.0, None):
+            with pytest.raises((TypeError, ValueError)):
+                BudgetLimits(**{field: bad})  # type: ignore[arg-type]
+
+
+def test_limits_allow_lower_but_not_above_ceiling() -> None:
+    from agency.telegram.budget_store import BudgetLimits
+
+    lowered = BudgetLimits(requests_per_hour=2, model_calls_per_request=3)
+    assert lowered.requests_per_hour == 2
+    assert lowered.model_calls_per_request == 3
+    with pytest.raises(ValueError):
+        BudgetLimits(requests_per_hour=6)
+    with pytest.raises(ValueError):
+        BudgetLimits(requests_per_day=21)
+    with pytest.raises(ValueError):
+        BudgetLimits(model_calls_per_hour=41)
+    with pytest.raises(ValueError):
+        BudgetLimits(model_calls_per_day=161)
+    with pytest.raises(ValueError):
+        BudgetLimits(model_calls_per_request=9)
+
+
+# --- strict input / duplicate ---
+
+
+async def test_reserve_rejects_strict_input(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock)
+    await store.initialize()
+    try:
+        for bad_bot in ("", "   ", 123, None, True):
+            with pytest.raises((TypeError, ValueError)):
+                await store.reserve_request(bad_bot, 1, 101)  # type: ignore[arg-type]
+        # token-like bot_id must be rejected (stable local id, never a token)
+        with pytest.raises(ValueError):
+            await store.reserve_request("123456:ABCdefGHIjklMNOpqrSTUvwxYZ123456789", 1, 101)
+        for bad_update in (True, False, -1, "1", 1.5, None):
+            with pytest.raises((TypeError, ValueError)):
+                await store.reserve_request("bot1", bad_update, 101)  # type: ignore[arg-type]
+        for bad_user in (0, -5, True, False, "101", 101.5, None):
+            with pytest.raises((TypeError, ValueError)):
+                await store.reserve_request("bot1", 1, bad_user)  # type: ignore[arg-type]
+    finally:
+        await store.close()
+
+
+async def test_reserve_allows_once_duplicate_never_reauthorizes(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock)
+    await store.initialize()
+    try:
+        first = await store.reserve_request("bot1", 10, 101)
+        assert first.allowed is True
+        assert first.duplicate is False
+        assert first.state == "RESERVED"
+        # redelivery of the same update must not authorize a second execution
+        dup = await store.reserve_request("bot1", 10, 101)
+        assert dup.allowed is False
+        assert dup.duplicate is True
+        assert dup.state == "RESERVED"
+        await store.mark_running("bot1", 10, 101)
+        dup2 = await store.reserve_request("bot1", 10, 101)
+        assert dup2.allowed is False
+        assert dup2.duplicate is True
+        assert dup2.state == "RUNNING"
+    finally:
+        await store.close()
+
+
+async def test_user_mismatch_on_same_update_denies(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock)
+    await store.initialize()
+    try:
+        first = await store.reserve_request("bot1", 11, 101)
+        assert first.allowed is True
+        other = await store.reserve_request("bot1", 11, 202)
+        assert other.allowed is False
+        # mismatched user must not be able to advance or finish the reservation
+        with pytest.raises((KeyError, ValueError)):
+            await store.mark_running("bot1", 11, 202)
+        assert await store.reserve_model_call("bot1", 11, 202) is False
+        with pytest.raises((KeyError, ValueError)):
+            await store.finish_request("bot1", 11, 202, success=True)
+    finally:
+        await store.close()
+
+
+async def test_unknown_reservation_fails_closed(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock)
+    await store.initialize()
+    try:
+        with pytest.raises((KeyError, ValueError)):
+            await store.mark_running("bot1", 999, 101)
+        assert await store.reserve_model_call("bot1", 999, 101) is False
+        with pytest.raises((KeyError, ValueError)):
+            await store.finish_request("bot1", 999, 101, success=True)
+    finally:
+        await store.close()
+
+
+# --- rolling quotas + restart ---
+
+
+async def test_request_hour_quota_rolling_window(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock, requests_per_hour=2, requests_per_day=20)
+    await store.initialize()
+    try:
+        assert (await store.reserve_request("bot1", 1, 101)).allowed is True
+        assert (await store.reserve_request("bot1", 2, 101)).allowed is True
+        denied = await store.reserve_request("bot1", 3, 101)
+        assert denied.allowed is False
+        assert denied.duplicate is False
+        # other user unaffected
+        assert (await store.reserve_request("bot1", 3, 202)).allowed is True
+        # rolling expiry: after one hour the oldest slot frees
+        clock.advance(3601.0)
+        assert (await store.reserve_request("bot1", 4, 101)).allowed is True
+    finally:
+        await store.close()
+
+
+async def test_request_quota_counts_failed_attempts(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock, requests_per_hour=2, requests_per_day=20)
+    await store.initialize()
+    try:
+        assert (await store.reserve_request("bot1", 1, 101)).allowed is True
+        await store.mark_running("bot1", 1, 101)
+        await store.finish_request("bot1", 1, 101, success=False)
+        assert (await store.reserve_request("bot1", 2, 101)).allowed is True
+        await store.mark_running("bot1", 2, 101)
+        await store.finish_request("bot1", 2, 101, success=False)
+        # failures consume quota: no refund
+        assert (await store.reserve_request("bot1", 3, 101)).allowed is False
+    finally:
+        await store.close()
+
+
+async def test_restart_persists_quota(tmp_path: Path) -> None:
+    db = tmp_path / "persist.db"
+    clock = FakeClock()
+    store = _make_store(db, clock, requests_per_hour=1, requests_per_day=20)
+    await store.initialize()
+    assert (await store.reserve_request("bot1", 1, 101)).allowed is True
+    await store.close()
+    # reopen same file: quota must survive restart (no reset)
+    store2 = _make_store(db, clock, requests_per_hour=1, requests_per_day=20)
+    await store2.initialize()
+    try:
+        assert (await store2.reserve_request("bot1", 2, 101)).allowed is False
+        # nonterminal reservation still dedups after reopen (no auto-retry)
+        dup = await store2.reserve_request("bot1", 1, 101)
+        assert dup.allowed is False
+        assert dup.duplicate is True
+    finally:
+        await store2.close()
+
+
+async def test_concurrent_two_connections_single_winner(tmp_path: Path) -> None:
+    from agency.telegram.budget_store import BetaBudgetStore, BudgetLimits
+
+    db = tmp_path / "race.db"
+    clock = FakeClock()
+    a = BetaBudgetStore(str(db), limits=BudgetLimits(), clock=clock)
+    b = BetaBudgetStore(str(db), limits=BudgetLimits(), clock=clock)
+    await a.initialize()
+    await b.initialize()
+    try:
+        ra, rb = await asyncio.gather(
+            a.reserve_request("bot1", 77, 101),
+            b.reserve_request("bot1", 77, 101),
+        )
+        winners = [r for r in (ra, rb) if r.allowed]
+        losers = [r for r in (ra, rb) if not r.allowed]
+        assert len(winners) == 1
+        assert len(losers) == 1
+        assert losers[0].duplicate is True
+    finally:
+        await a.close()
+        await b.close()
+
+
+# --- model calls ---
+
+
+async def test_model_call_requires_running_reservation(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock)
+    await store.initialize()
+    try:
+        # no reservation at all
+        assert await store.reserve_model_call("bot1", 50, 101) is False
+        # reserved but not running
+        assert (await store.reserve_request("bot1", 51, 101)).allowed is True
+        assert await store.reserve_model_call("bot1", 51, 101) is False
+        # running grants
+        await store.mark_running("bot1", 51, 101)
+        assert await store.reserve_model_call("bot1", 51, 101) is True
+    finally:
+        await store.close()
+
+
+async def test_model_per_request_cap(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock, model_calls_per_request=2)
+    await store.initialize()
+    try:
+        assert (await store.reserve_request("bot1", 60, 101)).allowed is True
+        await store.mark_running("bot1", 60, 101)
+        assert await store.reserve_model_call("bot1", 60, 101) is True
+        assert await store.reserve_model_call("bot1", 60, 101) is True
+        assert await store.reserve_model_call("bot1", 60, 101) is False
+    finally:
+        await store.close()
+
+
+async def test_model_hour_cap_counts_failures_no_refund(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock, model_calls_per_hour=2, model_calls_per_day=160)
+    await store.initialize()
+    try:
+        assert (await store.reserve_request("bot1", 61, 101)).allowed is True
+        await store.mark_running("bot1", 61, 101)
+        assert await store.reserve_model_call("bot1", 61, 101) is True
+        assert await store.reserve_model_call("bot1", 61, 101) is True
+        assert await store.reserve_model_call("bot1", 61, 101) is False
+        await store.finish_request("bot1", 61, 101, success=False)
+        # new request still blocked on the model hour quota
+        assert (await store.reserve_request("bot1", 62, 101)).allowed is True
+        await store.mark_running("bot1", 62, 101)
+        assert await store.reserve_model_call("bot1", 62, 101) is False
+    finally:
+        await store.close()
+
+
+async def test_mark_running_and_finish_state_machine(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock)
+    await store.initialize()
+    try:
+        assert (await store.reserve_request("bot1", 70, 101)).allowed is True
+        await store.mark_running("bot1", 70, 101)
+        with pytest.raises(ValueError):
+            await store.mark_running("bot1", 70, 101)
+        await store.finish_request("bot1", 70, 101, success=True)
+        with pytest.raises(ValueError):
+            await store.finish_request("bot1", 70, 101, success=True)
+        # terminal reservation still dedups, never reauthorizes
+        dup = await store.reserve_request("bot1", 70, 101)
+        assert dup.allowed is False
+        assert dup.duplicate is True
+        assert dup.state == "COMPLETED"
+        # model calls after completion are denied
+        assert await store.reserve_model_call("bot1", 70, 101) is False
+        with pytest.raises(TypeError):
+            await store.finish_request("bot1", 70, 101, success="yes")  # type: ignore[arg-type]
+    finally:
+        await store.close()
+
+
+# --- clock rollback / errors ---
+
+
+async def test_clock_rollback_fails_closed(tmp_path: Path) -> None:
+    from agency.telegram.budget_store import BudgetUnavailable
+
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock)
+    await store.initialize()
+    try:
+        assert (await store.reserve_request("bot1", 1, 101)).allowed is True
+        clock.now -= 60.0
+        with pytest.raises(BudgetUnavailable):
+            await store.reserve_request("bot1", 2, 101)
+        with pytest.raises(BudgetUnavailable):
+            await store.reserve_model_call("bot1", 1, 101)
+    finally:
+        await store.close()
+
+
+async def test_clock_rollback_survives_restart(tmp_path: Path) -> None:
+    from agency.telegram.budget_store import BudgetUnavailable
+
+    db = tmp_path / "clock.db"
+    clock = FakeClock(start=1_700_000_000.0)
+    store = _make_store(db, clock)
+    await store.initialize()
+    assert (await store.reserve_request("bot1", 1, 101)).allowed is True
+    await store.close()
+    clock.now -= 3600.0  # wall clock moved backwards across restart
+    store2 = _make_store(db, clock)
+    await store2.initialize()
+    try:
+        with pytest.raises(BudgetUnavailable):
+            await store2.reserve_request("bot1", 2, 101)
+    finally:
+        await store2.close()
+
+
+async def test_bad_clock_values_fail_closed(tmp_path: Path) -> None:
+    from agency.telegram.budget_store import BetaBudgetStore, BudgetLimits, BudgetUnavailable
+
+    for bad in (float("nan"), float("inf"), "now", None, True):
+
+        def _clock(bad=bad):  # type: ignore[no-untyped-def]
+            return bad
+
+        store = BetaBudgetStore(
+            str(tmp_path / "c.db"),
+            limits=BudgetLimits(),
+            clock=_clock,  # type: ignore[arg-type]
+        )
+        await store.initialize()
+        try:
+            with pytest.raises(BudgetUnavailable):
+                await store.reserve_request("bot1", 1, 101)
+        finally:
+            await store.close()
+
+
+# --- locked / corrupt DB ---
+
+
+async def test_db_errors_raise_budget_unavailable_without_path_leak(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agency.telegram.budget_store import BetaBudgetStore, BudgetLimits, BudgetUnavailable
+
+    clock = FakeClock()
+    db = tmp_path / "locked.db"
+    store = BetaBudgetStore(str(db), limits=BudgetLimits(), clock=clock)
+    await store.initialize()
+    await store.close()
+
+    def _boom(*args: Any, **kwargs: Any) -> Any:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(sqlite3, "connect", _boom)
+    store2 = BetaBudgetStore(str(db), limits=BudgetLimits(), clock=clock)
+    try:
+        with pytest.raises(BudgetUnavailable) as ei:
+            await store2.initialize()
+        assert str(db) not in str(ei.value)
+        with pytest.raises(BudgetUnavailable) as ej:
+            await store2.reserve_request("bot1", 1, 101)
+        assert str(db) not in str(ej.value)
+    finally:
+        await store2.close()
+
+
+async def test_corrupt_db_fails_closed(tmp_path: Path) -> None:
+    from agency.telegram.budget_store import BetaBudgetStore, BudgetLimits, BudgetUnavailable
+
+    db = tmp_path / "corrupt.db"
+    db.write_bytes(b"this is not a sqlite database at all" * 8)
+    store = BetaBudgetStore(str(db), limits=BudgetLimits(), clock=FakeClock())
+    try:
+        with pytest.raises(BudgetUnavailable):
+            await store.initialize()
+    finally:
+        await store.close()
+
+
+async def test_unwritable_db_path_fails_closed(tmp_path: Path) -> None:
+    from agency.telegram.budget_store import BetaBudgetStore, BudgetLimits, BudgetUnavailable
+
+    blocker = tmp_path / "blocker"
+    blocker.write_text("file, not a directory")
+    bad_path = blocker / "nested.db"
+    store = BetaBudgetStore(str(bad_path), limits=BudgetLimits(), clock=FakeClock())
+    try:
+        with pytest.raises(BudgetUnavailable) as ei:
+            await store.initialize()
+        assert str(bad_path) not in str(ei.value)
+    finally:
+        await store.close()
+
+
+# --- privacy / retention ---
+
+
+async def test_schema_stores_no_prompt_or_content(tmp_path: Path) -> None:
+    db = tmp_path / "priv.db"
+    clock = FakeClock()
+    store = _make_store(db, clock)
+    await store.initialize()
+    try:
+        assert (await store.reserve_request("bot1", 5, 101)).allowed is True
+        await store.mark_running("bot1", 5, 101)
+        assert await store.reserve_model_call("bot1", 5, 101) is True
+    finally:
+        await store.close()
+    conn = sqlite3.connect(str(db))
+    try:
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        assert "requests" in tables
+        assert "model_attempts" in tables
+        schema = "\n".join(
+            row[0]
+            for row in conn.execute(
+                "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL"
+            ).fetchall()
+        ).lower()
+        for forbidden in (
+            "prompt",
+            "query",
+            "reply",
+            "token",
+            "api_key",
+            "apikey",
+            "message",
+            "content",
+            "response",
+        ):
+            assert forbidden not in schema
+        cols = " ".join(
+            row[1] for row in conn.execute("PRAGMA table_info(requests)").fetchall()
+        ).lower()
+        assert "user_id" in cols
+        assert "update_id" in cols
+        rows = conn.execute("SELECT * FROM requests").fetchall()
+        assert len(rows) == 1
+        blob = " ".join(str(c) for r in rows for c in r).lower()
+        assert "hello" not in blob
+    finally:
+        conn.close()
+
+
+async def test_pruning_caps_at_48h_and_keeps_live_windows(tmp_path: Path) -> None:
+    clock = FakeClock()
+    store = _make_store(tmp_path / "t.db", clock)
+    await store.initialize()
+    try:
+        assert (await store.reserve_request("bot1", 1, 101)).allowed is True
+        clock.advance(49 * 3600.0)  # beyond 48h dedup retention
+        # old row pruned; quota freed because only >48h rows are deleted
+        assert (await store.reserve_request("bot1", 2, 101)).allowed is True
+        conn = sqlite3.connect(str(tmp_path / "t.db"))
+        try:
+            old = conn.execute("SELECT COUNT(*) FROM requests WHERE update_id = 1").fetchone()[0]
+            assert old == 0
+        finally:
+            conn.close()
+        # within live windows nothing is pruned early
+        clock.advance(3600.0)
+        assert (await store.reserve_request("bot1", 3, 101)).allowed is True
+    finally:
+        await store.close()
