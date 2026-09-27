@@ -21,8 +21,8 @@ BETA_UNSUPPORTED_COMMAND = "Unsupported command in this beta."
 BETA_MODEL_DISABLED = "Model requests are unavailable in this beta."
 BETA_BUDGET_DENIED = "Request limit reached or budget unavailable."
 BETA_REPLAY = "Request already received; status uncertain. Please do not resend it."
-# These commands have no model calls or profile writes. Deliberately exempt
-# from the model-bearing request ledger; only invited private chats qualify.
+# These commands are deterministic and do not invoke a model or write a profile.
+# Trusted polling still reserves request quota before sending their replies.
 _BETA_EXEMPT_COMMANDS = frozenset({"/start", "/help", "/whoami", "/status", "/agents"})
 
 _CREATION_ATTEMPT = re.compile(
@@ -111,17 +111,15 @@ class TelegramHandler:
             }
         text = message["text"]
         token = text.strip().lower().split(None, 1)[0]
-        # Safe deterministic replies are exempt; never route into a model.
-        if (
+        # Every trusted update consumes request quota, including deterministic
+        # replies and disabled model paths. The model itself remains unreachable.
+        deterministic = (
             token in _BETA_EXEMPT_COMMANDS
+            or token == "/name"
             or token in ("/proposals", "/propose-agent", "/propose_agent")
             or self._is_agent_creation_attempt(text)
-            or (token.startswith("/") and token not in ("/name", "/research"))
-        ):
-            return await self._handle_update(update, marker=marker)
-        if token != "/name":
-            await self._adapter.send_message(message["chat"]["id"], BETA_MODEL_DISABLED)
-            return {"status": "rejected", "reason": "beta model path disabled"}
+            or (token.startswith("/") and token != "/research")
+        )
         if self._budget is None or self._bot_id is None:
             return {"status": "rejected", "reason": "budget unavailable"}
         user_id = message["from"]["id"]
@@ -138,9 +136,13 @@ class TelegramHandler:
                 self._bot_id, update_id, user_id, capability=reservation.capability
             )
             # A send failure leaves RUNNING; replay cannot repeat the profile write.
-            result = await self._handle_update(
-                update, marker=marker, quota_capability=reservation.capability
-            )
+            if deterministic:
+                result = await self._handle_update(
+                    update, marker=marker, quota_capability=reservation.capability
+                )
+            else:
+                await self._adapter.send_message(message["chat"]["id"], BETA_MODEL_DISABLED)
+                result = {"status": "rejected", "reason": "beta model path disabled"}
             await self._budget.finish_request(
                 self._bot_id,
                 update_id,

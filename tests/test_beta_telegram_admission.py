@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from agency.telegram.budget_store import BetaBudgetStore
 from agency.telegram.config import TelegramConfig
 from agency.telegram.handler import (
     BETA_CREATION_DISABLED,
@@ -222,10 +223,15 @@ async def test_beta_invited_status_is_deterministic_without_model() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("text", ["hello", "/research planets"])
-async def test_beta_trusted_polling_disables_model_paths_without_side_effects(text: str) -> None:
+async def test_beta_trusted_polling_disables_model_paths_without_side_effects(
+    text: str, tmp_path: Any
+) -> None:
     marker = object()
     butler = AsyncMock()
-    h = TelegramHandler(_beta_config(), butler=butler, polling_marker=marker)
+    budget = BetaBudgetStore(str(tmp_path / "budget.db"))
+    h = TelegramHandler(
+        _beta_config(), butler=butler, polling_marker=marker, budget=budget, bot_id="bot"
+    )
     h._adapter.send_message = AsyncMock()  # type: ignore[method-assign]
     h._handle_research = AsyncMock(return_value="SHOULD-NOT-RUN")  # type: ignore[method-assign]
     try:
@@ -237,6 +243,7 @@ async def test_beta_trusted_polling_disables_model_paths_without_side_effects(te
         assert h._profiles.get_name(101) is None
     finally:
         await h.close()
+        await budget.close()
 
 
 @pytest.mark.asyncio
@@ -249,11 +256,14 @@ async def test_beta_trusted_polling_disables_model_paths_without_side_effects(te
     ],
 )
 async def test_beta_trusted_polling_refuses_creation_and_unsupported_commands(
-    text: str, reply: str
+    text: str, reply: str, tmp_path: Any
 ) -> None:
     marker = object()
     butler = AsyncMock()
-    h = TelegramHandler(_beta_config(), butler=butler, polling_marker=marker)
+    budget = BetaBudgetStore(str(tmp_path / "budget.db"))
+    h = TelegramHandler(
+        _beta_config(), butler=butler, polling_marker=marker, budget=budget, bot_id="bot"
+    )
     h._adapter.send_message = AsyncMock()  # type: ignore[method-assign]
     h._handle_plain_english_agent_creation = AsyncMock()  # type: ignore[method-assign]
     try:
@@ -264,6 +274,7 @@ async def test_beta_trusted_polling_refuses_creation_and_unsupported_commands(
         h._handle_plain_english_agent_creation.assert_not_awaited()  # type: ignore[attr-defined]
     finally:
         await h.close()
+        await budget.close()
 
 
 # --- P-T3: creation denied, help hides it, non-beta preserved ---
