@@ -6,12 +6,13 @@ from typing import Any
 
 import httpx
 
-from agency.tools.base import Tool
+from agency.tools.base import BetaToolPolicy, Tool
 from agency.tools.builtin.calculator import CalculatorTool
 from agency.tools.builtin.memory import MemoryQueryTool, MemoryWriteTool
 from agency.tools.builtin.sandbox import SandboxExecTool
 from agency.tools.builtin.utc_time import UtcTimeTool
 from agency.tools.builtin.web import WebFetchTool, WebSearchTool
+from agency.tools.registry import ToolRegistry
 
 
 def register_all(registry: Any, transport: httpx.AsyncBaseTransport | None = None) -> list[Tool]:
@@ -41,14 +42,17 @@ def register_opt_in_local_tools(registry: Any) -> list[Tool]:
     return tools
 
 
-def register_beta_search_only(
-    registry: Any, transport: httpx.AsyncBaseTransport | None = None
-) -> list[Tool]:
-    """Populate a beta-policy registry with only the approved search tool."""
-    tools: list[Tool] = [WebSearchTool(transport=transport)]
-    for tool in tools:
-        registry.register(tool)
-    return tools
+def build_beta_search_registry(
+    *, transport: httpx.AsyncBaseTransport | None = None
+) -> ToolRegistry:
+    """Construct a fresh strict-policy, search-only registry.
+
+    This does not wire trusted ingress, budgets or durable audit; production
+    does not call it yet. In particular, it never mutates an existing registry.
+    """
+    registry = ToolRegistry(beta_policy=BetaToolPolicy())
+    registry.register(WebSearchTool(transport=transport))
+    return registry
 
 
 __all__ = [
@@ -59,7 +63,7 @@ __all__ = [
     "UtcTimeTool",
     "WebFetchTool",
     "WebSearchTool",
+    "build_beta_search_registry",
     "register_all",
-    "register_beta_search_only",
     "register_opt_in_local_tools",
 ]
