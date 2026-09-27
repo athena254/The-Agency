@@ -29,7 +29,7 @@ class AuditEntry(BaseModel):
     """A single, immutable audit record.
 
     ``entry_id`` is generated at creation and impossible to mutate afterwards
-    (``frozen=True``), preserving a tamper-evident chain.
+    (``frozen=True``). This does not make the SQLite file tamper-evident.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -118,9 +118,14 @@ class AuditLog:
         await log.close()
     """
 
-    def __init__(self, db_path: str | Path, *, table: str = "audit_entries") -> None:
+    def __init__(
+        self, db_path: str | Path, *, table: str = "audit_entries", _synchronous: str = "NORMAL"
+    ) -> None:
+        if _synchronous not in ("NORMAL", "FULL"):
+            raise ValueError("invalid audit synchronous mode")
         self._db_path = Path(db_path)
         self._table = table
+        self._synchronous = _synchronous
         self._conn: aiosqlite.Connection | None = None
         self._log = structlog.get_logger(__name__)
 
@@ -135,7 +140,7 @@ class AuditLog:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = await aiosqlite.connect(self._db_path)
         await self._conn.execute("PRAGMA journal_mode=WAL")
-        await self._conn.execute("PRAGMA synchronous=NORMAL")
+        await self._conn.execute(f"PRAGMA synchronous={self._synchronous}")
         await self._conn.execute(
             f"""
             CREATE TABLE IF NOT EXISTS {self._table} (
@@ -304,6 +309,43 @@ class AuditLog:
 
     def __repr__(self) -> str:
         return f"AuditLog(path={str(self._db_path)!r})"
+
+
+class BetaAuditLog(AuditLog):
+    """Disk-backed beta audit with SQLite WAL + synchronous FULL commits.
+
+    An acknowledged append means SQLite committed and the row can be read
+    back. This is not tamper evidence or a guarantee against faulty hardware.
+    Use a dedicated, protected file; ordinary AuditLog remains NORMAL.
+    """
+
+    def __init__(self, db_path: str | Path) -> None:
+        path = str(db_path)
+        if not path.strip() or path == ":memory:" or path.lower().startswith("file:"):
+            raise ValueError("beta audit requires a concrete disk path")
+        super().__init__(db_path, _synchronous="FULL")
+
+    async def append_beta(self, entry: AuditEntry) -> str:
+        """Commit exactly once; acknowledge only a readable FULL-sync row."""
+        conn = self._require_ready()
+        journal = await conn.execute("PRAGMA journal_mode")
+        if await journal.fetchone() != ("wal",):
+            raise RuntimeError("beta audit is not using WAL")
+        sync = await conn.execute("PRAGMA synchronous")
+        if await sync.fetchone() != (2,):
+            raise RuntimeError("beta audit is not synchronous FULL")
+        databases = await conn.execute("PRAGMA database_list")
+        rows = await databases.fetchall()
+        if not any(row[1] == "main" and row[2] for row in rows):
+            raise RuntimeError("beta audit has no disk-backed main database")
+        entry_id = await super().append(entry)
+        cursor = await conn.execute(
+            "SELECT result, evidence FROM audit_entries WHERE entry_id = ?", (entry_id,)
+        )
+        row = await cursor.fetchone()
+        if entry_id != entry.entry_id or row != (entry.result, _json(entry.evidence)):
+            raise RuntimeError("beta audit append was not acknowledged")
+        return entry_id
 
 
 def _json(value: Any) -> str | None:

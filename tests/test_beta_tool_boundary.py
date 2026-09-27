@@ -23,7 +23,7 @@ from typing import Any
 import pytest
 import pytest_asyncio
 
-from agency.kernel.audit import AuditFilter, AuditLog
+from agency.kernel.audit import AuditEntry, AuditFilter, AuditLog, BetaAuditLog
 from agency.memory.sms.models import MemoryItem
 from agency.memory.sms.store import MemoryStore
 from agency.tools.base import (
@@ -207,6 +207,16 @@ async def file_memory_store(tmp_path) -> AsyncGenerator[MemoryStore, None]:
         await store.close()
 
 
+@pytest_asyncio.fixture
+async def beta_log(tmp_path) -> AsyncGenerator[BetaAuditLog, None]:
+    log = BetaAuditLog(tmp_path / "audit.db")
+    await log.initialize()
+    try:
+        yield log
+    finally:
+        await log.close()
+
+
 async def test_legacy_open_without_policy() -> None:
     """P-I1: omitting beta_policy preserves legacy behavior."""
     registry = ToolRegistry()
@@ -283,32 +293,30 @@ async def test_beta_denies_mutating_and_executes_risk() -> None:
 
 
 async def test_beta_denies_memory_query_cross_user_no_leak(
-    file_memory_store: MemoryStore,
+    file_memory_store: MemoryStore, beta_log: BetaAuditLog
 ) -> None:
     """P-P3: memory_query denied in beta; never leaks another owner's rows."""
     await file_memory_store.store(MemoryItem(agent_id="owner-A", content="alpha secret"))
     await file_memory_store.store(MemoryItem(agent_id="owner-B", content="beta secret"))
-    audit = FakeAudit()
-    registry = ToolRegistry(audit=audit, beta_policy=BetaToolPolicy())
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
     registry.register(MemoryQueryTool())
     ctx = _trusted_ctx(memory_store=file_memory_store)
     result = await registry.call("memory_query", {"query": "secret", "agent_id": "owner-B"}, ctx)
     assert result.ok is False
     assert "memory" in (result.error or "").lower()
-    assert any(e["target"] == "memory_query" for e in audit.entries)
+    assert (await beta_log.count(AuditFilter(target="memory_query"))) == 1
 
 
 async def test_beta_denies_memory_write_no_side_effect(
-    file_memory_store: MemoryStore,
+    file_memory_store: MemoryStore, beta_log: BetaAuditLog
 ) -> None:
     """P-P3: memory_write denied in beta; store stays empty."""
-    audit = FakeAudit()
-    registry = ToolRegistry(audit=audit, beta_policy=BetaToolPolicy())
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
     registry.register(MemoryWriteTool())
     ctx = _trusted_ctx(memory_store=file_memory_store)
     result = await registry.call("memory_write", {"content": "hello"}, ctx)
     assert result.ok is False
-    assert audit.entries
+    assert await beta_log.count(AuditFilter(target="memory_write")) == 1
     items = await file_memory_store.search_fts("hello", limit=10)
     assert items == []
 
@@ -333,15 +341,15 @@ async def test_beta_denies_web_fetch_until_b05_closed() -> None:
     assert fetch.run_calls == 0
 
 
-async def test_beta_allows_bounded_web_search_stub() -> None:
-    audit = FakeAudit()
-    registry = ToolRegistry(audit=audit, beta_policy=BetaToolPolicy())
+async def test_beta_allows_bounded_web_search_stub(beta_log: BetaAuditLog) -> None:
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
     stub = CountingTool(_search_spec(), output=[{"title": "t"}])
     registry.register(stub)
     result = await registry.call("web_search", {"query": "agency beta"}, _trusted_ctx())
     assert result.ok is True
     assert stub.run_calls == 1
-    assert audit.entries and audit.entries[0]["action"] == "tool.call"
+    rows = await beta_log.query()
+    assert len(rows) == 2 and any(row.action == "tool.call" for row in rows)
 
 
 async def test_beta_denies_unbounded_web_search() -> None:
@@ -355,18 +363,18 @@ async def test_beta_denies_unbounded_web_search() -> None:
     assert stub.run_calls == 0
 
 
-async def test_beta_denial_is_audited_with_zero_run_calls() -> None:
+async def test_beta_denial_is_audited_with_zero_run_calls(beta_log: BetaAuditLog) -> None:
     """P-P2: direct registry.call denial is audited; tool never runs."""
-    audit = FakeAudit()
-    registry = ToolRegistry(audit=audit, beta_policy=BetaToolPolicy())
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
     stub = CountingTool(_search_spec())
     registry.register(stub)
     result = await registry.call("web_search", {"query": "hi"}, _untrusted_ctx())
     assert result.ok is False
     assert stub.run_calls == 0
-    assert len(audit.entries) == 1
-    assert audit.entries[0]["action"] == "tool.error"
-    assert audit.entries[0]["target"] == "web_search"
+    rows = await beta_log.query()
+    assert len(rows) == 1
+    assert rows[0].action == "tool.error"
+    assert rows[0].target == "web_search"
 
 
 async def test_beta_schema_validation_runs_before_policy() -> None:
@@ -511,6 +519,157 @@ def test_beta_policy_denies_forged_principal_instance() -> None:
 _BETA_AUDIT_ERROR = "beta audit unavailable"
 
 
+async def test_beta_requires_concrete_durable_store_before_running(tmp_path) -> None:
+    for audit in (NoneAudit(), FakeAudit(), AuditLog(tmp_path / "ordinary.db")):
+        registry = ToolRegistry(audit=audit, beta_policy=BetaToolPolicy())
+        stub = CountingTool(_search_spec())
+        registry.register(stub)
+        result = await registry.call("web_search", {"query": "hello"}, _trusted_ctx())
+        assert result.ok is False
+        assert result.error == _BETA_AUDIT_ERROR
+        assert stub.run_calls == 0
+
+
+async def test_beta_durable_store_requires_disk_and_full_sync(tmp_path) -> None:
+    for path in (":memory:", "file:memory:?cache=shared", ""):
+        with pytest.raises(ValueError):
+            BetaAuditLog(path)
+    log = BetaAuditLog(tmp_path / "durable.db")
+    await log.initialize()
+    try:
+        conn = log._require_ready()
+        cursor = await conn.execute("PRAGMA synchronous")
+        assert await cursor.fetchone() == (2,)  # SQLite FULL
+        registry = ToolRegistry(audit=log, beta_policy=BetaToolPolicy())
+        tool = CountingTool(_search_spec())
+        registry.register(tool)
+        result = await registry.call("web_search", {"query": "hello"}, _trusted_ctx())
+        assert result.ok is True
+        assert tool.run_calls == 1
+    finally:
+        await log.close()
+    reopened = BetaAuditLog(tmp_path / "durable.db")
+    await reopened.initialize()
+    try:
+        rows = await reopened.query(AuditFilter(target="web_search"))
+        assert len(rows) == 2
+    finally:
+        await reopened.close()
+
+
+async def test_beta_append_does_not_retry_after_typeerror(tmp_path, monkeypatch) -> None:
+    log = BetaAuditLog(tmp_path / "durable.db")
+    await log.initialize()
+    calls = 0
+    original = AuditLog.append
+
+    async def commit_then_fail(self: AuditLog, entry: AuditEntry) -> str:
+        nonlocal calls
+        calls += 1
+        await original(self, entry)
+        raise TypeError("private-after-commit")
+
+    monkeypatch.setattr(AuditLog, "append", commit_then_fail)
+    try:
+        registry = ToolRegistry(audit=log, beta_policy=BetaToolPolicy())
+        tool = CountingTool(_search_spec())
+        registry.register(tool)
+        result = await registry.call("web_search", {"query": "hello"}, _trusted_ctx())
+        assert result.error == _BETA_AUDIT_ERROR
+        assert tool.run_calls == 0
+        assert calls == 1
+        assert await log.count() == 1
+    finally:
+        await log.close()
+
+
+async def test_beta_refuses_degraded_sync_before_execution(beta_log: BetaAuditLog) -> None:
+    conn = beta_log._require_ready()
+    await conn.execute("PRAGMA synchronous=NORMAL")
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
+    tool = CountingTool(_search_spec())
+    registry.register(tool)
+    result = await registry.call("web_search", {"query": "hello"}, _trusted_ctx())
+    assert result.error == _BETA_AUDIT_ERROR
+    assert tool.run_calls == 0
+
+
+async def test_beta_refuses_degraded_journal_before_execution(beta_log: BetaAuditLog) -> None:
+    conn = beta_log._require_ready()
+    await conn.execute("PRAGMA journal_mode=DELETE")
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
+    tool = CountingTool(_search_spec())
+    registry.register(tool)
+    result = await registry.call("web_search", {"query": "hello"}, _trusted_ctx())
+    assert result.error == _BETA_AUDIT_ERROR
+    assert tool.run_calls == 0
+
+
+async def test_beta_noop_append_returning_an_id_never_runs(tmp_path, monkeypatch) -> None:
+    log = BetaAuditLog(tmp_path / "durable.db")
+    await log.initialize()
+
+    async def noop(self: AuditLog, entry: AuditEntry) -> str:
+        return entry.entry_id
+
+    monkeypatch.setattr(AuditLog, "append", noop)
+    try:
+        registry = ToolRegistry(audit=log, beta_policy=BetaToolPolicy())
+        tool = CountingTool(_search_spec())
+        registry.register(tool)
+        result = await registry.call("web_search", {"query": "hello"}, _trusted_ctx())
+        assert result.error == _BETA_AUDIT_ERROR
+        assert tool.run_calls == 0
+        assert await log.count() == 0
+    finally:
+        await log.close()
+
+
+async def test_beta_ignores_instance_append_override(beta_log: BetaAuditLog, monkeypatch) -> None:
+    async def fake(entry: AuditEntry) -> str:
+        return entry.entry_id
+
+    monkeypatch.setattr(beta_log, "append_beta", fake)
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
+    tool = CountingTool(_search_spec())
+    registry.register(tool)
+    result = await registry.call("web_search", {"query": "hello"}, _trusted_ctx())
+    assert result.ok is True
+    assert tool.run_calls == 1
+    assert await beta_log.count() == 2
+
+
+async def test_beta_rejections_and_tool_errors_never_persist_user_text(tmp_path) -> None:
+    marker = "private-input-marker"
+    log = BetaAuditLog(tmp_path / "audit.db")
+    await log.initialize()
+    try:
+        registry = ToolRegistry(audit=log, beta_policy=BetaToolPolicy())
+        tool = CountingTool(_search_spec())
+        registry.register(tool)
+        denied = await registry.call("web_search", {marker: "value"}, _trusted_ctx())
+        assert denied.ok is False
+        assert marker not in repr(await log.query())
+        tool.spec.parameters["additionalProperties"] = False
+        denied = await registry.call("web_search", {"query": "ok", marker: "value"}, _trusted_ctx())
+        assert denied.ok is False
+        assert marker not in repr(await log.query())
+
+        class ErrorTool(CountingTool):
+            async def run(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+                raise RuntimeError(marker)
+
+        failing = ErrorTool(_search_spec())
+        another = ToolRegistry(audit=log, beta_policy=BetaToolPolicy())
+        another.register(failing)
+        result = await another.call("web_search", {"query": "ok"}, _trusted_ctx())
+        assert result.ok is False
+        assert marker not in repr(result)
+        assert marker not in repr(await log.query())
+    finally:
+        await log.close()
+
+
 async def test_beta_absent_audit_blocks_tool_execution() -> None:
     """Beta allowed call with no audit at all must not run the tool."""
     registry = ToolRegistry(beta_policy=BetaToolPolicy())
@@ -533,25 +692,50 @@ async def test_beta_audit_without_append_method_blocks_tool_execution() -> None:
     assert stub.run_calls == 0
 
 
-async def test_beta_preflight_append_exception_blocks_tool_execution() -> None:
+async def test_beta_preflight_append_exception_blocks_tool_execution(
+    beta_log: BetaAuditLog, monkeypatch
+) -> None:
     """Intent append failure => fixed error, no run, no exception leak."""
-    audit = BrokenAudit(marker="synthetic-private-value")
-    registry = ToolRegistry(audit=audit, beta_policy=BetaToolPolicy())
+    calls = 0
+
+    async def fail(self: AuditLog, entry: AuditEntry) -> str:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("synthetic-private-value")
+
+    monkeypatch.setattr(AuditLog, "append", fail)
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
     stub = CountingTool(_search_spec())
     registry.register(stub)
     result = await registry.call("web_search", {"query": "hello"}, _trusted_ctx())
     assert stub.run_calls == 0
     assert result.ok is False
     assert result.error == _BETA_AUDIT_ERROR
-    assert audit.calls == 1
+    assert calls == 1
     assert "synthetic-private-value" not in (result.error or "")
     assert "RuntimeError" not in (result.error or "")
 
 
-async def test_beta_outcome_append_exception_returns_failure_not_success() -> None:
+def _fail_outcome(log: BetaAuditLog, monkeypatch) -> None:
+    original = AuditLog.append
+    calls = 0
+
+    async def append(self: AuditLog, entry: AuditEntry) -> str:
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise RuntimeError("synthetic-storage-path")
+        return await original(self, entry)
+
+    monkeypatch.setattr(AuditLog, "append", append)
+
+
+async def test_beta_outcome_append_exception_returns_failure_not_success(
+    beta_log: BetaAuditLog, monkeypatch
+) -> None:
     """Tool ran, outcome append failed => fixed failure, never success."""
-    audit = FlakyAudit(fail_after=1, marker="synthetic-private-value")
-    registry = ToolRegistry(audit=audit, beta_policy=BetaToolPolicy())
+    _fail_outcome(beta_log, monkeypatch)
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
     stub = CountingTool(_search_spec(), output=[{"title": "t"}])
     registry.register(stub)
     result = await registry.call("web_search", {"query": "hello"}, _trusted_ctx())
@@ -560,30 +744,31 @@ async def test_beta_outcome_append_exception_returns_failure_not_success() -> No
     assert result.error == _BETA_AUDIT_ERROR
     assert result.output is None
     assert result.evidence.get("status") == "INDETERMINATE"
-    assert "synthetic-private-value" not in (result.error or "")
-    assert "RuntimeError" not in (result.error or "")
+    assert await beta_log.count() == 1
+    assert "synthetic-storage-path" not in (result.error or "")
 
 
-async def test_beta_timeout_is_audited_before_returning() -> None:
+async def test_beta_timeout_is_audited_before_returning(beta_log: BetaAuditLog) -> None:
     """Timeout outcome still needs a persisted record, intent first."""
-    audit = FakeAudit()
-    registry = ToolRegistry(audit=audit, beta_policy=BetaToolPolicy(), default_timeout_s=0.05)
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy(), default_timeout_s=0.05)
     stub = SlowTool(_search_spec(), delay_s=0.5)
     registry.register(stub)
     result = await registry.call("web_search", {"query": "hello"}, _trusted_ctx())
     assert stub.run_calls == 1
     assert result.ok is False
-    assert "timed out" in (result.error or "")
-    assert len(audit.entries) == 2
-    assert audit.entries[0]["evidence"].get("phase") == "intent"
-    assert audit.entries[0]["result"] == "pending"
-    assert audit.entries[1]["evidence"].get("phase") == "outcome"
+    assert result.error == "beta tool failed"
+    entries = await beta_log.query()
+    assert len(entries) == 2
+    assert any(e.evidence and e.evidence.get("phase") == "intent" for e in entries)
+    assert any(e.evidence and e.evidence.get("phase") == "outcome" for e in entries)
 
 
-async def test_beta_timeout_with_outcome_append_failure_fails_closed() -> None:
+async def test_beta_timeout_with_outcome_append_failure_fails_closed(
+    beta_log: BetaAuditLog, monkeypatch
+) -> None:
     """Timeout plus outcome append failure must not return the tool error."""
-    audit = FlakyAudit(fail_after=1, marker="synthetic-private-value")
-    registry = ToolRegistry(audit=audit, beta_policy=BetaToolPolicy(), default_timeout_s=0.05)
+    _fail_outcome(beta_log, monkeypatch)
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy(), default_timeout_s=0.05)
     stub = SlowTool(_search_spec(), delay_s=0.5)
     registry.register(stub)
     result = await registry.call("web_search", {"query": "hello"}, _trusted_ctx())
@@ -595,7 +780,9 @@ async def test_beta_timeout_with_outcome_append_failure_fails_closed() -> None:
     assert "synthetic-private-value" not in (result.error or "")
 
 
-async def test_beta_tool_exception_outcome_append_failure_fails_closed() -> None:
+async def test_beta_tool_exception_outcome_append_failure_fails_closed(
+    beta_log: BetaAuditLog, monkeypatch
+) -> None:
     """A raising tool whose outcome cannot be persisted reports failure."""
 
     class _BoomTool(CountingTool):
@@ -603,8 +790,8 @@ async def test_beta_tool_exception_outcome_append_failure_fails_closed() -> None
             self.run_calls += 1
             raise RuntimeError("synthetic-tool-private-value")
 
-    audit = FlakyAudit(fail_after=1, marker="synthetic-storage-path")
-    registry = ToolRegistry(audit=audit, beta_policy=BetaToolPolicy())
+    _fail_outcome(beta_log, monkeypatch)
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
     stub = _BoomTool(_search_spec())
     registry.register(stub)
     result = await registry.call("web_search", {"query": "hello"}, _trusted_ctx())
@@ -648,7 +835,7 @@ async def test_beta_denial_with_failing_audit_still_denies_without_leak() -> Non
     assert "trusted" in (result.error or "").lower()
     assert "synthetic-private-value" not in (result.error or "")
     assert stub.run_calls == 0
-    assert audit.calls == 1
+    assert audit.calls == 0
 
 
 async def test_beta_policy_error_with_absent_audit_does_not_leak() -> None:
@@ -667,41 +854,44 @@ async def test_beta_policy_error_with_absent_audit_does_not_leak() -> None:
     assert "synthetic-policy-private-value" not in repr(result)
 
 
-async def test_beta_append_returning_none_is_treated_as_persisted() -> None:
-    """A falsy append return is not a failure; the real log returns ids."""
+async def test_beta_append_returning_none_is_not_an_acknowledgement() -> None:
+    """A fake claiming success, including None, must never grant execution."""
     audit = NoneAudit()
     registry = ToolRegistry(audit=audit, beta_policy=BetaToolPolicy())
     stub = CountingTool(_search_spec(), output=[{"title": "t"}])
     registry.register(stub)
     result = await registry.call("web_search", {"query": "hello"}, _trusted_ctx())
-    assert result.ok is True
-    assert stub.run_calls == 1
-    assert len(audit.entries) == 2
+    assert result.error == _BETA_AUDIT_ERROR
+    assert stub.run_calls == 0
+    assert not audit.entries
 
 
-async def test_beta_audit_payload_has_no_query_args_or_result_text() -> None:
+async def test_beta_audit_payload_has_no_query_args_or_result_text(
+    beta_log: BetaAuditLog,
+) -> None:
     """Sanitized records carry ids/status only, never query or output text."""
     secret = "super-secret-query-text"
-    audit = FakeAudit()
-    registry = ToolRegistry(audit=audit, beta_policy=BetaToolPolicy())
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
     stub = CountingTool(_search_spec(), output=[{"title": "result body text"}])
     registry.register(stub)
     result = await registry.call("web_search", {"query": secret}, _trusted_ctx())
     assert result.ok is True
-    assert len(audit.entries) == 2
-    blob = repr(audit.entries)
+    rows = await beta_log.query()
+    assert len(rows) == 2
+    blob = repr(rows)
     assert secret not in blob
     assert "result body text" not in blob
-    for entry in audit.entries:
-        assert "args" not in entry["evidence"]
-        assert "query" not in entry["evidence"]
-        assert "output" not in entry["evidence"]
+    for entry in rows:
+        assert entry.evidence is not None
+        assert "args" not in entry.evidence
+        assert "query" not in entry.evidence
+        assert "output" not in entry.evidence
 
 
 async def test_beta_success_requires_persisted_intent_then_outcome(tmp_path) -> None:
     """Real AuditLog: intent + outcome rows persist and survive reopen."""
     db_path = tmp_path / "audit.db"
-    log = AuditLog(db_path)
+    log = BetaAuditLog(db_path)
     await log.initialize()
     registry = ToolRegistry(audit=log, beta_policy=BetaToolPolicy())
     stub = CountingTool(_search_spec(), output=[{"title": "t"}])
