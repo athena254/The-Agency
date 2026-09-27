@@ -24,6 +24,8 @@ logger = structlog.get_logger(__name__)
 
 _TYPE_NAMES = ("string", "integer", "number", "boolean", "array", "object")
 
+_BETA_AUDIT_ERROR = "beta audit unavailable"
+
 
 def _type_matches(value: Any, expected: str) -> bool:
     """Check a JSON-schema primitive type; bool is not an integer."""
@@ -124,6 +126,22 @@ class ToolRegistry:
         and before ``tool.run``. ``None`` (default) keeps legacy-open
         behavior. A denial returns ``ToolResult(ok=False, ...)`` and is
         audited; policy errors fail closed.
+
+    Beta audit gate
+    ---------------
+    Setting ``beta_policy`` switches ``call`` from best-effort audit to a
+    fail-closed durable gate: a usable audit sink and a persisted,
+    sanitized pre-execution intent are required before ``tool.run``, and a
+    persisted sanitized outcome is required before any result is returned.
+    If either append is missing or raises, the call returns the fixed
+    ``ToolResult(ok=False, error='beta audit unavailable')`` without
+    leaking the exception. Audit payloads carry ids/status/duration only —
+    never args, query, prompt or result text. Denials, unknown tools and
+    schema violations never execute and keep their specific error even
+    when no audit sink exists (they fail closed by refusing to run).
+    Effects already sent outward cannot be rolled back, so a failed
+    outcome append is reported with ``evidence['status']='INDETERMINATE'``.
+    Without ``beta_policy`` nothing here changes: audit stays best effort.
     """
 
     def __init__(
@@ -175,6 +193,10 @@ class ToolRegistry:
 
         Unknown tools, schema violations, timeouts, and tool exceptions
         all become ``ToolResult(ok=False, ...)``.
+
+        With ``beta_policy`` set, the call additionally fails closed when a
+        sanitized pre-execution intent or the final outcome cannot be
+        persisted; see the class docstring.
         """
         tool = self._tools.get(name)
         if tool is None:
@@ -205,6 +227,17 @@ class ToolRegistry:
                 result = ToolResult(tool=name, ok=False, error=f"beta policy denied: {detail}")
                 await self._audit_call(ctx, name, result)
                 return result
+            persisted = await self._beta_persist(
+                ctx, name, action="tool.call", outcome="pending", phase="intent", extra={}
+            )
+            if not persisted:
+                self._log.warning("tool.beta_audit_unavailable", tool=name, phase="intent")
+                return ToolResult(
+                    tool=name,
+                    ok=False,
+                    error=_BETA_AUDIT_ERROR,
+                    evidence={"status": "FAILED"},
+                )
 
         timeout = self._timeouts.get(name, self._default_timeout_s)
         start = time.perf_counter()
@@ -234,8 +267,97 @@ class ToolRegistry:
                 error=f"{type(exc).__name__}: {exc}",
                 duration_ms=duration_ms,
             )
+        if self._beta_policy is not None:
+            extra: dict[str, Any] = {"ok": result.ok, "duration_ms": result.duration_ms}
+            persisted = await self._beta_persist(
+                ctx,
+                name,
+                action="tool.call" if result.ok else "tool.error",
+                outcome="ok" if result.ok else "error",
+                phase="outcome",
+                extra=extra,
+            )
+            if not persisted:
+                # Outward effects may already have happened; they cannot be
+                # rolled back, so the honest status is INDETERMINATE.
+                self._log.warning("tool.beta_audit_unavailable", tool=name, phase="outcome")
+                return ToolResult(
+                    tool=name,
+                    ok=False,
+                    error=_BETA_AUDIT_ERROR,
+                    duration_ms=result.duration_ms,
+                    evidence={"status": "INDETERMINATE"},
+                )
+            self._log.info(
+                "tool.call",
+                tool=name,
+                ok=result.ok,
+                agent_id=ctx.agent_id,
+                task_id=ctx.task_id,
+            )
+            return result
         await self._audit_call(ctx, name, result)
         return result
+
+    async def _beta_persist(
+        self,
+        ctx: ToolContext,
+        name: str,
+        *,
+        action: str,
+        outcome: str,
+        phase: str,
+        extra: dict[str, Any],
+    ) -> bool:
+        """Persist one sanitized beta audit record; ``True`` only if stored.
+
+        Returns ``False`` when no audit sink is available, when it exposes
+        no callable ``append``, or when appending raises. The return value
+        of ``append`` itself is deliberately ignored: the real ``AuditLog``
+        returns an entry id and other sinks may legitimately return
+        ``None``, so only an exception means the record was not persisted.
+        """
+        audit = self._audit if self._audit is not None else ctx.audit
+        if audit is None:
+            return False
+        append = getattr(audit, "append", None)
+        if not callable(append):
+            return False
+        evidence: dict[str, Any] = {
+            "agent_id": ctx.agent_id,
+            "task_id": ctx.task_id,
+            "tool": name,
+            "phase": phase,
+        }
+        evidence.update(extra)
+        try:
+            await append(
+                agent=ctx.agent_id,
+                action=action,
+                result=outcome,
+                target=name,
+                evidence=evidence,
+            )
+            return True
+        except TypeError:
+            # Fallback for AuditEntry-style logs: append(entry).
+            try:
+                from agency.kernel.audit import AuditEntry
+
+                entry = AuditEntry(
+                    agent=ctx.agent_id,
+                    task=ctx.task_id,
+                    target=name,
+                    action=action,
+                    result=outcome,
+                    evidence=evidence,
+                )
+                await append(entry)
+                return True
+            except Exception:  # noqa: BLE001 — surfaced as fail-closed result
+                return False
+        except Exception:  # noqa: BLE001 — surfaced as fail-closed result
+            return False
 
     async def _audit_call(self, ctx: ToolContext, name: str, result: ToolResult) -> None:
         """Best-effort audit logging for one tool call."""
