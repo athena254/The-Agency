@@ -246,8 +246,19 @@ class ToolRegistry:
                 return result
             audit = self._audit if self._audit is not None else ctx.audit
             try:
-                if type(audit) is not BetaAuditLog or await BetaAuditLog.has_pending_calls(audit):
+                if type(audit) is not BetaAuditLog:
                     self._beta_suspended = True
+                    return ToolResult(
+                        tool=name,
+                        ok=False,
+                        error=_BETA_AUDIT_ERROR,
+                        evidence={"status": "INDETERMINATE"},
+                    )
+                if await BetaAuditLog.has_pending_calls(audit):
+                    # A pending intent may belong to an active concurrent call.
+                    # Refuse this call, but do not latch suspension: retry may
+                    # proceed once the active call durably writes its outcome.
+                    # A truly orphaned intent continues to deny after restart.
                     return ToolResult(
                         tool=name,
                         ok=False,
