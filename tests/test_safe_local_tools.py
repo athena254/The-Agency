@@ -25,8 +25,8 @@ from structlog.testing import capture_logs
 from agency.orchestrator import AgencyOrchestrator
 from agency.tools.base import BetaPrincipal, BetaToolPolicy, ToolContext, ToolRisk
 from agency.tools.builtin import (
+    build_beta_search_registry,
     register_all,
-    register_beta_search_only,
     register_opt_in_local_tools,
 )
 from agency.tools.builtin import utc_time as utc_time_module
@@ -371,8 +371,7 @@ async def test_register_all_preserves_legacy_tools_without_new_tools() -> None:
 
 
 async def test_beta_constructor_advertises_only_search_and_denies_local_tools() -> None:
-    registry = ToolRegistry(beta_policy=BetaToolPolicy())
-    register_beta_search_only(registry, transport=httpx.MockTransport(_blocked))
+    registry = build_beta_search_registry(transport=httpx.MockTransport(_blocked))
     assert {spec.name for spec in registry.list_specs()} == {"web_search"}
     prompt = ToolDriver(registry, llm=None)._build_prompt(
         "test", "system", registry.list_specs(), []
@@ -475,8 +474,7 @@ async def test_local_tools_ignore_injected_side_effect_capabilities() -> None:
 
 async def test_beta_denies_both_tools_even_for_a_trusted_principal() -> None:
     clock, clock_calls = _clock(_fixed_moment())
-    registry = ToolRegistry(beta_policy=BetaToolPolicy())
-    register_beta_search_only(registry, transport=httpx.MockTransport(_blocked))
+    registry = build_beta_search_registry(transport=httpx.MockTransport(_blocked))
     registry.register(CalculatorTool())
     registry.register(UtcTimeTool())
     registry.get("utc_time")._clock = clock  # type: ignore[attr-defined]
@@ -552,8 +550,7 @@ def test_deployed_beta_policy_still_allowlists_web_search_only() -> None:
 
 async def test_beta_web_search_still_allowed_alongside_denials() -> None:
     """The new tools did not displace the existing bounded beta capability."""
-    registry = ToolRegistry(beta_policy=BetaToolPolicy())
-    register_beta_search_only(registry, transport=httpx.MockTransport(_blocked))
+    registry = build_beta_search_registry(transport=httpx.MockTransport(_blocked))
     denied = await registry.call("utc_time", {}, _trusted_ctx())
     assert denied.ok is False
     verdict = BetaToolPolicy()(
