@@ -28,16 +28,15 @@ class _TaskStub:
 
 
 @pytest.mark.asyncio
-async def test_explicit_principal_reaches_tool_context_via_butler() -> None:
+async def test_explicit_principal_rejected_before_butler_creates_task() -> None:
     principal = BetaPrincipal(telegram_user_id=101, private_chat=True)
     stub = _TaskStub()
     service = ButlerService(orchestrator=stub, memory_store=MemoryStore(":memory:"))  # type: ignore[arg-type]
     agent = Agent(name="research", domain="research", capabilities=["research"])
-    response = await service.execute(
-        agent, "topic", {"sender": "telegram:101"}, beta_principal=principal
-    )
-    assert response == "ok"
-    assert stub.execute_task.await_args.kwargs["beta_principal"] is principal
+    with pytest.raises(RuntimeError, match="beta execution disabled"):
+        await service.execute(agent, "topic", {"sender": "telegram:101"}, beta_principal=principal)
+    stub.submit_task.assert_not_awaited()
+    stub.execute_task.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -73,13 +72,39 @@ async def test_handle_message_does_not_promote_context_identity(
         == "ok"
     )
     assert "beta_principal" not in stub.execute_task.await_args.kwargs
-    assert (
+
+
+@pytest.mark.asyncio
+async def test_handle_message_rejects_typed_principal_before_start_memory_routing_or_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    principal = BetaPrincipal(telegram_user_id=999, private_chat=True)
+    stub = _TaskStub()
+    model = AsyncMock(return_value="general")
+    memory = MemoryStore(":memory:")
+    service = ButlerService(orchestrator=stub, memory_store=memory, llm=model)  # type: ignore[arg-type]
+    startup = AsyncMock()
+    recall = AsyncMock()
+    store_turn = AsyncMock()
+    routing = AsyncMock()
+    audit = AsyncMock()
+    monkeypatch.setattr(service, "_ensure_started", startup)
+    monkeypatch.setattr(service, "_recall_history", recall)
+    monkeypatch.setattr(service, "_store_turn", store_turn)
+    monkeypatch.setattr(service, "route", routing)
+    monkeypatch.setattr(service, "_audit_append", audit)
+    with pytest.raises(RuntimeError, match="beta execution disabled"):
         await service.handle_message(
-            "hello", "telegram:999", {}, memory_enabled=False, beta_principal=principal
+            "hello", "telegram:999", {"beta_principal": principal}, beta_principal=principal
         )
-        == "ok"
-    )
-    assert stub.execute_task.await_args.kwargs["beta_principal"] is principal
+    startup.assert_not_awaited()
+    recall.assert_not_awaited()
+    store_turn.assert_not_awaited()
+    routing.assert_not_awaited()
+    model.assert_not_awaited()
+    audit.assert_not_awaited()
+    stub.submit_task.assert_not_awaited()
+    stub.execute_task.assert_not_awaited()
 
 
 def test_orchestrator_tool_context_requires_explicit_principal() -> None:
