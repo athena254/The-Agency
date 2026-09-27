@@ -15,6 +15,7 @@ import json
 import re
 import unicodedata
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from typing import Any, cast
 
 from cryptography.exceptions import InvalidSignature
@@ -221,6 +222,21 @@ def _signature_bytes(encoded: Any) -> bytes:
     return raw
 
 
+def _same_decoded_json(original: Any, candidate: Any) -> bool:
+    """Compare exact decoded values and container types, without NFC folding."""
+    if type(original) is not type(candidate):
+        return False
+    if type(original) is dict:
+        return original.keys() == candidate.keys() and all(
+            _same_decoded_json(original[key], candidate[key]) for key in original
+        )
+    if type(original) is list:
+        return len(original) == len(candidate) and all(
+            _same_decoded_json(a, b) for a, b in zip(original, candidate)
+        )
+    return bool(original == candidate)
+
+
 def sign_envelope(
     header: Mapping[str, Any],
     payload: Mapping[str, Any],
@@ -278,13 +294,16 @@ def verify_envelope(
         raise EnvelopeError("all external validators are required")
 
     def checked(callback: Callable[..., bool], *args: Any) -> None:
-        if callback(*args) is not True:
+        # Never expose the authenticated result to a validator. Re-encoding
+        # alone misses canonically equivalent Unicode or list→tuple mutation.
+        candidate = deepcopy(envelope)
+        if callback(candidate, *args) is not True:
             raise EnvelopeError("external prerequisite failed")
-        if canonical_json(envelope) != wire:
+        if not _same_decoded_json(envelope, candidate):
             raise EnvelopeError("validator mutated signed envelope")
 
-    checked(transport_check, envelope)
-    checked(membership_check, envelope, public_key)
+    checked(transport_check)
+    checked(membership_check, public_key)
     if envelope["sender_peer_id"] != peer_id(public_key):
         raise EnvelopeError("sender does not match public key")
     if envelope["signature"]["key_id"] != peer_fingerprint(public_key):
@@ -300,6 +319,6 @@ def verify_envelope(
     projection = {field: envelope[field] for field in HEADER}
     if envelope["envelope_digest"] != hashlib.sha256(canonical_json(projection)).hexdigest():
         raise EnvelopeError("envelope digest mismatch")
-    checked(replay_check, envelope)
-    checked(expiry_check, envelope)
+    checked(replay_check)
+    checked(expiry_check)
     return envelope
