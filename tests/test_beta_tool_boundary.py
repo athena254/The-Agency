@@ -20,13 +20,14 @@ from agency.tools.base import (
     BetaPrincipal,
     BetaToolPolicy,
     ToolContext,
+    ToolPolicyDecision,
     ToolResult,
     ToolRisk,
     ToolSpec,
 )
 from agency.tools.builtin.memory import MemoryQueryTool, MemoryWriteTool
 from agency.tools.driver import ToolDriver
-from agency.tools.registry import ToolRegistry
+from agency.tools.registry import ToolRegistry, build_default_registry
 
 
 class FakeAudit:
@@ -329,3 +330,41 @@ async def test_beta_driver_path_cannot_bypass_policy() -> None:
     assert fetch.run_calls == 0
     assert outcome.steps and outcome.steps[0].ok is False
     assert "beta policy denied" in (outcome.steps[0].error or "").lower()
+
+
+async def test_registry_factory_preserves_explicit_beta_policy() -> None:
+    tool = CountingTool(_search_spec())
+    registry = build_default_registry([tool], beta_policy=BetaToolPolicy())
+    result = await registry.call("web_search", {"query": "hi"}, ToolContext("a", "t"))
+    assert result.ok is False
+    assert tool.run_calls == 0
+
+
+async def test_policy_exception_does_not_leak_exception_text() -> None:
+    marker = "synthetic-private-value"
+
+    def _boom(spec: ToolSpec, args: dict[str, Any], ctx: ToolContext) -> bool:
+        raise RuntimeError(marker)
+
+    audit = FakeAudit()
+    tool = CountingTool(_search_spec())
+    registry = ToolRegistry(audit=audit, beta_policy=_boom)
+    registry.register(tool)
+    result = await registry.call("web_search", {"query": "hi"}, _trusted_ctx())
+    assert result.ok is False
+    assert marker not in (result.error or "")
+    assert marker not in repr(audit.entries)
+    assert tool.run_calls == 0
+
+
+async def test_malformed_policy_verdict_fails_closed() -> None:
+    tool = CountingTool(_search_spec())
+
+    def _malformed(spec: ToolSpec, args: dict[str, Any], ctx: ToolContext) -> Any:
+        return ToolPolicyDecision(allowed="yes")  # type: ignore[arg-type]
+
+    registry = ToolRegistry(beta_policy=_malformed)
+    registry.register(tool)
+    result = await registry.call("web_search", {"query": "hi"}, _trusted_ctx())
+    assert result.ok is False
+    assert tool.run_calls == 0

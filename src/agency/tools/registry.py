@@ -101,10 +101,10 @@ def _coerce_policy_verdict(verdict: bool | ToolPolicyDecision) -> tuple[bool, st
     if isinstance(verdict, bool):
         return verdict, ""
     if isinstance(verdict, ToolPolicyDecision):
-        return verdict.allowed, verdict.reason
-    allowed = bool(getattr(verdict, "allowed", False))
-    reason = str(getattr(verdict, "reason", "") or "")
-    return allowed, reason
+        if isinstance(verdict.allowed, bool):
+            return verdict.allowed, verdict.reason
+        return False, "invalid policy decision"
+    return False, "invalid policy decision"
 
 
 class ToolRegistry:
@@ -195,7 +195,7 @@ class ToolRegistry:
                 result = ToolResult(
                     tool=name,
                     ok=False,
-                    error=f"beta policy denied: policy error: {type(exc).__name__}: {exc}",
+                    error=f"beta policy denied: policy error: {type(exc).__name__}",
                 )
                 await self._audit_call(ctx, name, result)
                 return result
@@ -288,17 +288,23 @@ class ToolRegistry:
             self._log.warning("tool.audit_failed", tool=name)
 
 
-def build_default_registry(tools: Iterable[Tool] | None = None, **ctx_kwargs: Any) -> ToolRegistry:
+def build_default_registry(
+    tools: Iterable[Tool] | None = None,
+    *,
+    beta_policy: ToolPolicy | None = None,
+    **ctx_kwargs: Any,
+) -> ToolRegistry:
     """Return a ToolRegistry for the Agency tool layer.
 
     Builtin tools are registered by ``agency.tools.builtin`` (wired in a
     later brief); this factory intentionally does NOT import builtin
     modules so it stays dependency-light. Pass an optional list of
-    ``Tool`` instances to pre-register them. Extra ``ctx_kwargs`` are
-    accepted for forward compatibility and currently ignored.
+    ``Tool`` instances to pre-register them. An explicitly supplied
+    beta policy must survive this factory; other ``ctx_kwargs`` remain
+    ignored for compatibility.
     """
     _ = ctx_kwargs
-    registry = ToolRegistry()
+    registry = ToolRegistry(beta_policy=beta_policy)
     for tool in tools or []:
         registry.register(tool)
     return registry
