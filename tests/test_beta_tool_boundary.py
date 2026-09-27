@@ -952,6 +952,38 @@ async def test_beta_calls_have_opaque_distinct_correlated_ids(beta_log: BetaAudi
         assert hashlib.sha256(identity.encode()).hexdigest() not in blob
 
 
+async def test_live_pending_call_does_not_permanently_suspend_registry(
+    beta_log: BetaAuditLog,
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingTool(CountingTool):
+        async def run(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+            self.run_calls += 1
+            if self.run_calls == 1:
+                started.set()
+                await release.wait()
+            return ToolResult(tool=self.spec.name, ok=True, output="ok")
+
+    registry = ToolRegistry(audit=beta_log, beta_policy=BetaToolPolicy())
+    tool = BlockingTool(_search_spec())
+    registry.register(tool)
+    first = asyncio.create_task(registry.call("web_search", {"query": "first"}, _trusted_ctx()))
+    try:
+        await asyncio.wait_for(started.wait(), 2)
+        overlap = await registry.call("web_search", {"query": "second"}, _trusted_ctx())
+        assert overlap.ok is False
+        assert tool.run_calls == 1
+    finally:
+        release.set()
+    assert (await asyncio.wait_for(first, 2)).ok is True
+    assert await beta_log.has_pending_calls() is False
+    after = await registry.call("web_search", {"query": "third"}, _trusted_ctx())
+    assert after.ok is True
+    assert tool.run_calls == 2
+
+
 async def test_beta_cancellation_keeps_pending_intent_and_suspends_work(
     beta_log: BetaAuditLog,
 ) -> None:
