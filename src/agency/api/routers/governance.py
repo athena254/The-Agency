@@ -8,18 +8,14 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from agency.api.authority import require_peer_authority
 from agency.lattice.api import Lattice
 
 log = structlog.get_logger(__name__)
 
 
-def _require_owner(request: Request) -> None:
-    """An owner token is not a signed peer grant; disable this router."""
-    raise HTTPException(status_code=503, detail="Peer authorization is unavailable.")
-
-
 router = APIRouter(
-    prefix="/v1/governance", tags=["governance"], dependencies=[Depends(_require_owner)]
+    prefix="/v1/governance", tags=["governance"], dependencies=[Depends(require_peer_authority)]
 )
 
 

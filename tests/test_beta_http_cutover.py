@@ -6,6 +6,11 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from agency.api.routers.agents import router as agents_router
+from agency.api.routers.bridges import router as bridges_router
+from agency.api.routers.evidence import router as evidence_router
+from agency.api.routers.memory import router as memory_router
+from agency.api.routers.tasks import router as tasks_router
 from agency.api.server import create_app as create_agency_app
 from agency.butler.server import create_app as create_butler_app
 
@@ -99,3 +104,49 @@ async def test_cors_preflight_and_non_get_health_denied(factory) -> None:
         )
     for result in (health_post, preflight):
         assert result.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_direct_bridge_router_refuses_before_coordinator_calls() -> None:
+    class CoordinatorSpy:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def route_task(self, *_args, **_kwargs):
+            self.calls += 1
+            raise AssertionError("bridge execution reached")
+
+        def get_bridge(self, *_args, **_kwargs):
+            self.calls += 1
+            raise AssertionError("bridge health reached")
+
+    app = FastAPI()
+    spy = CoordinatorSpy()
+    app.state.bridge_coordinator = spy
+    app.include_router(bridges_router, prefix="/v1/bridges")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        execute = await client.post("/v1/bridges/x/execute", json={"task": "run"})
+        health = await client.get("/v1/bridges/x/health")
+    for result in (execute, health):
+        assert result.status_code == 503
+        assert result.json() == {"detail": "Peer authorization is unavailable."}
+    assert spy.calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("router", "prefix", "path"),
+    [
+        (agents_router, "/v1/agents", "/v1/agents"),
+        (tasks_router, "/v1/tasks", "/v1/tasks"),
+        (evidence_router, "/v1/evidence", "/v1/evidence"),
+        (memory_router, "/v1/memory", "/v1/memory/search?q=private"),
+    ],
+)
+async def test_independently_mounted_sensitive_router_is_also_closed(router, prefix, path) -> None:
+    app = FastAPI()
+    app.include_router(router, prefix=prefix)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        result = await client.get(path)
+    assert result.status_code == 503
+    assert result.json() == {"detail": "Peer authorization is unavailable."}
