@@ -1,9 +1,10 @@
 """Tests for the audit log: append-only writes, filters, pagination."""
 
+import aiosqlite
 import pytest
 from pydantic import ValidationError
 
-from agency.kernel.audit import AuditEntry, AuditFilter, AuditLog
+from agency.kernel.audit import AuditEntry, AuditFilter, AuditLog, BetaAuditLog
 from agency.kernel.policies import ActionClass
 
 
@@ -151,3 +152,30 @@ async def test_context_manager_and_as_ts(tmp_path):
         eid = await log.append(entry)
         assert await log.count() == 1
         assert (await log.query())[0].entry_id == eid
+
+
+async def test_beta_initialize_recovers_from_transient_wal_lock(tmp_path, monkeypatch):
+    """Two processes may collide while enabling WAL on their first open."""
+    original_execute = aiosqlite.Connection.execute
+    attempts = 0
+
+    def once_locked(self, sql, *args, **kwargs):
+        nonlocal attempts
+        if sql == "PRAGMA journal_mode=WAL":
+            attempts += 1
+            if attempts == 1:
+
+                async def locked():
+                    raise aiosqlite.OperationalError("database is locked")
+
+                return locked()
+        return original_execute(self, sql, *args, **kwargs)
+
+    monkeypatch.setattr(aiosqlite.Connection, "execute", once_locked)
+    log = BetaAuditLog(tmp_path / "audit.db")
+    try:
+        await log.initialize()
+        assert attempts == 2
+        await log._verify_beta_connection(log._require_ready())
+    finally:
+        await log.close()
