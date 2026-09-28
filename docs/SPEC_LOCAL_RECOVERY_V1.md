@@ -1,5 +1,9 @@
 # SPEC_LOCAL_RECOVERY_V1 — minimal durable local recovery (CORRECTED)
 
+> Consolidation status: specification only. Candidate implementation is unfinished
+> and kept off main; see `FREE_PROGRAM_BUILD_STATUS.md`. The resume/reconcile APIs
+> below describe the target, not currently operational features.
+
 Status: CORRECTED at `18b9717`, branch `feat/free-recovery`. Supersedes draft
 with clock leases, omitted-input resume, magic reader compat. No peer
 authority, no deployment. License MIT per `pyproject.toml`.

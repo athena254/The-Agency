@@ -1,0 +1,276 @@
+{
+  "tested_code_head": "2a022dd6b321f198863f0f43b804185c396c5f23",
+  "source_tree": "8cee8b0b427ddaf17ec5babb76ba7a0455072b08",
+  "tests_tree": "cd6508b45314814f003322d57f7f5d99436f94ba",
+  "included": {
+    "18b9717": true,
+    "842459f": true,
+    "07b2c44": true,
+    "b0971ee": true,
+    "9da1922": true,
+    "9c7a686": true,
+    "1f996e7": true,
+    "b8ad163": true,
+    "a2ebda1": true
+  },
+  "excluded_wip": {
+    "6f6ee44": false,
+    "474e8a4": false
+  },
+  "pytest": "1205 passed, 22 warnings in 111.35s (0:01:51)",
+  "engine_report": {
+    "schema": "agency.lab.comet_engine_report/v1",
+    "label": "engine-only",
+    "not_proved": [
+      "byzantine-fault-tolerance",
+      "network-partition",
+      "independent-host-resilience",
+      "agency-policy-authorization",
+      "production-readiness"
+    ],
+    "status": "PASS",
+    "failures": [],
+    "limits": {
+      "validator_count": 4,
+      "stage_timeout_s": 90.0,
+      "tx_poll_timeout_s": 30.0,
+      "version_timeout_s": 30.0,
+      "testnet_timeout_s": 120.0,
+      "rpc_timeout_s": 5.0,
+      "poll_interval_s": 0.5,
+      "quorum_loss_observe_s": 20.0,
+      "quorum_loss_stable_s": 2.0,
+      "whole_timeout_s": 180.0
+    },
+    "binary": {
+      "path": "C:\\Users\\alphi\\AppData\\Local\\Temp\\agency-bft-tools\\bin\\cometbft.exe",
+      "version": "0.38.26",
+      "expected_version": "0.38.26",
+      "matches": true
+    },
+    "output_dir": "C:\\Users\\alphi\\AppData\\Local\\Temp\\agency-peer-labs\\consolidated-run-01",
+    "started_utc": "2026-09-28T16:37:05Z",
+    "finished_utc": "2026-09-28T16:37:49Z",
+    "duration_s": 43.672,
+    "engine_only": true,
+    "nodes": [
+      {
+        "index": 0,
+        "node_id": "9ebc1ef549467642b76135a6eccd62068f232aed",
+        "home": "C:\\Users\\alphi\\AppData\\Local\\Temp\\agency-peer-labs\\consolidated-run-01\\node0",
+        "p2p_laddr": "tcp://127.0.0.1:54144",
+        "rpc_laddr": "tcp://127.0.0.1:54148"
+      },
+      {
+        "index": 1,
+        "node_id": "51cefb12d20e0f68855b5cddfccd9e8727c6060a",
+        "home": "C:\\Users\\alphi\\AppData\\Local\\Temp\\agency-peer-labs\\consolidated-run-01\\node1",
+        "p2p_laddr": "tcp://127.0.0.1:54145",
+        "rpc_laddr": "tcp://127.0.0.1:54149"
+      },
+      {
+        "index": 2,
+        "node_id": "079c1ca90452bc4463f5f934d46bc30184193912",
+        "home": "C:\\Users\\alphi\\AppData\\Local\\Temp\\agency-peer-labs\\consolidated-run-01\\node2",
+        "p2p_laddr": "tcp://127.0.0.1:54146",
+        "rpc_laddr": "tcp://127.0.0.1:54150"
+      },
+      {
+        "index": 3,
+        "node_id": "9d3d92f98916c1e1521afbf832b58de50590ecea",
+        "home": "C:\\Users\\alphi\\AppData\\Local\\Temp\\agency-peer-labs\\consolidated-run-01\\node3",
+        "p2p_laddr": "tcp://127.0.0.1:54147",
+        "rpc_laddr": "tcp://127.0.0.1:54151"
+      }
+    ],
+    "phases": [
+      {
+        "name": "version",
+        "status": "passed",
+        "detail": "ok",
+        "duration_s": 0.09400000000096043
+      },
+      {
+        "name": "testnet",
+        "status": "passed",
+        "detail": "ok",
+        "duration_s": 0.75
+      },
+      {
+        "name": "start4",
+        "status": "passed",
+        "detail": "ok",
+        "duration_s": 2.625
+      },
+      {
+        "name": "tx4",
+        "status": "passed",
+        "detail": "ok",
+        "duration_s": 2.577999999997701
+      },
+      {
+        "name": "stop1_commit3",
+        "status": "passed",
+        "detail": "ok",
+        "duration_s": 3.062000000001717
+      },
+      {
+        "name": "restart_catchup",
+        "status": "passed",
+        "detail": "ok",
+        "duration_s": 4.09400000000096
+      },
+      {
+        "name": "quorum_loss",
+        "status": "passed",
+        "detail": "ok",
+        "duration_s": 22.0779999999977
+      },
+      {
+        "name": "restore",
+        "status": "passed",
+        "detail": "ok",
+        "duration_s": 8.2970000000023
+      }
+    ],
+    "heights": {
+      "start4": {
+        "node0": 1,
+        "node1": 1,
+        "node2": 1,
+        "node3": 1
+      },
+      "tx4_commit": 2,
+      "tx3_commit": 4,
+      "restore_common": 7,
+      "restore_committed": 6
+    },
+    "app_hash": [
+      {
+        "phase": "tx4",
+        "height": 3,
+        "equal": true,
+        "values": {
+          "node0": "0200000000000000",
+          "node1": "0200000000000000",
+          "node2": "0200000000000000",
+          "node3": "0200000000000000"
+        }
+      },
+      {
+        "phase": "tx3",
+        "height": 5,
+        "equal": true,
+        "values": {
+          "node0": "0400000000000000",
+          "node1": "0400000000000000",
+          "node2": "0400000000000000"
+        }
+      },
+      {
+        "phase": "restart",
+        "height": 5,
+        "equal": true,
+        "values": {
+          "node0": "0400000000000000",
+          "node1": "0400000000000000",
+          "node2": "0400000000000000",
+          "node3": "0400000000000000"
+        }
+      },
+      {
+        "phase": "restore",
+        "height": 7,
+        "equal": true,
+        "values": {
+          "node0": "0800000000000000",
+          "node1": "0800000000000000",
+          "node2": "0800000000000000",
+          "node3": "0800000000000000"
+        }
+      }
+    ],
+    "txs": {
+      "tx4": {
+        "hash": "C6312E5577497085F3BEA195F1C51150E4E860056155C6238AB33FABBB77C311",
+        "check_tx_code": 0,
+        "tx_result_code": 0,
+        "height": 2
+      },
+      "tx3": {
+        "hash": "6953040B566B2A20B219432FCD88720CDD3027161BFD5A2E1A0572CEE405866E",
+        "check_tx_code": 0,
+        "tx_result_code": 0,
+        "height": 4
+      },
+      "restore": {
+        "hash": "90A72082684D8022CC972AC79A4331AFE3C100BDF33FD34702B05D45A71D54A5",
+        "check_tx_code": 0,
+        "tx_result_code": 0,
+        "height": 6,
+        "key": "restore-proof",
+        "value": "restored"
+      }
+    },
+    "quorum_loss": {
+      "submitted": true,
+      "check_tx_code": 0,
+      "observe_s": 20.0,
+      "observed_s": 20.015,
+      "height_unchanged": true,
+      "tx_found": false,
+      "observed_heights": {
+        "node0": 5,
+        "node1": 5
+      },
+      "late_commit_observed": true,
+      "hash": "765F5D29F837D7433B2E4D0F891D7A0D38FC9D88A25441583041B0997AE93E17",
+      "baseline_heights": {
+        "node0": 5,
+        "node1": 5
+      }
+    },
+    "cleanup": {
+      "terminated": [
+        "node0",
+        "node1",
+        "node2",
+        "node3"
+      ],
+      "exit_codes": {
+        "node0": 1,
+        "node1": 1,
+        "node2": 1,
+        "node3": 1
+      },
+      "log_files": [
+        "node0.log",
+        "node1.log",
+        "node2.log",
+        "node3.log"
+      ],
+      "errors": [],
+      "confirmed_stopped": true
+    }
+  },
+  "runtime_blob_equal": true,
+  "ruff_check": "passed repo-wide",
+  "ruff_format": "221 files already formatted",
+  "mypy": "Success: no issues found in 146 source files",
+  "node_ui_tests": {
+    "passed": 14,
+    "failed": 0
+  },
+  "remaining_comet_processes": 0,
+  "private_backup_directory": "C:/Users/alphi/AppData/Local/Temp/agency-merge-backup-1mls3icr",
+  "scope": "local main consolidation only; no push or deployment",
+  "wip_tests": {
+    "agency-metering-consolidation-check.log": "6 failed, 28 passed, 6 warnings in 2.73s",
+    "agency-recovery-consolidation-check.log": "1 failed, 36 passed in 3.12s"
+  },
+  "archive_drafts": [
+    "bft-worker-draft.md",
+    "bft-coordinator-draft.md",
+    "human-lattice-gateway-draft.md"
+  ]
+}

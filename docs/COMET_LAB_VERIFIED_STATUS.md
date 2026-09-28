@@ -68,8 +68,9 @@ AGENCY_LLM_PROVIDER=echo AGENCY_LLM_MODEL=echo PYTHONPATH=src \
 
 ## Boundary and remaining work
 
-This checkpoint is **engine-only**, in `feat/free-lattice-engine`. It is not merged
-into the main Agency or deployed. It does not implement Agency peer authorization,
+This original checkpoint was created on `feat/free-lattice-engine`. For its subsequent
+merge/consolidation status, see `FREE_PROGRAM_BUILD_STATUS.md`; no production deployment
+is implied. It does not implement Agency peer authorization,
 affected-consumer participation, distributed task scheduling, or real-action execution.
 Butler remains specified as the non-agent human gateway, without voting authority.
 

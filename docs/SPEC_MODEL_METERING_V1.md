@@ -1,5 +1,9 @@
 # Model metering V1 — frozen spec (CORRECTED, supersedes draft)
 
+> Consolidation status: specification only. Candidate implementation is unfinished
+> and kept off main; see `FREE_PROGRAM_BUILD_STATUS.md`. Frozen contract is not
+> evidence of operational metering.
+
 Status: FROZEN. Base `18b9717`. Program `docs/SPEC_FREE_ONLY_DECENTRALIZED_PROGRAM.md`. License MIT (`pyproject.toml:11`).
 Scope: request-bound metered adapter on the existing ToolDriver beta path ONLY. No beta ingress enablement, no Butler/orchestrator/Telegram-guard change, no `adapter.py` change. Top-level beta admission stays disabled. Ordinary non-beta behavior byte-identical.
 P-IDs: P-1 echo-only tests (echo + fake transport, never live); P-2 worktree is not a sandbox (never `.env*`/`data/`/creds/other worktrees); P-3 tests are not deployment proof (exact outputs + limits reported).
