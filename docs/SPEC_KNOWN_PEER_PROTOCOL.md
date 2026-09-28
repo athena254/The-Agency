@@ -1,5 +1,7 @@
 # Known-peer decentralized authority protocol — design specification (not implemented)
 
+> **Owner decision update (2026-09-28):** Byzantine/compromised-peer tolerance is now selected. All affected consumers must give attributable input; missing input blocks execution, but a rejection is **not** an individual veto and may be overridden by the approved peer decision rule. These decisions supersede historical `UNDECIDED` statements about fault *class* and veto semantics below. Fault count, validator count, exact engine/algorithm, application thresholds, membership changes and human-input proof are still unapproved; actuation remains disabled. See [SPEC_FREE_ONLY_DECENTRALIZED_PROGRAM.md](SPEC_FREE_ONLY_DECENTRALIZED_PROGRAM.md). This update is documentation, not an implementation or deployment claim.
+
 Status: **design specification for review; not implemented, not deployed, not approved for consequential execution.**
 Base revision: `36f41c8`. Scope: this document only (`docs/SPEC_KNOWN_PEER_PROTOCOL.md`).
 No code, database, credential, bot, or deployment change is authorized by this document.

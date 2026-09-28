@@ -1,0 +1,38 @@
+{
+  "baseline": "1e38912cbc5767fe1ee599f10019f60214ba4f03",
+  "checkpoint_kind": "documentation_only_pending_implementation_approval",
+  "provider_cost_evidence": "CLI run_result usage.totalCost; not an independent billing audit",
+  "runs": [
+    {"purpose":"MiMo free smoke","session":"proc_bf25547eb41f","provider":"cline","model":"cline-free/mimo-v2.6-flash","outcome":"completed","reported_cost":0},
+    {"purpose":"Muse free smoke","session":"proc_e08465730f10","provider":"cline","model":"cline-free/muse-spark-1.3-contributor","outcome":"completed","reported_cost":0},
+    {"purpose":"feature source audit","session":"proc_5be1787fa5b2","provider":"cline","model":"cline-free/mimo-v2.6-flash","outcome":"timed_out_before_report","reported_cost":0},
+    {"purpose":"recovery source audit","session":"proc_3e95c4515523","provider":"cline","model":"cline-free/mimo-v2.6-flash","outcome":"timed_out_before_report","reported_cost":0},
+    {"purpose":"BFT report","session":"proc_b7315ac00a9e","provider":"cline","model":"cline-free/muse-spark-1.3-contributor","outcome":"completed_reviewed_with_positive_test_requirement_added","reported_cost":0},
+    {"purpose":"feature report from preserved lookups","session":"proc_85d9efc6983d","provider":"cline","model":"cline-free/muse-spark-1.3-contributor","outcome":"completed_reviewed_incomplete_areas_marked_unverified","reported_cost":0},
+    {"purpose":"recovery report from preserved lookups","session":"proc_5cc68c3f0c15","provider":"cline","model":"cline-free/muse-spark-1.3-contributor","outcome":"completed_but_rejected_for_owner_policy_and_recovery_errors","reported_cost":0},
+    {"purpose":"recovery report correction","session":"proc_5bc33f764749","provider":"cline","model":"cline-free/muse-spark-1.3-contributor","outcome":"completed_then_coordinator_corrected_remaining_budget_and_durability_wording","reported_cost":0}
+  ],
+  "blocked_tools": {
+    "opencode": "1.18.32: Muse smoke twice and big-pickle control all returned 403 FreeTierError through native CLI; no bypass attempted",
+    "freebuff": "0.1.2 after auto-update: interactive UI started, no completed model smoke via PTY; owned sessions stopped",
+    "cline_resume": "headless --id failed with positional and piped followups; fresh pinned-free sessions used instead"
+  },
+  "baseline_checks": {
+    "python_tests": {"passed":1146,"warnings":23,"exit_code":0,"provider":"echo","network_blocker":false},
+    "ui_tests": {"passed":14,"failed":0,"exit_code":0},
+    "ruff_check":"passed",
+    "ruff_format":"216 files already formatted",
+    "mypy":"no issues in 144 source files",
+    "git_diff_check":"passed",
+    "credential_pattern_scan":"no hits for checked private-key, sk-key and bot-token patterns; not a complete secret audit"
+  },
+  "integration": {
+    "expected_research_reports":3,
+    "verified_research_reports":3,
+    "runtime_source_changes":false,
+    "deployment_changed":false,
+    "remote_push_performed":false,
+    "fully_operational_claim":false,
+    "full_decentralization_claim":false
+  }
+}
