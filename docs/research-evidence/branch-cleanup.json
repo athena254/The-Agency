@@ -1,0 +1,378 @@
+{
+  "before": 75,
+  "after": 5,
+  "removed": 70,
+  "remaining": [
+    "docs/free-lattice-gateway",
+    "feat/free-metering",
+    "feat/free-recovery",
+    "main",
+    "research/free-bft-lab"
+  ],
+  "disposition_counts": {
+    "already-merged": 25,
+    "patch-equivalent-in-main": 42,
+    "archived-unsafe-experiment": 1,
+    "superseded-reviewed-port-in-main": 2
+  },
+  "retired_branches": [
+    {
+      "branch": "architecture/agency-core",
+      "tip": "816471cc52974d9a3cb5d03757c99295f40d7250",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "consolidation/agency-home",
+      "tip": "e3f0f5e300c3d6186656f9547c999547d3658ad4",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "consolidation/offline-tests",
+      "tip": "bb7f157eb5f50d5703ecfde7a98e65c23eefc6e3",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "consolidation/policy-review",
+      "tip": "07de00c886529bb712536d53a08e35ac869a09ba",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "consolidation/root-delta",
+      "tip": "51fd9c2d90046dc0c6eec3028fd35a1a634ab757",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "consolidation/tool-policy",
+      "tip": "3acb0f2a8340f5c874691b556b02b54e6410df8c",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "consolidation/web-security",
+      "tip": "9e113776b910047384679c80dfdd1400167234ab",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "docs/agency-honest-status",
+      "tip": "ab966991f896c349c31c7e5b3802578bc8aadbd9",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "feat/beta-admission",
+      "tip": "0991f9b7e6909d44714acf2620319315bd41f182",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "feat/beta-delivery",
+      "tip": "fc7b225544fc820b88a6816cdacf85c6ca33c08e",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "feat/beta-integration",
+      "tip": "0d86444cba8b6d745e56d52404f42e7753b6e71c",
+      "disposition": "archived-unsafe-experiment"
+    },
+    {
+      "branch": "feat/beta-integrity",
+      "tip": "f42ee1136d52964d7c06d9816d541ca93e22efa3",
+      "disposition": "superseded-reviewed-port-in-main"
+    },
+    {
+      "branch": "feat/beta-rate",
+      "tip": "b8936c2c26b1eab303736fe4f97da97e441ff1cd",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "feat/beta-tool-policy",
+      "tip": "e66a9419e52170fef0b845380e4218d4dceb0e55",
+      "disposition": "superseded-reviewed-port-in-main"
+    },
+    {
+      "branch": "feat/beta-web-security",
+      "tip": "366a649ad1777c085f0e98420a28c9d109067442",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "feat/free-audit-lifecycle",
+      "tip": "1f996e7c1d06bd50dd93757edf8ec127ab436631",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "feat/free-lattice-engine",
+      "tip": "9da1922a53b40cd12bd677a20ff128ba72821171",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "feat/local-safe-tools",
+      "tip": "19d3ff3e6df9daf1c1b289da3179536fe72247b3",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "feat/mvp-api",
+      "tip": "90534785b2c5a2f444a4c9f2b83e66693d529005",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "feat/mvp-chat-safety",
+      "tip": "e79cc55c186969691fbb15cb82c3dbc9358e58c8",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "feat/mvp-telegram",
+      "tip": "be130629cd93b618304c7fcd1091b9015ed1944e",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "feat/mvp-ui",
+      "tip": "05cd49ea7187112b83e49e469d3622f8bdf41c85",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "feat/peer-signed-envelope",
+      "tip": "6c71247b1626ab0678d5a35b9a9afb598cc384cd",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "feature/agency-factory",
+      "tip": "e2d87dc5e0cc849bbd712f869c7e46c66c86c027",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "feature/agency-forge",
+      "tip": "8137b3d0bb0d6539e0c7d36419779ead622d2efb",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "feature/agency-skills",
+      "tip": "5b0c9f9f7745389d5738509b54da02b7131c5822",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "feature/agency-threads",
+      "tip": "53f571a88348642408247092a6e0cc99e29a136a",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "feature/agency-workflow",
+      "tip": "4fe20932f0bc10c55487ecc54f5f6da33f6d8aac",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "feature/l2-telegram-beta",
+      "tip": "b0987763a16ecfd412372c0c5fd009676f46ec80",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "feature/mvp-prototype",
+      "tip": "e9b991199276990072a146e345bfbe8d4b8ca71d",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "feature/remex-personalization",
+      "tip": "e885c5cf112bb1140e50f4559dc96b023f6efa53",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "fix/agent-factory-activation-race",
+      "tip": "374112e7434ebee2c1398a5ad12bb009bfe8423d",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/beta-admission-tests",
+      "tip": "df5f936ce7999475230265c8d42b64d6a35d9ecf",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/beta-audit-gate",
+      "tip": "ec01564954a97bc6ba85aec99a6ae53ced076bc9",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/beta-audit-merge",
+      "tip": "17c7b7413a125721a035c094d313fa2a6ba0f851",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "fix/beta-budget-ledger",
+      "tip": "41b7a2d3fdc3134457800d648b4017f9567ea84d",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/beta-deterministic-budget",
+      "tip": "60df4098a89d0dfda1fc2d5152b3d86e383b2ef5",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/beta-driver-audit-status",
+      "tip": "993079c2e8eba7e83880fa438121d91ed1bd63ee",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/beta-ingress-cutover",
+      "tip": "34106aeeb87ae118b556fcdd954d9ea0d89c52c5",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/beta-principal-search-bound",
+      "tip": "a35c7e35b63a5f54a98f7d3b5c9ef656fe47c445",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/beta-principal-tests",
+      "tip": "30ff889b60a7e4db19c9ffda132753bed5707fd2",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/beta-profile-nonbeta",
+      "tip": "64d36eff3bc63342ce1a389cccb370191e1852b9",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/beta-profile-outcome",
+      "tip": "35cb84a94509690c1dc5e62c6913846a80b351a6",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/beta-route-deny",
+      "tip": "0cfc78c371423101a97ad519542ba27376d08bc0",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/beta-telegram-admission",
+      "tip": "fc0970c007a59afdfae6d71c613f69fa5889861c",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/beta-telegram-governance",
+      "tip": "4933be972b3a658ea67ed16f4d92584bb603e571",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/beta-test-compat",
+      "tip": "a632c3d6fa9dfc86653d94707af3b69fe5e12348",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/beta-web-query-logging",
+      "tip": "deca71a08d70660026ebdc0db63db9c4869a610c",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/forge-absorber-filesystem",
+      "tip": "cb17298a9e986c048ec5fc0fe8190b5bb5c7ad65",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/pr7-gate-core",
+      "tip": "16342f39906d48cbf0e02a4a149a8b672236b517",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "fix/pr7-gate-data",
+      "tip": "16342f39906d48cbf0e02a4a149a8b672236b517",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "fix/pr7-gate-external",
+      "tip": "74e841fbdd70f10d2df3e523382c08cd70a98170",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/pr7-gate-rest",
+      "tip": "16342f39906d48cbf0e02a4a149a8b672236b517",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "fix/pr7-llm-contract",
+      "tip": "81df1d0959feda9665d0ab6a584ffa8ce8e5c6f7",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/pr7-mypy",
+      "tip": "4fc6cd530689d3bb167107fd2079a710ce21d4cc",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/pr7-ruff-isolated",
+      "tip": "2eb8c3cfb2be8478aad20341e2f6ba301b109de4",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "fix/remex-ci-echo",
+      "tip": "e51903be8472fdaa454c684743ba685236e37514",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "fix/web-fetch-dns-async",
+      "tip": "9296a3ed182140e3d2f3f8abdeacc6d5d779f65d",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "integrate/free-completed-work",
+      "tip": "fef75203e621e96f59bee6d58d14b22b8d7921a4",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "integration/beta-peer-stage1a",
+      "tip": "a5030377458ffdc13bce6f2d9a1bbc1015eae2cd",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "research/free-cline-authority",
+      "tip": "1e38912cbc5767fe1ee599f10019f60214ba4f03",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "research/free-muse-bft",
+      "tip": "1e38912cbc5767fe1ee599f10019f60214ba4f03",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "research/freebuff-recovery",
+      "tip": "1e38912cbc5767fe1ee599f10019f60214ba4f03",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "review/beta-audit",
+      "tip": "07de00c886529bb712536d53a08e35ac869a09ba",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "review/beta-boundary",
+      "tip": "07de00c886529bb712536d53a08e35ac869a09ba",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "review/freebuff-protocol",
+      "tip": "36f41c8c38a06fa8bf8aae9d7d00371a295a133f",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "spec/beta-ingress-wiring",
+      "tip": "36f41c8c38a06fa8bf8aae9d7d00371a295a133f",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "spec/beta-peer-execution",
+      "tip": "73674268229ef4dc413e6d63575f3727beb64ef8",
+      "disposition": "patch-equivalent-in-main"
+    },
+    {
+      "branch": "spec/free-only-decentralized-program",
+      "tip": "07b2c4480cdc57e8077f57f89c034aac63904bed",
+      "disposition": "already-merged"
+    },
+    {
+      "branch": "spec/known-peer-protocol",
+      "tip": "f24670d86b7af75ae1e79e0c6a65fb009ff0c03c",
+      "disposition": "patch-equivalent-in-main"
+    }
+  ],
+  "backup": "C:\\Users\\alphi\\agency-backups\\branch-cleanup-20260928-215259",
+  "bundle_sha256": "d420aa57972abaa0c451c49608db18fa1f59a11fddf78b8a6429fec0c74efd80",
+  "runtime_and_local_deltas_preserved": true,
+  "source_tree": "8cee8b0b427ddaf17ec5babb76ba7a0455072b08",
+  "tests_tree": "cd6508b45314814f003322d57f7f5d99436f94ba",
+  "test_evidence": "free-program-consolidation.json; source/tests unchanged by cleanup",
+  "remote_scope": "No remote branch deletion or push",
+  "worktree_scope": "Removed three clean temporary checkouts only; detached retired branches at same HEAD, keeping dirty/runtime/deployment worktrees intact."
+}
