@@ -17,7 +17,8 @@ quorum evidence only).
   code 2 (never erase or reinitialize signing state). If missing, create it
   (including parents). If present and empty, reuse it.
 - `--whole-timeout`: optional float, default `420.0` seconds. Whole-run
-  deadline enforced by every wait loop alongside its stage timeout.
+  deadline enforced by every wait loop alongside its stage timeout. Non-finite
+  values (`nan`, `inf`) and values `<= 0` are refused with exit code 2.
 - Startup gate: run `<binary> version` (30 s timeout). Stdout must contain
   exactly `0.38.26` (`EXPECTED_VERSION`). Any mismatch, execution failure,
   or timeout is fatal (exit 1) before any node state is created.
@@ -57,6 +58,9 @@ quorum evidence only).
    - `([p2p], seeds)` -> `""`
    - `([p2p], pex)` -> `false`
    - `([rpc], unsafe)` -> `false` (assert present)
+   - `([p2p], allow_duplicate_ip)` -> `true` (lab-only same-IP support)
+   - `([instrumentation], prometheus)` -> `false`
+   - `([rpc], pprof_laddr)` -> `""`
 ## Part 2 — runtime, scenario, report and test contract (frozen)
 
 ### Deadline discipline
@@ -78,28 +82,42 @@ still performs full cleanup and exits nonzero.
    then re-parse each `config.toml` with `tomllib` and assert the edits landed.
 3. `start4` — start 4 processes, poll `/status` until all 4 report
    `result.sync_info.latest_block_height >= 1`.
-4. `tx4` — broadcast one probe transaction with `broadcast_tx_sync` (JSON-RPC POST, `tx`
-   base64 per Go `[]byte` JSON semantics) and require `check_tx.code == 0`. Poll
-   `/tx?hash=<HEX>` until the tx result is found with `tx_result.code == 0` and a block
-   height `H4`; require `abci_query` for the probe key to return a non-empty
-   `result.response.value` whose base64 decodes to the expected value; then require the
-   same-height app hash (`/commit?height=H4`, `result.signed_header.header.app_hash`) to
-   be equal on all 4 nodes.
+4. `tx4` — broadcast one probe transaction with `broadcast_tx_sync` (loopback GET,
+   `tx` = URL-encoded `json.dumps("probe=v4")`) and require the top-level
+   `result.code == 0`. `broadcast_tx_sync` has no nested `check_tx`; that field exists
+   only on `broadcast_tx_commit`. Poll `/tx?hash=0x<64_HEX_CHARS>` until the tx result is found
+   with `tx_result.code == 0` and a block height `H4`; require `abci_query` for the
+   probe key on **each** of the 4 peers to return a non-empty `result.response.value`
+   whose base64 decodes to the expected value; then require the app hash of block
+   `H4 + 1` (`/commit?height=H4+1`, `result.signed_header.header.app_hash`) to be equal
+   on all 4 nodes. The commit header at height `H` carries the app hash produced by
+   executing block `H - 1`, so a post-transaction comparison must use `H4 + 1` (or
+   later) and must always be paired with the independent per-peer queries above.
 5. `stop1_commit3` — terminate node3 and wait for process exit, submit a second
-   transaction, require it to commit at height `H5 > H4` with the 3 running nodes,
-   require the new value to be readable by query, and require same-height app hash
-   equality on those 3 nodes.
-6. `restart_catchup` — restart node3, poll until its height `>= H5` **and** its app hash
-   at `H5` equals the other nodes' (rejoined and converged, not merely listening).
-7. `quorum_loss` — terminate node2 and node3 (2 of 4 running). Submit a third
-   transaction: `check_tx.code` must be `0` (accepted into mempool), then observe for
+   transaction (`probe=v5`), require it to commit at height `H5 > H4` with the 3 running
+   nodes, require the new value to be readable by query on each running peer, and require
+   app hash equality at `H5 + 1` on those 3 nodes.
+6. `restart_catchup` — restart node3, poll until its height reaches `H5 + 1` **and** its
+   app hash at `H5 + 1` equals the other nodes' and its independent query returns
+   `probe=v5` (rejoined and converged, not merely listening).
+7. `quorum_loss` — terminate node2 and node3 (2 of 4 running), then wait for a stable
+   post-stop baseline (no running node's height changes for `QUORUM_LOSS_STABLE_S`) so an
+   already committed in-flight block cannot be mistaken for a new commit. Submit a third
+   transaction: the top-level `result.code` must be `0` (accepted into mempool), then observe for
    `QUORUM_LOSS_OBSERVE_S` (20 s) that no running node's height increases and `/tx` for
    that hash stays absent. The 2 running nodes must stay responsive (`/status` ok) during
    the window — unchanged height with dead nodes is not evidence. The window is a
    bounded observation, never "no news means pass".
-8. `restore` — restart node2 and node3, poll until all 4 reach the same height with
-   equal same-height app hash. Whether the quorum-loss transaction later commits is
-   recorded as `quorum_loss.late_commit_observed` (informational only).
+8. `restore` — restart node2 and node3, then submit a fresh independent-key
+   `restore-proof=restored` transaction. Require a successful commit above every
+   quorum-loss observed height, the expected query value on all four peers, and
+   matching app hashes at the new transaction height plus one. Serving old committed
+   history alone cannot pass this phase. Whether the quorum-loss transaction later
+   commits is recorded as `quorum_loss.late_commit_observed` (informational only).
+
+All nodes start with `--proxy_app persistent_kvstore` so state survives restart via the
+`data/` directory in each node home. Phases are executed in this fixed order; after the
+first failure every later phase is recorded `skipped`, never `passed`.
 ### Report contract
 
 `<output>/report.json` (`REPORT_NAME`), written best-effort on failure as well as
@@ -117,7 +135,8 @@ success; if the report cannot be written the CLI still exits nonzero and says so
   "limits": {"validator_count": 4, "stage_timeout_s": 90.0, "tx_poll_timeout_s": 30.0,
              "version_timeout_s": 30.0, "testnet_timeout_s": 120.0,
              "rpc_timeout_s": 5.0, "poll_interval_s": 0.5,
-             "quorum_loss_observe_s": 20.0, "whole_timeout_s": 420.0},
+             "quorum_loss_observe_s": 20.0, "quorum_loss_stable_s": 2.0,
+             "whole_timeout_s": 420.0},
   "binary": {"path": "...", "version": "0.38.26", "expected_version": "0.38.26",
              "matches": true},
   "output_dir": "...", "started_utc": "...", "finished_utc": "...", "duration_s": 0.0,
@@ -135,7 +154,7 @@ success; if the report cannot be written the CLI still exits nonzero and says so
                   "observed_heights": {"node0": 4, "node1": 4},
                   "late_commit_observed": false},
   "cleanup": {"terminated": ["node0"], "exit_codes": {"node0": 0},
-              "log_files": ["node0.log"]}
+              "log_files": ["node0.log"], "errors": [], "confirmed_stopped": true}
 }
 ```
 
@@ -147,11 +166,28 @@ contents, or key file paths; node IDs from `show-node-id` are public.
 refuses `status == "PASS"` when any failure or non-passed phase is present, and refuses
 `status == "FAIL"` with no recorded failure.
 
+### Review hardening
+
+- Exact stripped version output is required; finding the pinned token in a longer
+  version string does not pass.
+- GET transaction lookup validates the canonical hash before adding the RPC hex
+  prefix. Only error code `-32603` with the specific `error.data` transaction-not-found
+  text counts as absence; invalid parameters and missing methods fail immediately.
+- Port allocation retries are finite. Poll success is rejected after its deadline.
+  Cleanup has its own bounded waits so it is still attempted after the run deadline.
+- Phase-loop interruption is recorded as failure, with remaining phases skipped;
+  `finally` attempts every owned child's cleanup. Unconfirmed termination cannot PASS.
+- A PASS report requires the complete, ordered, nonduplicate phase list, correct
+  engine-only labels, no failures, and explicitly confirmed cleanup.
+- The JSON example above is a schema illustration, not a valid complete PASS artifact;
+  real reports include all eight phases and all four nodes. Regression coverage also
+  lives in `tests/test_comet_lab_regressions.py`.
+
 ### Exit codes
 
 `0` = all phases passed and report written; `1` = incomplete/error/timeout (report still
 written, failure listed); `2` = usage error (missing/relative/nonexistent `--binary`,
-existing non-empty `--output`, non-positive `--whole-timeout`).
+existing non-empty `--output`, non-positive or non-finite `--whole-timeout`).
 
 ### Test contract (`tests/test_comet_lab.py`, subprocess-free)
 
@@ -173,10 +209,4 @@ Unit tests never launch `cometbft` and never leave loopback. Required cases:
   forbidden markers; `not_proved` labels present.
 - cleanup on injected failure: a scenario failure terminates and waits every started
   child, closes every log handle, and yields nonzero exit plus a `FAIL` report.
-
-   - `([p2p], allow_duplicate_ip)` -> `true` (lab-only same-IP support)
-   - `([instrumentation], prometheus)` -> `false`
-   - `([rpc], pprof_laddr)` -> `""`
-4. All nodes start with `--proxy_app persistent_kvstore` so state survives
-   restart via the `data/` directory in each node home.
 
