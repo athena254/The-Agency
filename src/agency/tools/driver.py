@@ -8,7 +8,9 @@ from typing import Any
 import structlog
 from pydantic import BaseModel, Field
 
-from agency.tools.base import ToolContext
+from agency.kernel.audit import BetaAuditLog
+from agency.llm.metered import MeteredModel
+from agency.tools.base import BetaPrincipal, ToolContext
 
 logger = structlog.get_logger(__name__)
 
@@ -198,6 +200,25 @@ class ToolDriver:
         beta_path = strict_registry or ctx.beta_principal is not None
         if beta_path and (not strict_registry or ctx.beta_principal is None):
             return ToolLoopResult(final_answer="Beta tool unavailable.", status="tool_error")
+        metered = None
+        if beta_path:
+            # Strict/beta path requires the concrete MeteredModel bound to the
+            # exact same principal AND the same concrete audit object as ctx.
+            # A bare model (or scripted double) is denied before any generate.
+            if (
+                type(self._llm) is not MeteredModel
+                or getattr(self._llm, "binding", None) is None
+                or self._llm.binding.principal != ctx.beta_principal
+                or not isinstance(ctx.beta_principal, BetaPrincipal)
+                or ctx.beta_principal.private_chat is not True
+                or self._llm.audit is not ctx.audit
+                or ctx.audit is None
+                or type(ctx.audit) is not BetaAuditLog
+            ):
+                return ToolLoopResult(
+                    final_answer="Beta tool unavailable.", status="tool_error"
+                )
+            metered = self._llm
 
         specs: list[Any] = []
         try:
@@ -209,8 +230,16 @@ class ToolDriver:
 
         while True:
             prompt = self._build_prompt(task, system_prompt, specs, history)
+            if metered is not None:
+                llm_context: dict[str, Any] = {
+                    "task_id": task_id,
+                    "strict": True,
+                    "beta_principal": ctx.beta_principal,
+                }
+            else:
+                llm_context = {"task_id": task_id, "strict": True}
             try:
-                raw = await self._llm.generate(prompt, {"task_id": task_id, "strict": True})
+                raw = await self._llm.generate(prompt, llm_context)
             except Exception as exc:  # noqa: BLE001 — surfaced as llm_error
                 return ToolLoopResult(
                     final_answer=("Model unavailable." if beta_path else f"LLM error: {exc}"),
@@ -301,9 +330,17 @@ class ToolDriver:
                         specs,
                         [*history, {"assistant": "", "observation": _FORCED_FINAL_MESSAGE}],
                     )
+                    if metered is not None:
+                        forced_context: dict[str, Any] = {
+                            "task_id": task_id,
+                            "strict": True,
+                            "beta_principal": ctx.beta_principal,
+                        }
+                    else:
+                        forced_context = {"task_id": task_id, "strict": True}
                     try:
                         forced_raw = await self._llm.generate(
-                            forced_prompt, {"task_id": task_id, "strict": True}
+                            forced_prompt, forced_context
                         )
                     except Exception as exc:  # noqa: BLE001
                         return ToolLoopResult(
