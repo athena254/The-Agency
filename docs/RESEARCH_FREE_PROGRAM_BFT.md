@@ -1,0 +1,44 @@
+# FREE-program BFT research — known-peer trial (no implementation)
+Status: research only. No code/tests/servers/installs/commits/edits. This file only.
+Allowed: SPEC_KNOWN_PEER_PROTOCOL, SPEC_PEER_LATTICE_GOVERNANCE, BETA_GAPS, peer_envelope.py, lattice/governance.py, api/authority.py + relevant tests. Externals coordinator-verified: CometBFT rounds, Raft crash-only, AWS outbox, AWS bounded retries. No network calls made here.
+Owner deltas (supersede old UNDECIDED): tolerate Byzantine peers; every affected consumer gives attributable input; rejection is NOT an individual veto, overridable by approved peer policy; missing input still blocks. All other §10/§20 items undecided.
+## 1. Current gaps (source-grounded)
+- Single-process consensus, not BFT: `governance.py:56-58` in-memory proposals/payloads; `:90-93` single asyncio.Lock; `:263-282` best-effort mirror. No independent processes/stores, transport auth, epoch/root.
+- Cast-only quorum: `:236-252` `approve/(approve+deny)`, abstentions excluded, denominator cast-only; one approve reads 100%. Spec flags it (`SPEC_KNOWN_PEER_PROTOCOL:32`); target needs eligible+affected denominator (`§11.2`).
+- Replaceable ballots + human override: `:131-143` re-vote replaces; `:144-149` `voter_id=="user"` resolves immediately. Target: one ballot per (voter,version); second differing ballot is equivocation, excluded not replaced (`§7,§11.2`); user-string/Telegram/Butler/model output rejected (`§11.3`).
+- Envelope is crypto only: `peer_envelope.py:1-7` verification is NOT admission/consensus/ballot/grant; `:269-283` requires caller transport/membership/replay/expiry checks; no kind schemas/policy/actuator link. Dormant per `test_peer_envelope.py:218-233`.
+- HTTP closed by deny, not grants: `authority.py:13-18` raises 503; `test_governance_http_boundary.py:15-42` forged/tokened votes leave votes empty; B-17 notes peer execution unimplemented, envelope has no transport/membership/quorum/grant/actuator (`BETA_GAPS:38`).
+- Target restated: `SPEC_PEER_LATTICE_GOVERNANCE:9-16` no central authority, explicit affected graph, attributable ballots, deny-while-missing, replicated history, Butler/Telegram ingress-only; `:20-23` present code fails each invariant.
+## 2. BFT primer (do not custom-build)
+- CometBFT: Propose/Prevote/Precommit rounds, >2/3 power commit, lock/unlock across rounds, gossip catch-up; safety needs <1/3 Byzantine power, liveness needs eventual synchrony. Proposer never decides alone. Three approval ballots alone are NOT a commit proof without full round/lock/finality rule.
+- Raft is crash-fault only, not Byzantine: equivocating/compromised peer breaks it.
+- AWS outbox: same-DB state+outbox write, at-least-once relay, downstream idempotency. Local SQLite cannot atomically commit an external call (`SPEC_KNOWN_PEER_PROTOCOL:282-288,301`).
+- AWS retries: bounded timeouts, capped backoff+jitter, never blind-retry unknown effect. Required: persist PENDING intent, reconcile at resource, UNKNOWN_AFTER_CRASH never optimistically executed (`§12.3-12.4`).
+## 3. Recommendation: maintained BFT sidecar, minimal trial
+- Do NOT write custom Python consensus: round/lock/equivocation/epoch-intersection/partition logic repeats governance.py failure modes; use maintained BFT engine (CometBFT-class) as ordering sidecar.
+- Separate layers: BFT orders opaque records + proves finality; deterministic app layer (11.2) checks signatures, epoch/root, affected coverage by kind, policy version, expiry, conflicts, fencing/idempotency. BFT commit does not validate hallucinations or establish human identity.
+- LLM rule: outputs are evidence digests only (6 evidence_manifest, 7 evidence_cited, 9 no raw/PII); each validator independently rechecks deterministic rules; model completion never a ballot.
+- PROPOSED only (not owner-approved): four equal-weight peers tolerate one Byzantine fault; commit needs three matching final votes under engine full commit rule. Counts/algorithm/thresholds remain UNDECIDED.
+## 4. Required guarantees
+- Human confirmation: ingress re-sign by one peer (5.4/9/112) is single point of trust, insufficient for Byzantine model (20.10). Require human-held confirmation: user-held signature or independently corroborated ingress ceremony (admission claim + content digest, multi-peer observable), never one peer attestation as its own proof.
+- Affected-set completeness: snapshot with per-member reason + derivation (11.1 graph DEPENDS_ON/CONSUMES/GOVERNS, root, epoch); each verifier recomputes locally; forks/stale reject; peer slots need ballots, human slots need attestations, never interchangeable; missing blocks, deny overridable only by approved policy.
+- Membership/rotation: pin epoch+root everywhere (13.1); competing/unpinned roots suspend grants; upgrades need final reconfig certificate + old/new quorum-intersection under chosen fault bound (13.2-13.3); in-flight complete-or-hold, never auto-carry.
+- Actuator fencing: grant binds proposal/certificate/action/affected-digest/policy/epochs-roots/idempotency/tokens/expiry/signers (12.2); resource must atomically compare expected_current, advance token, dedupe key with effect (12.3); order per 12.4; ineligible resources refused. All routes (HTTP/Telegram/bridge) must require grant verification; current 503 (authority.py) is not a verifier.
+- Rollback/replay/partition/privacy: (sender,monotonic_seq) replay key + bounded window/gap set, same-bytes retry, cross-epoch replay invalid (5.5); equivocation retained, never arrival/seq-wins (11.2-11.3); partitions fail closed, no split-brain, heal converges w/o duplicates (19B); digests only, retention/head-anchoring open (20.7,9).
+- Local four-process limits: same-host tests protocol logic only; shared-host/admin/clock/key correlation remains. Multi-host proof with real keys/transport/skew/stores required before authority (19C).
+## 5. First deliverable (cannot mutate real resources)
+Hermetic 4-peer ordering + deterministic-check harness, with no path to real mutable resources: (a) sidecar orders envelopes across 4 local processes/stores; (b) separate checker enforces the deny paths; (c) a synthetic-resource fixture demonstrates a valid authorized state transition and durable idempotency. Success requires both positive progress under the declared assumptions and refusal of invalid/uncertain execution, plus converged evidence; a harness that always refuses is insufficient. This is not production actuation.
+## 6. Boundaries to specify next
+- Messages: freeze proposal/ballot/membership/certificate/grant/heartbeat/recovery schemas (5-9,12-13): canonical JSON, proposal_id digest inputs, affected derivation, ballot affected_role/human_input_ref/ballot_seq, grant fencing/expiry/signers, epoch+root everywhere.
+- APIs: submitProposal/getProposal/castBallot/getCertificate/requestGrant/validateGrant (pinned epoch/root); admin rotateMembership/revokePeer/updatePolicy (change rule open); actuator checkGrant+reconcile/executeOnce per 12.3-12.4.
+- CLI: peer init/join/propose/ballot/show/certify/grant-check/rotate/revoke/audit-export with key-store + genesis-digest pinning; no superuser/user-override flag.
+- Policy bundle: participation floor, approve fraction, affected-deny override rule, expiry/skew, conflict ordering, retention.
+## 7. Minimal fault tests (hermetic, no live net/model; per 19A-B)
+Single-ballot pseudo-quorum; missing peer/human member; kind-swap; forged/tampered/noncanonical/duplicate/stale-epoch-unknown-root/expired; equivocating voter + conflicting certs same idempotency scope; reorder/dup/gap storms; kill-9 mid-grant-persist then reconcile-no-reexecute; revoke-mid-proposal; conflicting proposals same scope execute <=once; audit-append failure each persist point; 3+1 partition both sides refuse conflicting finals; heal converges; plus independent real-transport-auth review (mocks insufficient).
+## 8. Alternatives rejected
+- Custom Python BFT: repeats governance.py modes, lacks rounds/locks/intersection, unauditable.
+- Raft/CFT majority: crash-only, equivocating adversary breaks safety under Byzantine mandate.
+- Single-peer/Butler/Telegram/user-string authority: violates no-central-authority (GOV 9-16, 11.3).
+- Local-ledger exactly-once / first-seen-wins / cast-only quorum: contradicts 11-12.
+## 9. Dependencies / open human decisions
+Decided: Byzantine tolerance, attributable affected input, deny-overridable-not-veto, missing-blocks. Still need: n/f, exact engine + round/lock/timeout/commit-cert rule, participation/approve + override policy, membership/emergency-revocation rule, timeout/expiry/skew, policy-upgrade rule, genesis operators + OOB channel, retention/pruning, transport (mTLS vs Noise) + custody, head-anchoring, human-attestation mechanism. Until then 12 actuation disabled; no production-consensus or benchmark claims.
