@@ -12,6 +12,7 @@ system of record even when application code changes.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -128,6 +129,7 @@ class AuditLog:
         self._table = table
         self._synchronous = _synchronous
         self._conn: aiosqlite.Connection | None = None
+        self._lifecycle_lock = asyncio.Lock()
         self._log = structlog.get_logger(__name__)
 
     # ------------------------------------------------------------------ #
@@ -138,54 +140,66 @@ class AuditLog:
         """Open the SQLite connection and create the schema if needed."""
         if self._conn is not None:
             return
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = await aiosqlite.connect(self._db_path)
-        try:
-            # Concurrent first opens can briefly lock the WAL transition.
-            for attempt in range(4):
-                try:
-                    await conn.execute("PRAGMA journal_mode=WAL")
-                    break
-                except aiosqlite.OperationalError as exc:
-                    if attempt == 3 or "locked" not in str(exc).lower():
-                        raise
-                    await asyncio.sleep(0.05 * (2**attempt))
-            await conn.execute(f"PRAGMA synchronous={self._synchronous}")
-            await conn.execute(
-                f"""
-            CREATE TABLE IF NOT EXISTS {self._table} (
-                entry_id       TEXT PRIMARY KEY,
-                timestamp      TEXT NOT NULL,
-                agent          TEXT,
-                task           TEXT,
-                target         TEXT,
-                authorization  TEXT,
-                capability     TEXT,
-                action         TEXT,
-                result         TEXT NOT NULL,
-                evidence       TEXT,
-                model          TEXT,
-                model_version  TEXT,
-                tool_version   TEXT,
-                environment    TEXT
-            )
-            """
-            )
-            await conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_{self._table}_timestamp ON {self._table} (timestamp)"
-            )
-            await conn.commit()
-        except BaseException:
-            await conn.close()
-            raise
-        self._conn = conn
-        self._log.info("audit.ready", path=str(self._db_path))
+        async with self._lifecycle_lock:
+            if self._conn is not None:
+                return
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            conn = await aiosqlite.connect(self._db_path)
+            try:
+                # Concurrent first opens can briefly lock the WAL transition.
+                for attempt in range(4):
+                    try:
+                        await conn.execute("PRAGMA journal_mode=WAL")
+                        break
+                    except aiosqlite.OperationalError as exc:
+                        if attempt == 3 or "locked" not in str(exc).lower():
+                            raise
+                        await asyncio.sleep(0.05 * (2**attempt))
+                await conn.execute(f"PRAGMA synchronous={self._synchronous}")
+                await conn.execute(
+                    f"""
+                CREATE TABLE IF NOT EXISTS {self._table} (
+                    entry_id       TEXT PRIMARY KEY,
+                    timestamp      TEXT NOT NULL,
+                    agent          TEXT,
+                    task           TEXT,
+                    target         TEXT,
+                    authorization  TEXT,
+                    capability     TEXT,
+                    action         TEXT,
+                    result         TEXT NOT NULL,
+                    evidence       TEXT,
+                    model          TEXT,
+                    model_version  TEXT,
+                    tool_version   TEXT,
+                    environment    TEXT
+                )
+                """
+                )
+                await conn.execute(
+                    f"CREATE INDEX IF NOT EXISTS idx_{self._table}_timestamp"
+                    f" ON {self._table} (timestamp)"
+                )
+                await conn.commit()
+            except BaseException:
+                with contextlib.suppress(Exception):
+                    await conn.close()
+                raise
+            self._conn = conn
+            self._log.info("audit.ready", path=str(self._db_path))
 
     async def close(self) -> None:
-        """Flush and close the underlying connection."""
-        if self._conn is not None:
-            await self._conn.commit()
-            await self._conn.close()
+        """Flush and close the underlying connection.
+
+        Serialized with initialize; idempotent; a commit/close failure
+        propagates without clearing the live connection (never a durable ack).
+        """
+        async with self._lifecycle_lock:
+            if self._conn is None:
+                return
+            conn = self._conn
+            await conn.commit()
+            await conn.close()
             self._conn = None
 
     async def __aenter__(self) -> Self:
