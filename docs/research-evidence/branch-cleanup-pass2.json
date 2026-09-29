@@ -109,6 +109,36 @@
     },
     "backup_meaning_change": "agency-backups, agency-runtime-backups and agency-consolidation-snapshot-20260927-105944 hold the remaining runtime database copies; deleting the last database backups was not done without explicit approval."
   },
+  "deployment_and_archive_consolidation": {
+    "removed_checkouts": [
+      {
+        "path": "agency-deploy-main",
+        "commit": "4cf28a7f66e1f104273502fbedde72cdeeb9df50",
+        "reason": "Clean, no local edits, HEAD is an ancestor of main, and no running process used it. Only the dormant launcher agency_run_merged.py referenced it.",
+        "recreate": "git -C C:/Users/alphi/theagency worktree add --detach C:/Users/alphi/agency-deploy-main 4cf28a7f66e1f104273502fbedde72cdeeb9df50"
+      },
+      {
+        "path": "agency-deploy-next",
+        "commit": "a997abc6400861919af0e68866b0b7a00d3d9b83",
+        "reason": "Clean, HEAD is an ancestor of main, no running process used it. Only the dormant launchers agency_run_a997abc.py and agency_run_8399b4f.py referenced it.",
+        "recreate": "git -C C:/Users/alphi/theagency worktree add --detach C:/Users/alphi/agency-deploy-next a997abc6400861919af0e68866b0b7a00d3d9b83"
+      }
+    ],
+    "consolidated_archives": {
+      "agency-runtime-backups": "moved to agency-backups/runtime-backups",
+      "agency-consolidation-snapshot-20260927-105944": "moved to agency-backups/consolidation-snapshot-20260927-105944",
+      "note": "docs/SPEC_WORKTREE_CONSOLIDATION.md still names the old snapshot path; that reference is historical."
+    },
+    "agency_mvp_finding": "agency-mvp is NOT newer than main. Its local edits are an older pre-consolidation state that main has superseded (main carries 89f857a, e29491a, 6cc06bf, ac1c42c, 2a022dd). Its only live dependency is the .venv used by the running bot interpreter, and its data directory is untouched by that process.",
+    "folders_after_this_stage": 8,
+    "still_held_by_live_processes": [
+      {"path": "agency-deploy-3417c79", "holder": "the running Telegram bot deployment pinned by C:/Users/alphi/AppData/Local/Temp/agency_run_3417c79.py; no process has the directory as cwd, but deleting it breaks a pinned restart"},
+      {"path": "agency-mvp", "holder": "the running bot interpreter is agency-mvp/.venv/Scripts/python.exe"},
+      {"path": "agency-free-lattice-gateway", "holder": "live Freebuff processes (node.exe 11744, freebuff.exe 12836)"},
+      {"path": "agency-free-bft-lab", "holder": "live cline.exe hub (PID 1568) with --cwd there; folder is now empty"}
+    ],
+    "requires_approval": "Stopping the running bot or the idle agent processes to delete the folders above was not done without explicit owner approval."
+  },
   "historical_path_references": "docs/SPEC_FREE_ONLY_DECENTRALIZED_PROGRAM.md and research-evidence/*.md name checkouts that no longer exist (for example agency-free-program). Those are historical evidence statements, not current instructions, matching the retired-branch-name convention already recorded in docs/BRANCH_CLEANUP.md.",
   "non_branch_clutter_left_alone": "refs/cline/checkpoints/* (41 Cline tool checkpoints, not branches) and 6 origin/dependabot/* remote PR refs were left untouched.",
   "backup": "C:/Users/alphi/agency-backups/branch-cleanup-pass2-20260929-135409",

@@ -59,6 +59,42 @@ Documents that name removed checkouts (for example `agency-free-program` in
 `SPEC_FREE_ONLY_DECENTRALIZED_PROGRAM.md` and the evidence snapshots) are
 historical evidence statements, exactly like the retired branch names above.
 
+## Deployment and archive consolidation (2026-09-29, same run)
+
+The owner asked again to clear the remaining look-alike folders whose code is
+finished. Two unused deployment checkouts and two archive folders were removed
+without stopping any process, because nothing running depended on them:
+
+- `agency-deploy-main` (`4cf28a7`) and `agency-deploy-next` (`a997abc`) were
+  clean, their HEADs are ancestors of `main`, and no process was using them. Only
+  dormant launchers (`agency_run_merged.py`, `agency_run_a997abc.py`,
+  `agency_run_8399b4f.py`) named them; both are recreated with one
+  `git worktree add --detach` command recorded in the backup and evidence file.
+- `agency-runtime-backups` and `agency-consolidation-snapshot-20260927-105944`
+  were moved inside `agency-backups/`, so the archives now occupy one folder
+  instead of three. No archive content was deleted.
+- `agency-mvp` was inspected rather than assumed: its local edits are an **older**
+  pre-consolidation state that `main` already supersedes, not unfinished new work.
+  Its only live dependency is the `.venv` that the running bot interpreter uses.
+
+Eight folders remain, each blocked by a running process or holding the only copy
+of something:
+
+- `theagency`: canonical repository.
+- `agency-deploy-3417c79`: deployment pinned by the launcher that started the
+  running bot; deleting it breaks a pinned restart.
+- `agency-mvp`: supplies the running bot's virtual environment.
+- `agency-free-lattice-gateway`: cwd of live Freebuff processes.
+- `agency-free-bft-lab`: empty directory whose deletion Windows blocks while a
+  live `cline.exe` hub keeps it as its cwd.
+- `agency-free-metering`, `agency-free-recovery`: the only branches with work not
+  in `main`, so they are not finished code.
+- `agency-backups`: now the single archive folder (bundles, local-content copies,
+  runtime database backups, consolidation snapshot).
+
+Removing any of the first five requires stopping the Telegram bot or the idle
+agent processes, which was left to explicit owner approval.
+
 ## Remaining local branches — pass 1 snapshot (2026-09-28, historical)
 
 This list described the state after the first cleanup. It is kept for provenance:
