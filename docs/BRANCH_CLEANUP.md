@@ -149,6 +149,12 @@ the Cline hub of this session keeps it as its working directory. Once that
 window is closed, `Remove-Item C:\Users\alphi\agency-free-bft-lab -Recurse -Force`
 finishes it.
 
+The superseded launchers in `%TEMP%` that pinned the deleted checkouts
+(`agency_run_3417c79.py`, `agency_run_8399b4f.py`, `agency_run_a997abc.py`,
+`agency_run_merged.py`, the old `agency_bot_health_check.py` and
+`agency_deploy_preflight.py`) were copied into the archive's `deployment-scripts/`
+folder and then removed, so only one start command remains in use.
+
 ## Remaining local branches — pass 1 snapshot (2026-09-28, historical)
 
 This list described the state after the first cleanup. It is kept for provenance:
