@@ -95,6 +95,60 @@ of something:
 Removing any of the first five requires stopping the Telegram bot or the idle
 agent processes, which was left to explicit owner approval.
 
+## Bot restart on the canonical checkout (2026-09-29, same run)
+
+The owner then instructed: stop the bot and everything running, and start it on
+the main repo. The bot was running from `agency-mvp`'s virtual environment with
+`src/telegram_bot.py` loaded out of the `agency-deploy-3417c79` checkout, so the
+whole separate-deployment arrangement was replaced with the canonical checkout.
+
+Stopped first (the old poller was confirmed gone before the replacement started):
+
+- the Telegram poller tree: the `agency_run_3417c79.py` launcher, the
+  `agency-mvp/.venv` interpreter and the underlying uv Python 3.11 process;
+- the Freebuff fleet (`node.exe`, `freebuff.exe` and their bash/sh wrappers) that
+  occupied `agency-free-lattice-gateway`.
+
+Not stopped, deliberately: the Cline hub (PID 1568) is the **ancestor of this
+session's own shell**, so killing it would have terminated the work in progress
+and could not have deleted its own working directory anyway. The idle Cline CLI
+and the unrelated Hermes processes were also left alone.
+
+Then:
+
+- The runtime databases were backed up with the bot stopped, using SQLite's
+  online backup API: `lattice.db`, `memory.db` and `remex_profiles.db` all
+  reported `integrity_check = ok`. Pending WAL content was folded into the
+  copies, so `data/lattice.db` is now self-contained.
+- `agency-deploy-3417c79`, `agency-mvp` and `agency-free-lattice-gateway` were
+  retired. `agency-mvp`'s local edits are preserved as a 54 KB patch plus its
+  untracked test and database files; every checkout has a recorded one-command
+  `git worktree add --detach` restore note.
+- The canonical checkout gained its own `.venv` (gitignored): the known-working
+  environment was copied and its editable link was repointed from
+  `agency-mvp/src` to `theagency/src`. `src`/`tests` tree ids are unchanged, and
+  the interpreter resolves `agency` from `theagency/src`.
+
+The bot now starts from the single versioned command
+`scripts/run_telegram_bot.py`, which refuses to start unless the `src` and
+`tests` git tree ids match the verified revision and the working tree is clean
+there, so documentation-only commits cannot invalidate the pin. It preserves the
+previous runtime settings (`AGENCY_BETA_MODE=0`, no webhook, private `.env`
+untouched) and runs with the checkout as its working directory.
+
+Verified after the restart: startup markers (`agency_deployment_revision`,
+`butler.started`, `telegram_commands_registered`, `telegram_polling_started`),
+exactly one independent poller tree, no traceback or poll conflict, Telegram
+read-only `getMe`/`getWebhookInfo`/`getMyCommands` all ok with the webhook
+disabled and six commands registered, and an unchanged `.env` hash.
+
+Five folders remain: `theagency`, `agency-backups` (the single archive),
+`agency-free-metering`, `agency-free-recovery` (the two branches with unfinished
+work) and the empty `agency-free-bft-lab`, which Windows will not delete while
+the Cline hub of this session keeps it as its working directory. Once that
+window is closed, `Remove-Item C:\Users\alphi\agency-free-bft-lab -Recurse -Force`
+finishes it.
+
 ## Remaining local branches — pass 1 snapshot (2026-09-28, historical)
 
 This list described the state after the first cleanup. It is kept for provenance:

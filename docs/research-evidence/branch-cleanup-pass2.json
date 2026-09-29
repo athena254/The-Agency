@@ -139,6 +139,49 @@
     ],
     "requires_approval": "Stopping the running bot or the idle agent processes to delete the folders above was not done without explicit owner approval."
   },
+  "bot_restart_on_main": {
+    "authorisation": "Owner instructed: stop the bot and everything running, then start it on the main repo after the merges.",
+    "stopped": {
+      "telegram_poller_tree": "launcher agency_run_3417c79.py, the agency-mvp/.venv interpreter shim and the underlying uv Python 3.11 process; the old poller was confirmed gone before the replacement started",
+      "freebuff_fleet": "node.exe 11744, freebuff.exe 12836 and their bash/sh wrappers (14132, 12384, 3580), which occupied agency-free-lattice-gateway",
+      "deliberately_not_stopped": "Cline hub PID 1568 is the ancestor of this session's own shell (PID 3972), so killing it would terminate the work in progress; the idle Cline CLI (2132/16148) and the unrelated Hermes processes were also left running",
+      "single_poller": "Exactly one independent poller tree has been verified since the restart; no 409 conflict appeared."
+    },
+    "retired_checkouts": ["agency-deploy-3417c79", "agency-mvp", "agency-free-lattice-gateway"],
+    "runtime_backup": {
+      "path": "C:/Users/alphi/agency-backups/pre-restart-main-20260929-142905",
+      "method": "sqlite3 online backup API taken while the bot was stopped",
+      "integrity_check": "ok for lattice.db, memory.db and remex_profiles.db; pending WAL content folded into the copies"
+    },
+    "new_environment": {
+      "path": "C:/Users/alphi/theagency/.venv",
+      "method": "copy of the known-working environment; the editable .pth was repointed from agency-mvp/src to theagency/src",
+      "verified": "interpreter resolves agency from C:/Users/alphi/theagency/src/agency/__init__.py and every runtime dependency imports",
+      "gitignored": true
+    },
+    "launcher": {
+      "path": "scripts/run_telegram_bot.py",
+      "start_command": "C:/Users/alphi/theagency/.venv/Scripts/python.exe -u C:/Users/alphi/theagency/scripts/run_telegram_bot.py",
+      "pin": "asserts src tree 8cee8b0b427ddaf17ec5babb76ba7a0455072b08 and tests tree cd6508b45314814f003322d57f7f5d99436f94ba plus a clean src/tests working tree",
+      "settings": "AGENCY_BETA_MODE=0, no TELEGRAM_WEBHOOK_URL, private .env untouched, working directory set to the checkout",
+      "lint": "ruff check and ruff format --check pass; CI lints src/ and tests/ only"
+    },
+    "verification": [
+      "startup markers: agency_deployment_revision=98ac98b7ee52bc577440e10057c256658e67ecf5, agency_deployment_source=theagency/src/telegram_bot.py, butler.started, telegram_commands_registered, telegram_polling_started",
+      "exactly one independent poller tree",
+      "no Traceback, no telegram_poll_conflict, no telegram_commands_register_failed",
+      "Telegram read-only getMe ok, webhook disabled, pending_update_count 0, six commands registered",
+      "private .env sha256 unchanged from the preflight baseline",
+      "the process is detached from the agent shell (parent is the WMI provider host)"
+    ],
+    "folders_after": 5,
+    "remaining_folders": [
+      "theagency (canonical checkout running the bot)",
+      "agency-backups (single archive: bundles, local content, runtime backups, deployment scripts)",
+      "agency-free-metering, agency-free-recovery (branches with unfinished work)",
+      "agency-free-bft-lab (empty; Windows blocks deletion while this session's Cline hub keeps it as cwd)"
+    ]
+  },
   "historical_path_references": "docs/SPEC_FREE_ONLY_DECENTRALIZED_PROGRAM.md and research-evidence/*.md name checkouts that no longer exist (for example agency-free-program). Those are historical evidence statements, not current instructions, matching the retired-branch-name convention already recorded in docs/BRANCH_CLEANUP.md.",
   "non_branch_clutter_left_alone": "refs/cline/checkpoints/* (41 Cline tool checkpoints, not branches) and 6 origin/dependabot/* remote PR refs were left untouched.",
   "backup": "C:/Users/alphi/agency-backups/branch-cleanup-pass2-20260929-135409",
