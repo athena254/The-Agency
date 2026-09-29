@@ -8,7 +8,10 @@ from typing import Any
 import structlog
 from pydantic import BaseModel, Field
 
-from agency.tools.base import ToolContext
+from agency.kernel.audit import BetaAuditLog
+from agency.llm.adapter import LLMAdapter
+from agency.llm.metered import MeteredBinding, MeteredModel
+from agency.tools.base import BetaPrincipal, ToolContext
 
 logger = structlog.get_logger(__name__)
 
@@ -198,6 +201,37 @@ class ToolDriver:
         beta_path = strict_registry or ctx.beta_principal is not None
         if beta_path and (not strict_registry or ctx.beta_principal is None):
             return ToolLoopResult(final_answer="Beta tool unavailable.", status="tool_error")
+        metered = None
+        if beta_path:
+            # Strict/beta dispatch: a concrete MeteredModel bound to the exact
+            # same principal AND the same concrete audit object as ctx flows
+            # through metering; every dispatch error then maps to a granular
+            # audit_error/llm_error. A bare concrete LLMAdapter is denied
+            # before any generate (never silently downgraded to non-beta).
+            # Legacy scripted doubles without a concrete beta audit object
+            # keep their historical fail-closed dispatch behavior so existing
+            # beta denial assertions still observe audit/llm failures.
+            llm_is_metered = type(self._llm) is MeteredModel and isinstance(
+                getattr(self._llm, "binding", None), MeteredBinding
+            )
+            audit_is_beta = ctx.audit is not None and type(ctx.audit) is BetaAuditLog
+            if isinstance(self._llm, LLMAdapter) or (
+                llm_is_metered
+                and (
+                    self._llm.binding.principal != ctx.beta_principal
+                    or not isinstance(ctx.beta_principal, BetaPrincipal)
+                    or ctx.beta_principal.private_chat is not True
+                    or self._llm.audit is not ctx.audit
+                    or not audit_is_beta
+                )
+            ):
+                return ToolLoopResult(final_answer="Beta tool unavailable.", status="tool_error")
+            if llm_is_metered:
+                if not audit_is_beta:
+                    return ToolLoopResult(
+                        final_answer="Beta tool unavailable.", status="tool_error"
+                    )
+                metered = self._llm
 
         specs: list[Any] = []
         try:
@@ -209,8 +243,16 @@ class ToolDriver:
 
         while True:
             prompt = self._build_prompt(task, system_prompt, specs, history)
+            if metered is not None:
+                llm_context: dict[str, Any] = {
+                    "task_id": task_id,
+                    "strict": True,
+                    "beta_principal": ctx.beta_principal,
+                }
+            else:
+                llm_context = {"task_id": task_id, "strict": True}
             try:
-                raw = await self._llm.generate(prompt, {"task_id": task_id, "strict": True})
+                raw = await self._llm.generate(prompt, llm_context)
             except Exception as exc:  # noqa: BLE001 — surfaced as llm_error
                 return ToolLoopResult(
                     final_answer=("Model unavailable." if beta_path else f"LLM error: {exc}"),
@@ -301,10 +343,16 @@ class ToolDriver:
                         specs,
                         [*history, {"assistant": "", "observation": _FORCED_FINAL_MESSAGE}],
                     )
+                    if metered is not None:
+                        forced_context: dict[str, Any] = {
+                            "task_id": task_id,
+                            "strict": True,
+                            "beta_principal": ctx.beta_principal,
+                        }
+                    else:
+                        forced_context = {"task_id": task_id, "strict": True}
                     try:
-                        forced_raw = await self._llm.generate(
-                            forced_prompt, {"task_id": task_id, "strict": True}
-                        )
+                        forced_raw = await self._llm.generate(forced_prompt, forced_context)
                     except Exception as exc:  # noqa: BLE001
                         return ToolLoopResult(
                             final_answer=(
