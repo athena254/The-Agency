@@ -4,7 +4,31 @@ The owner requested merging completed work and retaining only active branches.
 Completed work was already integrated at `fef7520`. This cleanup changes no
 application code, tests, live settings or runtime data. It does not enable beta.
 
-## Remaining local branches
+## Second pass (2026-09-29) — current state
+
+The owner again asked to merge agency branches down to the ones in active
+development and clean the finished ones. Verification first, deletion second:
+
+- Nothing finished remained unmerged. Both finished branch tips were already
+  ancestors of `main` (`git merge-base --is-ancestor` true and
+  `git rev-list main..<branch>` = 0), so no merge commit was possible or needed.
+- `docs/free-lattice-gateway` and `research/free-bft-lab` were therefore retired
+  as `already-merged-ancestor-of-main`, using `git branch -d`, which refuses to
+  delete a branch that is not fully merged. Both deletions succeeded.
+- Their checkouts were only detached at the same commit, so no directory or file
+  changed and a stale Freebuff process still holding one of them is unaffected.
+- Three local branches remain: `main` plus the two unfinished candidates
+  `feat/free-metering` and `feat/free-recovery`. These are the only lines with
+  work that is not in `main`; they are preserved, not merged and not deleted.
+
+Machine-readable evidence, backup path, bundle hash and recovery commands are in
+`research-evidence/branch-cleanup-pass2.json`.
+
+## Remaining local branches — pass 1 snapshot (2026-09-28, historical)
+
+This list described the state after the first cleanup. It is kept for provenance:
+`docs/free-lattice-gateway` and `research/free-bft-lab` were retired by the
+second pass above.
 
 - `main`: integrated, verified baseline.
 - `feat/free-metering`: unfinished candidate; focused tests fail.

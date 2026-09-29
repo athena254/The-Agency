@@ -1,0 +1,80 @@
+{
+  "pass": 2,
+  "recorded": "2026-09-29",
+  "run_timestamp": "20260929-135409",
+  "trigger": "Owner asked to merge all agency branches so that only branches in active development remain, and to merge and clean the finished ones.",
+  "result": {
+    "branches_before": 5,
+    "branches_after": 3,
+    "branches_removed": 2,
+    "merges_required": 0,
+    "new_commits_merged": 0,
+    "main_head_before": "3417c79bf2056ab414f49b3c0281b5c723377493",
+    "source_tree": "8cee8b0b427ddaf17ec5babb76ba7a0455072b08",
+    "tests_tree": "cd6508b45314814f003322d57f7f5d99436f94ba"
+  },
+  "remaining_branches": [
+    {
+      "branch": "main",
+      "tip": "3417c79bf2056ab414f49b3c0281b5c723377493",
+      "role": "verified integrated baseline",
+      "upstream": "equal to origin/main at time of run (0 ahead, 0 behind)"
+    },
+    {
+      "branch": "feat/free-metering",
+      "tip": "6f6ee449a98d97405dc6ea358b8db97108a784d7",
+      "role": "active unfinished candidate",
+      "disposition": "preserved-not-merged",
+      "reason": "one commit (6f6ee44) is not in main; documented focused check 6 failed / 28 passed"
+    },
+    {
+      "branch": "feat/free-recovery",
+      "tip": "474e8a4fed9125d4dc980970ef6365a8112c44ed",
+      "role": "active unfinished candidate",
+      "disposition": "preserved-not-merged",
+      "reason": "one commit (474e8a4) is not in main; documented focused check 1 failed / 36 passed; executor integration missing"
+    }
+  ],
+  "retired_branches": [
+    {
+      "branch": "docs/free-lattice-gateway",
+      "tip": "07b2c4480cdc57e8077f57f89c034aac63904bed",
+      "disposition": "already-merged-ancestor-of-main",
+      "proof": [
+        "git merge-base --is-ancestor docs/free-lattice-gateway main -> true",
+        "git rev-list main..docs/free-lattice-gateway -> 0 commits"
+      ],
+      "archive_tag": "archive/cleanup-20260929-135409/docs/free-lattice-gateway"
+    },
+    {
+      "branch": "research/free-bft-lab",
+      "tip": "18b971776d824432266c39b6f5e5f79e3a593df1",
+      "disposition": "already-merged-ancestor-of-main",
+      "proof": [
+        "git merge-base --is-ancestor research/free-bft-lab main -> true",
+        "git rev-list main..research/free-bft-lab -> 0 commits"
+      ],
+      "archive_tag": "archive/cleanup-20260929-135409/research/free-bft-lab"
+    }
+  ],
+  "merge_statement": "Nothing was merged by this pass because nothing finished was left unmerged: both finished branch tips were already ancestors of main, so their content is already in main history. Deletion used 'git branch -d', which refuses to delete a branch that is not fully merged; both deletions succeeded.",
+  "deliberately_not_merged": {
+    "archive_tags_from_pass_1": "70 tags under archive/cleanup-20260928-215259/ preserve the old branches classified already-merged, patch-equivalent-in-main, superseded-reviewed-port-in-main or archived-unsafe-experiment. Re-merging them is not cleanup and would reintroduce code that was reviewed out or judged unsafe (see docs/BRANCH_CLEANUP.md).",
+    "stash": "refs/stash (a9c764e) retained unchanged: pre-consolidation root source and lockfile, not applied."
+  },
+  "worktree_scope": "The two retired checkouts were detached at the same commit ('git checkout --detach'), so their files and directories are unchanged and still usable. No worktree directory was removed. The untracked worker briefs in each checkout were copied to the backup first.",
+  "non_branch_clutter_left_alone": "refs/cline/checkpoints/* (41 Cline tool checkpoints, not branches) and 6 origin/dependabot/* remote PR refs were left untouched.",
+  "backup": "C:/Users/alphi/agency-backups/branch-cleanup-pass2-20260929-135409",
+  "bundle": "all-refs.bundle (every ref, including all local branches and the stash)",
+  "bundle_sha256": "1c17172ffb0b6b307386eb2c266a585fc03a6fa5e094477d7ab2cc16b219e105",
+  "verification": [
+    "git branch -vv -> exactly main, feat/free-metering, feat/free-recovery",
+    "main 3417c79 unchanged; src/tests tree ids match the previously verified combined revision",
+    "canonical worktree status unchanged (same modified data/lattice.db and untracked runtime files)",
+    "git fsck --connectivity-only -> no missing or corrupt objects; dangling objects are pre-existing",
+    "both retired tips remain resolvable through archive tags and main ancestry"
+  ],
+  "remote_scope": "No push, no fetch, no remote branch deletion. origin/main unchanged.",
+  "runtime_scope": "No application code, test, configuration, runtime database, .env or deployment worktree was modified. No bot restart, deployment or provider call.",
+  "recovery_example": "git branch recovered-lattice-gateway archive/cleanup-20260929-135409/docs/free-lattice-gateway"
+}
