@@ -21,7 +21,9 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from agency.agents.executor import ExecutionStatus
+from agency.butler.commands import CommandError, ThreadCommands
 from agency.butler.config import ButlerConfig
+from agency.butler.context import ThreadContextEngine
 from agency.butler.router import MessageRouter
 from agency.butler.threads import Thread, ThreadMessage, ThreadStore, Workspace
 from agency.kernel.audit import AuditEntry, AuditLog
@@ -84,6 +86,8 @@ class ButlerService:
         self._memory_retrieval = RetrievalEngine(self._memory)
         self._threads = thread_store
         self._owns_threads = thread_store is None
+        self._engine: ThreadContextEngine | None = None
+        self._commands: ThreadCommands | None = None
         self._lattice: Lattice | None = None  # Will be set from orchestrator
         self._llm = llm
         self._log = structlog.get_logger(__name__)
@@ -131,6 +135,20 @@ class ButlerService:
                 thread_path = str(path)
             self._threads = ThreadStore(thread_path)
         return self._threads
+
+    @property
+    def thread_context_engine(self) -> ThreadContextEngine:
+        """Layered per-thread context engine over the shared stores."""
+        if self._engine is None:
+            self._engine = ThreadContextEngine(self.thread_store, self._memory)
+        return self._engine
+
+    @property
+    def commands(self) -> ThreadCommands:
+        """Deterministic thread-command executor."""
+        if self._commands is None:
+            self._commands = ThreadCommands(self.thread_store, self.thread_context_engine)
+        return self._commands
 
     def create_workspace(self, owner: str, title: str) -> Workspace:
         """Create a persistent workspace for a trusted caller identity."""
@@ -215,11 +233,17 @@ class ButlerService:
         *,
         memory_enabled: bool = True,
         beta_principal: BetaPrincipal | None = None,
+        commands_enabled: bool = False,
     ) -> str:
         """Validate and execute a turn; anonymous channels disable memory.
 
         Only trusted in-process admission may supply ``beta_principal``. Beta
         execution is dormant: reject it before startup, routing or persistence.
+
+        ``commands_enabled`` opts a trusted channel into deterministic thread
+        commands (``/new``, ``/threads``, ``/switch``, ``/current``) and the
+        persisted active-thread fallback. Unauthenticated channels must leave
+        it off: commands create and mutate owner-scoped thread state.
         """
         if beta_principal is not None and not isinstance(beta_principal, BetaPrincipal):
             raise TypeError("beta_principal must be a BetaPrincipal")
@@ -247,17 +271,32 @@ class ButlerService:
             self.thread_store.get_thread(sender, thread_id)
         started = datetime.now(UTC)
 
+        # Deterministic conversation commands run before any routing. They are
+        # opt-in per call so unauthenticated channels (public HTTP) can never
+        # create or mutate thread state.
+        parsed = ThreadCommands.parse(text) if commands_enabled else None
+        if parsed is not None:
+            command, args = parsed
+            return await self._run_command(sender, command, args, started)
+
+        # Effective thread: an explicit authorized thread_id wins; otherwise a
+        # persisted active thread applies only when the caller opted into
+        # conversational commands (trusted channels).
+        if thread_id is None and commands_enabled:
+            active = self.thread_store.get_active_thread(sender)
+            if active is not None:
+                thread_id = active.id
+        engine = self.thread_context_engine if thread_id is not None else None
+
         # Recall earlier conversation with this sender so the agent has
         # continuity (parity with OpenClaw/Hermes). Best-effort — never
         # blocks the turn.
-        if thread_id is not None:
-            history = self.thread_store.list_messages(sender, thread_id)[-10:]
-            memory_context = (
-                "Earlier conversation:\n"
-                + "\n".join(f"- [{item.role}] {item.content[:300]}" for item in history)
-                if history
-                else ""
-            )
+        if engine is not None:
+            # One source per turn: layered thread context only — sender-global
+            # memory is never blended into a thread's prompt.
+            assert thread_id is not None  # engine is non-None only with a thread.
+            assembled = await engine.assemble(sender, thread_id, text)
+            memory_context = assembled.render()
         elif memory_enabled:
             memory_context = await self._recall_history(sender, text)
         else:
@@ -287,7 +326,17 @@ class ButlerService:
             result = "failed"
             self._log.exception("butler.execute_failed", sender=sender)
 
-        if thread_id is not None:
+        if thread_id is not None and engine is not None:
+            # Persist the turn twice with different scopes: verbatim in the
+            # owner's thread, and mirrored thread-scoped for topical recall.
+            # Sender-global memory is intentionally not written here so the
+            # two context channels cannot cross-pollinate.
+            self.thread_store.append_message(sender, thread_id, "user", text)
+            self.thread_store.append_message(sender, thread_id, "assistant", response)
+            await engine.record_turn(sender, thread_id, text, response)
+            await self._maybe_summarize(sender, thread_id)
+        elif thread_id is not None:
+            # Legacy trusted-caller path without the context engine.
             self.thread_store.append_message(sender, thread_id, "user", text)
             self.thread_store.append_message(sender, thread_id, "assistant", response)
         elif memory_enabled:
@@ -380,6 +429,45 @@ class ButlerService:
             },
         )
         return ButlerReply(text=reply_text, status=status)
+
+    async def _run_command(
+        self, sender: str, command: str, args: str, started: datetime
+    ) -> str:
+        """Execute a parsed command; errors become user-visible replies."""
+        outcome = "ok"
+        try:
+            command_result = self.commands.execute(sender, command, args)
+            reply = command_result.text
+        except CommandError as exc:
+            reply = str(exc)
+            outcome = "error"
+        await self._audit_append(
+            agent=None,
+            action="butler.command",
+            result=outcome,
+            target=f"/{command}",
+            evidence={
+                "sender": sender,
+                "command": command,
+                "duration_s": (datetime.now(UTC) - started).total_seconds(),
+            },
+        )
+        return reply
+
+    async def _maybe_summarize(self, owner: str, thread_id: str) -> None:
+        """Compress older turns into the rolling summary (deterministic).
+
+        Runs once a thread holds at least two full windows of messages;
+        the newest window stays verbatim. Best-effort: summary failures
+        never fail the turn.
+        """
+        try:
+            engine = self.thread_context_engine
+            count = self.thread_store.count_messages(owner, thread_id)
+            if count >= engine.window * 2:
+                engine.summarize_prefix(owner, thread_id)
+        except Exception:  # noqa: BLE001 — summarization must not block turns.
+            self._log.debug("butler.summarize_failed", thread_id=thread_id)
 
     async def route(self, message: str, context: dict[str, Any]) -> Agent:
         """Select the handling agent, preferring the LLM when configured."""
