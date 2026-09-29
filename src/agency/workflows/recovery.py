@@ -9,7 +9,19 @@ import copy
 import hashlib
 import json
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, BinaryIO, Protocol, cast
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from agency.workflows.registry import WorkflowDefinition
+
+
+class _DefinitionLike(Protocol):
+    workflow_id: str
+    version: str
+    steps: Sequence[Any]
+
 
 RECOVERY_SCHEMA_VERSION = 1
 RECOVERABLE_STATUSES = ("RUNNING", "INDETERMINATE", "COMPLETED", "FAILED")
@@ -30,12 +42,12 @@ def input_digest(inputs: dict[str, object]) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def definition_digest(definition: object) -> str:
+def definition_digest(definition: WorkflowDefinition | _DefinitionLike) -> str:
     """Digest of pinned definition identity + topology (rejects silent change)."""
-    steps = getattr(definition, "steps", ())
+    steps = definition.steps
     payload = {
-        "workflow_id": getattr(definition, "workflow_id"),
-        "version": getattr(definition, "version"),
+        "workflow_id": definition.workflow_id,
+        "version": definition.version,
         "steps": [
             {
                 "step_id": s.step_id,
@@ -93,7 +105,7 @@ class RecoverableLock:
         if db_path == ":memory:":
             raise ValueError(":memory: is rejected for recoverable operations.")
         self._path = db_path + ".recover.lock"
-        self._handle: object | None = None
+        self._handle: BinaryIO | None = None
 
     @property
     def path(self) -> str:
@@ -102,7 +114,7 @@ class RecoverableLock:
     def acquire(self) -> bool:
         if self._handle is not None:
             return True
-        handle = open(self._path, "a+b")  # noqa: PTH123 - lock file by design
+        handle: BinaryIO = open(self._path, "a+b")  # noqa: SIM115 - lock handle
         try:
             if os.name == "nt":
                 import msvcrt
@@ -116,8 +128,11 @@ class RecoverableLock:
             else:
                 import fcntl
 
+                flock = cast(Any, fcntl).flock
+                lock_ex = cast(Any, fcntl).LOCK_EX
+                lock_nb = cast(Any, fcntl).LOCK_NB
                 try:
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    flock(handle.fileno(), lock_ex | lock_nb)
                 except OSError:
                     handle.close()
                     return False
@@ -137,19 +152,19 @@ class RecoverableLock:
                 import msvcrt
 
                 try:
-                    handle.seek(0)  # type: ignore[union-attr]
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[union-attr]
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
                 except OSError:
                     pass
             else:
                 import fcntl
 
                 try:
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)  # type: ignore[union-attr]
+                    cast(Any, fcntl).flock(handle.fileno(), cast(Any, fcntl).LOCK_UN)
                 except OSError:
                     pass
         finally:
-            handle.close()  # type: ignore[union-attr]
+            handle.close()
 
 
 __all__ = [

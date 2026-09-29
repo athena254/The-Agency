@@ -10,6 +10,10 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from agency.workflows.recovery import RecoverableRun
 
 MAX_STEPS = 64
 MAX_JSON_BYTES = 64 * 1024
@@ -389,19 +393,17 @@ class WorkflowRegistry:
     def db_path(self) -> str:
         return self._db_path
 
-    def record_recoverable_run(self, run: object) -> object:
+    def record_recoverable_run(self, run: RecoverableRun) -> RecoverableRun:
         """Insert or replace a versioned recoverable run (FULL durable)."""
         from agency.workflows.recovery import RECOVERY_SCHEMA_VERSION
 
-        status = str(getattr(run, "status"))
-        schema_version = int(getattr(run, "schema_version"))
+        status = str(run.status)
+        schema_version = int(run.schema_version)
         if schema_version != RECOVERY_SCHEMA_VERSION:
             raise ValueError("unsupported recovery schema version.")
-        step_results = getattr(run, "step_results")
-        step_results_json = _dumps_bounded(
-            step_results, MAX_JSON_BYTES * (MAX_STEPS + 1)
-        )
-        ops_binding = getattr(run, "ops_binding")
+        step_results = run.step_results
+        step_results_json = _dumps_bounded(step_results, MAX_JSON_BYTES * (MAX_STEPS + 1))
+        ops_binding = run.ops_binding
         ops_binding_json = _dumps_bounded(ops_binding)
         self._conn.execute(
             "INSERT OR REPLACE INTO recoverable_runs (run_id, workflow_id, version, "
@@ -409,24 +411,24 @@ class WorkflowRegistry:
             "ops_binding_json, schema_version, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                getattr(run, "run_id"),
-                getattr(run, "workflow_id"),
-                getattr(run, "version"),
-                getattr(run, "actor_id"),
+                run.run_id,
+                run.workflow_id,
+                run.version,
+                run.actor_id,
                 status,
                 step_results_json,
-                getattr(run, "input_digest"),
-                getattr(run, "definition_digest"),
+                run.input_digest,
+                run.definition_digest,
                 ops_binding_json,
                 schema_version,
-                getattr(run, "created_at"),
-                getattr(run, "updated_at"),
+                run.created_at,
+                run.updated_at,
             ),
         )
         self._conn.commit()
         return run
 
-    def get_recoverable_run(self, run_id: str) -> object:
+    def get_recoverable_run(self, run_id: str) -> RecoverableRun:
         """Return a recoverable run; raises KeyError (never legacy)."""
         from agency.workflows.recovery import RecoverableRun
 
@@ -463,7 +465,7 @@ class WorkflowRegistry:
             schema_version=row[9],
         )
 
-    def list_recoverable_runs(self, status: str | None = None) -> list[object]:
+    def list_recoverable_runs(self, status: str | None = None) -> list[RecoverableRun]:
         """List recoverable runs, optionally filtered by status."""
         query = (
             "SELECT run_id, workflow_id, version, actor_id, status, "
