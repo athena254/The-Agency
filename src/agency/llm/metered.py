@@ -100,9 +100,7 @@ class MeteredModel:
             f"model={self._binding.model!r})"
         )
 
-    async def generate(
-        self, prompt: str, context: dict[str, Any] | None = None
-    ) -> str:
+    async def generate(self, prompt: str, context: dict[str, Any] | None = None) -> str:
         binding = self._binding
         if not isinstance(prompt, str) or not prompt.strip():
             raise MeteredDenied("metered: invalid prompt")
@@ -126,7 +124,7 @@ class MeteredModel:
             )
         except BudgetUnavailable as exc:
             raise MeteredDenied("metered: budget unavailable") from exc
-        except Exception as exc:  # noqa: BLE001 — durability failure denies
+        except Exception as exc:
             raise MeteredDenied("metered: budget unavailable") from exc
         if not reserved:
             raise MeteredDenied("metered: quota denied")
@@ -148,18 +146,21 @@ class MeteredModel:
         )
         try:
             claimed = await self._audit.claim_intent(intent)
-        except Exception as exc:  # noqa: BLE001 — incl. cancel: stays pending
+        except Exception as exc:
             raise MeteredDenied("metered: audit unavailable") from exc
         if not claimed:
             raise MeteredDenied("metered: audit unavailable")
         try:
-            raw = await asyncio.wait_for(
-                self._inner.generate(prompt, {}), timeout=self._timeout_s
-            )
-        except (asyncio.TimeoutError, asyncio.CancelledError) as exc:
+            raw = await asyncio.wait_for(self._inner.generate(prompt, {}), timeout=self._timeout_s)
+        except TimeoutError as exc:
+            # Dispatch timed out with a genuinely unknown provider outcome
+            # (the call may still complete server-side): leave the pending
+            # intent unresolved so it stays blocking; never claim success.
+            raise MeteredError("metered: model unavailable") from exc
+        except asyncio.CancelledError as exc:
             await self._record_outcome(call_id, "unknown", type(exc).__name__)
             raise MeteredError("metered: model unavailable") from exc
-        except Exception as exc:  # noqa: BLE001 — redacted class only
+        except Exception as exc:
             await self._record_outcome(call_id, "unknown", type(exc).__name__)
             raise MeteredError("metered: model unavailable") from exc
         if not isinstance(raw, str) or not raw.strip():

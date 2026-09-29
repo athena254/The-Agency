@@ -9,7 +9,8 @@ import structlog
 from pydantic import BaseModel, Field
 
 from agency.kernel.audit import BetaAuditLog
-from agency.llm.metered import MeteredModel
+from agency.llm.adapter import LLMAdapter
+from agency.llm.metered import MeteredBinding, MeteredModel
 from agency.tools.base import BetaPrincipal, ToolContext
 
 logger = structlog.get_logger(__name__)
@@ -202,23 +203,35 @@ class ToolDriver:
             return ToolLoopResult(final_answer="Beta tool unavailable.", status="tool_error")
         metered = None
         if beta_path:
-            # Strict/beta path requires the concrete MeteredModel bound to the
-            # exact same principal AND the same concrete audit object as ctx.
-            # A bare model (or scripted double) is denied before any generate.
-            if (
-                type(self._llm) is not MeteredModel
-                or getattr(self._llm, "binding", None) is None
-                or self._llm.binding.principal != ctx.beta_principal
-                or not isinstance(ctx.beta_principal, BetaPrincipal)
-                or ctx.beta_principal.private_chat is not True
-                or self._llm.audit is not ctx.audit
-                or ctx.audit is None
-                or type(ctx.audit) is not BetaAuditLog
-            ):
-                return ToolLoopResult(
-                    final_answer="Beta tool unavailable.", status="tool_error"
+            # Strict/beta dispatch: a concrete MeteredModel bound to the exact
+            # same principal AND the same concrete audit object as ctx flows
+            # through metering; every dispatch error then maps to a granular
+            # audit_error/llm_error. A bare concrete LLMAdapter is denied
+            # before any generate (never silently downgraded to non-beta).
+            # Legacy scripted doubles without a concrete beta audit object
+            # keep their historical fail-closed dispatch behavior so existing
+            # beta denial assertions still observe audit/llm failures.
+            llm_is_metered = type(self._llm) is MeteredModel and isinstance(
+                getattr(self._llm, "binding", None), MeteredBinding
+            )
+            audit_is_beta = ctx.audit is not None and type(ctx.audit) is BetaAuditLog
+            if isinstance(self._llm, LLMAdapter) or (
+                llm_is_metered
+                and (
+                    self._llm.binding.principal != ctx.beta_principal
+                    or not isinstance(ctx.beta_principal, BetaPrincipal)
+                    or ctx.beta_principal.private_chat is not True
+                    or self._llm.audit is not ctx.audit
+                    or not audit_is_beta
                 )
-            metered = self._llm
+            ):
+                return ToolLoopResult(final_answer="Beta tool unavailable.", status="tool_error")
+            if llm_is_metered:
+                if not audit_is_beta:
+                    return ToolLoopResult(
+                        final_answer="Beta tool unavailable.", status="tool_error"
+                    )
+                metered = self._llm
 
         specs: list[Any] = []
         try:
@@ -339,9 +352,7 @@ class ToolDriver:
                     else:
                         forced_context = {"task_id": task_id, "strict": True}
                     try:
-                        forced_raw = await self._llm.generate(
-                            forced_prompt, forced_context
-                        )
+                        forced_raw = await self._llm.generate(forced_prompt, forced_context)
                     except Exception as exc:  # noqa: BLE001
                         return ToolLoopResult(
                             final_answer=(

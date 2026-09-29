@@ -43,27 +43,26 @@ async def _setup(tmp_path, **limits: int):
 
 
 def _ctx(principal: BetaPrincipal, audit: BetaAuditLog) -> ToolContext:
-    return ToolContext(
-        agent_id="agent-1", task_id="task-1", audit=audit, beta_principal=principal
-    )
+    return ToolContext(agent_id="agent-1", task_id="task-1", audit=audit, beta_principal=principal)
 
 
 class _Registry:
     def __init__(self) -> None:
         self._specs = [ToolSpec(name="web_search", description="s")]
+        # Strict/beta registry marker: trusted test setup uses real metering.
+        self._beta_policy = object()
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
     def list_specs(self) -> list[ToolSpec]:
         return list(self._specs)
 
-    async def call(
-        self, name: str, args: dict[str, Any], ctx: ToolContext
-    ) -> ToolResult:
+    async def call(self, name: str, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         self.calls.append((name, args))
         return ToolResult(tool=name, ok=True, output={"r": 1}, evidence={})
 
+
 async def test_positive_loop_and_forced_final_counts(tmp_path) -> None:
-    store, audit, principal, inner, _binding, metered = await _setup(tmp_path)
+    _store, audit, principal, _inner_unused, _binding, metered = await _setup(tmp_path)
     calls: list[str] = []
     orig = LLMAdapter.generate
 
@@ -95,26 +94,30 @@ async def test_bare_model_denied_in_beta_path(tmp_path) -> None:
 
 
 async def test_quota_denial_zero_calls(tmp_path, monkeypatch) -> None:
-    _store, audit, principal, inner, binding, metered = await _setup(
+    _store, _audit_unused, principal, _inner_unused, _binding_unused, metered = await _setup(
         tmp_path, model_calls_per_request=1
     )
     ctx = {"task_id": "t", "strict": True, "beta_principal": principal}
-    monkeypatch.setattr(
-        LLMAdapter, "generate", lambda self, p, c=None: (_ for _ in ()).throw(
-            AssertionError("provider must not run")
-        ),
-    )
+    calls: list[str] = []
+
+    async def counting(self: LLMAdapter, prompt: str, context=None) -> str:
+        calls.append(prompt)
+        return '{"final": "one"}'
+
+    monkeypatch.setattr(LLMAdapter, "generate", counting)
     await metered.generate('{"final": "one"}', ctx)
+    assert len(calls) == 1
     try:
         await metered.generate('{"final": "two"}', ctx)
     except MeteredDenied:
         pass
     else:
         raise AssertionError("second generate must deny")
+    assert len(calls) == 1  # quota denial made zero provider calls
 
 
 async def test_missing_wrong_capability_principal(tmp_path) -> None:
-    store, audit, principal, inner, binding, metered = await _setup(tmp_path)
+    store, audit, principal, inner, _binding_unused, metered = await _setup(tmp_path)
     good = {"task_id": "t", "strict": True, "beta_principal": principal}
     other = BetaPrincipal(telegram_user_id=9, private_chat=True)
     wrong_ctx = {"task_id": "t", "strict": True, "beta_principal": other}
@@ -158,7 +161,7 @@ async def test_context_override_denied(tmp_path) -> None:
 
 
 async def test_no_secret_in_audit_errors_repr(tmp_path, monkeypatch) -> None:
-    store, audit, principal, inner, binding, metered = await _setup(tmp_path)
+    _store, _audit_unused, principal, _inner_unused, binding, metered = await _setup(tmp_path)
     secret = "super-secret-capability-value"
     assert secret not in repr(binding) and secret not in repr(metered)
     ctx = {"task_id": "t", "strict": True, "beta_principal": principal}
@@ -172,11 +175,14 @@ async def test_no_secret_in_audit_errors_repr(tmp_path, monkeypatch) -> None:
     except MeteredError as exc:
         assert secret not in str(exc)
 
+
 async def test_durability_failure_before_and_after(tmp_path, monkeypatch) -> None:
-    store, audit, principal, inner, binding, metered = await _setup(tmp_path)
+    store, audit, principal, _inner_unused, _binding_unused, metered = await _setup(tmp_path)
     ctx = {"task_id": "t", "strict": True, "beta_principal": principal}
     monkeypatch.setattr(
-        LLMAdapter, "generate", lambda self, p, c=None: (_ for _ in ()).throw(
+        LLMAdapter,
+        "generate",
+        lambda self, p, c=None: (_ for _ in ()).throw(
             AssertionError("no provider on reserve failure")
         ),
     )
@@ -254,8 +260,9 @@ async def test_timeout_pending_and_closed_store(tmp_path, monkeypatch) -> None:
 
 
 async def test_concurrent_second_blocked(tmp_path, monkeypatch) -> None:
-    _store, audit, principal, inner, binding, metered = await _setup(tmp_path)
+    _store, audit, principal, _inner_unused, binding, metered = await _setup(tmp_path)
     ctx = {"task_id": "t", "strict": True, "beta_principal": principal}
+    secret = binding.capability  # real request secret: must never reach audit
     started = asyncio.Event()
     release = asyncio.Event()
 
@@ -283,4 +290,3 @@ async def test_concurrent_second_blocked(tmp_path, monkeypatch) -> None:
     rows = await audit.query()
     blob = repr([(r.result, r.evidence) for r in rows])
     assert secret not in blob and "private prompt" not in blob
-
