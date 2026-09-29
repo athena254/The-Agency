@@ -62,7 +62,54 @@
     "archive_tags_from_pass_1": "70 tags under archive/cleanup-20260928-215259/ preserve the old branches classified already-merged, patch-equivalent-in-main, superseded-reviewed-port-in-main or archived-unsafe-experiment. Re-merging them is not cleanup and would reintroduce code that was reviewed out or judged unsafe (see docs/BRANCH_CLEANUP.md).",
     "stash": "refs/stash (a9c764e) retained unchanged: pre-consolidation root source and lockfile, not applied."
   },
-  "worktree_scope": "The two retired checkouts were detached at the same commit ('git checkout --detach'), so their files and directories are unchanged and still usable. No worktree directory was removed. The untracked worker briefs in each checkout were copied to the backup first.",
+  "worktree_scope": "Stage 1 (branch pass) only detached the two retired checkouts at the same commit, leaving their files unchanged. Stage 2 (folder cleanup, after the owner asked to delete the leftovers) then removed the merged checkouts themselves.",
+  "checkout_folder_cleanup": {
+    "folders_before": 44,
+    "folders_after": 12,
+    "composition_before": "43 non-canonical folders (37 registered git checkouts plus 6 unregistered folders: agency-backups, agency-runtime-backups, agency-consolidation-snapshot-20260927-105944, agency-beta-briefs, agency-mvp-briefs, agency-combined-verify) beside the canonical theagency checkout.",
+    "removed_worktrees": [
+      "agency-beta-audit-gate", "agency-beta-budget", "agency-beta-combined-verify",
+      "agency-beta-deterministic-budget", "agency-beta-failure-verify", "agency-beta-final-verify",
+      "agency-beta-final2-verify", "agency-beta-ingress-wiring", "agency-beta-profile-nonbeta",
+      "agency-beta-profile-outcome", "agency-beta-release-verify", "agency-beta-telegram-admission",
+      "agency-ci-audit-fix", "agency-comet-baseline-check", "agency-deploy-next",
+      "agency-driver-audit-status", "agency-free-audit-fix", "agency-free-bft-lab",
+      "agency-free-cline-audit", "agency-free-completed-merge", "agency-free-lattice-engine",
+      "agency-free-muse-audit", "agency-free-program", "agency-freebuff-audit",
+      "agency-ingress-cutover", "agency-integration-verify", "agency-local-tools",
+      "agency-peer-envelope", "agency-peer-protocol", "agency-route-deny", "agency-web-dns-async"
+    ],
+    "removed_non_worktree": [
+      "agency-combined-verify (empty scratch directory)",
+      "agency-beta-briefs (preserved then removed)",
+      "agency-mvp-briefs (preserved then removed)"
+    ],
+    "deletion_rule": "A folder was removed only when its HEAD was an ancestor of main (git merge-base --is-ancestor), or git cherry main <HEAD> reported zero unique patches (patch-equivalent-in-main). 16 were ancestor-merged and 15 patch-equivalent; none had unique work.",
+    "preserved_before_deletion": "checkout-local-content/<name>/ keeps each checkout's runtime lattice.db* plus every untracked file (.clineignore, *_BRIEF.md, .agent-input/*, untracked docs, recovered-evidence.md up to 165 KB) and a tracked-mods.patch that was empty for every one of them. non-worktree-content/ keeps the two brief folders.",
+    "only_thing_not_copied": "Reproducible build artifacts (.venv in three checkouts) and ignored caches (.pytest_cache, .mypy_cache, .ruff_cache, __pycache__).",
+    "restored_after_deletion": {
+      "path": "agency-deploy-next",
+      "commit": "a997abc6400861919af0e68866b0b7a00d3d9b83",
+      "reason": "The pinned launchers agency_run_a997abc.py and agency_run_8399b4f.py still load src/telegram_bot.py from it and docs/BETA_GAPS.md B-09 records the bot as running from it; the earlier cleanup script also listed it as protected.",
+      "state": "Recreated as a detached worktree at the identical commit and verified clean against HEAD."
+    },
+    "blocked_by_live_process": {
+      "path": "agency-free-bft-lab",
+      "state": "Files were deleted but the now-empty folder could not be removed: a live cline.exe (PID 1568) runs with --cwd pointing at it, so Windows denies the directory delete.",
+      "data_impact": "None. Commit 18b9717 is in main and tagged archive/cleanup-20260929-135409/research/free-bft-lab; its untracked briefs were preserved before deletion."
+    },
+    "kept_and_why": {
+      "theagency": "canonical repository and integrated baseline",
+      "agency-deploy-3417c79": "current live bot deployment pinned by the launcher",
+      "agency-deploy-main": "rollback deployment source used by agency_run_merged.py",
+      "agency-deploy-next": "rollback deployment source used by two launchers",
+      "agency-mvp": "holds unmerged local source edits (telegram handler/bot and tests) and the .venv the running bot interpreter uses",
+      "agency-free-metering / agency-free-recovery": "the only branches with work not in main",
+      "agency-free-lattice-gateway": "cwd of live Freebuff processes, so it cannot be deleted"
+    },
+    "backup_meaning_change": "agency-backups, agency-runtime-backups and agency-consolidation-snapshot-20260927-105944 hold the remaining runtime database copies; deleting the last database backups was not done without explicit approval."
+  },
+  "historical_path_references": "docs/SPEC_FREE_ONLY_DECENTRALIZED_PROGRAM.md and research-evidence/*.md name checkouts that no longer exist (for example agency-free-program). Those are historical evidence statements, not current instructions, matching the retired-branch-name convention already recorded in docs/BRANCH_CLEANUP.md.",
   "non_branch_clutter_left_alone": "refs/cline/checkpoints/* (41 Cline tool checkpoints, not branches) and 6 origin/dependabot/* remote PR refs were left untouched.",
   "backup": "C:/Users/alphi/agency-backups/branch-cleanup-pass2-20260929-135409",
   "bundle": "all-refs.bundle (every ref, including all local branches and the stash)",

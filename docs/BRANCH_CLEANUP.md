@@ -24,6 +24,41 @@ development and clean the finished ones. Verification first, deletion second:
 Machine-readable evidence, backup path, bundle hash and recovery commands are in
 `research-evidence/branch-cleanup-pass2.json`.
 
+## Checkout folder cleanup (2026-09-29, same run)
+
+The owner asked why so many folders remained and to delete them if already
+merged. Each of the 43 non-canonical folders (37 registered checkouts plus 6
+unregistered folders) was classified before anything was removed. Of the 31
+checkouts selected for removal, 16 had HEAD already merged into `main` and 15
+were patch-equivalent (`git cherry main <HEAD>` reported zero unique patches).
+None held unique work. No folder was removed on the strength of its name.
+
+- 30 merged checkouts were removed after their local content was copied to the
+  backup: runtime `lattice.db` files, every untracked file (`.clineignore`,
+  briefs, `.agent-input/*`, untracked docs and `recovered-evidence.md`), and a
+  `tracked-mods.patch` that was empty in every case. Only reproducible `.venv`
+  directories and ignored caches were not copied.
+- Three non-checkout folders were also cleared: the empty `agency-combined-verify`
+  scratch directory and the two brief folders (preserved first).
+- `agency-deploy-next` was removed and then **restored** at the identical commit
+  (`a997abc`): `docs/BETA_GAPS.md` B-09 and two pinned launchers still use it.
+- `agency-free-bft-lab` lost its files but the empty directory cannot be deleted
+  while a live `cline.exe` (PID 1568) uses it as its working directory. Nothing
+  was lost: `18b9717` is in `main` and tagged.
+- Two folders could not be deleted at all because live processes occupy them:
+  `agency-free-bft-lab` (Cline) and `agency-free-lattice-gateway` (Freebuff).
+
+Twelve folders remain, each for a stated reason: `theagency` (canonical),
+`agency-deploy-3417c79` (live deployment), `agency-deploy-main` and
+`agency-deploy-next` (rollback deployment sources), `agency-mvp` (unmerged local
+source edits plus the running bot's virtual environment), the two active-branch
+checkouts, the two process-bound checkouts, and the three backup folders
+(`agency-backups`, `agency-runtime-backups`, `agency-consolidation-snapshot-20260927-105944`).
+
+Documents that name removed checkouts (for example `agency-free-program` in
+`SPEC_FREE_ONLY_DECENTRALIZED_PROGRAM.md` and the evidence snapshots) are
+historical evidence statements, exactly like the retired branch names above.
+
 ## Remaining local branches — pass 1 snapshot (2026-09-28, historical)
 
 This list described the state after the first cleanup. It is kept for provenance:
