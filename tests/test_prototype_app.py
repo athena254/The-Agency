@@ -416,12 +416,9 @@ def test_missing_static_root_returns_json_error(
 
 
 def test_real_butler_echo_conversation(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _no_lattice() -> None:
-        return None
-
     # Keep the real Butler/orchestrator but avoid the shared Lattice backend
     # so the test never opens the tracked ``data/lattice.db``.
-    monkeypatch.setattr("agency.orchestrator.get_lattice", _no_lattice)
+    monkeypatch.setattr("agency.orchestrator.acquire_lattice", _no_lattice)
     orchestrator = AgencyOrchestrator(
         memory_db_path=":memory:",
         llm=LLMAdapter(provider="echo", model="echo"),
@@ -517,13 +514,20 @@ def test_chat_returns_504_when_isolated_status_timeout() -> None:
 # --------------------------------------------------------------------------- #
 
 
-async def _no_lattice() -> None:
-    return None
+class _NoLatticeLease:
+    lattice = None
+
+    async def release(self) -> None:
+        pass
+
+
+async def _no_lattice() -> _NoLatticeLease:
+    return _NoLatticeLease()
 
 
 def _real_service(monkeypatch: pytest.MonkeyPatch) -> ButlerService:
     """Build a real Butler over an in-memory orchestrator (echo provider)."""
-    monkeypatch.setattr("agency.orchestrator.get_lattice", _no_lattice)
+    monkeypatch.setattr("agency.orchestrator.acquire_lattice", _no_lattice)
     orchestrator = AgencyOrchestrator(
         memory_db_path=":memory:",
         llm=LLMAdapter(provider="echo", model="echo"),
@@ -593,7 +597,7 @@ async def test_isolated_turn_never_runs_tools_or_touches_memory(
 async def test_isolated_turn_ignores_model_requested_memory_query(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("agency.orchestrator.get_lattice", _no_lattice)
+    monkeypatch.setattr("agency.orchestrator.acquire_lattice", _no_lattice)
 
     class _ToolAttemptingLLM:
         provider = "test"
@@ -672,7 +676,7 @@ async def test_legacy_turn_keeps_tool_and_lattice_behavior_for_other_callers(
 async def test_chat_returns_non_200_when_real_model_fails(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr("agency.orchestrator.get_lattice", _no_lattice)
+    monkeypatch.setattr("agency.orchestrator.acquire_lattice", _no_lattice)
 
     async def _boom(prompt: str, context: dict[str, Any]) -> str:
         raise ValueError("boom-secret")

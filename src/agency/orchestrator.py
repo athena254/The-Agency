@@ -9,8 +9,10 @@ Every component is injected or created with defaults. No global state.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any
 
@@ -33,7 +35,7 @@ from agency.kernel.identity import Agent, Capability, TrustLevel
 from agency.kernel.policies import ActionClass, Permission, PolicyEngine
 from agency.kernel.registry import AgentRegistry
 from agency.kernel.tasks import Task, TaskManager, TaskStatus
-from agency.lattice import get_lattice
+from agency.lattice import LatticeLease, acquire_lattice
 from agency.lattice.api import Lattice
 from agency.llm.adapter import LLMAdapter
 from agency.memory.sms.lifecycle import TieredMemoryEngine
@@ -56,6 +58,21 @@ TOOL_CAPABLE_DOMAINS = frozenset({"research", "general"})
 _TOOL_ITERATIONS: dict[str, int] = {"research": 6, "general": 4}
 
 _DEFAULT_MEMORY_DB = "data/memory.db"
+
+
+async def _finish_cleanup(task: asyncio.Task[BaseException | None]) -> None:
+    """Keep cleanup owned and awaited even if its caller is cancelled again."""
+    cancelled: asyncio.CancelledError | None = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as exc:
+            cancelled = exc
+    error = task.result()
+    if cancelled is not None:
+        raise cancelled
+    if error is not None:
+        raise error
 
 
 def _assistant_name(context: dict[str, Any] | None) -> str:
@@ -152,6 +169,7 @@ class AgencyOrchestrator:
 
         # Lattice
         self._lattice: Lattice | None = None
+        self._lattice_lease: LatticeLease | None = None
         self._spawned_proposals: set[str] = set()
 
         self._started = False
@@ -168,17 +186,19 @@ class AgencyOrchestrator:
             await self._memory_store.initialize()
             await self._evidence_store.initialize()
             await self._audit_log.initialize()
-            self._lattice = await get_lattice()
+            self._lattice_lease = await acquire_lattice()
+            self._lattice = self._lattice_lease.lattice
             self._build_tool_layer()
+            self._started = True
+            self._log.info("orchestrator_started")
         except BaseException:
             # Cancellation also requires rollback; cleanup must not mask it.
             try:
                 await self.stop()
             except BaseException as exc:  # noqa: BLE001 — finish cleanup before re-raising.
-                self._log.warning("orchestrator_rollback_failed", error_type=type(exc).__name__)
+                with suppress(BaseException):
+                    self._log.warning("orchestrator_rollback_failed", error_type=type(exc).__name__)
             raise
-        self._started = True
-        self._log.info("orchestrator_started")
 
     def _build_tool_layer(self) -> None:
         """Wire the tool registry with live services (idempotent)."""
@@ -210,35 +230,40 @@ class AgencyOrchestrator:
         )
 
     async def stop(self) -> None:
-        """Attempt every cleanup, including after partial startup.
-
-        Preserve the existing Lattice close contract; shared factory ownership
-        and store-internal initialization rollback are separate follow-ups.
-        """
+        """Release our local lease and attempt all independently owned cleanup."""
         self._started = False
         self._tool_registry = None
         self._tool_driver = None
-        error: BaseException | None = None
-        closers = [self._memory_lifecycle.stop_periodic]
-        lattice = self._lattice
-        if lattice is not None:
-            closers.append(lattice.close)
-        closers.extend(
-            [self._audit_log.close, self._evidence_store.close, self._memory_store.close]
-        )
-        for close in closers:
-            try:
-                await close()
-            except BaseException as exc:  # noqa: BLE001 — finish cleanup before re-raising.
-                if error is None:
-                    error = exc
-                self._log.warning("orchestrator_cleanup_failed", error_type=type(exc).__name__)
-            else:
-                if lattice is not None and close == lattice.close:
-                    self._lattice = None
-        if error is not None:
-            raise error
-        self._log.info("orchestrator_stopped")
+        lease = self._lattice_lease
+        self._lattice = None
+
+        async def cleanup() -> BaseException | None:
+            error: BaseException | None = None
+            closers = [self._memory_lifecycle.stop_periodic]
+            if lease is not None:
+                closers.append(lease.release)
+            closers.extend(
+                [self._audit_log.close, self._evidence_store.close, self._memory_store.close]
+            )
+            for close in closers:
+                try:
+                    await close()
+                except BaseException as exc:  # noqa: BLE001 - finish independent cleanup
+                    if error is None:
+                        error = exc
+                    with suppress(BaseException):
+                        self._log.warning(
+                            "orchestrator_cleanup_failed", error_type=type(exc).__name__
+                        )
+                else:
+                    if lease is not None and close == lease.release:
+                        self._lattice_lease = None
+            if error is None:
+                with suppress(BaseException):
+                    self._log.info("orchestrator_stopped")
+            return error
+
+        await _finish_cleanup(asyncio.create_task(cleanup()))
 
     # ------------------------------------------------------------------ #
     # Agent management

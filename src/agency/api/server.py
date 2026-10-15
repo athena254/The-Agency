@@ -34,9 +34,10 @@ Run with::
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 import structlog
@@ -56,7 +57,7 @@ from agency.bridges.coordinator import ExternalCoordinator
 from agency.evidence.store.store import EvidenceStore
 from agency.kernel.registry import AgentRegistry
 from agency.kernel.tasks import TaskManager
-from agency.lattice import get_lattice
+from agency.lattice import LatticeLease, acquire_lattice
 from agency.memory.sms.retrieval import RetrievalEngine
 from agency.memory.sms.store import MemoryStore
 from agency.risk.engine.engine import RiskEngine
@@ -100,44 +101,94 @@ def _database_path(env_var: str, default: str) -> str:
     return os.environ.get(env_var, default)
 
 
+async def _finish_cleanup(task: asyncio.Task[BaseException | None]) -> None:
+    """Keep cleanup owned and awaited even if its caller is cancelled again."""
+    cancelled: asyncio.CancelledError | None = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as exc:
+            cancelled = exc
+    error = task.result()
+    if cancelled is not None:
+        raise cancelled
+    if error is not None:
+        raise error
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-    """Create shared services on startup; close persistent stores on shutdown."""
-    application.state.task_manager = TaskManager()
-    application.state.agent_registry = AgentRegistry()
-    application.state.risk_engine = RiskEngine()
-    application.state.bridge_coordinator = ExternalCoordinator()
-
-    evidence_store = EvidenceStore(_database_path("AGENCY_EVIDENCE_DB", ":memory:"))
-    await evidence_store.initialize()
-    application.state.evidence_store = evidence_store
-
-    memory_store = MemoryStore(_database_path("AGENCY_MEMORY_DB", ":memory:"))
-    await memory_store.initialize()
-    application.state.memory_store = memory_store
-    application.state.memory_retrieval = RetrievalEngine(memory_store)
-
-    # Lattice
-    lattice = await get_lattice()
-    application.state.lattice = lattice
-
-    log.info("api.startup", version=__version__)
+    """Own one local Lattice lease and roll back every allocated store."""
+    evidence_store: EvidenceStore | None = None
+    memory_store: MemoryStore | None = None
+    lease: LatticeLease | None = None
+    primary: BaseException | None = None
+    state_names = (
+        "task_manager",
+        "agent_registry",
+        "risk_engine",
+        "bridge_coordinator",
+        "evidence_store",
+        "memory_store",
+        "memory_retrieval",
+        "lattice",
+    )
+    for name in state_names:
+        setattr(application.state, name, None)
     try:
+        application.state.task_manager = TaskManager()
+        application.state.agent_registry = AgentRegistry()
+        application.state.risk_engine = RiskEngine()
+        application.state.bridge_coordinator = ExternalCoordinator()
+
+        evidence_store = EvidenceStore(_database_path("AGENCY_EVIDENCE_DB", ":memory:"))
+        await evidence_store.initialize()
+        application.state.evidence_store = evidence_store
+
+        memory_store = MemoryStore(_database_path("AGENCY_MEMORY_DB", ":memory:"))
+        await memory_store.initialize()
+        application.state.memory_store = memory_store
+        application.state.memory_retrieval = RetrievalEngine(memory_store)
+
+        # Record ownership before exposing the borrowed handle or running hooks.
+        lease = await acquire_lattice()
+        application.state.lattice = lease.lattice
+        log.info("api.startup", version=__version__)
         yield
+    except BaseException as exc:
+        primary = exc
+        raise
     finally:
+        for name in state_names:
+            setattr(application.state, name, None)
+
+        async def cleanup() -> BaseException | None:
+            error: BaseException | None = None
+            closers = []
+            if lease is not None:
+                closers.append(lease.release)
+            if evidence_store is not None:
+                closers.append(evidence_store.close)
+            if memory_store is not None:
+                closers.append(memory_store.close)
+            for close in closers:
+                try:
+                    await close()
+                except BaseException as exc:  # noqa: BLE001 - finish independent cleanup
+                    if error is None:
+                        error = exc
+                    with suppress(BaseException):
+                        log.warning("api.shutdown.cleanup_failed", error_type=type(exc).__name__)
+            if error is None:
+                with suppress(BaseException):
+                    log.info("api.shutdown")
+            return error
+
         try:
-            await lattice.close()
-        except Exception:
-            log.exception("api.shutdown.lattice_close_failed")
-        try:
-            await evidence_store.close()
-        except Exception:  # Shutdown must not raise.
-            log.exception("api.shutdown.evidence_close_failed")
-        try:
-            await memory_store.close()
-        except Exception:
-            log.exception("api.shutdown.memory_close_failed")
-        log.info("api.shutdown")
+            await _finish_cleanup(asyncio.create_task(cleanup()))
+        except BaseException:
+            if primary is None:
+                raise
 
 
 def create_app() -> FastAPI:

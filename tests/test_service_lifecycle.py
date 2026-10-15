@@ -1,7 +1,7 @@
 """Owned service cleanup, using real temporary SQLite and no global Lattice.
 
-The fresh per-start Lattice double deliberately does not certify the factory's
-cached-closed singleton or multi-consumer ownership; those remain follow-ups.
+The per-start lease double isolates owned-store assertions; actual shared
+factory lifetimes are covered in test_lattice_consumer_lifecycle.py.
 """
 
 from __future__ import annotations
@@ -89,12 +89,19 @@ async def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         async def register_agent(self, **_kwargs: Any) -> None:
             pass
 
-    async def fresh_lattice() -> FreshLattice:
+    class FreshLease:
+        def __init__(self, lattice: FreshLattice) -> None:
+            self.lattice = lattice
+
+        async def release(self) -> None:
+            await self.lattice.close()
+
+    async def fresh_lattice() -> FreshLease:
         lattice = FreshLattice()
         result.lattices.append(lattice)
-        return lattice
+        return FreshLease(lattice)
 
-    monkeypatch.setattr(orchestrator_module, "get_lattice", fresh_lattice)
+    monkeypatch.setattr(orchestrator_module, "acquire_lattice", fresh_lattice)
     try:
         yield result
     finally:
@@ -165,7 +172,7 @@ async def test_orchestrator_startup_rolls_back(
         async def fail_lattice() -> None:
             raise primary
 
-        monkeypatch.setattr(orchestrator_module, "get_lattice", fail_lattice)
+        monkeypatch.setattr(orchestrator_module, "acquire_lattice", fail_lattice)
     else:
 
         def fail_tools() -> None:
