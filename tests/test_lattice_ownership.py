@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import threading
 
 import pytest
 
@@ -506,3 +507,269 @@ async def test_sqlite_repeated_cancellation_keeps_rollback_exclusive(monkeypatch
         await asyncio.wait_for(waiter, 3)
         await backend.close()
     assert all(c._connection is None for c in connections)
+
+
+def test_simultaneous_cold_start_has_one_process_owner(monkeypatch):
+    from agency.lattice.backends.sqlite import SQLiteLattice
+
+    start = threading.Barrier(2)
+    acquired = threading.Barrier(2)
+    contender = threading.Event()
+    mutex = threading.Lock()
+    successes, failures, initialized, connections = [], [], [], []
+    original_manager = factory._Manager
+    original_initialize = SQLiteLattice.initialize
+
+    class ObservedLock:
+        """Expose actual contention without sleeping or a constructor deadlock."""
+
+        def __enter__(self):
+            if not mutex.acquire(blocking=False):
+                contender.set()
+                assert mutex.acquire(timeout=3), "installation lock did not drain"
+            return self
+
+        def __exit__(self, *args):
+            mutex.release()
+
+    def manager(loop):
+        # Before the repair the second constructor signals this gate; after it,
+        # the second thread contends on the real installation critical section.
+        if not contender.is_set():
+            if not mutex.locked():
+                with mutex:
+                    first = not initialized
+                    initialized.append("constructing")
+                if not first:
+                    contender.set()
+            if not contender.is_set():
+                assert contender.wait(3), "cold-start contender never arrived"
+        return original_manager(loop)
+
+    async def initialize(self):
+        await original_initialize(self)
+        connections.append(self._db)
+
+    monkeypatch.setattr(factory, "_manager_lock", ObservedLock(), raising=False)
+    monkeypatch.setattr(factory, "_Manager", manager)
+    monkeypatch.setattr(SQLiteLattice, "initialize", initialize)
+
+    async def worker():
+        lease = None
+        try:
+            start.wait(timeout=3)
+            try:
+                lease = await factory.acquire_lattice(LatticeConfig(sqlite_path=":memory:"))
+                successes.append(lease.lattice)
+                node = await lease.lattice.create_node("task", {"cold": True})
+                assert await lease.lattice.get_node(node) is not None
+            except RuntimeError as exc:
+                failures.append(str(exc))
+            finally:
+                await asyncio.to_thread(acquired.wait, 3)
+        finally:
+            if lease is not None:
+                await lease.release()
+
+    errors = []
+
+    def run():
+        try:
+            asyncio.run(worker())
+        except BaseException as exc:  # noqa: BLE001 - propagate worker failures in the test thread
+            errors.append(exc)
+
+    threads = [threading.Thread(target=run) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(8)
+    assert all(not thread.is_alive() for thread in threads)
+    for connection in connections:
+        connection._thread.join(3)
+        assert connection._connection is None and not connection._thread.is_alive()
+    assert not errors, errors
+    assert len(successes) == 1, "multiple live process-local generations were published"
+    assert len(connections) == 1, "foreign loop reached backend initialization"
+    assert len(failures) == 1 and "event loop" in failures[0]
+    assert factory._manager is None
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "fallback"])
+@pytest.mark.parametrize("fallback_engines", [False, True])
+async def test_cached_managed_operations_reject_foreign_loop_before_effects(
+    monkeypatch, backend, fallback_engines
+):
+    import inspect
+
+    from agency.lattice import api
+
+    if fallback_engines:
+        monkeypatch.setattr(api, "_optional_engine", lambda *args: None)
+    lease = await factory.acquire_lattice(LatticeConfig(backend=backend, sqlite_path=":memory:"))
+    cached = lease.lattice
+    governance, reputation = cached.governance, cached.reputation
+    node = await cached.create_node("task", {"status": "open"})
+    proposal = await cached.submit_proposal("synthetic", "policy_change", {})
+    args = {
+        "create_node": ("task", {}),
+        "get_node": (node,),
+        "update_node": (node, {"foreign": True}),
+        "delete_node": (node,),
+        "find_nodes": (),
+        "add_edge": (node, node, "depends_on"),
+        "get_edges": (node,),
+        "remove_edge": ("absent",),
+        "traverse": (node,),
+        "find_path": (node, node),
+        "get_dependencies": (node,),
+        "get_dependents": (node,),
+        "upsert_vector": ("memory", [("v", [1.0], {})]),
+        "search_vectors": ("memory", [1.0]),
+        "search_by_text": ("memory", ""),
+        "delete_vectors": ("memory", ["v"]),
+        "submit_proposal": ("synthetic", "policy_change", {}),
+        "cast_vote": ("synthetic", proposal, "abstain"),
+        "list_open_proposals": (),
+        "get_proposal_status": (proposal,),
+        "update_reputation": ("synthetic", True),
+        "get_reputation": ("synthetic",),
+        "check_quorum": (proposal,),
+        "get_events": (),
+        "replay_events": (),
+        "get_audit_trail": (node,),
+        "get_status": (),
+        "get_agent_count": (),
+        "get_active_tasks": (),
+        "register_agent": ("synthetic", "worker", []),
+        "create_task": ("synthetic", "test", {}),
+        "complete_task": (node, {}),
+        "link_evidence": (node, node),
+    }
+    public_data = {
+        name
+        for name, method in inspect.getmembers(Lattice, inspect.iscoroutinefunction)
+        if not name.startswith("_") and name not in {"initialize", "close"}
+    }
+    assert set(args) == public_data
+    calls = [(name, getattr(cached, name), values) for name, values in args.items()]
+    engine_proposal = await governance.submit_proposal("synthetic", "policy_change", {})
+    for name, values in {
+        "submit_proposal": ("synthetic", "policy_change", {}),
+        "cast_vote": ("synthetic", engine_proposal, "abstain"),
+        "get_proposal_status": (engine_proposal,),
+        "check_quorum": (engine_proposal,),
+        **(
+            {"resolve_proposal": (engine_proposal,), "list_open_proposals": ()}
+            if not fallback_engines
+            else {}
+        ),
+    }.items():
+        calls.append(("governance." + name, getattr(governance, name), values))
+    rep_args = {"get_reputation": ("synthetic",)}
+    if fallback_engines:
+        rep_args["update_reputation"] = ("synthetic", True)
+    else:
+        rep_args.update(
+            {
+                "record_task_completion": ("synthetic", True),
+                "submit_peer_rating": ("rater", "synthetic", 0.5),
+                "get_leaderboard": (),
+                "vote_weight": ("user",),
+            }
+        )
+    for name, values in rep_args.items():
+        calls.append(("reputation." + name, getattr(reputation, name), values))
+    if not fallback_engines:
+        nested = governance.reputation
+        calls.append(("governance.reputation.vote_weight", nested.vote_weight, ("user",)))
+    if fallback_engines:
+        await reputation.update_reputation("synthetic", True)
+    else:
+        await reputation.record_task_completion("synthetic", True)
+    before = [event.to_dict() for event in await cached.get_events()]
+    before_proposal = (await governance.get_proposal_status(engine_proposal)).to_dict()
+    before_rep = (await reputation.get_reputation("synthetic")).to_dict()
+    lock = getattr(cached.backend, "_lock", None)
+    connection = getattr(cached.backend, "_db", None)
+
+    async def foreign():
+        outcomes = []
+        if lock is not None:
+            await lock.acquire()
+            writes = [await queued(lambda: cached.create_node("task", {})) for _ in range(2)]
+            lock.release()
+            outcomes.extend(
+                zip(["contended write"] * 2, await asyncio.gather(*writes, return_exceptions=True))
+            )
+        for name, method, values in calls:
+            try:
+                result = await method(*values)
+            except Exception as exc:  # noqa: BLE001 - assert every foreign operation outcome
+                result = exc
+            outcomes.append((name, result))
+        return [
+            (name, repr(result))
+            for name, result in outcomes
+            if not isinstance(result, RuntimeError) or "event loop" not in str(result)
+        ]
+
+    try:
+        violations = await asyncio.to_thread(lambda: asyncio.run(foreign()))
+        assert not violations, violations
+        assert [event.to_dict() for event in await cached.get_events()] == before
+        assert (await governance.get_proposal_status(engine_proposal)).to_dict() == before_proposal
+        assert (await reputation.get_reputation("synthetic")).to_dict() == before_rep
+        if lock is not None:
+            assert lock._loop is None
+            await lock.acquire()
+            writer = await queued(lambda: cached.create_node("task", {"owner": True}))
+            reader = await queued(lambda: cached.get_node(node))
+            lock.release()
+            written, read = await asyncio.gather(writer, reader)
+            assert read is not None and await cached.get_node(written) is not None
+            assert lock._loop is asyncio.get_running_loop()
+        else:
+            written, read = await asyncio.gather(
+                cached.create_node("task", {"owner": True}), cached.get_node(node)
+            )
+            assert read is not None and await cached.get_node(written) is not None
+    finally:
+        await lease.release()
+        if connection is not None:
+            await asyncio.to_thread(connection._thread.join, 3)
+            assert not connection._thread.is_alive()
+
+
+@pytest.mark.parametrize("fallback_engines", [False, True])
+async def test_managed_engine_preserves_default_quorum(monkeypatch, fallback_engines):
+    from agency.lattice import api
+
+    if fallback_engines:
+        monkeypatch.setattr(api, "_optional_engine", lambda *args: None)
+    lease = await factory.acquire_lattice(LatticeConfig(backend="fallback"))
+    try:
+        proposal = await lease.lattice.governance.submit_proposal("synthetic", "policy_change", {})
+        status = await lease.lattice.governance.get_proposal_status(proposal)
+        assert status.quorum_required == (0.5 if fallback_engines else 0.66)
+    finally:
+        await lease.release()
+
+
+async def test_managed_reputation_preserves_score_helper():
+    lease = await factory.acquire_lattice(LatticeConfig(backend="fallback"))
+    try:
+        reputation = lease.lattice.reputation
+        rep = await reputation.record_task_completion("synthetic", True)
+        assert reputation.compute_score(rep) == rep.score
+
+        def foreign():
+            async def run():
+                with pytest.raises(RuntimeError, match="event loop"):
+                    reputation.compute_score(rep)
+
+            asyncio.run(run())
+
+        await asyncio.to_thread(foreign)
+    finally:
+        await lease.release()
