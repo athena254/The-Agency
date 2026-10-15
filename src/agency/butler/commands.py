@@ -43,6 +43,15 @@ class CommandError(Exception):
     """A command failed for a user-visible, deterministic reason."""
 
 
+def unknown_command_text(command: str) -> str:
+    """Deterministic reply for an unknown ``/command`` (zero model calls).
+
+    Shared with the Telegram handler so private and group transports
+    answer unknown slash commands identically without reaching the LLM.
+    """
+    return f"Unknown command '/{command}'. Available: /new, /threads, /switch, /current."
+
+
 @dataclass(frozen=True)
 class CommandResult:
     """Result of executing one Butler command."""
@@ -103,9 +112,7 @@ class ThreadCommands:
             return self.cmd_switch(owner, args)
         if command == "current":
             return self.cmd_current(owner)
-        raise CommandError(
-            f"Unknown command '/{command}'. Available: /new, /threads, /switch, /current."
-        )
+        raise CommandError(unknown_command_text(command))
 
     # ------------------------------------------------------------------ #
     # /new
@@ -122,10 +129,7 @@ class ThreadCommands:
         log.info("butler.cmd_new", owner=owner, thread_id=thread.id)
         return CommandResult(
             handled=True,
-            text=(
-                f"Created thread '{thread.title}' and switched to it. "
-                f"Thread id: {thread.id}"
-            ),
+            text=(f"Created thread '{thread.title}' and switched to it. Thread id: {thread.id}"),
             thread_id=thread.id,
             switched=True,
         )
@@ -155,9 +159,7 @@ class ThreadCommands:
                 messages = self._threads.count_messages(owner, thread.id)
                 lines.append(f"  - {thread.title} ({messages} messages){marker}")
         if not lines:
-            text = (
-                "You have no threads yet. Create one with /new <title>."
-            )
+            text = "You have no threads yet. Create one with /new <title>."
         else:
             text = "Your threads:\n" + "\n".join(lines)
         return CommandResult(handled=True, text=text)
@@ -190,9 +192,7 @@ class ThreadCommands:
                 f"'{clean_ref}' matches {len(title_matches)} threads — be specific "
                 f"using /switch <id>:\n{listing}"
             )
-        raise CommandError(
-            f"No thread titled '{clean_ref}'. Use /threads to list yours."
-        )
+        raise CommandError(f"No thread titled '{clean_ref}'. Use /threads to list yours.")
 
     def _switch_to(self, owner: str, thread: Thread) -> CommandResult:
         self._threads.set_active_thread(owner, thread.id)

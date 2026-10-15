@@ -240,6 +240,19 @@ async def test_thread_context_cannot_cross_threads(
 
 
 @pytest.mark.asyncio
+async def test_record_turn_denies_foreign_owner(
+    engine: ThreadContextEngine, store: ThreadStore
+) -> None:
+    thread = _seed_thread(store, "alice")
+    with pytest.raises(KeyError):
+        await engine.record_turn("bob", thread.id, "hijack", "hijack reply")
+    with pytest.raises(KeyError):
+        await engine.record_turn("alice", "does-not-exist", "hi", "hello")
+    # The legitimate owner path still records.
+    await engine.record_turn("alice", thread.id, "hello", "hi")
+
+
+@pytest.mark.asyncio
 async def test_topical_recall_scoped_to_own_thread(
     engine: ThreadContextEngine, store: ThreadStore, memory
 ) -> None:
@@ -363,10 +376,7 @@ async def test_service_commands_opt_in_and_active_thread_fallback(tmp_path) -> N
         assert active is not None and active.title == "Research"
         # Active-thread fallback: no thread_id supplied, still lands in thread.
         await service.handle_message("hello thread", "alice", {}, commands_enabled=True)
-        assert any(
-            m.content == "hello thread"
-            for m in store.list_messages("alice", active.id)
-        )
+        assert any(m.content == "hello thread" for m in store.list_messages("alice", active.id))
         # Without commands_enabled, no active-thread fallback occurs.
         await service.handle_message("outside thread", "alice", {})
         contents = [m.content for m in store.list_messages("alice", active.id)]
@@ -407,14 +417,10 @@ async def test_service_triggers_summary_on_long_threads(tmp_path) -> None:
         ws = service.create_workspace("alice", "WS")
         thread = service.create_thread("alice", ws.id, "Long")
         for i in range(11):
-            await service.handle_message(
-                f"long session msg {i}", "alice", {"thread_id": thread.id}
-            )
+            await service.handle_message(f"long session msg {i}", "alice", {"thread_id": thread.id})
         summary = store.get_summary("alice", thread.id)
         assert summary is not None
-        ctx = await service.thread_context_engine.assemble(
-            "alice", thread.id, "long session msg 8"
-        )
+        ctx = await service.thread_context_engine.assemble("alice", thread.id, "long session msg 8")
         assert ctx.summary
         assert "[user] long session msg 0" in ctx.summary
     finally:
