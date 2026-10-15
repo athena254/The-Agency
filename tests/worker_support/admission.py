@@ -8,12 +8,12 @@ No early bootstrap notification is an acknowledgement of registry readiness.
 from __future__ import annotations
 
 import asyncio
-import logging
 import multiprocessing
 import os
 import queue
 import sys
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -301,12 +301,9 @@ def run_admission_race(path: str, *, mutant: bool = False, context: Any = None) 
         def attempt(label: str, operation: Any, fallback: Any = None) -> Any:
             try:
                 return operation()
-            except BaseException as exc:
+            except BaseException as exc:  # noqa: BLE001 - reap every resource even on interrupts
                 cleanup_errors.append(f"{label}: {type(exc).__name__}")
-                # Log the phase/type, never private exception text or traceback.
-                logging.getLogger(__name__).exception(
-                    "cleanup %s failed: %s", label, type(exc).__name__, exc_info=False
-                )
+                # Defer sanitized diagnostics; logging itself can interrupt reaping.
                 return fallback
 
         owned = [(worker, worker.pid) for worker in workers]
@@ -330,6 +327,8 @@ def run_admission_race(path: str, *, mutant: bool = False, context: Any = None) 
         if cleanup_errors:
             detail = "admission cleanup failed: " + "; ".join(cleanup_errors)
             if primary_error is not None:
-                primary_error.add_note(detail)
+                # A diagnostic hook must never replace the initiating error.
+                with suppress(BaseException):
+                    primary_error.add_note(detail)
             else:
                 raise AdmissionProtocolError(detail, observations)
