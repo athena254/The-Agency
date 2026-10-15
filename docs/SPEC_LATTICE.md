@@ -1,7 +1,7 @@
 # SPEC_LATTICE.md — Unified Lattice Service
 
-> **Status:** DESIGN SPECIFICATION
-> **Version:** 1.0
+> **Status:** TARGET BOUNDARY RECONCILED; LOCAL PROTOTYPE IS NOT PEER AUTHORITY
+> **Version:** 1.1
 > **Date:** 2026-09-22
 > **Author:** Hermes Agent + Danny Dis
 
@@ -11,7 +11,7 @@
 
 ## 1. Purpose & Scope
 
-The **Lattice** is the central coordination and memory layer for The Agency. It is the single source of truth for:
+The **Lattice** is the shared hive-memory, messaging, coordination and orchestration layer for The Agency. It connects independently identified agents and supports collective knowledge about:
 
 - **What agents exist** and their current state
 - **What tasks are running** and their dependencies
@@ -19,16 +19,17 @@ The **Lattice** is the central coordination and memory layer for The Agency. It 
 - **What decisions were made** and by whom
 - **Who trusts whom** (peer scoring, governance)
 
-Every component that needs to coordinate with another component goes through the Lattice. No exceptions.
+Cross-agent coordination uses the Lattice through reviewed interfaces. Shared memory is permission-scoped; it does not require replicating private content to all peers or one authoritative shared database. Butler is the human gateway, not an agent or validator. Orchestration is a Lattice function, not a separate decision-making boss.
 
 ### 1.1 What the Lattice IS
-- A unified API for graph + vector + relational data
-- An event-sourced coordination log
-- The governance substrate (voting, reputation, consensus)
-- The memory substrate (agent state, task history, deliverables)
+- **Hive memory:** permission-scoped knowledge, context, evidence, provenance and work history.
+- **Messaging:** authenticated exchange of requests, findings, proposals and results; durable delivery/replay remains an implementation gap.
+- **Coordination:** dependencies, assignments, peer inputs and independent checks.
+- **Orchestration:** collective task progression under approved rules, using replaceable scheduling roles.
+- Graph/vector/relational APIs and local event logs support these functions; they are not themselves peer consensus.
 
 ### 1.2 What the Lattice is NOT
-- It is NOT a message bus (use Redis/Streams for that if needed)
+- It is not **merely** a message bus: messaging is one of its responsibilities. No particular broker is selected or required by this document.
 - It is NOT a file store (use filesystem/S3 for artifacts)
 - It is NOT an LLM (it provides data TO agents, not reasoning)
 
@@ -45,6 +46,10 @@ Every component that needs to coordinate with another component goes through the
 | **Graceful degradation** | Works on SQLite alone; scales with Neo4j + Qdrant |
 
 ---
+
+## Implementation status of the remaining local design
+
+Sections 3–6, configuration and the historical file/test/migration sketches preserve local prototype design material, not an approved peer protocol or a complete implemented-API inventory. Optional indexes do not confer authority. The SQLite backend persists proposal state, the separate GovernanceEngine maintains process-local proposal state with best-effort mirroring, and the in-memory backend has different duplicate-ballot behavior; none is independently replicated peer governance. A local SQL transaction or reputation score cannot grant action authority. See `CURRENT_STATE.md` for implemented scope and `SPEC_LATTICE_FOUNDATION_REPAIRS.md` for the repair boundary.
 
 ## 3. Data Model
 
@@ -386,7 +391,7 @@ CREATE INDEX idx_vectors_collection ON vectors(collection);
 ### 5.3 Qdrant (Optional, Vector Search)
 
 - Used only for vector storage and semantic search
-- SQLite remains the source of truth for metadata
+- SQLite may back a peer's local metadata/index; it is not network-wide authority or a substitute for committed peer state
 - If Qdrant unavailable, vector operations degrade to "not supported" (not error)
 
 ### 5.4 Backend Selection Logic
@@ -446,16 +451,16 @@ def create_lattice(config: LatticeConfig) -> LatticeBackend:
 
 ## 7. Governance Integration
 
-### 7.1 Consensus Protocol
+### 7.1 Peer authority target (specified, not enabled)
 
-When a new sub-agent spawn is proposed:
+1. Butler carries an authenticated human request; it has no validator key, ballot or unilateral permission.
+2. An identified peer proposes the exact action, membership/policy versions and independently recomputable affected set.
+3. Every affected consumer supplies attributable input. Missing input blocks. A present rejection is not an individual veto; override conditions require approved policy.
+4. Each replica validates the application transition and committed input set. Engine ordering/finality is distinct from application approval and evidence correctness.
+5. A final grant binds the action, resource scope and assignment. The worker/resource independently verifies it before acting; schedulers cannot mint authority.
+6. Result/evidence and recovery records are durably acknowledged before success is claimed.
 
-1. **Proposal created** in Lattice with `proposal_type: "spawn_agent"`
-2. **Quorum computed** — Butler + Personal Agent + User (3 voters, need 2/3)
-3. **Each voter casts vote** with evidence
-4. **Quorum checked** automatically when vote is cast
-5. **If passed** — orchestrator spawns the agent
-6. **If denied** — proposal closed, appeal possible
+Fault bounds, validator membership/power, application thresholds and human-input proof remain owner decisions. Local API default arguments are not approved peer policy.
 
 ### 7.2 Reputation Formula
 
@@ -470,16 +475,9 @@ def compute_reputation(rep: Reputation) -> float:
     return 0.6 * success_rate + 0.4 * peer_avg
 ```
 
-### 7.3 Vote Weight
+### 7.3 Participation and weighting
 
-```python
-def vote_weight(voter_id: str) -> float:
-    rep = await get_reputation(voter_id)
-    # Butler and User always weight 1.0
-    if voter_id in ("butler", "user"):
-        return 1.0
-    return rep.score
-```
+Butler never ballots, and a `user` string grants no override. Human input is not a validator ballot. The formula in §7.2 is a legacy local reputation heuristic, not approved voting power. Consensus voting power, application approval weights and voter eligibility require separate explicit contracts.
 
 ---
 
@@ -516,7 +514,7 @@ lattice:
     retention_days: 365
     prune_enabled: false
 
-  # Governance
+  # Legacy local-prototype polling only; NOT approved peer policy
   governance:
     default_quorum: 0.66
     proposal_ttl_seconds: 3600
@@ -528,22 +526,12 @@ lattice:
 ## 9. Integration Points
 
 ### 9.1 Butler (Gateway)
-```python
-# Butler uses Lattice for:
-- lattice.get_agent_count()          # For /status
-- lattice.get_status()               # For /health
-- lattice.send_to_agent(id, msg)     # Route messages
-- lattice.send_and_wait(id, msg)     # Synchronous RPC
-```
 
-### 9.2 Orchestrator
-```python
-# Orchestrator uses Lattice for:
-- Register tasks, track dependencies
-- Record deliverables
-- Query active agents and capabilities
-- Submit governance proposals for agent lifecycle
-```
+Butler carries human inputs and presents committed status/results. The existing local status/count surfaces are not proof of peer messaging. Previously advertised `send_to_agent` and `send_and_wait` are unimplemented by the inspected Lattice/backend API. Authenticated transport, durable inbox/outbox, deduplication, recovery and scope contracts are prerequisites to adding those capabilities.
+
+### 9.2 Orchestration within the Lattice
+
+Task dependencies, assignments, deliverables, capability discovery and peer proposals are collective Lattice functions. `src/agency/orchestrator.py` is current local wiring, not a separate target authority. Schedulers are replaceable and cannot grant permissions or manufacture peer approval.
 
 ### 9.3 Agents (Domain Agents)
 ```python
@@ -595,7 +583,9 @@ lattice:
 
 ---
 
-## 11. Migration Plan
+## 11. Historical local-backend migration sketch
+
+The week labels below preserve historical phases, not dates or delivery promises. Current delivery order and release gates are in `PRODUCTION_READINESS_PLAN.md` and `SPEC_SINGLE_HOST_LATTICE_MILESTONE.md`.
 
 ### Phase 1: SQLite Core (Week 1)
 - Implement `SQLiteLattice` backend
@@ -624,7 +614,7 @@ lattice:
 | SQLite performance degrades at scale | Monitor node count; plan Neo4j migration at 100k+ nodes |
 | Vector search unavailable without Qdrant | Graceful degradation to metadata-only search |
 | Event log grows unbounded | Configurable retention + pruning |
-| Race conditions in voting | Atomic transactions per proposal |
+| Race conditions in local polling | Atomic local transactions; these are not Byzantine peer agreement |
 | Schema migrations | Versioned schema with automatic migration |
 
 ---
