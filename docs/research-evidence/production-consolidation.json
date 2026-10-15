@@ -1,6 +1,7 @@
 {
   "recorded_at": "2026-10-15T11:17:34.937714+03:00",
-  "status": "local completion qualified; production NO-GO",
+  "status": "historical c47f7a7 consolidation checkpoint; superseded by late-review verification",
+  "superseded_by": "late-review-verification.json",
   "tested_revision": "c47f7a727380758f37244a90811a677bd25919cc",
   "source_tree": "7dbf14ff087cb3b845651a2d07d8a18799bf3724",
   "test_tree": "6554e999ef33591325a7a005535bd6e1c24b4990",

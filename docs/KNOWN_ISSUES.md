@@ -1,6 +1,6 @@
 # Known qualification issues
 
-Updated October 15, 2026. These are tracked engineering findings, not waived warnings or GitHub issue closures. Full results/source trees are in `research-evidence/production-consolidation.json`. Production gates remain open.
+Updated October 15, 2026. These are tracked engineering findings, not waived warnings or GitHub issue closures. Full results/source trees are in `research-evidence/late-review-verification.json`. Production gates remain open.
 
 ## W-01 — SQLite worker threads after event-loop shutdown
 
@@ -34,8 +34,13 @@ Observed: the free worker reported one transient child-spawn-related recovery fa
 
 State: OPEN, qualification debt. Preserve child stderr/exit codes in failed test diagnostics, detect premature child exit instead of waiting only on marker timeouts, stress repeated runs under bounded load on Windows/Ubuntu and diagnose the actual failing condition. Do not merely increase deadlines or retry until green.
 
+## Late assessment follow-ups
+
+Read `LATE_REVIEW_DISPOSITION.md` for the delayed assessments' exact source revision, superseded findings, closed strict-driver bypass and open R-01–R-06 product gaps. In particular, all-domain context continuity, actual specialist/DAG execution, blocking evidence verification, legacy memory-tool tenant isolation, runtime durability and authenticated capability publication remain unfinished. They are mandatory plan items where relevant, not capabilities inferred from passing tests or class names.
+
 ## Closed integration regressions in this pass
 
+- Scripted/duck-typed models and MeteredModel subclasses could skip strict-driver metering and return an unaudited final answer. Four regressions reproduced the bypass; `28c9d09` enforces an exact concrete request-bound model. Existing audit/provider/policy failure assertions now use real temporary metering rather than granting test doubles a production exception.
 - Completed recoverable runs returned data before checking actor/input binding. Fixed with binding checks before every completed return plus regression coverage.
 - Provider adapter drift was checked only before awaits. Fixed by rechecking the bound provider/model immediately before dispatch; mutation-during-reservation regression proved RED then GREEN.
 - Unknown cancellation/exception/empty replies wrote terminal audit outcomes, clearing the pending gate across restart. Fixed using nonterminal durable uncertainty evidence; retries remain blocked after audit reopen.

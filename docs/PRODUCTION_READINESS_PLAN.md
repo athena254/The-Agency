@@ -1,6 +1,6 @@
 # Production readiness plan
 
-Status: **NOT PRODUCTION READY**. This is a gated engineering plan, not authorization to deploy. Owner requested October 15, 2026. Current implementation evidence is maintained in `CURRENT_STATE.md` and `research-evidence/production-consolidation.json` after integration. The 51-section source brief remains product direction; this plan does not pretend its planned features are implemented.
+Status: **NOT PRODUCTION READY**. This is a gated engineering plan, not authorization to deploy. Owner requested October 15, 2026. Current implementation evidence is maintained in `CURRENT_STATE.md` and `research-evidence/late-review-verification.json` after integration. The 51-section source brief remains product direction; this plan does not pretend its planned features are implemented.
 
 ## 1. Define what will be released
 
@@ -17,7 +17,7 @@ These findings are grounded in the checked-out code, not hypothetical framework 
 
 - `Dockerfile` copies `src/agency/` but not the top-level Telegram bot; its command invokes `python -m agency.api.server` although that module defines an ASGI app rather than a module runner. Its health probe `/health` does not match the Agency API's `/v1/health`. Installer location/runtime dependency locking and actual image startup must be tested; a successful wheel build alone is insufficient.
 - `docker-compose.yml` publishes Redis and PostgreSQL host ports, uses a `changeme` database-password fallback, adds services without proving the runtime uses them, and provides `AGENCY_TELEGRAM_BOT_TOKEN` while the bot reads `TELEGRAM_BOT_TOKEN`. Do not ship this file unchanged or assume all these services are necessary. Prefer one explicit process/service per boundary and only dependencies actually used.
-- `scripts/run_telegram_bot.py` pins exact tested `src` and `tests` Git trees. This pass repinned the trees tested at `c47f7a7`, and `--check` passed without starting the bot. Future source changes must pass gates before re-pinning; keep beta off. Preflight success is not deployment or owner-side Telegram reply proof.
+- `scripts/run_telegram_bot.py` pins exact tested `src` and `tests` Git trees. This pass repinned the trees tested at `59e9bc9`, and `--check` passed without starting the bot. Future source changes must pass gates before re-pinning; keep beta off. Preflight success is not deployment or owner-side Telegram reply proof.
 - The legacy Lattice governance keeps authoritative proposal dictionaries in one process, best-effort mirrors state, and supports a special `user` override. It is a prototype, NOT Byzantine agreement. Public HTTP business routes remain closed until a real authority chain replaces these bypasses.
 - The local browser app has loopback/Host/Origin/CSRF guards and an isolated model-only chat path, not multiuser authentication or distributed authorization. Enforce the actual server bind; app headers alone are not a deployment boundary.
 - `web_fetch` DNS preflight is not connection-address pinning. Keep it disabled for beta until the actual egress connection is constrained and rebinding/redirect tests pass.
@@ -64,6 +64,8 @@ Acceptance: real containment tests on target OS for filesystem/network/CPU/memor
 ### P4 — Product integration and capability lifecycle
 
 Dependencies: P2/P3 for authority-bearing runtime paths.
+
+Late source-review backlog (details in `LATE_REVIEW_DISPOSITION.md`): R-01 consistent owner-scoped conversation context in every routed domain; R-02 actual subtask-specific specialist dispatch/dependency outputs rather than repeated whole-task prompts; R-03 evidence/QA outcomes that are not hardcoded to passed and have the approved blocking semantics; R-04 principal-bound memory-tool resource scope/redacted errors before multiuser exposure; R-05 durable task/audit/evidence lifecycle and explicit memory aging; R-06 strict authenticated/evaluated capability approval/publication. P1/P3 must close the privacy/authority subsets before any pilot that could expose them; this list does not defer a tenant leak until after deployment.
 
 Work: close AgentFactory restart/reconciliation/evaluation gaps; bind versioned published skills/workflows to actual permitted execution and evidence. Review the proposed unified capability contract before implementation. Forge expands in independently gated slices: isolated tests -> reviewer/security evidence -> bounded coding -> immutable artifacts -> authorized release. Workspace/project/authenticated UI is separate from current local chat shell. Domain agents beyond general/research/demo need actual implementations and evaluations, not seeded names.
 

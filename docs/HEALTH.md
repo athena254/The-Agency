@@ -1,6 +1,6 @@
 # The Agency — Project Health Assessment (honest)
 
-> October 15, 2026 update: **pre-production; release NO-GO** until the gates in [PRODUCTION_READINESS_PLAN.md](PRODUCTION_READINESS_PLAN.md) pass. [CURRENT_STATE.md](CURRENT_STATE.md) supersedes older component/status/PR snapshots below. Current exact local checks are in `research-evidence/production-consolidation.json`, not the historical totals here. Source histories are consolidated on `main`, runtime data is preserved outside Git tracking, and internal model metering/local recovery exist. Full peer authority, all-entrypoint budget/audit, hostile-code/tenant isolation, deployable artifacts/operations and independent release review remain blockers.
+> October 15, 2026 update: **pre-production; release NO-GO** until the gates in [PRODUCTION_READINESS_PLAN.md](PRODUCTION_READINESS_PLAN.md) pass. [CURRENT_STATE.md](CURRENT_STATE.md) supersedes older component/status/PR snapshots below. Current exact local checks are in `research-evidence/late-review-verification.json`, not the historical totals here. Source histories are consolidated on `main`, runtime data is preserved outside Git tracking, and internal model metering/local recovery exist. Full peer authority, all-entrypoint budget/audit, hostile-code/tenant isolation, deployable artifacts/operations and independent release review remain blockers.
 
 > Aligned with `README.md`, `docs/ARCHITECTURE.md`, and `docs/ROADMAP.md`.
 > Direction: `docs/SOURCE_CONSOLIDATED_BRIEF.md`; code-backed gaps:

@@ -31,10 +31,10 @@ from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Verified trees at c47f7a7: 1293 Python tests, 14 UI tests, Ruff and mypy.
-# See docs/research-evidence/production-consolidation.json for scope/warnings.
-VERIFIED_SRC_TREE = "7dbf14ff087cb3b845651a2d07d8a18799bf3724"
-VERIFIED_TESTS_TREE = "6554e999ef33591325a7a005535bd6e1c24b4990"
+# Verified trees at 59e9bc9: 1297 Python tests, 14 UI tests, Ruff and mypy.
+# See docs/research-evidence/late-review-verification.json for scope/warnings.
+VERIFIED_SRC_TREE = "6a87df6a15a876e5b2443fd3b1eda6d975e5c5b3"
+VERIFIED_TESTS_TREE = "3342f6e32fa7372dcacc7c8b7a473b0551f529bc"
 
 
 def git(*args: str) -> str:
