@@ -449,10 +449,6 @@ class WorkflowExecutor:
             raise RuntimeError("resume denied: lock held by a live worker.")
         try:
             stored = self._registry.get_recoverable_run(run_id)
-            if stored.status == "COMPLETED":
-                return stored
-            if stored.status != "INDETERMINATE":
-                raise RuntimeError(f"run {run_id!r} is {stored.status}; reconcile before resume.")
             if stored.input_digest != digest:
                 raise ValueError("resume inputs do not match recorded digest.")
             if stored.actor_id != actor:
@@ -462,6 +458,10 @@ class WorkflowExecutor:
                 raise ValueError("pinned definition changed; resume refused.")
             if self._ops_binding(definition) != dict(stored.ops_binding):
                 raise ValueError("operation versions changed; resume refused.")
+            if stored.status == "COMPLETED":
+                return stored
+            if stored.status != "INDETERMINATE":
+                raise RuntimeError(f"run {run_id!r} is {stored.status}; reconcile before resume.")
             order = topological_order(definition)
             running = self._persist_recoverable_state(
                 stored,
