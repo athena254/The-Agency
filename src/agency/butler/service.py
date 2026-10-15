@@ -79,7 +79,8 @@ class ButlerService:
         self._config = config or ButlerConfig()
         self._orchestrator = orchestrator or AgencyOrchestrator()
         self._router = router or MessageRouter()
-        self._audit = audit_log or AuditLog(":memory:")
+        self._owns_audit = audit_log is None
+        self._audit = audit_log if audit_log is not None else AuditLog(":memory:")
         # Share the orchestrator's memory store — one store, one truth.
         # (A standalone MemoryStore here was a second, separate DB.)
         self._memory = memory_store or self._orchestrator._memory_store
@@ -93,6 +94,7 @@ class ButlerService:
         self._log = structlog.get_logger(__name__)
         self._started = False
         self._seeded = False
+        self._orchestrator_active = False
 
     @property
     def lattice(self) -> Lattice | None:
@@ -169,28 +171,57 @@ class ButlerService:
     # ------------------------------------------------------------------ #
 
     async def start(self) -> None:
-        """Initialise stores, orchestrator and default agents (idempotent)."""
+        """Initialise stores and services, rolling back failed startup."""
         if self._started:
             return
-        await self._audit.initialize()
-        await self._memory.initialize()
-        await self._orchestrator.start()
-        # Pick up the Lattice from orchestrator after it starts
-        if hasattr(self._orchestrator, "_lattice") and self._orchestrator._lattice is not None:
+        try:
+            await self._audit.initialize()
+            # The orchestrator alone initializes/closes its shared memory.
+            self._orchestrator_active = True
+            await self._orchestrator.start()
+            if self._memory is not self._orchestrator._memory_store:
+                await self._memory.initialize()
             self._lattice = self._orchestrator._lattice
-        await self._ensure_default_agents()
+            await self._ensure_default_agents()
+        except BaseException:
+            try:
+                await self.stop()
+            except BaseException as exc:  # noqa: BLE001 — finish cleanup before re-raising.
+                self._log.warning("butler.rollback_failed", error_type=type(exc).__name__)
+            raise
         self._started = True
         self._log.info("butler.started")
 
     async def stop(self) -> None:
-        """Shut down background services (memory lifecycle only; stores stay open)."""
-        if not self._started:
-            return
-        await self._orchestrator.stop()
-        if self._owns_threads and self._threads is not None:
-            self._threads.close()
-            self._threads = None
+        """Stop the orchestrator; close only Butler-owned audit/thread stores."""
         self._started = False
+        self._lattice = None
+        self._engine = None
+        self._commands = None
+        error: BaseException | None = None
+        if self._orchestrator_active:
+            try:
+                await self._orchestrator.stop()
+            except BaseException as exc:  # noqa: BLE001 — finish cleanup before re-raising.
+                error = exc
+            else:
+                self._orchestrator_active = False
+        if self._owns_threads and self._threads is not None:
+            try:
+                self._threads.close()
+            except BaseException as exc:  # noqa: BLE001 — finish cleanup before re-raising.
+                if error is None:
+                    error = exc
+            else:
+                self._threads = None
+        if self._owns_audit:
+            try:
+                await self._audit.close()
+            except BaseException as exc:  # noqa: BLE001 — finish cleanup before re-raising.
+                if error is None:
+                    error = exc
+        if error is not None:
+            raise error
         self._log.info("butler.stopped")
 
     async def _ensure_started(self) -> None:

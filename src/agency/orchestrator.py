@@ -161,12 +161,22 @@ class AgencyOrchestrator:
     # ------------------------------------------------------------------ #
 
     async def start(self) -> None:
-        """Start background services."""
-        await self._memory_store.initialize()
-        await self._evidence_store.initialize()
-        await self._audit_log.initialize()
-        self._lattice = await get_lattice()
-        self._build_tool_layer()
+        """Start background services once until stopped."""
+        if self._started:
+            return
+        try:
+            await self._memory_store.initialize()
+            await self._evidence_store.initialize()
+            await self._audit_log.initialize()
+            self._lattice = await get_lattice()
+            self._build_tool_layer()
+        except BaseException:
+            # Cancellation also requires rollback; cleanup must not mask it.
+            try:
+                await self.stop()
+            except BaseException as exc:  # noqa: BLE001 — finish cleanup before re-raising.
+                self._log.warning("orchestrator_rollback_failed", error_type=type(exc).__name__)
+            raise
         self._started = True
         self._log.info("orchestrator_started")
 
@@ -200,12 +210,34 @@ class AgencyOrchestrator:
         )
 
     async def stop(self) -> None:
-        """Stop background services."""
-        await self._memory_lifecycle.stop_periodic()
-        if self._lattice is not None:
-            await self._lattice.close()
-            self._lattice = None
+        """Attempt every cleanup, including after partial startup.
+
+        Preserve the existing Lattice close contract; shared factory ownership
+        and store-internal initialization rollback are separate follow-ups.
+        """
         self._started = False
+        self._tool_registry = None
+        self._tool_driver = None
+        error: BaseException | None = None
+        closers = [self._memory_lifecycle.stop_periodic]
+        lattice = self._lattice
+        if lattice is not None:
+            closers.append(lattice.close)
+        closers.extend(
+            [self._audit_log.close, self._evidence_store.close, self._memory_store.close]
+        )
+        for close in closers:
+            try:
+                await close()
+            except BaseException as exc:  # noqa: BLE001 — finish cleanup before re-raising.
+                if error is None:
+                    error = exc
+                self._log.warning("orchestrator_cleanup_failed", error_type=type(exc).__name__)
+            else:
+                if lattice is not None and close == lattice.close:
+                    self._lattice = None
+        if error is not None:
+            raise error
         self._log.info("orchestrator_stopped")
 
     # ------------------------------------------------------------------ #
