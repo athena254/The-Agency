@@ -9,7 +9,6 @@ import structlog
 from pydantic import BaseModel, Field
 
 from agency.kernel.audit import BetaAuditLog
-from agency.llm.adapter import LLMAdapter
 from agency.llm.metered import MeteredBinding, MeteredModel
 from agency.tools.base import BetaPrincipal, ToolContext
 
@@ -203,35 +202,21 @@ class ToolDriver:
             return ToolLoopResult(final_answer="Beta tool unavailable.", status="tool_error")
         metered = None
         if beta_path:
-            # Strict/beta dispatch: a concrete MeteredModel bound to the exact
-            # same principal AND the same concrete audit object as ctx flows
-            # through metering; every dispatch error then maps to a granular
-            # audit_error/llm_error. A bare concrete LLMAdapter is denied
-            # before any generate (never silently downgraded to non-beta).
-            # Legacy scripted doubles without a concrete beta audit object
-            # keep their historical fail-closed dispatch behavior so existing
-            # beta denial assertions still observe audit/llm failures.
-            llm_is_metered = type(self._llm) is MeteredModel and isinstance(
-                getattr(self._llm, "binding", None), MeteredBinding
-            )
-            audit_is_beta = ctx.audit is not None and type(ctx.audit) is BetaAuditLog
-            if isinstance(self._llm, LLMAdapter) or (
-                llm_is_metered
-                and (
-                    self._llm.binding.principal != ctx.beta_principal
-                    or not isinstance(ctx.beta_principal, BetaPrincipal)
-                    or ctx.beta_principal.private_chat is not True
-                    or self._llm.audit is not ctx.audit
-                    or not audit_is_beta
-                )
+            # No scripted/duck-typed model or subclass can bypass the concrete
+            # request-bound metering seam, even when it returns a final answer
+            # without invoking a tool. Test doubles belong below this boundary.
+            if type(self._llm) is not MeteredModel:
+                return ToolLoopResult(final_answer="Beta tool unavailable.", status="tool_error")
+            if (
+                not isinstance(self._llm.binding, MeteredBinding)
+                or not isinstance(ctx.beta_principal, BetaPrincipal)
+                or ctx.beta_principal.private_chat is not True
+                or self._llm.binding.principal != ctx.beta_principal
+                or type(ctx.audit) is not BetaAuditLog
+                or self._llm.audit is not ctx.audit
             ):
                 return ToolLoopResult(final_answer="Beta tool unavailable.", status="tool_error")
-            if llm_is_metered:
-                if not audit_is_beta:
-                    return ToolLoopResult(
-                        final_answer="Beta tool unavailable.", status="tool_error"
-                    )
-                metered = self._llm
+            metered = self._llm
 
         specs: list[Any] = []
         try:
