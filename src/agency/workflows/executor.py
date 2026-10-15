@@ -129,7 +129,7 @@ class WorkflowExecutor:
         if self._authorizer is None:
             return False
         try:
-            return bool(self._authorizer(actor_id, permission))
+            return self._authorizer(actor_id, permission) is True
         except Exception:  # noqa: BLE001 - deny closed on authorizer failure
             return False
 
