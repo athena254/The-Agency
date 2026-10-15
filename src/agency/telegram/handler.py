@@ -9,7 +9,6 @@ from typing import Any
 import structlog
 
 from agency.agents.demo.agent import DemoAgent
-from agency.butler.commands import ThreadCommands, unknown_command_text
 from agency.telegram.adapter import TelegramAdapter
 from agency.telegram.budget_store import BetaBudgetStore, BudgetUnavailable
 from agency.telegram.config import TelegramConfig
@@ -62,12 +61,21 @@ _CREATION_ATTEMPT = re.compile(
 )
 
 
+def unknown_command_text(command: str) -> str:
+    # Avoid eager Butler -> orchestrator -> ToolDriver -> metering cycles.
+    from agency.butler.commands import unknown_command_text as render
+
+    return render(command)
+
+
 def _normalize_thread_command(text: str) -> str | None:
     """Return Butler-ready ``/command args`` for this bot's thread commands.
 
     Strips an ``@RemexMemorybot`` suffix; returns None for non-commands,
     other bots' suffixes, and non-thread commands.
     """
+    from agency.butler.commands import ThreadCommands
+
     parsed = ThreadCommands.parse(text.strip())
     if parsed is None:
         return None
@@ -90,6 +98,8 @@ def _unknown_command_name(text: str) -> str | None:
     addressed to another bot is unknown to us: deterministic, never
     executed.
     """
+    from agency.butler.commands import ThreadCommands
+
     parsed = ThreadCommands.parse(text.strip())
     if parsed is None:
         return None
