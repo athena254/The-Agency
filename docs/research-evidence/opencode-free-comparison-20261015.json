@@ -1,0 +1,52 @@
+[
+  {
+    "model": "muse-spark-1.3-contributor-free",
+    "seconds": 48.82,
+    "status": "completed",
+    "score": 22,
+    "checks": 22,
+    "reported_cost": 0,
+    "review": [
+      "call_provider before reserve_quota allows quota bypass and overspend",
+      "side effects before audit_intent leaves actions unaudited",
+      "audit failure swallowed is fail-open, must fail closed",
+      "unconditional return_success masks provider, quota, and audit failures",
+      "missing intent validation before provider call and quota reservation"
+    ],
+    "exit_code": 0
+  },
+  {
+    "model": "longcat-2.5-preview-free",
+    "seconds": 50.08,
+    "status": "completed",
+    "score": 22,
+    "checks": 22,
+    "reported_cost": 0,
+    "review": [
+      "call_provider before authorize: external side effect runs without authorization gate",
+      "reserve_quota before audit_intent: resource committed before intent is verified",
+      "audit failure swallowed: swallowed exception lets operation proceed as if audited",
+      "return_success returned even when audit fails: result does not reflect audit outcome"
+    ],
+    "exit_code": 0
+  },
+  {
+    "model": "nemotron-3.5-lightning-free",
+    "seconds": 85.91,
+    "status": "completed",
+    "score": 21,
+    "checks": 22,
+    "reported_cost": 0,
+    "review": [
+      "audit failure swallowed",
+      "audit executed after return_success"
+    ],
+    "exit_code": 0
+  },
+  {
+    "model": "mimo-v2.6-flash-free",
+    "seconds": 150.51,
+    "status": "timeout",
+    "score": 0
+  }
+]
