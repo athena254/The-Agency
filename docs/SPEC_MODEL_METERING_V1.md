@@ -1,8 +1,6 @@
 # Model metering V1 — frozen spec (CORRECTED, supersedes draft)
 
-> Consolidation status: specification only. Candidate implementation is unfinished
-> and kept off main; see `FREE_PROGRAM_BUILD_STATUS.md`. Frozen contract is not
-> evidence of operational metering.
+> Current checkpoint: source was integrated into canonical `main` through `7bc5987`, then consolidated on October 15, 2026. See `CURRENT_STATE.md` and `research-evidence/production-consolidation.json` for the final qualification results. This is an internal metering seam; beta ingress remains disabled. The historical base notes below are not a deployment claim.
 
 Status: FROZEN. Base `18b9717`. Program `docs/SPEC_FREE_ONLY_DECENTRALIZED_PROGRAM.md`. License MIT (`pyproject.toml:11`).
 Scope: request-bound metered adapter on the existing ToolDriver beta path ONLY. No beta ingress enablement, no Butler/orchestrator/Telegram-guard change, no `adapter.py` change. Top-level beta admission stays disabled. Ordinary non-beta behavior byte-identical.
@@ -24,6 +22,8 @@ P-IDs: P-1 echo-only tests (echo + fake transport, never live); P-2 worktree is 
 1. Validate prompt: valid nonempty `str`, else deny before any store call. 2. Reject closed/foreign capability, principal mismatch (`binding.principal != ctx principal`), `private_chat is not True`, any context-supplied binding/provider/model override — all BEFORE dispatch, zero provider calls. 3. `ok = await store.reserve_model_call(bot_id, update_id, user_id, capability=cap)`; `False`/`BudgetUnavailable` -> deny, zero provider calls.
 
 ## 5. Failure / retry / audit semantics
+
+**October 15 safety correction:** uncertainty must not be acknowledged as terminal. Regressions reproduced cancellation/exception/empty responses clearing the pending gate and permitting another attempt after audit reopen. These now persist redacted `result='unknown'`, `phase='uncertainty'` evidence, leaving the original intent unresolved and blocking retries across processes/restart. Timeout retains its pending intent; success alone uses `phase='outcome'`. Binding is rechecked after quota/audit awaits immediately before dispatch. No automatic pending-clearance is provided: uncertainty trades availability for safety. This supersedes terminal-unknown wording below.
 - Pending intent (`claim_intent`, redacted metadata only — call_id, provider/model labels, principal user id; NEVER prompt, capability, secrets) precedes dispatch; `False`/raise incl. cancel -> deny, zero provider calls, pending stays blocking (no blind retry/refund). Provider unknown outcome (timeout/cancel/exception/ambiguous/empty shape) -> durable `outcome(result='unknown', redacted error_class)` then `llm_error`; never success-shaped text (B-13 fail-open closed).
 - Audit/completion persistence failure → no success claim; suspend further beta work until audit health recovers.
 - Bounded dispatch uses `asyncio.wait_for(inner.generate(prompt, {}), timeout_s)` with EMPTY context (kills the `adapter.py:117-118` override hole). Retries BOUNDED: `max_tool_iterations=6` + adapter timeouts only. Missing/stale binding can never degrade to non-beta.

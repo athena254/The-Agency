@@ -1,5 +1,7 @@
 # The Agency — Roadmap (honest implemented / partial / planned)
 
+> October 15, 2026 update: the current source-backed feature ledger is [CURRENT_STATE.md](CURRENT_STATE.md). The active engineering order is P0 reproducible baseline -> P1 end-to-end identity/budget/audit -> P2 peer application authority -> P3 isolation/privacy/recovery -> P4 Factory/skills/Forge integration -> P5 deployment operations -> P6 independent release review. See [PRODUCTION_READINESS_PLAN.md](PRODUCTION_READINESS_PLAN.md) for dependencies and acceptance criteria. Older sprint/PR snapshots below are historical where superseded. Both metering and local recovery implementations are now on `main`; neither enables beta or constitutes peer authority.
+
 > **Normative direction:** `docs/SOURCE_CONSOLIDATED_BRIEF.md` §§45–46 (priorities and
 > build sequence) and `docs/SPEC_AGENCY_CORE_RECONCILIATION.md` (code-backed gap matrix
 > and first build slice). Status words below are coarse — Implemented / Exists /
@@ -46,7 +48,7 @@
 | Durable thread / workspace / project store | Partial | SQLite thread/workspace store for trusted callers; public HTTP is anonymous/stateless until authentication, project model pending |
 | Agent Factory (versioned) | Partial v1 | Versioned blueprints, approval, L0/UNKNOWN activation; no evaluation, autonomous creation or restart rehydration |
 | Skill registry (Agency-native) | Partial | Versioned metadata, lifecycle evidence, explicit permissions; skill runtime binding pending |
-| Workflow registry + deterministic executor | Partial | Bounded DAG validation, pinned versions, allowlisted operations; no Agent/Forge integration or crash resume |
+| Workflow registry + deterministic executor | Partial product, explicit local recovery implemented | Bounded DAG/pinned allowlisted execution plus file-backed `run_recoverable/resume/reconcile`; Agent/Forge integration and distributed task recovery remain missing |
 | Forge (integrated) + native coding agent | Partial inspection gate | `forge/inspection.py` has bounded read-only hash/syntax reports; real coding, tests, security review, packaging and release remain planned |
 | Durable governance votes / approvals | Planned | Persist proposals/votes; human-approval flow |
 | Workspace/project UI, branching | Planned | After thread isolation lands |

@@ -1,5 +1,7 @@
 # Branch cleanup checkpoint
 
+> October 15, 2026 final consolidation supersedes the remaining-branch/folder lists below. All original branch tips and reviewed completion-worker commits are ancestors of canonical `main`; all worker branches/worktrees were retired after hash-verified source/private-input snapshots and recoverable Git bundle checks. Final verification is at `c47f7a7`; see `CURRENT_STATE.md` and `research-evidence/production-consolidation.json`. The canonical runtime DB remains on disk with its original SHA-256, now outside Git tracking. No remote push/delete, deployment or beta enablement was performed.
+
 The owner requested merging completed work and retaining only active branches.
 Completed work was already integrated at `fef7520`. This cleanup changes no
 application code, tests, live settings or runtime data. It does not enable beta.

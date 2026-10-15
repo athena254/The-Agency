@@ -1,5 +1,7 @@
 # The Agency — Governed Multi-Agent Execution System
 
+**Current checkpoint — October 15, 2026:** pre-production prototype, not a deployed decentralized runtime. Start with [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) for implemented/partial/planned boundaries and [`docs/PRODUCTION_READINESS_PLAN.md`](docs/PRODUCTION_READINESS_PLAN.md) for release gates. Both metering and local-recovery source histories are consolidated on `main`; historical PR/test totals below are not current release evidence. Beta model/tool ingress remains disabled and legacy business HTTP routes are health-only/closed. The browser UI is a local HTML/JS prototype, not an Electron/React production GUI.
+
 > Human → Butler → orchestrator/agents/tools, with Lattice coordination,
 > memory, policies/audit/sandbox as cross-cutting infrastructure.
 > Agent Factory and Forge now have narrow v1 foundations alongside partial thread,
@@ -61,7 +63,7 @@ provenance/evidence (`src/agency/evidence/`), sandbox isolation
 
 | Area | State | Evidence / note |
 |------|-------|-----------------|
-| Butler gateway | Partial | Trusted channels can use owner-scoped threads; unauthenticated HTTP ignores caller `sender`/context, uses a one-turn anonymous identity and no memory persistence |
+| Butler gateway | Partial product | Owner-scoped threads/context and private nonbeta transport commands; public legacy business HTTP is closed pending authority; see CURRENT_STATE for verified boundaries |
 | Orchestrator + task pipeline | Partial | `src/agency/orchestrator.py`, `src/agency/kernel/tasks.py` |
 | Research agent | Exists, partial | `src/agency/agents/research/agent.py`; offline integration tests exercise the route, but a live provider response is not certified by CI |
 | General/demo agents, planner, verifier | Exists, partial | `src/agency/agents/`; capability/eval coverage not claimed |
@@ -73,6 +75,7 @@ provenance/evidence (`src/agency/evidence/`), sandbox isolation
 | Agent Factory | Partial v1 | `src/agency/factory/`: versioned blueprints, approval, L0 identity activation/revocation; no autonomous creation/evaluation or runtime restart recovery |
 | Skill registry, workflow registry/executor | Partial | `src/agency/skills/`, `src/agency/workflows/` provide versioned metadata and a bounded allowlisted runner; not yet integrated with an agent/Forge execution path |
 | Forge | Partial v1 | `src/agency/forge/` persists bounded read-only file inventory/syntax reports; no test runner, coding agent, security review, package, or release. Dark/ghost factories remain separate prototypes |
+| Internal metering / local recovery | Implemented bounded seams | Request-bound strict ToolDriver wrapper and explicit OS-locked recoverable workflow APIs; beta ingress and distributed recovery remain disabled/unimplemented |
 | External bridges (Claude, Codex, Hermes, OpenClaw) | Partial adapters | `src/agency/bridges/`; optional integrations behind explicit boundaries, never architectural dependencies |
 
 Status words used here are deliberately coarse (Exists / Partial / Planned / Missing).

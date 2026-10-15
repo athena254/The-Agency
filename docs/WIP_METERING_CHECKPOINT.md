@@ -1,5 +1,7 @@
 # Preserved work in progress — metering
 
+> HISTORICAL CHECKPOINT, superseded October 15, 2026. The candidate was merged in `8fd860d` and consolidated onto `main`. The following prose/test counts describe an earlier WIP snapshot, not current status. Read `CURRENT_STATE.md` and the consolidated verification evidence for the qualified implementation and still-disabled beta ingress.
+
 This is a recovery checkpoint of unfinished free-worker output, NOT a verified
 feature or a candidate for main. The completed specification has been merged
 separately; these source/test changes intentionally remain on this feature branch.

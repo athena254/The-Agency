@@ -1,8 +1,6 @@
 # SPEC_LOCAL_RECOVERY_V1 — minimal durable local recovery (CORRECTED)
 
-> Consolidation status: specification only. Candidate implementation is unfinished
-> and kept off main; see `FREE_PROGRAM_BUILD_STATUS.md`. The resume/reconcile APIs
-> below describe the target, not currently operational features.
+> Current checkpoint: source was integrated into canonical `main` through `7bc5987`, then consolidated on October 15, 2026. See `CURRENT_STATE.md` and `research-evidence/production-consolidation.json` for exact qualification and limitations. Recovery is an explicit local library API, not automatic peer/task recovery or exactly-once execution. Historical base-state descriptions below refer to `18b9717`.
 
 Status: CORRECTED at `18b9717`, branch `feat/free-recovery`. Supersedes draft
 with clock leases, omitted-input resume, magic reader compat. No peer

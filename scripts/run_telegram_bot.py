@@ -31,9 +31,10 @@ from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Verified git tree ids for src/ and tests/ (the free-only program revision).
-VERIFIED_SRC_TREE = "8cee8b0b427ddaf17ec5babb76ba7a0455072b08"
-VERIFIED_TESTS_TREE = "cd6508b45314814f003322d57f7f5d99436f94ba"
+# Verified trees at c47f7a7: 1293 Python tests, 14 UI tests, Ruff and mypy.
+# See docs/research-evidence/production-consolidation.json for scope/warnings.
+VERIFIED_SRC_TREE = "7dbf14ff087cb3b845651a2d07d8a18799bf3724"
+VERIFIED_TESTS_TREE = "6554e999ef33591325a7a005535bd6e1c24b4990"
 
 
 def git(*args: str) -> str:

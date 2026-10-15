@@ -1,5 +1,7 @@
 # Free-only program — consolidated status
 
+> CURRENT STATUS UPDATE — October 15, 2026: `main` now includes both `8fd860d` (metering implementation) and `7bc5987` (recovery implementation), plus Butler context work. The historical exclusions and test totals below described an earlier consolidation and are superseded by `CURRENT_STATE.md`, `SPEC_PRODUCTION_CONSOLIDATION.md` and `research-evidence/production-consolidation.json`. Internal metering/local recovery are not beta enablement, peer authority or deployment. This earlier ledger is preserved as provenance, not current branch instructions.
+
 This ledger supersedes the historical worker-allocation and platform-blocker notes.
 The owner requested consolidation of all completed work. The main integration includes
 verified work only; unfinished source has separate, explicit Git recovery checkpoints.

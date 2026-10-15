@@ -1,5 +1,7 @@
 # Telegram beta gap and decision log
 
+> October 15, 2026 correction: read `CURRENT_STATE.md` and `research-evidence/production-consolidation.json` for the current checkpoint. The internal request-bound MeteredModel/ToolDriver seam is now implemented and qualified, including durable uncertainty blocking; historical statements below that no production caller of reserve_model_call exists are superseded for that internal seam only. End-to-end trusted Telegram/Butler/all-provider task execution is still incomplete; ordinary beta models/research/tools remain disabled. Earlier deployment/process claims below are historical, not evidence of a currently running bot.
+
 This log tracks observed gaps against [SPEC_L2_TELEGRAM_BETA.md](SPEC_L2_TELEGRAM_BETA.md). Entries below include historical checkout/PR snapshots and are **not all current canonical-main states**; the canonical checkpoint after the table supersedes their state labels where noted. A checked CI run on a docs-only commit is **not** beta readiness. Update each entry with the exact test/revision when closed. No credentials or user message contents belong here.
 
 | ID | State | Evidence / risk | Owner and closure proof |

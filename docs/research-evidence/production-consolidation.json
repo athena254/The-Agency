@@ -1,0 +1,197 @@
+{
+  "recorded_at": "2026-10-15T11:17:34.937714+03:00",
+  "status": "local completion qualified; production NO-GO",
+  "tested_revision": "c47f7a727380758f37244a90811a677bd25919cc",
+  "source_tree": "7dbf14ff087cb3b845651a2d07d8a18799bf3724",
+  "test_tree": "6554e999ef33591325a7a005535bd6e1c24b4990",
+  "python_suite": {
+    "revision": "c47f7a727380758f37244a90811a677bd25919cc",
+    "timestamp": "2026-10-15T11:09:05.681763+03:00",
+    "python": "3.11.16 (main, Sep  1 2026, 14:15:24) [MSC v.1944 64 bit (AMD64)]",
+    "exit_code": 0,
+    "suites": [
+      {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "1293",
+        "time": "211.296",
+        "timestamp": "2026-10-15T11:05:33.840852+03:00",
+        "hostname": "LUX"
+      }
+    ],
+    "failures": [],
+    "summary_lines": [
+      "1293 passed, 24 warnings in 211.66s (0:03:31)"
+    ],
+    "full_log": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-final-verification-84zyncv2\\pytest.log",
+    "network": "external sockets/DNS blocked in parent test process; loopback allowed; echo provider for child tests",
+    "source_tree": "7dbf14ff087cb3b845651a2d07d8a18799bf3724",
+    "test_tree": "6554e999ef33591325a7a005535bd6e1c24b4990"
+  },
+  "other_checks": [
+    {
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-m",
+        "ruff",
+        "check",
+        "--no-cache",
+        "src/",
+        "tests/"
+      ],
+      "exit_code": 0,
+      "output": "All checks passed!\n"
+    },
+    {
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-m",
+        "ruff",
+        "format",
+        "--check",
+        "--no-cache",
+        "src/",
+        "tests/"
+      ],
+      "exit_code": 0,
+      "output": "231 files already formatted\n"
+    },
+    {
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-m",
+        "mypy",
+        "--no-incremental",
+        "src/"
+      ],
+      "exit_code": 0,
+      "output": "Success: no issues found in 150 source files\n"
+    },
+    {
+      "command": [
+        "node",
+        "--test",
+        "tests/prototype_ui.test.mjs"
+      ],
+      "exit_code": 0,
+      "output": "\u2714 app.js passes node --check (145.5928ms)\n\u2714 index.html references only the local /assets files, with no external resources (1.7011ms)\n\u2714 app.js renders safely: textContent only, no storage, no credentials (1.5856ms)\n\u2714 the page labels itself local prototype, not beta ready, with no fake agents (0.5136ms)\n\u2714 healthView reports honest badge states (0.5469ms)\n\u2714 normalizeAgents only returns validated server entries (0.4792ms)\n\u2714 describeHttpError prefers the sanitized server error and stays honest (0.2781ms)\n\u2714 session initializes first; chat sends CSRF and renders untrusted reply as plain text (5.3467ms)\n\u2714 HTTP failure is visible, original input retained, and no success is implied (0.9305ms)\n\u2714 without a session, nothing is sent or shown as delivered (1.4115ms)\n\u2714 busy state prevents a second concurrent send (1.0946ms)\n\u2714 Enter sends, Shift+Enter does not, and a network error stays visibly failed (1.1206ms)\n\u2714 session recovery permits only one send while token request is pending (0.8756ms)\n\u2714 reply does not erase a new draft typed while the request is pending (0.5051ms)\n\u2139 tests 14\n\u2139 suites 0\n\u2139 pass 14\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 388.5442\n"
+    },
+    {
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "scripts/run_telegram_bot.py",
+        "--check"
+      ],
+      "exit_code": 0,
+      "output": "preflight ok: revision=c47f7a727380758f37244a90811a677bd25919cc src_tree_verified=True tests_tree_verified=True local_src_edits=False\n"
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "output": "warning: in the working copy of 'docs/BRANCH_CLEANUP.md', LF will be replaced by CRLF the next time Git touches it\nwarning: in the working copy of 'docs/SPEC_PRODUCTION_CONSOLIDATION.md', LF will be replaced by CRLF the next time Git touches it\n"
+    }
+  ],
+  "free_model_comparison": [
+    {
+      "model": "muse-spark-1.3-contributor-free",
+      "seconds": 48.82,
+      "status": "completed",
+      "score": 22,
+      "checks": 22,
+      "reported_cost": 0,
+      "review": [
+        "call_provider before reserve_quota allows quota bypass and overspend",
+        "side effects before audit_intent leaves actions unaudited",
+        "audit failure swallowed is fail-open, must fail closed",
+        "unconditional return_success masks provider, quota, and audit failures",
+        "missing intent validation before provider call and quota reservation"
+      ],
+      "exit_code": 0
+    },
+    {
+      "model": "longcat-2.5-preview-free",
+      "seconds": 50.08,
+      "status": "completed",
+      "score": 22,
+      "checks": 22,
+      "reported_cost": 0,
+      "review": [
+        "call_provider before authorize: external side effect runs without authorization gate",
+        "reserve_quota before audit_intent: resource committed before intent is verified",
+        "audit failure swallowed: swallowed exception lets operation proceed as if audited",
+        "return_success returned even when audit fails: result does not reflect audit outcome"
+      ],
+      "exit_code": 0
+    },
+    {
+      "model": "nemotron-3.5-lightning-free",
+      "seconds": 85.91,
+      "status": "completed",
+      "score": 21,
+      "checks": 22,
+      "reported_cost": 0,
+      "review": [
+        "audit failure swallowed",
+        "audit executed after return_success"
+      ],
+      "exit_code": 0
+    },
+    {
+      "model": "mimo-v2.6-flash-free",
+      "seconds": 150.51,
+      "status": "timeout",
+      "score": 0
+    }
+  ],
+  "selected_model": "opencode/muse-spark-1.3-contributor-free",
+  "model_selection_limit": "one task-specific comparison, not a universal performance ranking; no paid fallback used",
+  "worker_commits": {
+    "recovery": "8273cbd7a5d10a9ca27bbac0e37343f7b36170da",
+    "metering": "017286c8aa424acb8ea153c4a42a0c8e1a064518",
+    "butler": "e1efe3577c1c45dc32253c2123796674789f2f1a"
+  },
+  "coordinator_regressions": {
+    "uncertainty": "e017140",
+    "cold_import": "c47f7a7"
+  },
+  "preservation": {
+    "private_backup": "C:\\Users\\alphi\\agency-backups\\production-consolidation-20261015-094336",
+    "original_worktrees": 3,
+    "original_branch_tips": {
+      "refs/heads/feat/butler-context": "7bc5987c045b176fbc7ab3b195840375953d85e1",
+      "refs/heads/feat/free-metering": "d90901d8ad3c8994eb20b280eb34f62e59639ff2",
+      "refs/heads/feat/free-recovery": "5d751a2ec0a706ecacf55f5b86d214ad9ffbe3de",
+      "refs/heads/main": "c2da9fde2443ac1fcb1ac30649a16c4605833a3f"
+    },
+    "original_bundle_recovery_verified": true,
+    "worker_bundle_recovery_verified": true,
+    "retired_worker_branches": [
+      "work/metering",
+      "work/recovery",
+      "work/butler"
+    ],
+    "database_hash_unchanged": true,
+    "database_sha256": "77e54c3005c5a5dea46843eb8a43cc2ade3d6de0bf267f5b6647569c2dbaa41a",
+    "database_retained_on_disk": true,
+    "tracked_runtime_data": false,
+    "exploratory_probe": "preserved in private backup, not committed"
+  },
+  "known_limits": [
+    "24 test warnings; see docs/KNOWN_ISSUES.md",
+    "One worker-reported recovery subprocess flake remains qualification debt; final successful suite is not proof of flake elimination",
+    "Initial diagnostic launcher recursively ran under Windows spawn; guarded entrypoint corrected the harness",
+    "Fresh-process testing then exposed a real handler/Butler import cycle; RED/GREEN tests and c47f7a7 fix",
+    "No current GitHub CI/push/release/deployment/live-provider or hostile-code isolation proof",
+    "Beta ordinary chat/research/model/tool ingress remains disabled; peer application authority absent"
+  ],
+  "final_local_branches": ["main"],
+  "final_registered_worktrees": ["C:/Users/alphi/theagency"],
+  "temporary_worker_and_verification_worktrees_removed": true,
+  "final_scope": "finish existing recovery/metering/private-thread implementation slices; unfinished product capabilities remain gated in the production plan"
+}
