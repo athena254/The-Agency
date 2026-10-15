@@ -61,7 +61,10 @@ _DEFAULT_MEMORY_DB = "data/memory.db"
 
 
 async def _finish_cleanup(task: asyncio.Task[BaseException | None]) -> None:
-    """Keep cleanup owned and awaited even if its caller is cancelled again."""
+    """Drain cleanup before releasing exclusion; caller cancellation wins its error.
+
+    Startup rollback separately preserves its already-propagating primary error.
+    """
     cancelled: asyncio.CancelledError | None = None
     while not task.done():
         try:
@@ -173,6 +176,7 @@ class AgencyOrchestrator:
         self._spawned_proposals: set[str] = set()
 
         self._started = False
+        self._lifecycle_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------ #
     # Lifecycle
@@ -180,6 +184,11 @@ class AgencyOrchestrator:
 
     async def start(self) -> None:
         """Start background services once until stopped."""
+        async with self._lifecycle_lock:
+            await self._start_locked()
+
+    async def _start_locked(self) -> None:
+        """Start while the lifecycle transition is exclusively owned."""
         if self._started:
             return
         try:
@@ -194,7 +203,7 @@ class AgencyOrchestrator:
         except BaseException:
             # Cancellation also requires rollback; cleanup must not mask it.
             try:
-                await self.stop()
+                await self._stop_locked()
             except BaseException as exc:  # noqa: BLE001 — finish cleanup before re-raising.
                 with suppress(BaseException):
                     self._log.warning("orchestrator_rollback_failed", error_type=type(exc).__name__)
@@ -231,6 +240,14 @@ class AgencyOrchestrator:
 
     async def stop(self) -> None:
         """Release our local lease and attempt all independently owned cleanup."""
+        async with self._lifecycle_lock:
+            await self._stop_locked()
+
+    async def _stop_locked(self) -> None:
+        """Drain this generation's cleanup with the lifecycle lock still held.
+
+        Startup rollback calls this directly to avoid re-entering the lock.
+        """
         self._started = False
         self._tool_registry = None
         self._tool_driver = None
