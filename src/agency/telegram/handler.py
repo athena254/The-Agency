@@ -719,5 +719,14 @@ class TelegramHandler:
         return await self._adapter.send_message(chat_id, text)
 
     async def close(self) -> None:
-        await self._adapter.close()
-        self._profiles.close()
+        """Close transport/profile resources, not injected backend services."""
+        try:
+            await self._adapter.close()
+        except BaseException as primary:
+            try:
+                self._profiles.close()
+            except BaseException:  # noqa: BLE001 - preserve primary failure/cancellation
+                primary.add_note("Telegram profile cleanup also failed")
+            raise
+        else:
+            self._profiles.close()

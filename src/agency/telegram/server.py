@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from secrets import compare_digest
 from typing import Any
 
@@ -21,17 +23,33 @@ def create_app(config: TelegramConfig, handler: TelegramHandler | None = None) -
     """Create FastAPI app for Telegram webhook."""
     if config.beta_mode:
         raise ValueError("beta webhook disabled until Butler lifecycle and budget/audit are wired")
-    app = FastAPI(title="The Agency — Telegram Webhook")
-    _handler = (
-        handler
-        if handler is not None
-        else TelegramHandler(
-            config,
-            profile_store=ProfileStore(
-                os.environ.get("REMEX_PROFILE_DB_PATH", "data/remex_profiles.db")
-            ),
-        )
-    )
+    if handler is not None:
+        _handler = handler
+    else:
+        profiles = ProfileStore(os.environ.get("REMEX_PROFILE_DB_PATH", "data/remex_profiles.db"))
+        try:
+            _handler = TelegramHandler(config, profile_store=profiles)
+        except BaseException as primary:
+            try:
+                profiles.close()
+            except BaseException:  # noqa: BLE001 - preserve primary failure/cancellation
+                primary.add_note("Telegram profile construction rollback also failed")
+            raise
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        try:
+            yield
+        except BaseException as primary:
+            try:
+                await _handler.close()
+            except BaseException:  # noqa: BLE001 - preserve primary failure/cancellation
+                primary.add_note("Telegram lifespan cleanup also failed")
+            raise
+        else:
+            await _handler.close()
+
+    app = FastAPI(title="The Agency — Telegram Webhook", lifespan=lifespan)
 
     @app.get("/telegram/health")
     async def health() -> dict[str, Any]:
@@ -56,9 +74,5 @@ def create_app(config: TelegramConfig, handler: TelegramHandler | None = None) -
 
         result = await _handler.handle_update(body)
         return Response(content=str(result), media_type="application/json")
-
-    @app.on_event("shutdown")
-    async def shutdown() -> None:
-        await _handler.close()
 
     return app
