@@ -8,6 +8,7 @@ No early bootstrap notification is an acknowledgement of registry readiness.
 from __future__ import annotations
 
 import asyncio
+import logging
 import multiprocessing
 import os
 import queue
@@ -222,6 +223,7 @@ def run_admission_race(path: str, *, mutant: bool = False, context: Any = None) 
                 require(item.get("phase") == "start", f"invalid ready phase pid={pid}")
             seen.add(pid)
 
+    primary_error: BaseException | None = None
     try:
         # Register ownership BEFORE start: start may launch and then raise.
         for _ in range(2):
@@ -288,21 +290,46 @@ def run_admission_race(path: str, *, mutant: bool = False, context: Any = None) 
             "observations": observations,
             "exitcodes": [w.exitcode for w in workers],
         }
+    except BaseException as exc:
+        primary_error = exc
+        raise
     finally:
         # Do not set arm/start/release on failure; that would authorize late work.
-        for worker in workers:
-            if worker.pid is not None and worker.is_alive():
-                worker.terminate()
-        for worker in workers:
-            if worker.pid is not None:
-                worker.join(timeout=GAP_SECONDS)
-                if worker.is_alive():
-                    worker.kill()
-                    worker.join(timeout=GAP_SECONDS)
-                if worker.is_alive():
-                    raise AdmissionProtocolError(
-                        f"could not reap worker pid={worker.pid}", observations
+        # Each independent phase must run even if a previous cleanup call failed.
+        cleanup_errors: list[str] = []
+
+        def attempt(label: str, operation: Any, fallback: Any = None) -> Any:
+            try:
+                return operation()
+            except BaseException as exc:
+                cleanup_errors.append(f"{label}: {type(exc).__name__}")
+                # Log the phase/type, never private exception text or traceback.
+                logging.getLogger(__name__).exception(
+                    "cleanup %s failed: %s", label, type(exc).__name__, exc_info=False
+                )
+                return fallback
+
+        owned = [(worker, worker.pid) for worker in workers]
+        for worker, pid in owned:
+            if pid is not None and attempt(f"pid={pid} is_alive", worker.is_alive, True):
+                attempt(f"pid={pid} terminate", worker.terminate)
+        for worker, pid in owned:
+            if pid is not None:
+                attempt(f"pid={pid} join", lambda worker=worker: worker.join(timeout=GAP_SECONDS))
+                if attempt(f"pid={pid} is_alive", worker.is_alive, True):
+                    attempt(f"pid={pid} kill", worker.kill)
+                    attempt(
+                        f"pid={pid} join after kill",
+                        lambda worker=worker: worker.join(timeout=GAP_SECONDS),
                     )
-            worker.close()
-        messages.close()
-        messages.join_thread()
+                if attempt(f"pid={pid} is_alive", worker.is_alive, True):
+                    cleanup_errors.append(f"could not reap worker pid={pid}")
+            attempt(f"pid={pid} close", worker.close)
+        attempt("queue.close", messages.close)
+        attempt("queue.join_thread", messages.join_thread)
+        if cleanup_errors:
+            detail = "admission cleanup failed: " + "; ".join(cleanup_errors)
+            if primary_error is not None:
+                primary_error.add_note(detail)
+            else:
+                raise AdmissionProtocolError(detail, observations)

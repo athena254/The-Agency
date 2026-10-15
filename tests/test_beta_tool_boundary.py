@@ -955,6 +955,41 @@ async def test_beta_calls_have_opaque_distinct_correlated_ids(beta_log: BetaAudi
         assert hashlib.sha256(identity.encode()).hexdigest() not in blob
 
 
+def _assert_admission_rows(rows: list[AuditEntry], pending: bool) -> None:
+    assert len(rows) == 2
+    assert {(row.evidence["phase"], row.result) for row in rows} == {
+        ("intent", "pending"),
+        ("outcome", "ok"),
+    }
+    assert all(isinstance(row.evidence["call_id"], str) and row.evidence["call_id"] for row in rows)
+    assert len({row.evidence["call_id"] for row in rows}) == 1
+    assert all(row.target == "web_search" and row.action == "tool.call" for row in rows)
+    assert pending is False
+
+
+@pytest.mark.parametrize(
+    "pairs, call_id",
+    [
+        ((("intent", "ok"), ("outcome", "pending")), "correlated-call"),
+        ((("intent", "pending"), ("outcome", "ok")), ""),
+        ((("intent", "pending"), ("outcome", "ok")), None),
+        ((("intent", "pending"), ("outcome", "ok")), 123),
+    ],
+)
+def test_admission_rows_reject_malformed_pairs_or_call_id(pairs, call_id) -> None:
+    rows = [
+        AuditEntry(
+            target="web_search",
+            action="tool.call",
+            result=result,
+            evidence={"phase": phase, "call_id": call_id},
+        )
+        for phase, result in pairs
+    ]
+    with pytest.raises(AssertionError):
+        _assert_admission_rows(rows, False)
+
+
 def test_beta_cross_process_admission_allows_only_one_pending_call(tmp_path) -> None:
     """Two real processes must not both run while one intent lacks an outcome."""
     path = str(tmp_path / "cross-process-audit.db")
@@ -967,12 +1002,7 @@ def test_beta_cross_process_admission_allows_only_one_pending_call(tmp_path) -> 
         await log.initialize()
         try:
             rows = await log.query()
-            assert len(rows) == 2
-            assert {row.result for row in rows} == {"pending", "ok"}
-            assert {row.evidence["phase"] for row in rows} == {"intent", "outcome"}
-            assert len({row.evidence["call_id"] for row in rows}) == 1
-            assert all(row.target == "web_search" and row.action == "tool.call" for row in rows)
-            assert await log.has_pending_calls() is False
+            _assert_admission_rows(rows, await log.has_pending_calls())
         finally:
             await log.close()
 
