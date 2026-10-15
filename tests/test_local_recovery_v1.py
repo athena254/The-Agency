@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import os
+import runpy
 import sqlite3
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -56,29 +60,113 @@ def make_executor(
     )
 
 
-def _wait_for_path(path: Path, timeout: float = 30.0) -> None:
+OUTPUT_TAIL_BYTES = 4096
+
+
+@dataclass
+class _Child:
+    process: subprocess.Popen[bytes]
+    stdout: Path
+    stderr: Path
+
+    def diagnostics(self) -> str:
+        # Read only bounded tails; regular files cannot backpressure the child.
+        parts = [f"pid {self.process.pid}, exit code {self.process.poll()}"]
+        for label, path in (("stdout", self.stdout), ("stderr", self.stderr)):
+            with path.open("rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                size = handle.tell()
+                handle.seek(max(0, size - OUTPUT_TAIL_BYTES))
+                tail = handle.read(OUTPUT_TAIL_BYTES).decode("utf-8", errors="replace")
+            parts.append(f"{label} (last {OUTPUT_TAIL_BYTES} bytes): {tail}")
+        return "\n".join(parts)
+
+
+def _check_child(child: _Child, waiting: str) -> None:
+    if child.process.poll() is not None:
+        raise RuntimeError(f"child exited while waiting for {waiting}\n{child.diagnostics()}")
+
+
+def _wait_for_path(path: Path, child: _Child, timeout: float = 30.0) -> None:
     deadline = time.monotonic() + timeout
-    while not path.exists():
+    while True:
+        _check_child(child, str(path))
+        if path.exists():
+            return
         if time.monotonic() > deadline:
-            raise TimeoutError(f"timed out waiting for {path}")
+            raise TimeoutError(f"timed out waiting for {path}\n{child.diagnostics()}")
         time.sleep(0.05)
 
 
-def _wait_for_marker(path: Path, token: str, timeout: float = 30.0) -> None:
+def _wait_for_marker(path: Path, token: str, child: _Child, timeout: float = 30.0) -> None:
     deadline = time.monotonic() + timeout
     while True:
+        _check_child(child, f"{token!r} in {path}")
         if path.exists() and token in path.read_text():
             return
         if time.monotonic() > deadline:
-            raise TimeoutError(f"timed out waiting for {token!r} in {path}")
+            raise TimeoutError(f"timed out waiting for {token!r} in {path}\n{child.diagnostics()}")
         time.sleep(0.05)
+
+
+@contextmanager
+def _cleanup_after(cleanup: Callable[[], object]) -> Iterator[None]:
+    """Do not let a secondary cleanup failure replace the useful test failure."""
+    try:
+        yield
+    except BaseException as primary:
+        try:
+            cleanup()
+        except BaseException as secondary:  # noqa: BLE001 - preserve the primary failure
+            primary.add_note(f"cleanup failed: {secondary!r}")
+        raise
+    else:
+        cleanup()
+
+
+def _reap_child(process: subprocess.Popen[bytes]) -> None:
+    try:
+        if process.poll() is None:
+            process.kill()
+    finally:
+        # Even a failing kill must not skip reaping a child that has exited.
+        process.wait(timeout=20)
+
+
+@contextmanager
+def _child_process(script: Path, *args: str) -> Iterator[_Child]:
+    stdout_path = script.with_suffix(".stdout")
+    stderr_path = script.with_suffix(".stderr")
+    files = ExitStack()
+    with _cleanup_after(files.close):
+        stdout = files.enter_context(stdout_path.open("wb"))
+        stderr = files.enter_context(stderr_path.open("wb"))
+        executable = sys.executable
+        env = _child_env()
+        if os.name == "nt" and sys.prefix != sys.base_prefix:
+            # The Windows venv executable is a launcher, not the interpreter.
+            # Bypass it so kill()/wait() own the actual lock holder, retaining
+            # the same venv configuration through CPython's launcher variable.
+            executable = sys._base_executable
+            env["__PYVENV_LAUNCHER__"] = sys.executable
+        process = subprocess.Popen(
+            [executable, str(script), *args],
+            env=env,
+            stdout=stdout,
+            stderr=stderr,
+        )
+        with _cleanup_after(lambda: _reap_child(process)):
+            yield _Child(process, stdout_path, stderr_path)
 
 
 def _child_env() -> dict[str, str]:
     env = dict(os.environ)
-    env["PYTHONPATH"] = str(SRC_DIR)
-    env.setdefault("AGENCY_LLM_PROVIDER", "echo")
-    env.setdefault("AGENCY_LLM_MODEL", "echo")
+    # Retain the qualification harness's inherited sitecustomize/network guard.
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(SRC_DIR), env.get("PYTHONPATH", "")) if part
+    )
+    env["AGENCY_LLM_PROVIDER"] = "echo"
+    env["AGENCY_LLM_MODEL"] = "echo"
     return env
 
 
@@ -551,7 +639,7 @@ finally:
     lock.release()
 """
 
-CRASH_SCRIPT = """import sys, time
+CRASH_SCRIPT = """import sys, time, traceback
 sys.path.insert(0, %r)
 from agency.workflows.executor import WorkflowExecutor
 from agency.workflows.registry import WorkflowDefinition, WorkflowRegistry, WorkflowStep
@@ -573,36 +661,189 @@ try:
         for _ in range(600):
             time.sleep(0.1)
         return {"n": 2}
+    def diagnostic_callback(inputs, prev):
+        try:
+            return op_safe(inputs, prev)
+        except Exception:
+            traceback.print_exc()
+            raise
     executor = WorkflowExecutor(
-        registry, {"op_safe": op_safe}, authorizer=lambda a, p: True,
+        registry, {"op_safe": diagnostic_callback}, authorizer=lambda a, p: True,
         replay_safe=frozenset({"op_safe"}), operation_versions={"op_safe": "1"},
     )
+    run = executor.run_recoverable("wf", "1.0.0", {"x": 1}, "alice")
+    if run.status != "COMPLETED":
+        raise RuntimeError(f"recoverable child failed: {run.step_results!r}")
+except BaseException as primary:
     try:
-        executor.run_recoverable("wf", "1.0.0", {"x": 1}, "alice")
-    except Exception:
-        pass
-finally:
+        registry.close()
+    except BaseException as secondary:
+        primary.add_note(f"registry cleanup failed: {secondary!r}")
+    raise
+else:
     registry.close()
 """
+
+
+@pytest.mark.parametrize("failure", ["executor", "callback"])
+def test_crash_script_propagates_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: str,
+) -> None:
+    script = CRASH_SCRIPT % str(SRC_DIR)
+    if failure == "executor":
+
+        def fail(*args, **kwargs):
+            raise RuntimeError("synthetic executor failure")
+
+        monkeypatch.setattr(WorkflowExecutor, "run_recoverable", fail)
+    else:
+        script = script.replace(
+            'if "s0" not in prev:',
+            'raise RuntimeError("synthetic callback failure")\n        if "s0" not in prev:',
+        )
+    monkeypatch.setattr(
+        sys, "argv", ["crasher.py", str(tmp_path / "rec.db"), str(tmp_path / "marker")]
+    )
+    script_path = tmp_path / "crasher.py"
+    script_path.write_text(script)
+    expected = "synthetic executor failure" if failure == "executor" else "recoverable child failed"
+    with pytest.raises(RuntimeError, match=expected):
+        runpy.run_path(str(script_path), run_name="__main__")
+    if failure == "callback":
+        assert "synthetic callback failure" in capsys.readouterr().err
+
+
+def test_child_handle_targets_interpreter(tmp_path: Path) -> None:
+    # kill()/wait() must target the script, not a Windows venv launcher whose
+    # interpreter descendant can retain the lock after the launcher is reaped.
+    script = tmp_path / "identity.py"
+    script.write_text(
+        "import os, sys\n"
+        "from pathlib import Path\n"
+        "from agency.workflows.recovery import RecoverableLock\n"
+        "print(os.getpid(), flush=True)\n"
+        "print(Path(sys.prefix).resolve(), flush=True)\n"
+        "print(RecoverableLock.__module__, flush=True)\n"
+    )
+    with _child_process(script) as child:
+        assert child.process.wait(timeout=20) == 0, child.diagnostics()
+        pid, prefix, module = child.stdout.read_text().splitlines()
+        assert int(pid) == child.process.pid, child.diagnostics()
+        assert Path(prefix) == Path(sys.prefix).resolve()
+        assert module == "agency.workflows.recovery"
+
+
+@pytest.mark.parametrize("wait_kind", ["path", "marker"])
+def test_child_timeout_reaps_and_preserves_primary_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, wait_kind: str
+) -> None:
+    script = tmp_path / "sleeper.py"
+    script.write_text("import time; time.sleep(60)")
+    child = None
+    waited = []
+    try:
+        with (
+            pytest.raises(TimeoutError, match="timed out waiting") as caught,
+            _child_process(script) as child,
+        ):
+            original_kill, original_wait = child.process.kill, child.process.wait
+
+            def kill_then_fail():
+                original_kill()
+                raise RuntimeError("synthetic cleanup failure")
+
+            def record_wait(*args, **kwargs):
+                waited.append(True)
+                return original_wait(*args, **kwargs)
+
+            monkeypatch.setattr(child.process, "kill", kill_then_fail)
+            monkeypatch.setattr(child.process, "wait", record_wait)
+            absent = tmp_path / "absent"
+            if wait_kind == "path":
+                _wait_for_path(absent, child, timeout=0)
+            else:
+                _wait_for_marker(absent, "missing-token", child, timeout=0)
+        assert waited
+        assert child.process.returncode is not None
+        assert "stdout" in str(caught.value) and "stderr" in str(caught.value)
+        assert any("synthetic cleanup failure" in note for note in caught.value.__notes__)
+    finally:
+        # Keep the regression itself leak-free even against the broken helper.
+        if child is not None:
+            if child.process.poll() is None:
+                original_kill()
+            original_wait(timeout=20)
+
+
+def test_child_env_preserves_offline_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PYTHONPATH", "synthetic-offline-guard")
+    monkeypatch.setenv("AGENCY_LLM_PROVIDER", "not-echo")
+    monkeypatch.setenv("AGENCY_LLM_MODEL", "not-echo")
+    env = _child_env()
+    assert env["PYTHONPATH"].split(os.pathsep) == [str(SRC_DIR), "synthetic-offline-guard"]
+    assert env["AGENCY_LLM_PROVIDER"] == env["AGENCY_LLM_MODEL"] == "echo"
+
+
+@pytest.mark.parametrize("scenario", ["holder", "crasher"])
+def test_child_early_exit_reports_bounded_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str
+) -> None:
+    # Exercise the actual launch/wait/cleanup wiring with a deterministically dead child.
+    script = """import sys
+sys.path.insert(0, %r)
+print("synthetic stdout", flush=True)
+print("x" * 20000 + "synthetic stderr", file=sys.stderr, flush=True)
+sys.exit(23)
+"""
+    script_name, wait_name, exercise = {
+        "holder": (
+            "HOLDER_SCRIPT",
+            "_wait_for_path",
+            test_lock_denial_while_holder_alive_and_release_after_kill,
+        ),
+        "crasher": (
+            "CRASH_SCRIPT",
+            "_wait_for_marker",
+            test_child_killed_mid_callback_reconcile_resume,
+        ),
+    }[scenario]
+    monkeypatch.setitem(globals(), script_name, script)
+    original_popen = subprocess.Popen
+
+    def exited_child(*args, **kwargs):
+        child = original_popen(*args, **kwargs)
+        child.wait(timeout=20)
+        return child
+
+    monkeypatch.setattr(subprocess, "Popen", exited_child)
+    original_wait = globals()[wait_name]
+
+    def no_deadline_wait(*args, **kwargs):
+        return original_wait(*args, **kwargs, timeout=0)
+
+    monkeypatch.setitem(globals(), wait_name, no_deadline_wait)
+    with pytest.raises(RuntimeError, match="exit code 23") as caught:
+        exercise(tmp_path)
+    message = str(caught.value)
+    assert "synthetic stdout" in message
+    assert "synthetic stderr" in message
+    assert "stdout" in message and "stderr" in message
+    assert len(message) < 10000
 
 
 def test_lock_denial_while_holder_alive_and_release_after_kill(tmp_path: Path) -> None:
     db_path = str(tmp_path / "rec.db")
     registry = WorkflowRegistry(db_path)
-    child: subprocess.Popen[bytes] | None = None
-    try:
+    with _cleanup_after(registry.close):
         registry.register(make_definition("op_safe"))
         script = tmp_path / "holder.py"
         script.write_text(HOLDER_SCRIPT % str(SRC_DIR))
         ready = tmp_path / "holder.ready"
-        child = subprocess.Popen(
-            [sys.executable, str(script), db_path, str(ready)],
-            env=_child_env(),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        try:
-            _wait_for_path(ready)
+        with _child_process(script, db_path, str(ready)) as child:
+            _wait_for_path(ready, child)
             parent_lock = RecoverableLock(db_path)
             assert parent_lock.acquire() is False
             executor = make_executor(registry, {"op_safe": lambda i, p: {"n": 1}})
@@ -612,45 +853,23 @@ def test_lock_denial_while_holder_alive_and_release_after_kill(tmp_path: Path) -
                 executor.reconcile()
             with pytest.raises(RuntimeError, match="lock held"):
                 executor.resume("missing", {"x": 1}, "alice")
-        finally:
-            assert child is not None
-            child.kill()
-            child.wait(timeout=20)
-            child = None
         free_lock = RecoverableLock(db_path)
         assert free_lock.acquire() is True
         free_lock.release()
         executor = make_executor(registry, {"op_safe": lambda i, p: {"n": 1}})
         assert executor.reconcile() == []
-    finally:
-        if child is not None:
-            child.kill()
-            child.wait(timeout=20)
-        registry.close()
 
 
 def test_child_killed_mid_callback_reconcile_resume(tmp_path: Path) -> None:
     db_path = str(tmp_path / "rec.db")
     registry = WorkflowRegistry(db_path)
-    child: subprocess.Popen[bytes] | None = None
-    try:
+    with _cleanup_after(registry.close):
         registry.register(make_definition("op_safe", "op_safe"))
         script = tmp_path / "crasher.py"
         script.write_text(CRASH_SCRIPT % str(SRC_DIR))
         marker = tmp_path / "calls.marker"
-        child = subprocess.Popen(
-            [sys.executable, str(script), db_path, str(marker)],
-            env=_child_env(),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        try:
-            _wait_for_marker(marker, "s1-start")
-        finally:
-            assert child is not None
-            child.kill()
-            child.wait(timeout=20)
-            child = None
+        with _child_process(script, db_path, str(marker)) as child:
+            _wait_for_marker(marker, "s1-start", child)
         text = marker.read_text()
         assert "s0" in text
         assert "s1-start" in text
@@ -675,8 +894,3 @@ def test_child_killed_mid_callback_reconcile_resume(tmp_path: Path) -> None:
         assert resumed.step_results["s0"]["output"] == {"n": 1}
         assert resumed.step_results["s1"]["output"] == {"n": 2}
         assert calls == [["s0"]]
-    finally:
-        if child is not None:
-            child.kill()
-            child.wait(timeout=20)
-        registry.close()
