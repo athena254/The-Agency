@@ -350,6 +350,125 @@ def test_cleanup_continues_and_preserves_primary_failure(tmp_path, faults, prima
         assert gates == []
 
 
+@pytest.mark.parametrize("primary", ["start", "protocol", "interrupt"])
+@pytest.mark.parametrize("diagnostic", ["raising_handler", "closed_stderr", "note_hook"])
+def test_cleanup_diagnostic_failure_cannot_mask_primary(tmp_path, monkeypatch, primary, diagnostic):
+    import io
+    import logging
+    import sys
+    from types import SimpleNamespace
+
+    from tests.worker_support import admission
+
+    calls, gates, workers, notes = [], [], [], []
+
+    def failing_note(self, detail):
+        notes.append(detail)
+        raise KeyboardInterrupt("private diagnostic failure")
+
+    error_type = {
+        "start": RuntimeError,
+        "protocol": admission.AdmissionProtocolError,
+        "interrupt": KeyboardInterrupt,
+    }[primary]
+    if diagnostic == "note_hook":
+        error_type = type("FailingNoteError", (error_type,), {"add_note": failing_note})
+    original = (
+        error_type("primary failure", [])
+        if primary == "protocol"
+        else error_type("primary failure")
+    )
+
+    def fail(index, phase):
+        calls.append((index, phase))
+        raise OSError("private cleanup failure")
+
+    def process(**kwargs):
+        index = len(workers)
+        worker = SimpleNamespace(pid=None, live=False, exitcode=None)
+        workers.append(worker)
+
+        def start():
+            worker.pid, worker.live = 101 + index, True
+            if index == 1 and primary != "protocol":
+                raise original
+
+        def is_alive():
+            calls.append((index, "is_alive"))
+            return worker.live
+
+        def kill():
+            worker.live, worker.exitcode = False, -9
+            fail(index, "kill")
+
+        worker.start, worker.is_alive, worker.kill = start, is_alive, kill
+        worker.terminate = lambda: fail(index, "terminate")
+        worker.join = lambda timeout: fail(index, "join")
+        worker.close = lambda: fail(index, "close")
+        return worker
+
+    def receive(**kwargs):
+        raise original
+
+    context = SimpleNamespace(
+        Event=lambda: SimpleNamespace(set=lambda: gates.append("set")),
+        Barrier=lambda count: None,
+        Queue=lambda: SimpleNamespace(
+            get=receive,
+            close=lambda: fail(None, "queue.close"),
+            join_thread=lambda: fail(None, "queue.join_thread"),
+        ),
+        Process=process,
+    )
+
+    class RaisingHandler(logging.Handler):
+        def emit(self, record):
+            raise RuntimeError("private logging failure")
+
+    # Restore stderr before pytest reports anything, even on the RED path.
+    with monkeypatch.context() as diagnostic_scope:
+        logger = logging.getLogger(admission.__name__)
+        if diagnostic in {"raising_handler", "closed_stderr"}:
+            if diagnostic == "closed_stderr":
+                stream = io.StringIO()
+                stream.close()
+                handler = logging.StreamHandler(stream)
+                diagnostic_scope.setattr(sys, "stderr", stream)
+                diagnostic_scope.setattr(logging, "raiseExceptions", True)
+            else:
+                handler = RaisingHandler()
+            diagnostic_scope.setattr(logger, "handlers", [handler])
+            diagnostic_scope.setattr(logger, "propagate", False)
+            diagnostic_scope.setattr(logger, "disabled", False)
+            diagnostic_scope.setattr(logger, "level", logging.ERROR)
+        with pytest.raises(BaseException) as caught:
+            admission.run_admission_race(str(tmp_path / "diagnostic.db"), context=context)
+    assert caught.value is original
+    assert calls == [
+        (0, "is_alive"),
+        (0, "terminate"),
+        (1, "is_alive"),
+        (1, "terminate"),
+        *[
+            (index, phase)
+            for index in (0, 1)
+            for phase in ("join", "is_alive", "kill", "join", "is_alive", "close")
+        ],
+        (None, "queue.close"),
+        (None, "queue.join_thread"),
+    ]
+    assert all(not worker.live for worker in workers)
+    assert gates == []
+    diagnostics = notes if diagnostic == "note_hook" else original.__notes__
+    assert len(diagnostics) == 1
+    detail = diagnostics[0]
+    for pid in (101, 102):
+        for phase in ("terminate", "join", "kill", "join after kill", "close"):
+            assert f"pid={pid} {phase}: OSError" in detail
+    assert "queue.close: OSError" in detail and "queue.join_thread: OSError" in detail
+    assert "private" not in detail
+
+
 @pytest.mark.parametrize("wait_for_bootstrap", [False, True])
 def test_partially_failed_start_reaps_every_owned_child(tmp_path, wait_for_bootstrap):
     from tests.worker_support.admission import run_admission_race
