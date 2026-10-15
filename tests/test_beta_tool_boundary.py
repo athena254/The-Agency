@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import multiprocessing
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -40,6 +39,7 @@ from agency.tools.base import (
 from agency.tools.builtin.memory import MemoryQueryTool, MemoryWriteTool
 from agency.tools.driver import ToolDriver
 from agency.tools.registry import ToolRegistry, build_default_registry
+from tests.worker_support.admission import run_admission_race
 
 
 class FakeAudit:
@@ -955,76 +955,12 @@ async def test_beta_calls_have_opaque_distinct_correlated_ids(beta_log: BetaAudi
         assert hashlib.sha256(identity.encode()).hexdigest() not in blob
 
 
-def _beta_race_worker(path: str, start: Any, release: Any, barrier: Any, messages: Any) -> None:
-    """Separate process and connection; force the old read/check gap open."""
-
-    async def run() -> None:
-        log = BetaAuditLog(path)
-        await log.initialize()
-        original = BetaAuditLog.has_pending_calls
-
-        async def synchronized_check(self: BetaAuditLog) -> bool:
-            pending = await original(self)
-            if not pending:
-                await asyncio.to_thread(barrier.wait, 5)
-            return pending
-
-        BetaAuditLog.has_pending_calls = synchronized_check  # type: ignore[method-assign]
-
-        class BlockingTool(CountingTool):
-            async def run(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-                messages.put("ran")
-                await asyncio.to_thread(release.wait, 10)
-                return ToolResult(tool=self.spec.name, ok=True, output="ok")
-
-        registry = ToolRegistry(audit=log, beta_policy=BetaToolPolicy())
-        registry.register(BlockingTool(_search_spec()))
-        try:
-            messages.put("ready")
-            await asyncio.to_thread(start.wait, 10)
-            result = await registry.call("web_search", {"query": "private"}, _trusted_ctx())
-            messages.put((result.ok, result.error))
-        finally:
-            await log.close()
-
-    try:
-        asyncio.run(run())
-    except BaseException as exc:
-        messages.put(("worker_error", repr(exc)))
-        raise
-
-
 def test_beta_cross_process_admission_allows_only_one_pending_call(tmp_path) -> None:
     """Two real processes must not both run while one intent lacks an outcome."""
-    ctx = multiprocessing.get_context("spawn")
-    start, release = ctx.Event(), ctx.Event()
-    barrier = ctx.Barrier(2)
-    messages = ctx.Queue()
     path = str(tmp_path / "cross-process-audit.db")
-    workers = [
-        ctx.Process(target=_beta_race_worker, args=(path, start, release, barrier, messages))
-        for _ in range(2)
-    ]
-    for worker in workers:
-        worker.start()
-    observations: list[Any] = []
-    try:
-        assert messages.get(timeout=15) == "ready"
-        assert messages.get(timeout=15) == "ready"
-        start.set()
-        # The successful call is held inside run until after admission is measured.
-        while len(observations) < 2:
-            observations.append(messages.get(timeout=15))
-        assert observations.count("ran") == 1, observations
-        assert (False, _BETA_AUDIT_ERROR) in observations
-    finally:
-        release.set()
-        for worker in workers:
-            worker.join(timeout=15)
-            if worker.is_alive():
-                worker.terminate()
-                worker.join(timeout=5)
-    assert all(worker.exitcode == 0 for worker in workers)
+    report = run_admission_race(path)
+    assert report["exitcodes"] == [0, 0]
+    print(f"admission aggregate bootstrap: {report['bootstrap_s']:.3f}s / 60s")
     log = BetaAuditLog(path)
 
     async def verify() -> None:
@@ -1033,6 +969,9 @@ def test_beta_cross_process_admission_allows_only_one_pending_call(tmp_path) -> 
             rows = await log.query()
             assert len(rows) == 2
             assert {row.result for row in rows} == {"pending", "ok"}
+            assert {row.evidence["phase"] for row in rows} == {"intent", "outcome"}
+            assert len({row.evidence["call_id"] for row in rows}) == 1
+            assert all(row.target == "web_search" and row.action == "tool.call" for row in rows)
             assert await log.has_pending_calls() is False
         finally:
             await log.close()
