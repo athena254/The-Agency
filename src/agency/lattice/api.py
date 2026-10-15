@@ -718,6 +718,7 @@ class Lattice:
     """
 
     def __init__(self, config: LatticeConfig | None = None) -> None:
+        self._managed_by: object | None = None
         self.config: LatticeConfig = config or get_config()
         self.backend: LatticeBackend = self._create_backend()
         governance_cls = (
@@ -770,6 +771,8 @@ class Lattice:
     async def initialize(self) -> None:
         """Initialize backend (create tables, connect)."""
 
+        if self._managed_by is not None:
+            raise RuntimeError("Managed Lattice lifecycle belongs to its resource leases")
         log.info("lattice.api.initializing", backend=self.config.backend)
         await self.backend.initialize()
         log.info("lattice.api.initialized", backend=self.config.backend)
@@ -777,6 +780,15 @@ class Lattice:
     async def close(self) -> None:
         """Release backend connections."""
 
+        if self._managed_by is not None:
+            raise RuntimeError("Managed Lattice must be closed by releasing its resource leases")
+        await self.backend.close()
+        log.info("lattice.api.closed")
+
+    async def _close_managed(self, key: object) -> None:
+        """Manager-only finalization; not an authorization/security boundary."""
+        if key is not self._managed_by:
+            raise RuntimeError("Invalid Lattice lifecycle owner")
         await self.backend.close()
         log.info("lattice.api.closed")
 
