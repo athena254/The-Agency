@@ -208,6 +208,16 @@ class MeteredModel:
             raise MeteredDenied("metered: audit unavailable") from exc
         if not claimed:
             raise MeteredDenied("metered: audit unavailable")
+        # Budget and audit persistence yield to other tasks. Recheck the fixed
+        # adapter after those awaits, before constructing the dispatch coroutine.
+        # Refusal keeps the acknowledged intent pending rather than inventing an
+        # outcome or permitting a retry through a different provider.
+        if (
+            type(self._inner) is not LLMAdapter
+            or self._inner.provider != binding.provider
+            or self._inner.model != binding.model
+        ):
+            raise MeteredDenied("metered: provider binding denied")
         try:
             raw = await asyncio.wait_for(self._inner.generate(prompt, {}), timeout=self._timeout_s)
         except TimeoutError as exc:
@@ -237,7 +247,10 @@ class MeteredModel:
             action="model.generate",
             result=result,
             evidence={
-                "phase": "outcome",
+                # Unknown is evidence, not a terminal acknowledgement. Keep the
+                # original intent unresolved so other processes and restarts
+                # cannot dispatch another call on an uncertain provider effect.
+                "phase": "uncertainty" if result == "unknown" else "outcome",
                 "call_id": call_id,
                 "provider": binding.provider,
                 "model": binding.model,
