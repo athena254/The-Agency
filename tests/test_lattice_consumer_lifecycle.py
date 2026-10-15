@@ -40,6 +40,351 @@ async def owners(tmp_path, monkeypatch):
     await factory.reset_lattice()
 
 
+async def assert_workers_closed(connections):
+    for conn in connections:
+        await asyncio.to_thread(conn._thread.join, 2)
+        assert not conn._thread.is_alive(), "owned SQLite worker outlived final cleanup"
+
+
+async def test_concurrent_real_starts_keep_one_lease_and_store_generation(owners, monkeypatch):
+    orch = owners()
+    stores = [orch._memory_store, orch._evidence_store, orch._audit_log]
+    # Isolate the lifecycle race from unrelated non-serialized store initialization.
+    for store in stores:
+        await store.initialize()
+    connections = [store._conn for store in stores]
+    entered, proceed = asyncio.Event(), asyncio.Event()
+    initialize = orch._memory_store.initialize
+    acquire = orchestrator_module.acquire_lattice
+    calls, leases, tasks = [], [], []
+
+    async def gated_initialize():
+        calls.append("memory")
+        await initialize()
+        entered.set()
+        await proceed.wait()
+
+    async def tracked_acquire():
+        lease = await acquire()
+        leases.append(lease)
+        return lease
+
+    monkeypatch.setattr(orch._memory_store, "initialize", gated_initialize)
+    monkeypatch.setattr(orchestrator_module, "acquire_lattice", tracked_acquire)
+    try:
+        tasks.append(asyncio.create_task(orch.start()))
+        await entered.wait()
+        tasks.append(asyncio.create_task(orch.start()))
+        # FIFO ready-queue barrier: the second call has reached its first await.
+        checkpoint = asyncio.Event()
+        asyncio.get_running_loop().call_soon(checkpoint.set)
+        await checkpoint.wait()
+        proceed.set()
+        await asyncio.gather(*tasks)
+        generation = factory._manager.generation
+        shared = orch._lattice
+        assert len(generation.tokens) == len(leases) == 1
+        assert calls == ["memory"]
+        assert [store._conn for store in stores] == connections
+        assert orch._lattice_lease is leases[0]
+        connections.append(shared.backend._db)
+        row = await shared.create_node("task", {"concurrent": True})
+        assert await shared.get_node(row) is not None
+        await orch.stop()
+        assert not generation.tokens
+        assert shared.backend._db is None
+        assert all(store._conn is None for store in stores)
+        assert factory._manager is None
+        await assert_workers_closed(connections)
+    finally:
+        proceed.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await orch.stop()
+        # Retain every actual lease so the deliberately broken RED leaks no token.
+        for lease in leases:
+            await lease.release()
+        for conn in connections:
+            await conn.close()
+
+
+@pytest.mark.parametrize(
+    ("cancel_stop", "cleanup_error"), [(False, False), (True, False), (True, True)]
+)
+async def test_real_restart_waits_for_owned_shutdown_drain(
+    owners, monkeypatch, cancel_stop, cleanup_error
+):
+    orch = owners()
+    leases, tasks, connections = [], [], []
+    acquire = orchestrator_module.acquire_lattice
+
+    async def tracked_acquire():
+        lease = await acquire()
+        leases.append(lease)
+        return lease
+
+    monkeypatch.setattr(orchestrator_module, "acquire_lattice", tracked_acquire)
+    await orch.start()
+    shared = orch._lattice
+    generation = factory._manager.generation
+    row = await shared.create_node("task", {"restart": True})
+    stores = [orch._memory_store, orch._evidence_store, orch._audit_log]
+    connections.extend([shared.backend._db, *(store._conn for store in stores)])
+    entered, proceed, restarting = (asyncio.Event() for _ in range(3))
+    stop_periodic = orch._memory_lifecycle.stop_periodic
+
+    async def gated_stop():
+        monkeypatch.setattr(orch._memory_lifecycle, "stop_periodic", stop_periodic)
+        entered.set()
+        await proceed.wait()
+        await stop_periodic()
+        if cleanup_error:
+            raise ValueError("secondary cleanup must not replace caller cancellation")
+
+    async def restart():
+        restarting.set()
+        await orch.start()
+
+    monkeypatch.setattr(orch._memory_lifecycle, "stop_periodic", gated_stop)
+    try:
+        stopping = asyncio.create_task(orch.stop())
+        tasks.append(stopping)
+        await entered.wait()
+        if cancel_stop:
+            for _ in range(2):
+                stopping.cancel()
+                checkpoint = asyncio.Event()
+                asyncio.get_running_loop().call_soon(checkpoint.set)
+                await checkpoint.wait()
+                assert not stopping.done()
+        starting = asyncio.create_task(restart())
+        tasks.append(starting)
+        await restarting.wait()
+        overlapped = starting.done()
+        proceed.set()
+        if cancel_stop:
+            with pytest.raises(asyncio.CancelledError):
+                await stopping
+        else:
+            await stopping
+        await starting
+        assert orch._lattice_lease is leases[-1], "old cleanup erased the replacement lease"
+        assert not overlapped, "restart ran before the preceding shutdown drained"
+        assert orch._started
+        assert all(store._conn is not None for store in stores)
+        assert not generation.tokens
+        assert shared.backend._db is None
+        replacement = orch._lattice
+        replacement_generation = factory._manager.generation
+        assert replacement is not shared
+        assert len(replacement_generation.tokens) == 1
+        assert await replacement.get_node(row) is not None
+        connections.extend([replacement.backend._db, *(store._conn for store in stores)])
+        for store in stores:
+            async with store._conn.execute("SELECT 1") as cursor:
+                assert await cursor.fetchone() is not None
+        await orch.stop()
+        assert not replacement_generation.tokens
+        assert replacement.backend._db is None
+        assert all(store._conn is None for store in stores)
+        assert factory._manager is None
+        await assert_workers_closed(connections)
+    finally:
+        proceed.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await orch.stop()
+        for lease in leases:
+            await lease.release()
+        for conn in connections:
+            await conn.close()
+
+
+@pytest.mark.parametrize(
+    ("transition", "waiter", "cancel_waiter"),
+    [
+        ("start", "stop", False),
+        ("stop", "stop", False),
+        ("start", "start", True),
+        ("start", "stop", True),
+        ("stop", "start", True),
+        ("stop", "stop", True),
+    ],
+)
+async def test_real_queued_transitions_preserve_current_owner(
+    owners, monkeypatch, transition, waiter, cancel_waiter
+):
+    orch = owners()
+    stores = [orch._memory_store, orch._evidence_store, orch._audit_log]
+    entered, proceed, attempted = (asyncio.Event() for _ in range(3))
+    tasks, connections, leases, generations = [], [], [], []
+    acquire = orchestrator_module.acquire_lattice
+
+    async def tracked_acquire():
+        lease = await acquire()
+        leases.append(lease)
+        generations.append(factory._manager.generation)
+        connections.extend([lease.lattice.backend._db, *(store._conn for store in stores)])
+        return lease
+
+    def remember_stores():
+        connections.extend(store._conn for store in stores if store._conn is not None)
+
+    monkeypatch.setattr(orchestrator_module, "acquire_lattice", tracked_acquire)
+    row = None
+    if transition == "stop":
+        await orch.start()
+        row = await orch._lattice.create_node("task", {"queued": True})
+        remember_stores()
+        target, name = orch._memory_lifecycle, "stop_periodic"
+    else:
+        target, name = orch._memory_store, "initialize"
+    original = getattr(target, name)
+
+    async def gated_transition():
+        if transition == "start":
+            await original()
+            remember_stores()
+        entered.set()
+        await proceed.wait()
+        if transition == "stop":
+            await original()
+
+    async def queued_transition():
+        attempted.set()
+        await getattr(orch, waiter)()
+
+    monkeypatch.setattr(target, name, gated_transition)
+    try:
+        owner = asyncio.create_task(getattr(orch, transition)())
+        tasks.append(owner)
+        await entered.wait()
+        waiting = asyncio.create_task(queued_transition())
+        tasks.append(waiting)
+        await attempted.wait()
+        assert not waiting.done(), "queued lifecycle operation bypassed the active transition"
+        if cancel_waiter:
+            waiting.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waiting
+            assert not owner.done()
+        proceed.set()
+        await owner
+        if not cancel_waiter:
+            await waiting
+        active = (transition if cancel_waiter else waiter) == "start"
+        assert orch._started is active
+        remember_stores()
+        if active:
+            assert orch._lattice_lease is leases[-1]
+            assert len(generations[-1].tokens) == 1
+            assert all(store._conn is not None for store in stores)
+        else:
+            assert orch._lattice_lease is orch._lattice is None
+            assert all(store._conn is None for store in stores)
+            assert factory._manager is None
+        await orch.start()
+        remember_stores()
+        assert len(factory._manager.generation.tokens) == 1
+        if row is None:
+            row = await orch._lattice.create_node("task", {"queued": True})
+        assert await orch._lattice.get_node(row) is not None
+        for store in stores:
+            async with store._conn.execute("SELECT 1") as cursor:
+                assert await cursor.fetchone() is not None
+        await orch.stop()
+        assert all(not generation.tokens for generation in generations)
+        assert factory._manager is None
+        await assert_workers_closed(connections)
+    finally:
+        proceed.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await orch.stop()
+        for lease in leases:
+            await lease.release()
+        for conn in connections:
+            await conn.close()
+        await assert_workers_closed(connections)
+
+
+@pytest.mark.parametrize("cancel_primary", [False, True])
+async def test_real_startup_rollback_drains_before_queued_restart(
+    owners, monkeypatch, cancel_primary
+):
+    orch = owners()
+    primary = asyncio.CancelledError("startup") if cancel_primary else RuntimeError("startup")
+    entered, proceed, attempted = (asyncio.Event() for _ in range(3))
+    tasks, leases, connections, generations = [], [], [], []
+    acquire = orchestrator_module.acquire_lattice
+    build = orch._build_tool_layer
+    stop_periodic = orch._memory_lifecycle.stop_periodic
+    stores = [orch._memory_store, orch._evidence_store, orch._audit_log]
+
+    async def tracked_acquire():
+        lease = await acquire()
+        leases.append(lease)
+        generations.append(factory._manager.generation)
+        connections.extend([lease.lattice.backend._db, *(store._conn for store in stores)])
+        return lease
+
+    def fail_tools_once():
+        monkeypatch.setattr(orch, "_build_tool_layer", build)
+        raise primary
+
+    async def gated_cleanup():
+        monkeypatch.setattr(orch._memory_lifecycle, "stop_periodic", stop_periodic)
+        entered.set()
+        await proceed.wait()
+        await stop_periodic()
+        raise ValueError("secondary cleanup")
+
+    async def restart():
+        attempted.set()
+        await orch.start()
+
+    monkeypatch.setattr(orchestrator_module, "acquire_lattice", tracked_acquire)
+    monkeypatch.setattr(orch, "_build_tool_layer", fail_tools_once)
+    monkeypatch.setattr(orch._memory_lifecycle, "stop_periodic", gated_cleanup)
+    try:
+        failing = asyncio.create_task(orch.start())
+        tasks.append(failing)
+        await entered.wait()
+        starting = asyncio.create_task(restart())
+        tasks.append(starting)
+        await attempted.wait()
+        for _ in range(2):
+            failing.cancel()
+            checkpoint = asyncio.Event()
+            asyncio.get_running_loop().call_soon(checkpoint.set)
+            await checkpoint.wait()
+            assert not failing.done()
+            assert not starting.done()
+        proceed.set()
+        with pytest.raises(type(primary)) as caught:
+            await failing
+        assert caught.value is primary
+        await starting
+        assert not generations[0].tokens
+        assert leases[0].lattice.backend._db is None
+        assert orch._lattice_lease is leases[1]
+        assert len(generations[1].tokens) == 1
+        assert orch._started
+        assert all(store._conn is not None for store in stores)
+        row = await orch._lattice.create_node("task", {"rollback": True})
+        assert await orch._lattice.get_node(row) is not None
+        await orch.stop()
+        assert all(not generation.tokens for generation in generations)
+        assert factory._manager is None
+        await assert_workers_closed(connections)
+    finally:
+        proceed.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await orch.stop()
+        for lease in leases:
+            await lease.release()
+        for conn in connections:
+            await conn.close()
+        await assert_workers_closed(connections)
+
+
 @pytest.mark.parametrize("first_stop", [0, 1])
 async def test_real_orchestrators_share_restart_and_final_close(owners, first_stop, monkeypatch):
     pair = [owners(), owners()]
