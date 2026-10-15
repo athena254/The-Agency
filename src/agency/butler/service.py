@@ -430,9 +430,7 @@ class ButlerService:
         )
         return ButlerReply(text=reply_text, status=status)
 
-    async def _run_command(
-        self, sender: str, command: str, args: str, started: datetime
-    ) -> str:
+    async def _run_command(self, sender: str, command: str, args: str, started: datetime) -> str:
         """Execute a parsed command; errors become user-visible replies."""
         outcome = "ok"
         try:

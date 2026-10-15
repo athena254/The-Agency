@@ -407,10 +407,7 @@ class ThreadStore:
 
     def list_messages(self, owner: str, thread_id: str) -> list[ThreadMessage]:
         """All messages in ``owner``'s thread, oldest first."""
-        return [
-            message
-            for _rowid, message in self.list_message_rows(owner, thread_id)
-        ]
+        return [message for _rowid, message in self.list_message_rows(owner, thread_id)]
 
     def list_message_rows(self, owner: str, thread_id: str) -> list[tuple[int, ThreadMessage]]:
         """Messages in ``owner``'s thread with their SQLite rowids, oldest first.
@@ -459,7 +456,9 @@ class ThreadStore:
     # Summaries
     # ------------------------------------------------------------------ #
 
-    def set_summary(self, owner: str, thread_id: str, content: str, up_to_rowid: int) -> ThreadSummary:
+    def set_summary(
+        self, owner: str, thread_id: str, content: str, up_to_rowid: int
+    ) -> ThreadSummary:
         """Replace the rolling summary of ``owner``'s thread.
 
         One summary per thread, atomically replaced. ``up_to_rowid`` must
@@ -561,8 +560,5 @@ class ThreadStore:
         clean_owner = _require_nonblank(owner, "owner")
         conn = self._connection()
         with conn:
-            cursor = conn.execute(
-                "DELETE FROM active_threads WHERE owner = ?", (clean_owner,)
-            )
+            cursor = conn.execute("DELETE FROM active_threads WHERE owner = ?", (clean_owner,))
         return cursor.rowcount > 0
-
