@@ -404,18 +404,13 @@ async def test_beta_policy_error_fails_closed() -> None:
     assert stub.run_calls == 0
 
 
-async def test_beta_driver_path_cannot_bypass_policy() -> None:
-    """Driver LLM loop routes through registry.call, so policy still denies."""
+async def test_beta_driver_path_cannot_bypass_policy(tmp_path, monkeypatch) -> None:
+    """Concrete metering reaches registry policy; denied fetch never runs."""
+    from agency.llm.adapter import LLMAdapter
+    from tests.test_model_metering import _close, _setup
 
-    class _ScriptedLLM:
-        def __init__(self, responses: list[str]) -> None:
-            self._responses = list(responses)
-
-        async def generate(self, prompt: str, context: dict[str, Any] | None = None) -> str:
-            assert self._responses, "LLM ran out of scripted responses"
-            return self._responses.pop(0)
-
-    registry = ToolRegistry(beta_policy=BetaToolPolicy())
+    store, audit, principal, _inner, _binding, model = await _setup(tmp_path)
+    registry = ToolRegistry(audit=audit, beta_policy=BetaToolPolicy())
     fetch = CountingTool(
         ToolSpec(
             name="web_fetch",
@@ -429,17 +424,27 @@ async def test_beta_driver_path_cannot_bypass_policy() -> None:
         )
     )
     registry.register(fetch)
-    llm = _ScriptedLLM(
-        [
-            '{"action": {"name": "web_fetch", "args": {"url": "https://example.com"}}}',
-            '{"final": "done"}',
-        ]
-    )
-    driver = ToolDriver(registry=registry, llm=llm)
-    outcome = await driver.run("fetch this", "sys", _trusted_ctx())
-    assert fetch.run_calls == 0
-    assert outcome.steps and outcome.steps[0].ok is False
-    assert "beta policy denied" in (outcome.steps[0].error or "").lower()
+    calls: list[str] = []
+
+    async def provider(self, prompt, context=None):
+        calls.append(prompt)
+        if len(calls) == 1:
+            return '{"action": {"name": "web_fetch", "args": {"url": "https://example.com"}}}'
+        return '{"final": "must not accept this"}'
+
+    monkeypatch.setattr(LLMAdapter, "generate", provider)
+    ctx = _trusted_ctx()
+    ctx.beta_principal = principal
+    ctx.audit = audit
+    try:
+        outcome = await ToolDriver(registry=registry, llm=model).run("fetch this", "sys", ctx)
+        assert fetch.run_calls == 0
+        assert outcome.steps and outcome.steps[0].ok is False
+        assert "beta policy denied" in (outcome.steps[0].error or "").lower()
+        assert outcome.status == "tool_error"
+        assert len(calls) == 1
+    finally:
+        await _close(store, audit)
 
 
 async def test_registry_factory_preserves_explicit_beta_policy() -> None:
