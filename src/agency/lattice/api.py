@@ -12,12 +12,13 @@ or embedder are available it returns an empty list instead of raising.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import math
 import uuid
 from collections import deque
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import structlog
 
@@ -711,6 +712,121 @@ class ReputationEngine:
         return await self._backend.get_reputation(agent_id)
 
 
+class _ManagedGovernance:
+    """Explicit managed entry points; check before engine state or locks."""
+
+    def __init__(self, owner: Lattice, engine: Any) -> None:
+        self._owner = owner
+        self._engine = engine
+        if hasattr(engine, "reputation"):
+            self.reputation = _ManagedReputation(owner, engine.reputation)
+
+    async def submit_proposal(
+        self,
+        proposer_id: str,
+        proposal_type: str,
+        payload: dict[str, Any],
+        quorum: float | None = None,
+        ttl_seconds: int = 3600,
+    ) -> str:
+        self._owner._check_managed_loop()
+        # Preserve the selected engine's own default (local and fallback differ).
+        kwargs = {} if quorum is None else {"quorum": quorum}
+        return cast(
+            str,
+            await self._engine.submit_proposal(
+                proposer_id, proposal_type, payload, ttl_seconds=ttl_seconds, **kwargs
+            ),
+        )
+
+    async def cast_vote(
+        self,
+        voter_id: str,
+        proposal_id: str,
+        decision: str,  # 'approve', 'deny', 'abstain'
+        evidence: list[str] | None = None,
+    ) -> dict[str, Any] | bool:
+        self._owner._check_managed_loop()
+        return cast(
+            dict[str, Any] | bool,
+            await self._engine.cast_vote(voter_id, proposal_id, decision, evidence),
+        )
+
+    async def resolve_proposal(self, proposal_id: str) -> str:
+        self._owner._check_managed_loop()
+        return cast(str, await self._engine.resolve_proposal(proposal_id))
+
+    async def check_quorum(self, proposal_id: str) -> bool:
+        self._owner._check_managed_loop()
+        return cast(bool, await self._engine.check_quorum(proposal_id))
+
+    async def get_proposal_status(self, proposal_id: str) -> ConsensusProposal:
+        self._owner._check_managed_loop()
+        return cast(ConsensusProposal, await self._engine.get_proposal_status(proposal_id))
+
+    async def list_open_proposals(self) -> list[ConsensusProposal]:
+        self._owner._check_managed_loop()
+        return cast(list[ConsensusProposal], await self._engine.list_open_proposals())
+
+
+class _ManagedReputation:
+    """Explicit managed entry points; check before engine state or locks."""
+
+    def __init__(self, owner: Lattice, engine: Any) -> None:
+        self._owner = owner
+        self._engine = engine
+
+    async def record_task_completion(
+        self,
+        agent_id: str,
+        success: bool,
+        peer_rating: float | None = None,
+    ) -> Reputation:
+        self._owner._check_managed_loop()
+        return cast(
+            Reputation, await self._engine.record_task_completion(agent_id, success, peer_rating)
+        )
+
+    async def get_reputation(self, agent_id: str) -> Reputation:
+        self._owner._check_managed_loop()
+        return cast(Reputation, await self._engine.get_reputation(agent_id))
+
+    def compute_score(self, rep: Reputation) -> float:
+        self._owner._check_managed_loop()
+        return cast(float, self._engine.compute_score(rep))
+
+    async def get_leaderboard(self, limit: int = 20) -> list[Reputation]:
+        self._owner._check_managed_loop()
+        return cast(list[Reputation], await self._engine.get_leaderboard(limit))
+
+    async def vote_weight(self, voter_id: str) -> float:
+        self._owner._check_managed_loop()
+        return cast(float, await self._engine.vote_weight(voter_id))
+
+    async def submit_peer_rating(
+        self,
+        rater_id: str,
+        ratee_id: str,
+        rating: float,
+        context: str | None = None,
+    ) -> bool:
+        self._owner._check_managed_loop()
+        return cast(
+            bool, await self._engine.submit_peer_rating(rater_id, ratee_id, rating, context)
+        )
+
+    async def update_reputation(
+        self,
+        agent_id: str,
+        success: bool,
+        peer_rating: float | None = None,
+    ) -> Reputation:
+        self._owner._check_managed_loop()
+        return cast(
+            Reputation, await self._engine.update_reputation(agent_id, success, peer_rating)
+        )
+
+
 class Lattice:
     """Unified Lattice API — the single entry point for all components.
 
@@ -719,6 +835,7 @@ class Lattice:
 
     def __init__(self, config: LatticeConfig | None = None) -> None:
         self._managed_by: object | None = None
+        self._managed_loop: asyncio.AbstractEventLoop | None = None
         self.config: LatticeConfig = config or get_config()
         self.backend: LatticeBackend = self._create_backend()
         governance_cls = (
@@ -730,6 +847,17 @@ class Lattice:
         self.governance = governance_cls(self.backend)
         self.reputation = reputation_cls(self.backend)
         log.info("lattice.api.created", backend=self.config.backend)
+
+    def _set_managed(self, key: object, loop: asyncio.AbstractEventLoop) -> None:
+        """Bind the published API and cached engine handles to their owner loop."""
+        self._managed_by = key
+        self._managed_loop = loop
+        self.governance = _ManagedGovernance(self, self.governance)
+        self.reputation = _ManagedReputation(self, self.reputation)
+
+    def _check_managed_loop(self) -> None:
+        if self._managed_loop is not None and self._managed_loop is not asyncio.get_running_loop():
+            raise RuntimeError("Lattice ownership belongs to a different event loop")
 
     def _create_backend(self) -> LatticeBackend:
         """Instantiate the configured backend, falling back to memory."""
@@ -787,6 +915,7 @@ class Lattice:
 
     async def _close_managed(self, key: object) -> None:
         """Manager-only finalization; not an authorization/security boundary."""
+        self._check_managed_loop()
         if key is not self._managed_by:
             raise RuntimeError("Invalid Lattice lifecycle owner")
         await self.backend.close()
@@ -800,11 +929,13 @@ class Lattice:
         actor: str = "system",
     ) -> str:
         """Create a node of ``node_type``; returns its ID."""
+        self._check_managed_loop()
 
         return await self.backend.create_node(_coerce_node_type(node_type), properties, actor)
 
     async def get_node(self, node_id: str) -> dict[str, Any] | None:
         """Fetch a node by ID, or ``None`` when absent."""
+        self._check_managed_loop()
 
         return await self.backend.get_node(node_id)
 
@@ -815,11 +946,13 @@ class Lattice:
         actor: str = "system",
     ) -> bool:
         """Merge ``properties`` into a node."""
+        self._check_managed_loop()
 
         return await self.backend.update_node(node_id, properties, actor)
 
     async def delete_node(self, node_id: str, actor: str = "system") -> bool:
         """Delete a node; returns ``True`` when removed."""
+        self._check_managed_loop()
 
         return await self.backend.delete_node(node_id, actor)
 
@@ -831,6 +964,7 @@ class Lattice:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         """List nodes by type + property filters (paginated)."""
+        self._check_managed_loop()
 
         coerced = _coerce_node_type(node_type) if node_type is not None else None
         return await self.backend.find_nodes(coerced, filters, limit, offset)
@@ -845,6 +979,7 @@ class Lattice:
         actor: str = "system",
     ) -> str:
         """Create a relationship; returns its ID."""
+        self._check_managed_loop()
 
         return await self.backend.add_edge(
             source_id, target_id, _coerce_edge_type(edge_type), properties, actor
@@ -857,12 +992,14 @@ class Lattice:
         edge_type: EdgeType | str | None = None,
     ) -> list[dict[str, Any]]:
         """Edges incident to ``node_id``."""
+        self._check_managed_loop()
 
         coerced = _coerce_edge_type(edge_type) if edge_type is not None else None
         return await self.backend.get_edges(node_id, direction, coerced)
 
     async def remove_edge(self, edge_id: str, actor: str = "system") -> bool:
         """Delete a relationship; returns ``True`` when removed."""
+        self._check_managed_loop()
 
         return await self.backend.remove_edge(edge_id, actor)
 
@@ -875,22 +1012,26 @@ class Lattice:
         direction: str = "out",
     ) -> list[str]:
         """Node IDs reachable from ``start_node`` within ``max_depth``."""
+        self._check_managed_loop()
 
         coerced = _coerce_edge_type(edge_type) if edge_type is not None else None
         return await self.backend.traverse(start_node, coerced, max_depth, direction)
 
     async def find_path(self, source: str, target: str, max_depth: int = 5) -> list[str] | None:
         """Shortest path from ``source`` to ``target`` (``None`` if none)."""
+        self._check_managed_loop()
 
         return await self.backend.find_path(source, target, max_depth)
 
     async def get_dependencies(self, task_id: str) -> list[str]:
         """All tasks ``task_id`` depends on."""
+        self._check_managed_loop()
 
         return await self.backend.get_dependencies(task_id)
 
     async def get_dependents(self, task_id: str) -> list[str]:
         """All tasks depending on ``task_id``."""
+        self._check_managed_loop()
 
         return await self.backend.get_dependents(task_id)
 
@@ -901,6 +1042,7 @@ class Lattice:
         vectors: list[tuple[str, list[float], dict[str, Any]]],
     ) -> bool:
         """Insert/replace ``(id, vector, payload)`` rows in ``collection``."""
+        self._check_managed_loop()
 
         return await self.backend.upsert_vector(collection, vectors)
 
@@ -912,6 +1054,7 @@ class Lattice:
         filters: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Nearest-neighbour search; ``[]`` when unavailable (graceful)."""
+        self._check_managed_loop()
 
         try:
             return await self.backend.search_vectors(collection, query_vector, limit, filters)
@@ -927,6 +1070,7 @@ class Lattice:
         embedder: Embedder | None = None,
     ) -> list[dict[str, Any]]:
         """Keyword/vector text search; ``[]`` when unavailable (graceful)."""
+        self._check_managed_loop()
 
         try:
             if embedder is not None:
@@ -954,6 +1098,7 @@ class Lattice:
 
     async def delete_vectors(self, collection: str, ids: list[str]) -> bool:
         """Remove ``ids`` from ``collection``."""
+        self._check_managed_loop()
 
         return await self.backend.delete_vectors(collection, ids)
 
@@ -968,6 +1113,7 @@ class Lattice:
         ttl: int | None = None,
     ) -> str:
         """Open a governance proposal; returns its ID."""
+        self._check_managed_loop()
 
         effective_quorum = quorum if quorum is not None else self.config.default_quorum
         effective_ttl = ttl if ttl is not None else ttl_seconds
@@ -983,6 +1129,7 @@ class Lattice:
         evidence: list[str] | None = None,
     ) -> dict[str, Any]:
         """Record a vote; returns a summary dict with quorum state."""
+        self._check_managed_loop()
 
         await self.backend.cast_vote(voter_id, proposal_id, decision, evidence)
         proposal = await self.backend.get_proposal_status(proposal_id)
@@ -999,10 +1146,12 @@ class Lattice:
 
     async def list_open_proposals(self) -> list[ConsensusProposal]:
         """List open proposals across supported backends."""
+        self._check_managed_loop()
         return await self.backend.list_open_proposals()
 
     async def get_proposal_status(self, proposal_id: str) -> ConsensusProposal:
         """Current proposal state."""
+        self._check_managed_loop()
 
         return await self.backend.get_proposal_status(proposal_id)
 
@@ -1013,16 +1162,19 @@ class Lattice:
         peer_rating: float | None = None,
     ) -> Reputation:
         """Fold a task outcome into an agent's reputation."""
+        self._check_managed_loop()
 
         return await self.backend.update_reputation(agent_id, success, peer_rating)
 
     async def get_reputation(self, agent_id: str) -> Reputation:
         """Reputation for ``agent_id``."""
+        self._check_managed_loop()
 
         return await self.backend.get_reputation(agent_id)
 
     async def check_quorum(self, proposal_id: str) -> bool:
         """Whether a proposal has reached quorum."""
+        self._check_managed_loop()
 
         return await self.backend.check_quorum(proposal_id)
 
@@ -1035,6 +1187,7 @@ class Lattice:
         limit: int = 100,
     ) -> list[LatticeEvent]:
         """Query the event log, newest first."""
+        self._check_managed_loop()
 
         return await self.backend.get_events(target_id, event_type, actor, limit)
 
@@ -1046,6 +1199,7 @@ class Lattice:
         to_timestamp: datetime | None = None,
     ) -> list[LatticeEvent]:
         """Events in ``[from, to]``, oldest first (alias-tolerant)."""
+        self._check_managed_loop()
 
         start = from_ts if from_ts is not None else from_timestamp
         end = to_ts if to_ts is not None else to_timestamp
@@ -1055,22 +1209,26 @@ class Lattice:
 
     async def get_audit_trail(self, node_id: str) -> list[LatticeEvent]:
         """Full history for ``node_id``, oldest first."""
+        self._check_managed_loop()
 
         return await self.backend.get_audit_trail(node_id)
 
     # === Health & Status ===
     async def get_status(self) -> dict[str, Any]:
         """Backend health, counts, and pending governance state."""
+        self._check_managed_loop()
 
         return await self.backend.get_status()
 
     async def get_agent_count(self) -> int:
         """Number of registered agents."""
+        self._check_managed_loop()
 
         return await self.backend.get_agent_count()
 
     async def get_active_tasks(self) -> list[dict[str, Any]]:
         """Task nodes not in a terminal state."""
+        self._check_managed_loop()
 
         return await self.backend.get_active_tasks()
 
@@ -1082,6 +1240,7 @@ class Lattice:
         capabilities: list[str],
     ) -> str:
         """Register an agent; returns the agent node's ID."""
+        self._check_managed_loop()
 
         return await self.create_node(
             NodeType.AGENT,
@@ -1101,6 +1260,7 @@ class Lattice:
         payload: dict[str, Any],
     ) -> str:
         """Create a task owned by ``agent_id``; returns the task node's ID."""
+        self._check_managed_loop()
 
         return await self.create_node(
             NodeType.TASK,
@@ -1119,6 +1279,7 @@ class Lattice:
         deliverable: dict[str, Any],
     ) -> bool:
         """Attach a deliverable to ``task_id`` and mark it completed."""
+        self._check_managed_loop()
 
         deliverable_id = await self.create_node(
             NodeType.DELIVERABLE,
@@ -1140,6 +1301,7 @@ class Lattice:
 
     async def link_evidence(self, evidence_id: str, target_id: str) -> str:
         """Link an evidence node to its target; returns the edge ID."""
+        self._check_managed_loop()
 
         return await self.add_edge(
             evidence_id,

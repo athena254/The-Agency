@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field
+from threading import Lock
 
 import structlog
 
@@ -41,6 +42,7 @@ class _Manager:
 
 
 _manager: _Manager | None = None
+_manager_lock = Lock()
 
 
 def _check_loop(manager: _Manager) -> None:
@@ -51,19 +53,23 @@ def _check_loop(manager: _Manager) -> None:
 @asynccontextmanager
 async def _guard(manager: _Manager | None = None) -> AsyncIterator[_Manager]:
     global _manager
-    if manager is None:
-        if _manager is None:
-            _manager = _Manager(asyncio.get_running_loop())
-        manager = _manager
-    _check_loop(manager)
-    manager.users += 1
+    # Process-wide installation and reservations are atomic across loop threads.
+    # Only the owning loop touches generation state; never hold this lock at await.
+    with _manager_lock:
+        if manager is None:
+            if _manager is None:
+                _manager = _Manager(asyncio.get_running_loop())
+            manager = _manager
+        _check_loop(manager)
+        manager.users += 1
     try:
         async with manager.lock:
             yield manager
     finally:
-        manager.users -= 1
-        if manager is _manager and manager.users == 0 and manager.generation is None:
-            _manager = None
+        with _manager_lock:
+            manager.users -= 1
+            if manager is _manager and manager.users == 0 and manager.generation is None:
+                _manager = None
 
 
 class LatticeLease:
@@ -145,13 +151,13 @@ async def _ready(manager: _Manager, config: LatticeConfig | None) -> _Generation
     manager.initializing = True
     try:
         await lattice.initialize()
-        lattice._managed_by = generation.key
+        lattice._set_managed(generation.key, manager.loop)
         generation.ready = True
     except BaseException:
         try:
             await _finish_cleanup(asyncio.create_task(lattice.close()), propagate_cancel=False)
         except BaseException as cleanup:  # noqa: BLE001 - preserve primary startup failure
-            lattice._managed_by = generation.key
+            lattice._set_managed(generation.key, manager.loop)
             log.warning(
                 "lattice.factory.startup_cleanup_failed", error_class=type(cleanup).__name__
             )
@@ -180,11 +186,13 @@ async def get_lattice(config: LatticeConfig | None = None) -> Lattice:
 
 async def reset_lattice() -> None:
     """Test-only reset; never invalidate an active lease or initializer."""
-    if _manager is not None:
-        _check_loop(_manager)
-        generation = _manager.generation
-        if _manager.initializing or (generation is not None and generation.tokens):
-            raise RuntimeError("Cannot reset Lattice with active leases or initialization")
+    with _manager_lock:
+        current = _manager
+        if current is not None:
+            _check_loop(current)
+            generation = current.generation
+            if current.initializing or (generation is not None and generation.tokens):
+                raise RuntimeError("Cannot reset Lattice with active leases or initialization")
     async with _guard() as manager:
         generation = manager.generation
         if manager.initializing or (generation is not None and generation.tokens):
