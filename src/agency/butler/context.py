@@ -136,9 +136,7 @@ class ThreadContextEngine:
             if window_start_index > 0:
                 boundary_rowid = rows[window_start_index - 1][0]
                 if covered_rowid < boundary_rowid:
-                    stored = self.summarize_prefix(
-                        owner, thread_id, up_to_rowid=boundary_rowid
-                    )
+                    stored = self.summarize_prefix(owner, thread_id, up_to_rowid=boundary_rowid)
                     summary_text = stored.content
                     covered_rowid = stored.up_to_rowid
 
@@ -204,10 +202,7 @@ class ThreadContextEngine:
     # ------------------------------------------------------------------ #
 
     def _render_window(self, rows: list[ThreadMessage]) -> str:
-        lines = [
-            f"[{m.role}] {_clip(m.content, _WINDOW_LINE_CHARS)}"
-            for m in rows
-        ]
+        lines = [f"[{m.role}] {_clip(m.content, _WINDOW_LINE_CHARS)}" for m in rows]
         return "\n".join(lines)
 
     async def _topical_recall(
@@ -233,7 +228,7 @@ class ThreadContextEngine:
             return ""
         if not items:
             return ""
-        lines = [f"- {item.content[: _WINDOW_LINE_CHARS]}" for item in items]
+        lines = [f"- {item.content[:_WINDOW_LINE_CHARS]}" for item in items]
         return "\n".join(lines)
 
     # ------------------------------------------------------------------ #
@@ -252,7 +247,15 @@ class ThreadContextEngine:
         Stored under the thread-unique agent id ``thread-{thread_id}``
         with the thread id as a tag. Best-effort: recall is an
         optimization, so persistence failures never fail the turn.
+
+        Ownership is authorized first via the thread store (same
+        ``KeyError`` as every other thread operation for unknown or
+        foreign threads), so a foreign owner cannot poison this
+        thread's recall.
         """
+        # Authorize before writing anything: assemble() is protected by
+        # list_message_rows, but this write path must check too.
+        self._threads.get_thread(owner, thread_id)
         try:
             await self._memory.store(
                 MemoryItem(
