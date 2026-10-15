@@ -2,7 +2,8 @@
 
 import pytest
 
-from agency.security.red.executor import RedTeamExecutor, RedTeamExecutorError, TestStatus
+from agency.security.red.executor import RedTeamExecutor, RedTeamExecutorError
+from agency.security.red.executor import TestStatus as RedTestStatus
 from agency.security.red.planner import PlanStatus, RedTeamPlanner, RedTeamPlannerError
 
 
@@ -50,7 +51,7 @@ def test_execute_approved_plan_collects_evidence(
     plan = test_red_planner.create_plan(target="staging/api", hypothesis="h")
     test_red_planner.approve_plan(plan.id)
     result = test_red_executor.execute_test(plan.id, test_sandbox.id, ["echo", "probe"])
-    assert result.status is TestStatus.PASSED
+    assert result.status is RedTestStatus.PASSED
     assert len(result.evidence) == 5
     kinds = {e.kind for e in result.evidence}
     assert {"command", "stdout", "stderr", "exit_code", "execution"} <= kinds
@@ -69,13 +70,13 @@ def test_execute_unapproved_plan_blocked(
 ):
     plan = test_red_planner.create_plan(target="t", hypothesis="h")
     result = test_red_executor.execute_test(plan.id, test_sandbox.id)
-    assert result.status is TestStatus.BLOCKED
+    assert result.status is RedTestStatus.BLOCKED
     assert any("not approved" in f for f in result.findings)
 
 
 def test_execute_unknown_plan_blocked(test_red_executor: RedTeamExecutor, test_sandbox):
     result = test_red_executor.execute_test("plan-nope", test_sandbox.id)
-    assert result.status is TestStatus.BLOCKED
+    assert result.status is RedTestStatus.BLOCKED
 
 
 def test_execute_missing_sandbox_error(
@@ -85,7 +86,7 @@ def test_execute_missing_sandbox_error(
     plan = test_red_planner.create_plan(target="t", hypothesis="h")
     test_red_planner.approve_plan(plan.id)
     result = test_red_executor.execute_test(plan.id, "sbx-missing")
-    assert result.status is TestStatus.ERROR
+    assert result.status is RedTestStatus.ERROR
 
 
 def test_execute_failing_command_marks_failed(
@@ -100,7 +101,7 @@ def test_execute_failing_command_marks_failed(
     test_red_planner.approve_plan(plan.id)
     sbx = test_sandbox_manager.create_sandbox("agent-1")
     result = executor.execute_test(plan.id, sbx.id, ["false"])
-    assert result.status is TestStatus.FAILED
+    assert result.status is RedTestStatus.FAILED
 
 
 def test_get_and_list_tests(
@@ -113,8 +114,8 @@ def test_get_and_list_tests(
     result = test_red_executor.execute_test(plan.id, test_sandbox.id)
     assert test_red_executor.get_test(result.id).id == result.id
     assert len(test_red_executor.list_tests()) == 1
-    assert len(test_red_executor.list_tests(TestStatus.PASSED)) == 1
-    assert test_red_executor.list_tests(TestStatus.FAILED) == []
+    assert len(test_red_executor.list_tests(RedTestStatus.PASSED)) == 1
+    assert test_red_executor.list_tests(RedTestStatus.FAILED) == []
     with pytest.raises(RedTeamExecutorError):
         test_red_executor.get_test("test-missing")
     with pytest.raises(RedTeamExecutorError):
