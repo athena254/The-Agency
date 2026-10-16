@@ -573,7 +573,10 @@ class AgencyOrchestrator:
             raise
 
     async def _execute_running(
-        self, task: Task, context: dict[str, Any] | None, recalled_context: str,
+        self,
+        task: Task,
+        context: dict[str, Any] | None,
+        recalled_context: str,
     ) -> ExecutionResult:
         """Legacy execution only; reports confer neither acceptance nor authority."""
         task_id = task.task_id
@@ -631,11 +634,20 @@ class AgencyOrchestrator:
             )
             # The driver puts provider exception bodies into llm_error's answer.
             # There is no model artifact to present on that path.
-            output = "" if loop_result.status == "llm_error" else render_output(loop_result.final_answer)
-            status = "completed" if loop_result.status == "completed" and output.strip() else "failed"
-            assessments.append(unchecked_subtask(
-                "tool_loop", path="tool", execution_status=status, output=output,
-            ))
+            output = (
+                "" if loop_result.status == "llm_error" else render_output(loop_result.final_answer)
+            )
+            status = (
+                "completed" if loop_result.status == "completed" and output.strip() else "failed"
+            )
+            assessments.append(
+                unchecked_subtask(
+                    "tool_loop",
+                    path="tool",
+                    execution_status=status,
+                    output=output,
+                )
+            )
             outputs.append(output)
             self._log.info(
                 "tool_loop_completed",
@@ -657,10 +669,14 @@ class AgencyOrchestrator:
             outputs.append(output)
             status = exec_result.status.value
             if status != "completed" or not output.strip():
-                assessments.append(unchecked_subtask(
-                    subtask.subtask_id, path="classic",
-                    execution_status="failed" if status == "completed" else status, output=output,
-                ))
+                assessments.append(
+                    unchecked_subtask(
+                        subtask.subtask_id,
+                        path="classic",
+                        execution_status="failed" if status == "completed" else status,
+                        output=output,
+                    )
+                )
                 continue
 
             # Verify
@@ -683,11 +699,16 @@ class AgencyOrchestrator:
 
             # Assess risk
             _, category = self._risk_engine.assess(finding)
-            assessments.append(classic_subtask(
-                subtask.subtask_id, execution_status=exec_result.status.value,
-                output=output, verification=verification,
-                category=category, finding_id=finding.id,
-            ))
+            assessments.append(
+                classic_subtask(
+                    subtask.subtask_id,
+                    execution_status=exec_result.status.value,
+                    output=output,
+                    verification=verification,
+                    category=category,
+                    finding_id=finding.id,
+                )
+            )
 
             # Audit
             await self._audit_log.append(
@@ -708,12 +729,16 @@ class AgencyOrchestrator:
                 )
             )
 
-        all_completed = bool(assessments) and all(s.execution_status == "completed" for s in assessments)
+        all_completed = bool(assessments) and all(
+            s.execution_status == "completed" for s in assessments
+        )
         final_status = TaskStatus.COMPLETED if all_completed else TaskStatus.FAILED
         final_output = "\n\n".join(output for output in outputs if output)
         report = build_assessment(
-            task_id, execution_status="completed" if all_completed else "failed",
-            output=final_output, subtasks=tuple(assessments),
+            task_id,
+            execution_status="completed" if all_completed else "failed",
+            output=final_output,
+            subtasks=tuple(assessments),
         )
         result = ExecutionResult(
             task_id=task_id,
@@ -728,12 +753,18 @@ class AgencyOrchestrator:
         # Valid result first, required persistence next, terminal status last.
         # These stores are not one transaction; A2 adds no recovery protocol.
         if all_completed:
-            await self._memory_store.store(MemoryItem(
-                agent_id=task.created_by,
-                content=(f"Task '{task.title}' [execution=completed; checks={report.verification.value}; "
-                         f"risk={report.risk_status}; independently_verified=false] → {final_output[:500]}"),
-                tier=MemoryTier.NORMAL, importance=0.7, tags=["task", "execution"],
-            ))
+            await self._memory_store.store(
+                MemoryItem(
+                    agent_id=task.created_by,
+                    content=(
+                        f"Task '{task.title}' [execution=completed; checks={report.verification.value}; "
+                        f"risk={report.risk_status}; independently_verified=false] → {final_output[:500]}"
+                    ),
+                    tier=MemoryTier.NORMAL,
+                    importance=0.7,
+                    tags=["task", "execution"],
+                )
+            )
         await self._task_manager.update_status(task_id, final_status)
 
         self._log.info(
@@ -771,9 +802,33 @@ class AgencyOrchestrator:
         if agent is None:
             raise ValueError(f"Unknown agent: {agent_id}")
         system_context = self._system_context(description, context, channel="local browser UI")
-        return await self._executor.execute(
+        result = await self._executor.execute(
             task=system_context,
             context={"agent_id": agent_id},
+        )
+        output = render_output(result.output)
+        status = result.status
+        if status is ExecutionStatus.COMPLETED and not output.strip():
+            status = ExecutionStatus.FAILED
+        report = build_assessment(
+            result.task_id,
+            execution_status=status.value,
+            output=output,
+            subtasks=(
+                unchecked_subtask(
+                    "isolated",
+                    path="isolated",
+                    execution_status=status.value,
+                    output=output,
+                ),
+            ),
+        )
+        return ExecutionResult.model_validate(
+            {
+                **result.model_dump(),
+                "status": status,
+                "assessment": report,
+            }
         )
 
     # ------------------------------------------------------------------ #

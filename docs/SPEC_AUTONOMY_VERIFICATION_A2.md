@@ -94,7 +94,7 @@ Reject contradictory summaries and a completed empty-subtask record. Aggregate c
 
 `ExecutionResult.assessment: ExecutionAssessment | None = None` — additive compatibility for standalone AgentExecutor and old internal test doubles. Orchestrated and isolated production paths populate it. `ExecutionResult.attempts` permits zero to represent the reproduced zero-work failure truthfully; default remains one. At the orchestrator level this historical field counts executed units, not total provider attempts; no new metering claim.
 
-`ButlerReply.assessment: ExecutionAssessment | None = None` — additive frozen dataclass field for the isolated path. Text-only Butler methods retain their public string return type.
+`ButlerReply.assessment: ExecutionAssessment | None = None` — additive frozen dataclass field for the isolated path. `ButlerReply.task_id: str | None = None` also carries the actual result ID so the prototype can recheck binding without taking the expected ID from the report itself; legacy doubles without an ID remain unavailable. This additive provenance field closes an inspection-discovered consumer seam, without changing inbound requests or granting authority. Text-only Butler methods retain their public string return type.
 
 `ChatResponse.assessment: ExecutionAssessment | None = None` — additive outbound field. ChatRequest stays message-only, extra=forbid. Report absence stays null; never turn it into a passed assessment. Production returns the real report. Existing test doubles can return no report and must display an unavailable notice.
 
@@ -164,7 +164,7 @@ One integration writer owns existing:
 - src/agency/prototype/app.py and its existing static JS/CSS assets if needed for a separate runtime notice.
 
 New runtime file: src/agency/agents/assessment.py.
-New focused tests: tests/test_autonomy_verification_assessment.py and tests/test_autonomy_verification_consumers.py. Existing affected tests may be updated only where response schema/text contract deliberately changes; never weaken denial/isolation assertions. Exact UI files are src/agency/prototype/static/app.js and tests/prototype_ui.test.mjs; no CSS/HTML change is needed. Deliberate compatibility-test updates include tests/test_beta_failure_integrity.py (the two text-only completed controls) and tests/test_prototype_app.py (the exact success JSON shape); their failure/denial assertions remain intact. Existing research tests may expect the new execution-oriented heading, with conservative fallback for old status-only doubles.
+New focused tests: tests/test_autonomy_verification_assessment.py and tests/test_autonomy_verification_consumers.py. Existing affected tests may be updated only where response schema/text contract deliberately changes; never weaken denial/isolation assertions. Exact UI files are src/agency/prototype/static/app.js and tests/prototype_ui.test.mjs; no CSS/HTML change is needed. Deliberate compatibility-test updates include tests/test_beta_failure_integrity.py (completed text controls), tests/test_beta_principal_hop.py (the completed context-identity control) and tests/test_prototype_app.py (the exact success JSON shape); their failure/denial assertions remain intact. Existing research tests may expect the new execution-oriented heading, with conservative fallback for old status-only doubles.
 
 Documentation/evidence: this spec, research, final qualification report and selected sanitized receipts under docs/research-evidence/. Full raw evidence stays outside the repository at the named evidence root.
 

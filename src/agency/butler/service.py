@@ -20,6 +20,12 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from agency.agents.assessment import (
+    ExecutionAssessment,
+    assessed_output,
+    bound_assessment,
+    render_output,
+)
 from agency.agents.executor import ExecutionStatus
 from agency.butler.commands import CommandError, ThreadCommands
 from agency.butler.config import ButlerConfig
@@ -57,6 +63,8 @@ class ButlerReply:
 
     text: str
     status: str
+    assessment: ExecutionAssessment | None = None
+    task_id: str | None = None
 
 
 class ButlerExecutionError(RuntimeError):
@@ -430,6 +438,8 @@ class ButlerService:
 
         status = "failed"
         reply_text = "Sorry, I could not process that request."
+        assessment = None
+        task_id = None
         try:
             result = await asyncio.wait_for(
                 self._orchestrator.converse_isolated(text, agent.id, context=merged),
@@ -437,14 +447,25 @@ class ButlerService:
             )
             status = str(result.status.value)
             output = result.output
-            reply_text = output if isinstance(output, str) else str(output)
+            reply_text = render_output(output)
+            task_id = getattr(result, "task_id", None)
+            assessment = bound_assessment(
+                getattr(result, "assessment", None),
+                task_id=task_id or "",
+                execution_status=status,
+                output=output,
+            )
         except TimeoutError as exc:
             status = "timeout"
             reply_text = f"Request timed out after {self._config.timeout:g}s. Please try again."
-            self._log.warning("butler.isolated_timeout", sender=sender, error=str(exc))
-        except Exception:  # noqa: BLE001 — never surface raw exception text or stack.
+            self._log.warning(
+                "butler.isolated_timeout", sender=sender, error_type=type(exc).__name__
+            )
+        except Exception as exc:  # noqa: BLE001 — never surface raw exception text or stack.
             status = "failed"
-            self._log.exception("butler.isolated_failed", sender=sender)
+            self._log.warning(
+                "butler.isolated_failed", sender=sender, error_type=type(exc).__name__
+            )
 
         # Sanitized audit: message/response bodies are never persisted here.
         await self._audit_append(
@@ -459,7 +480,7 @@ class ButlerService:
                 "duration_s": (datetime.now(UTC) - started).total_seconds(),
             },
         )
-        return ButlerReply(text=reply_text, status=status)
+        return ButlerReply(text=reply_text, status=status, assessment=assessment, task_id=task_id)
 
     async def _run_command(self, sender: str, command: str, args: str, started: datetime) -> str:
         """Execute a parsed command; errors become user-visible replies."""
@@ -552,7 +573,14 @@ class ButlerService:
                 status=result.status.value,
             )
             raise ButlerExecutionError(f"Task execution failed with status: {result.status.value}")
-        output = result.output if isinstance(result.output, str) else str(result.output)
+        output = assessed_output(
+            result.output,
+            assessment=getattr(result, "assessment", None)
+            if getattr(result, "task_id", None) == task.task_id
+            else None,
+            task_id=task.task_id,
+            execution_status=result.status.value,
+        )
         await self._audit_append(
             agent=agent.id,
             action="butler.execute",

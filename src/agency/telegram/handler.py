@@ -8,6 +8,7 @@ from typing import Any
 
 import structlog
 
+from agency.agents.assessment import assessed_output
 from agency.agents.demo.agent import DemoAgent
 from agency.telegram.adapter import TelegramAdapter
 from agency.telegram.budget_store import BetaBudgetStore, BudgetUnavailable
@@ -454,8 +455,15 @@ class TelegramHandler:
             if getattr(result, "status", None) == "timeout":
                 return "Research timed out. Please try again."
             return "Research could not be completed. Please try again."
-        output = result.output if isinstance(result.output, str) else str(result.output)
-        return f"🔍 *Research complete*\n\n{output}"
+        output = assessed_output(
+            result.output,
+            assessment=getattr(result, "assessment", None)
+            if getattr(result, "task_id", None) == task.task_id
+            else None,
+            task_id=task.task_id,
+            execution_status="completed",
+        )
+        return f"🔍 *Research execution finished*\n\n{output}"
 
     async def _send_long(self, chat_id: int, text: str, limit: int = 3800) -> None:
         """Send text, splitting into multiple messages above the limit."""

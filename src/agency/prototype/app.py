@@ -41,6 +41,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
 from agency import __version__
+from agency.agents.assessment import ExecutionAssessment, bound_assessment
 from agency.butler.service import ButlerService
 from agency.orchestrator import AgencyOrchestrator
 
@@ -201,6 +202,7 @@ class ChatResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     response: str
+    assessment: ExecutionAssessment | None = None
 
 
 class AgentView(BaseModel):
@@ -381,7 +383,13 @@ def create_app(butler: ButlerService | None = None) -> FastAPI:
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="The Butler returned no reply.",
             )
-        return ChatResponse(response=text)
+        report = bound_assessment(
+            getattr(reply, "assessment", None),
+            task_id=getattr(reply, "task_id", None) or "",
+            execution_status=status_value,
+            output=text,
+        )
+        return ChatResponse(response=text, assessment=report)
 
     @application.get("/", include_in_schema=False)
     async def index() -> FileResponse:

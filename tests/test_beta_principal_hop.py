@@ -69,7 +69,7 @@ async def test_handle_message_does_not_promote_context_identity(
         await service.handle_message(
             "hello", "telegram:999", {"beta_principal": principal}, memory_enabled=False
         )
-        == "ok"
+        == "ok\n\nRuntime assessment: unavailable. No independent verification or authorization."
     )
     assert "beta_principal" not in stub.execute_task.await_args.kwargs
 
