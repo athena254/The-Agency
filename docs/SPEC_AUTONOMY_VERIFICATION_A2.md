@@ -1,7 +1,7 @@
 # A2 — truthful observable execution assessments
 
 Date: October 16, 2026.
-Status: OWNER APPROVED at checkpoint b5de513 for free-only isolated implementation. IMPLEMENTATION BLOCKED before runtime edits: OpenCode free-tier 403 and Cline re-authentication required. See HANDOFF_AUTONOMY_VERIFICATION_A2_20261016.md.
+Status: OWNER APPROVED at checkpoint b5de513; resumed for direct implementation by the current assistant on October 16, 2026. The owner's newer instruction is: 'Do not delegate do the coding yourself or use your own luna and terra cheaper models where possible'. This supersedes the Cline/free-worker prerequisite, not the technical scope or offline qualification gates. No delegated or auxiliary model workers will be used in this continuation. HANDOFF_AUTONOMY_VERIFICATION_A2_20261016.md records the historical blocker, not a current requirement to authenticate Cline.
 Base: `c958b874e24938e2a3713963d4d5aa73f21a97ba` (A1).
 Worktree: `C:/Users/alphi/agency-worktrees/autonomy-verification-a2-20261016/`.
 Branch: `docs/autonomy-verification-a2-20261016`.
@@ -13,7 +13,7 @@ Tell callers what actually ran and what was checked. Finishing a model/tool loop
 
 Preserve A1 quoted recall and all existing beta denials, prototype request guards and isolated tool/memory/thread/Lattice exclusion. No new tools, model calls, verifier models, providers, filesystem authority, HTTP routes, orchestration powers, peer policy, ledger migrations or deployment. Butler stays a human gateway, not an autonomous governor. Existing uncontrolled legacy execution is not relabeled authorized by this work.
 
-The owner requested research, then plan and execution with milestone reports. The implementation approval checkpoint remains explicit. The current running assistant can research and review. Heavy delegated implementation requires a freshly qualified eligible free-model lane; unavailable quota is a blocker, not permission for a paid fallback. Main and any live bot remain untouched. No push, merge or rollout is included.
+The owner requested research, then plan and execution with milestone reports. The approved implementation checkpoint remains explicit. The current assistant now implements and reviews directly under the newer no-delegation instruction; no free-worker smoke or Cline login is required for direct coding. No paid fallback or auxiliary model is selected. Main and any live bot remain untouched. No push, merge or rollout is included.
 
 This A2 is the R-03 assessment slice in `SPEC_BOUNDED_AUTONOMY_V1.md:189`, not the differently numbered durable-runtime A2 in another program.
 
@@ -185,7 +185,7 @@ A2-T10: A1 recall (classic/tool allowed, isolated excluded), beta denial before 
 A2-T11: injected verifier/risk/evidence/audit/memory failures cannot return success; prior unverified evidence stays unverified, no fabricated audit/independent receipt. Record cross-store atomicity limitations honestly.
 A2-T12: no main/source runtime-data changes, no bot/provider operations, no unsupported authority/autonomy claim; final logs/JUnit and source hashes tie qualification to exact tested revision.
 
-Use vertical RED→GREEN slices: first expose tool report, then classic truthfulness, then zero-work/failure behavior, then immutable validation/binding, then consumers. Each new behavior needs a failing test observed before production edits. Retain focused red/green logs and checkpoint commits. Independent read-only review may proceed in parallel; shared runtime edits do not.
+Use vertical RED→GREEN slices: first expose tool report, then classic truthfulness, then zero-work/failure behavior, then immutable validation/binding, then consumers. Each new behavior needs a failing test observed before production edits. Retain focused red/green logs and checkpoint commits. The current assistant is the sole writer and performs an explicit read-only review pass after implementation. An independent reviewer is not supplied under the no-delegation instruction and must remain an explicitly unfulfilled gate, not a claimed independent review.
 
 ## 10. Qualification and milestone reporting
 
@@ -196,4 +196,4 @@ M4 qualification: independent code/security review; all tests on exact revision;
 
 Use discovered Python 3.11 interpreter read-only; PYTHONPATH and test paths must point to this isolated checkout. Preserve failed runs, start/completion timestamps, commands, JUnit totals, source/test fingerprints and exact changed-file lists outside cache. A source/test change during qualification invalidates that exact-revision claim. A later docs-only commit may reference earlier code qualification only after tree-equality proof.
 
-Final report distinguishes local offline qualification from unrun CI/platform matrix, live-provider validation, independent peer authorization, durable lifecycle and deployment. None is inferred from unit-test counts. Main remains clean/unchanged; no live bot action. Stop at any missing approval/tooling/free-worker prerequisite or unresolved security/regression failure and report the blocker plainly.
+Final report distinguishes local offline qualification and self-review from unperformed independent review, unrun CI/platform matrix, live-provider validation, independent peer authorization, durable lifecycle and deployment. None is inferred from unit-test counts. Main remains clean/unchanged; no live bot action. Stop at any missing approval/tooling prerequisite or unresolved security/regression failure and report the blocker plainly. The historical free-worker prerequisite no longer applies because the owner explicitly directed direct coding.
