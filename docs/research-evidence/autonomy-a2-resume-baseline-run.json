@@ -1,0 +1,18 @@
+{
+  "started_at_utc": "2026-10-16T15:25:46.664123+00:00",
+  "completed_at_utc": "2026-10-16T15:25:52.079565+00:00",
+  "elapsed_seconds": 5.42,
+  "command": [
+    "C:/Users/alphi/theagency/.venv/Scripts/python.exe",
+    "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\probe_baseline.py"
+  ],
+  "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-a2-20261016-resume-baseline",
+  "exit_code": 0,
+  "source_test_before": "f65db62f1d628c3a085b38bc1d8e39d3503b0c6e4f82905ca65d8d5cae9cbaa9",
+  "source_test_after": "f65db62f1d628c3a085b38bc1d8e39d3503b0c6e4f82905ca65d8d5cae9cbaa9",
+  "python_loopback_guard": true,
+  "os_sandbox": false,
+  "live_provider_authorized": false,
+  "probe_sha256": "97973ffeca4dbf74d4df1bc9085638efe9672c3171f48ab68faa0d70832fec14",
+  "guard_sha256": "27d3fe4e28c0a713f856025855328c55bd0e798b83f62e1a3842f8cd975acdab"
+}
