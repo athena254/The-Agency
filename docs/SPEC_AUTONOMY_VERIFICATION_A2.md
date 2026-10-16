@@ -1,7 +1,7 @@
 # A2 — truthful observable execution assessments
 
 Date: October 16, 2026.
-Status: SPECIFICATION CHECKPOINT — implementation awaits owner approval after this documentation commit.
+Status: OWNER APPROVED at checkpoint b5de513 for free-only isolated implementation. IMPLEMENTATION BLOCKED before runtime edits: OpenCode free-tier 403 and Cline re-authentication required. See HANDOFF_AUTONOMY_VERIFICATION_A2_20261016.md.
 Base: `c958b874e24938e2a3713963d4d5aa73f21a97ba` (A1).
 Worktree: `C:/Users/alphi/agency-worktrees/autonomy-verification-a2-20261016/`.
 Branch: `docs/autonomy-verification-a2-20261016`.
