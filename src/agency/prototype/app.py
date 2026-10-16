@@ -42,7 +42,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agency import __version__
 from agency.agents.assessment import ExecutionAssessment, bound_assessment
-from agency.butler.service import ButlerService
+from agency.butler.service import ButlerAuditError, ButlerService
 from agency.orchestrator import AgencyOrchestrator
 
 log = structlog.get_logger(__name__)
@@ -309,7 +309,7 @@ def create_app(butler: ButlerService | None = None) -> FastAPI:
 
     @application.exception_handler(Exception)
     async def _unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
-        log.exception("prototype.api_unhandled", path=str(request.url.path))
+        log.error("prototype.api_unhandled", error_type=type(exc).__name__)
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"error": "Internal server error."},
@@ -364,7 +364,14 @@ def create_app(butler: ButlerService | None = None) -> FastAPI:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Prototype chat is unavailable in this configuration.",
             )
-        reply = await isolated(payload.message, LOCAL_SENDER)
+        try:
+            reply = await isolated(payload.message, LOCAL_SENDER)
+        except ButlerAuditError:
+            log.warning("prototype.audit_unavailable")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Audit unavailable; execution outcome unconfirmed. Do not automatically retry.",
+            ) from None
         status_value = str(getattr(reply, "status", "failed"))
         if status_value == "timeout":
             raise HTTPException(

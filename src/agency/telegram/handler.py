@@ -52,6 +52,9 @@ _KNOWN_NONBETA_COMMANDS = frozenset(
     }
 )
 _THREAD_PRIVATE_ONLY = "Thread commands are available in a private chat with this bot."
+_AUDIT_UNAVAILABLE_NOTICE = (
+    "Audit unavailable; execution outcome unconfirmed. Do not automatically retry."
+)
 
 _CREATION_ATTEMPT = re.compile(
     r"\b(create|make|build|spawn|add|set\s+up|spin\s+up|stand\s+up|launch)\b.*\b(agent|bot)\b"
@@ -389,7 +392,7 @@ class TelegramHandler:
             if normalized is not None:
                 if private:
                     if self._butler is not None:
-                        response = await self._butler.handle_message(
+                        response, audit_acknowledged = await self._call_butler(
                             normalized,
                             conversation_sender,
                             {"chat_id": chat_id, "assistant_name": display_name},
@@ -397,8 +400,11 @@ class TelegramHandler:
                         )
                     else:
                         response = "Butler not running."
+                        audit_acknowledged = True
                     if chat_id:
                         await self._adapter.send_message(chat_id, response)
+                    if not audit_acknowledged:
+                        return {"status": "rejected", "reason": "audit unavailable"}
                     thread_command = normalized.split(None, 1)[0]
                     return {"status": "ok", "chat_id": chat_id, "command": thread_command}
                 if chat_id:
@@ -411,8 +417,9 @@ class TelegramHandler:
                 return {"status": "ok", "chat_id": chat_id, "command": f"/{unknown}"}
 
         # Process via Butler if available, else demo agent
+        audit_acknowledged = True
         if self._butler:
-            response = await self._butler.handle_message(
+            response, audit_acknowledged = await self._call_butler(
                 text,
                 conversation_sender,
                 {"chat_id": chat_id, "assistant_name": display_name},
@@ -425,7 +432,30 @@ class TelegramHandler:
         if chat_id:
             await self._adapter.send_message(chat_id, response)
 
+        if not audit_acknowledged:
+            return {"status": "rejected", "reason": "audit unavailable"}
         return {"status": "ok", "chat_id": chat_id, "response_length": len(response)}
+
+    async def _call_butler(
+        self,
+        message: str,
+        sender: str,
+        context: dict[str, Any],
+        *,
+        commands_enabled: bool = False,
+    ) -> tuple[str, bool]:
+        """Return reply and audit acknowledgement, never retry or use a fallback."""
+        # Import lazily: eager Butler imports introduce metering/ToolDriver cycles.
+        from agency.butler.service import ButlerAuditError
+
+        try:
+            response = await self._butler.handle_message(
+                message, sender, context, commands_enabled=commands_enabled
+            )
+        except ButlerAuditError:
+            self._log.warning("telegram.audit_unavailable")
+            return _AUDIT_UNAVAILABLE_NOTICE, False
+        return response, True
 
     async def _handle_research(self, args: str, sender: str, display_name: str = "Remex") -> str:
         """Run the research agent's tool loop on a topic."""
@@ -705,21 +735,19 @@ class TelegramHandler:
             if not private:
                 return _THREAD_PRIVATE_ONLY
             if self._butler:
-                return str(
-                    await self._butler.handle_message(
-                        normalized, sender, {"assistant_name": display_name}, commands_enabled=True
-                    )
+                response, _audit_acknowledged = await self._call_butler(
+                    normalized, sender, {"assistant_name": display_name}, commands_enabled=True
                 )
+                return str(response)
             return "Butler not running."
         unknown = _unknown_command_name(text)
         if unknown is not None:
             return unknown_command_text(unknown)
         if self._butler:
-            return str(
-                await self._butler.handle_message(
-                    text, sender, {"assistant_name": display_name}, commands_enabled=private
-                )
+            response, _audit_acknowledged = await self._call_butler(
+                text, sender, {"assistant_name": display_name}, commands_enabled=private
             )
+            return str(response)
         return await self._demo.handle(text, {"sender": sender})
 
     async def send_response(self, chat_id: int, text: str) -> dict[str, Any]:

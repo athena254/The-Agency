@@ -82,6 +82,9 @@ Tests allowed:
 - New `tests/test_autonomy_gateway_audit.py` for required acknowledgement, real service/store ordering and injected failure paths.
 - New `tests/test_autonomy_gateway_audit_consumers.py` for prototype and Telegram/poller consumer behavior.
 - Existing `tests/test_butler.py`, `tests/test_butler_threads.py`, `tests/test_butler_context.py`, `tests/test_butler_thread_transport.py`, `tests/test_butler_thread_integration.py`, `tests/test_prototype_app.py`, `tests/test_telegram_handler.py`, `tests/test_beta_telegram_polling.py` only for affected expectations/fixtures; do not weaken denial/isolation checks.
+- Owner-approved scope amendment: only `test_context_and_sender_cannot_mint_principal` in `tests/test_beta_principal_hop.py` may initialize/close its real audit store, preserving its principal-forgery assertion unchanged. Recorded in `research-evidence/autonomy-a3-1-fixture-approval.json` after the first full suite exposed that uninitialized fixture.
+
+The prototype's existing generic error logger must also omit exception traces/request locals when blocking metered errors propagate through it; preserve its existing fixed HTTP 500 response. This privacy refinement changes no endpoint, permission or error-response schema. Unknown command tokens must be recorded as a fixed `unknown` code rather than persisting arbitrary slash-command text.
 
 Documentation/evidence can be updated. All other production files, budget/audit schemas, adapter/metering code, UI source and runtime data are outside this slice. If inspection needs another source owner/interface, record the deviation and obtain approval rather than expanding silently. Verify actual existing test filenames before editing; absence is a scope-discovery issue, not permission to create a substitute broad test file.
 
