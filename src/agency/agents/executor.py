@@ -22,6 +22,7 @@ from uuid import uuid4
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
+from agency.agents.assessment import ExecutionAssessment
 from agency.llm.adapter import LLMAdapter
 
 logger = structlog.get_logger(__name__)
@@ -71,8 +72,9 @@ class ExecutionResult(BaseModel):
     task_id: str
     status: ExecutionStatus
     output: Any = None
+    assessment: ExecutionAssessment | None = None
     error: str | None = None
-    attempts: int = Field(default=1, ge=1)
+    attempts: int = Field(default=1, ge=0)
     duration_s: float = Field(default=0.0, ge=0.0)
     model: str = Field(default="")
 
