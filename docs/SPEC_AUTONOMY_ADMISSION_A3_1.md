@@ -1,7 +1,7 @@
 # A3.1 — Required gateway audit acknowledgement
 
 Date: October 16, 2026.
-Status: **PROPOSED implementation contract. Await owner approval after documentation checkpoint.**
+Status: **APPROVED for direct assistant implementation and offline testing** after checkpoint `622e41b`; see `research-evidence/autonomy-a3-1-approval.json`. No runtime enablement or deployment approval.
 Base: `d9377606de25e7dadbcf85d51480026022068085`.
 Branch: `docs/autonomy-admission-a3-20261016`.
 

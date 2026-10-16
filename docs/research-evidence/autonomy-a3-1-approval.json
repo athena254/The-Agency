@@ -1,0 +1,14 @@
+{
+  "recorded_at_utc": "2026-10-16T21:08:06.391118+00:00",
+  "approved_spec_checkpoint": "622e41b432df7a824e928c4c57543c3cd1bbf37f",
+  "spec": "docs/SPEC_AUTONOMY_ADMISSION_A3_1.md",
+  "approval_source": "User response to clarification tool in this conversation",
+  "user_response_exact": "Approve A3.1 offline implementation",
+  "continuation_exact": "Keep working",
+  "scope": "Direct assistant coding and offline tests in isolated branch; no delegation, auxiliary model, live provider, beta enablement, merge, push or deployment",
+  "unapproved": [
+    "D-01 through D-05 runtime/provider/resource/peer policy",
+    "independent-review substitution",
+    "rollout"
+  ]
+}
