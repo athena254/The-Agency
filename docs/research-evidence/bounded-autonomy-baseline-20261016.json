@@ -1,0 +1,16 @@
+{
+  "observed_at_utc": "2026-10-16T08:34:52.553387+00:00",
+  "baseline_sha": "1c7e7da2774ee4687741a0e346cbf2d593a9c845",
+  "kind": "diagnostic defect reproduction; NOT repair acceptance or live autonomy",
+  "model": "synthetic in-process legacy-path test double; zero live provider calls",
+  "classic_execution_status": "completed",
+  "classic_recalled_marker_received": false,
+  "tool_execution_status": "completed",
+  "tool_recalled_marker_received": true,
+  "tool_verification_label": "passed",
+  "tool_risk_label": "none",
+  "isolated_recalled_marker_received": false,
+  "beta_still_denied": true,
+  "beta_model_calls": 0,
+  "provider_dispatches": 0
+}

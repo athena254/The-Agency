@@ -1,0 +1,472 @@
+{
+  "recorded_at_utc": "2026-10-16T08:52:23.918824+00:00",
+  "kind": "documentation consistency/source identity/evidence validation; NOT runtime, security or autonomy acceptance",
+  "base_sha": "1c7e7da2774ee4687741a0e346cbf2d593a9c845",
+  "branch": "docs/bounded-autonomy-20261016",
+  "validator_path": "C:\\Users\\alphi\\agency-evidence\\bounded-autonomy-doc-checks-20261016.py",
+  "validator_sha256": "314af5566a45aaa0c8d372d77254efbd3a620fce946a57f5628480c1657ec675",
+  "checks": [
+    {
+      "name": "base source ancestry",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "branch",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "canonical unchanged",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "runtime source tests and config unchanged",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "all working changes under docs",
+      "passed": true,
+      "details": [
+        "docs/CURRENT_STATE.md",
+        "docs/RESEARCH_BOUNDED_AUTONOMY_20261016.md",
+        "docs/SPEC_AUTONOMY_CONTEXT_REPAIR_A1.md",
+        "docs/SPEC_BOUNDED_AUTONOMY_V1.md",
+        "docs/research-evidence/bounded-autonomy-audit-manifest-20261016.json",
+        "docs/research-evidence/bounded-autonomy-baseline-20261016.json",
+        "docs/research-evidence/bounded-autonomy-request-20261016.md"
+      ]
+    },
+    {
+      "name": "unique contiguous BA-",
+      "passed": true,
+      "details": {
+        "actual": [
+          "01",
+          "02",
+          "03",
+          "04",
+          "05",
+          "06"
+        ],
+        "expected": [
+          "01",
+          "02",
+          "03",
+          "04",
+          "05",
+          "06"
+        ]
+      }
+    },
+    {
+      "name": "unique contiguous D-",
+      "passed": true,
+      "details": {
+        "actual": [
+          "01",
+          "02",
+          "03",
+          "04",
+          "05"
+        ],
+        "expected": [
+          "01",
+          "02",
+          "03",
+          "04",
+          "05"
+        ]
+      }
+    },
+    {
+      "name": "unique contiguous AC-",
+      "passed": true,
+      "details": {
+        "actual": [
+          "01",
+          "02",
+          "03",
+          "04",
+          "05",
+          "06",
+          "07",
+          "08",
+          "09",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20",
+          "21",
+          "22",
+          "23",
+          "24"
+        ],
+        "expected": [
+          "01",
+          "02",
+          "03",
+          "04",
+          "05",
+          "06",
+          "07",
+          "08",
+          "09",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16",
+          "17",
+          "18",
+          "19",
+          "20",
+          "21",
+          "22",
+          "23",
+          "24"
+        ]
+      }
+    },
+    {
+      "name": "unique contiguous A1-T",
+      "passed": true,
+      "details": {
+        "actual": [
+          "01",
+          "02",
+          "03",
+          "04",
+          "05",
+          "06",
+          "07",
+          "08",
+          "09",
+          "10"
+        ],
+        "expected": [
+          "01",
+          "02",
+          "03",
+          "04",
+          "05",
+          "06",
+          "07",
+          "08",
+          "09",
+          "10"
+        ]
+      }
+    },
+    {
+      "name": "unique contiguous G-",
+      "passed": true,
+      "details": {
+        "actual": [
+          "01",
+          "02",
+          "03",
+          "04",
+          "05",
+          "06",
+          "07",
+          "08",
+          "09",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16"
+        ],
+        "expected": [
+          "01",
+          "02",
+          "03",
+          "04",
+          "05",
+          "06",
+          "07",
+          "08",
+          "09",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15",
+          "16"
+        ]
+      }
+    },
+    {
+      "name": "unique contiguous RQ-",
+      "passed": true,
+      "details": {
+        "actual": [
+          "01",
+          "02",
+          "03",
+          "04",
+          "05",
+          "06",
+          "07",
+          "08",
+          "09",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15"
+        ],
+        "expected": [
+          "01",
+          "02",
+          "03",
+          "04",
+          "05",
+          "06",
+          "07",
+          "08",
+          "09",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15"
+        ]
+      }
+    },
+    {
+      "name": "honest proposal and approval boundaries",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "publication cannot bypass checks",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "no fabricated Telegram principal",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "no clock stealing of existing workflow lock",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "gate policy decisions explicit",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "A1 preserves isolated and beta boundaries",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "balanced fenced blocks SPEC_BOUNDED_AUTONOMY_V1.md",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "no obvious credential material SPEC_BOUNDED_AUTONOMY_V1.md",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "balanced fenced blocks SPEC_AUTONOMY_CONTEXT_REPAIR_A1.md",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "no obvious credential material SPEC_AUTONOMY_CONTEXT_REPAIR_A1.md",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "balanced fenced blocks RESEARCH_BOUNDED_AUTONOMY_20261016.md",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "no obvious credential material RESEARCH_BOUNDED_AUTONOMY_20261016.md",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "balanced fenced blocks bounded-autonomy-request-20261016.md",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "no obvious credential material bounded-autonomy-request-20261016.md",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "relative markdown file links resolve",
+      "passed": true,
+      "details": [
+        {
+          "document": "SPEC_BOUNDED_AUTONOMY_V1.md",
+          "target": "SPEC_AUTONOMY_CONTEXT_REPAIR_A1.md",
+          "exists": true
+        },
+        {
+          "document": "SPEC_BOUNDED_AUTONOMY_V1.md",
+          "target": "RESEARCH_BOUNDED_AUTONOMY_20261016.md",
+          "exists": true
+        },
+        {
+          "document": "SPEC_BOUNDED_AUTONOMY_V1.md",
+          "target": "research-evidence/bounded-autonomy-request-20261016.md",
+          "exists": true
+        },
+        {
+          "document": "SPEC_BOUNDED_AUTONOMY_V1.md",
+          "target": "research-evidence/bounded-autonomy-baseline-20261016.json",
+          "exists": true
+        },
+        {
+          "document": "SPEC_BOUNDED_AUTONOMY_V1.md",
+          "target": "SPEC_AUTONOMY_CONTEXT_REPAIR_A1.md",
+          "exists": true
+        },
+        {
+          "document": "SPEC_AUTONOMY_CONTEXT_REPAIR_A1.md",
+          "target": "SPEC_BOUNDED_AUTONOMY_V1.md",
+          "exists": true
+        },
+        {
+          "document": "SPEC_AUTONOMY_CONTEXT_REPAIR_A1.md",
+          "target": "research-evidence/bounded-autonomy-baseline-20261016.json",
+          "exists": true
+        },
+        {
+          "document": "SPEC_AUTONOMY_CONTEXT_REPAIR_A1.md",
+          "target": "RESEARCH_BOUNDED_AUTONOMY_20261016.md",
+          "exists": true
+        },
+        {
+          "document": "RESEARCH_BOUNDED_AUTONOMY_20261016.md",
+          "target": "research-evidence/bounded-autonomy-baseline-20261016.json",
+          "exists": true
+        },
+        {
+          "document": "RESEARCH_BOUNDED_AUTONOMY_20261016.md",
+          "target": "research-evidence/bounded-autonomy-audit-manifest-20261016.json",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "name": "audited source hashes match base",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "source and tests tree identities preserved",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "private evidence manifest identity",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "every archived evidence file hash verified",
+      "passed": true,
+      "details": {
+        "count": 19
+      }
+    },
+    {
+      "name": "baseline result exactly matches retained evidence",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "diagnostic reproduces gaps and retains safe denial",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "five public sources retrieved successfully",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "citation mapping and attached evidence SPEC_BOUNDED_AUTONOMY_V1.md",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "citation mapping and attached evidence RESEARCH_BOUNDED_AUTONOMY_20261016.md",
+      "passed": true,
+      "details": null
+    },
+    {
+      "name": "tracked whitespace check",
+      "passed": true,
+      "details": null
+    }
+  ],
+  "check_count": 36,
+  "all_passed": true,
+  "citation_runs": [
+    {
+      "file": "SPEC_BOUNDED_AUTONOMY_V1.md",
+      "exit_code": 0,
+      "stdout": "info: stats: 255 prose sentence(s), 5 with declared provenance (2%) \u2014 5 cited, 0 marked [unverified] (a sentence may be both); 5 distinct source(s) cited, 6 in ledger (5 with evidence quotes)\nwarn: registered in the ledger but not cited in this draft: [6]\ncitations OK\n",
+      "stderr": ""
+    },
+    {
+      "file": "RESEARCH_BOUNDED_AUTONOMY_20261016.md",
+      "exit_code": 0,
+      "stdout": "info: stats: 113 prose sentence(s), 5 with declared provenance (4%) \u2014 5 cited, 0 marked [unverified] (a sentence may be both); 5 distinct source(s) cited, 6 in ledger (5 with evidence quotes)\nwarn: registered in the ledger but not cited in this draft: [6]\ncitations OK\n",
+      "stderr": ""
+    }
+  ],
+  "document_hashes": [
+    {
+      "path": "docs/SPEC_BOUNDED_AUTONOMY_V1.md",
+      "sha256": "740392c80c8f97863ab6377588569cbbe1009dca657225c5b325fead0afde49a"
+    },
+    {
+      "path": "docs/SPEC_AUTONOMY_CONTEXT_REPAIR_A1.md",
+      "sha256": "8115e2eb94dae20881c15200f96d2504aa77adb170970cd6c2e12635bbd733f9"
+    },
+    {
+      "path": "docs/RESEARCH_BOUNDED_AUTONOMY_20261016.md",
+      "sha256": "d851b04874635f9d365ae0c13bb09c629bcf1df42d5a3a5e86aa74ce50676769"
+    },
+    {
+      "path": "docs/research-evidence/bounded-autonomy-request-20261016.md",
+      "sha256": "735a210b22a84ba55aa1d2b019bac1e0e638fafa3f7c890d0c25efe45e4a6b4a"
+    }
+  ],
+  "runtime_tests_run": false,
+  "live_provider_called": false,
+  "peer_task_run": false,
+  "independent_security_review": false,
+  "push_merge_deploy": false
+}

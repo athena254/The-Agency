@@ -76,6 +76,12 @@ Source: `src/agency/lattice/`, `peer_envelope.py`, `lab/comet_smoke.py`; `COMET_
 
 See `PRODUCTION_READINESS_PLAN.md` for dependencies, observable acceptance gates, owner decisions and the restricted-pilot versus full-production distinction. There is no evidence-based completion percentage or release date yet.
 
+## Next development checkpoint — proposed bounded autonomy
+
+`SPEC_BOUNDED_AUTONOMY_V1.md` defines the first complete permitted task path, safety/recovery acceptance scenarios and unresolved authority decisions. `RESEARCH_BOUNDED_AUTONOMY_20261016.md` maps selected current-source gaps and records a synthetic diagnostic reproducing missing classic recall and unearned tool verification/risk labels. `SPEC_AUTONOMY_CONTEXT_REPAIR_A1.md` is the first bounded repair proposed for implementation approval; the later slices require separate frozen contracts.
+
+This documentation checkpoint is on `docs/bounded-autonomy-20261016`, based on handoff `1c7e7da`, in `C:/Users/alphi/agency-worktrees/bounded-autonomy-20261016`. It changes no runtime source/tests, enables no beta/model/tool path and does not constitute deployment or completion of autonomy. The diagnostic is not a fresh full-suite, live-provider, peer-authority or independent-QA qualification. The existing gates and historical qualification below remain unchanged.
+
 ## Verification and known limitations
 
 Latest full offline local verification at `ba9ec76`: **1,664 Python tests passed, zero failures/errors/skips, one Starlette/httpx deprecation warning**; **14 UI tests passed**; repo-wide Ruff lint/format and strict mypy on **150 source files** passed. Resource, unhandled-thread and unraisable warnings were errors; unsafe timed faulthandler diagnostics were disabled. The checkout/revision/source/test trees remained unchanged during the completed run. This handoff adds documentation/evidence only and must retain those exact source/test trees. Machine-readable results: `research-evidence/lattice-repairs-qualification-ba9ec768.json`; remaining warning/stability work: the handoff and `KNOWN_ISSUES.md`. Earlier `59e9bc9` verification and launcher pin/`--check` are historical and do not qualify the new repair revision for launch. Current CI matrix, fresh supported-launcher check, live-provider behavior, deployment, full sandbox/tenant security and host-independent Byzantine resilience remain unverified. Do not aggregate focused selections or turn the retained earlier failed/timed-out attempts into passing evidence.
