@@ -1,6 +1,6 @@
 # A3 admission / dispatch investigation — October 16, 2026
 
-Status: investigation and proposed next repair only; **A3 runtime source/tests remain unchanged**.
+Status: **HISTORICAL preimplementation investigation** at the base below. Its source paths/line numbers, observations, baseline totals and proposed next checkpoint describe that revision, not current runtime. A3.1 is now implemented/locally qualified at `418ab8e`; see `QUALIFICATION_AUTONOMY_ADMISSION_A3_1_20261016.md`. G2/G3 and the broader A3 integration remain open.
 Base `d9377606de25e7dadbcf85d51480026022068085`; source tree `3e5818e450be307b4d040f9c5252d2f30ba571a1`; tests tree `81902cb80f3dd26dbe04a6f816150f02f72338bf`.
 
 See `SPEC_AUTONOMY_ADMISSION_A3_1.md` for the exact next implementation boundary and `AUTONOMY_READINESS_20261016.md` for all remaining milestone gates.

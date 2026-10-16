@@ -1,7 +1,7 @@
 # A3.1 — Required gateway audit acknowledgement
 
 Date: October 16, 2026.
-Status: **APPROVED for direct assistant implementation and offline testing** after checkpoint `622e41b`; see `research-evidence/autonomy-a3-1-approval.json`. No runtime enablement or deployment approval.
+Status: **APPROVED, IMPLEMENTED and locally offline-qualified at `418ab8e`**; see `QUALIFICATION_AUTONOMY_ADMISSION_A3_1_20261016.md`. Original approval follows checkpoint `622e41b` in `research-evidence/autonomy-a3-1-approval.json`. No runtime enablement or deployment approval.
 Base: `d9377606de25e7dadbcf85d51480026022068085`.
 Branch: `docs/autonomy-admission-a3-20261016`.
 
@@ -109,6 +109,6 @@ Use real file-backed audit stores where proving acknowledgement and reopened evi
 
 ## 10. Stop gates and next slices
 
-Implementation approval for this document is the immediate gate. D-01 through D-05 need not be guessed to implement this narrow offline repair. Keep the branch local/unmerged and runtime untouched.
+Implementation approval is recorded and this slice is implemented/locally qualified at `418ab8e`; see `QUALIFICATION_AUTONOMY_ADMISSION_A3_1_20261016.md`. D-01 through D-05 were not guessed or granted by this repair. Keep the branch local/unmerged and live runtime untouched.
 
 A3 remains incomplete afterwards: immutable effective provider/endpoint/credential/limits binding; authenticated platform-neutral admission without fabricated Telegram principals; durable shared attempt accounting including routing, checking, failures and final turns; propagated uncertainty through all consumers, including direct research and optional provider/bridge paths. These require their own implementation contract, numeric/resource/provider policy and compatibility plan. A4 authority, A5 recovery/outbox, A6 useful task/checker and A7 qualification/authorized real-model demonstration remain separate.
