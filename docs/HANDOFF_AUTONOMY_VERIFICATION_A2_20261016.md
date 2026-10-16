@@ -1,5 +1,7 @@
 # A2 checkpoint and authentication blocker — October 16, 2026
 
+> HISTORICAL CHECKPOINT — superseded by the owner's direct-coding/no-delegation instruction and `QUALIFICATION_AUTONOMY_VERIFICATION_A2_20261016.md`. A2 is now implemented and locally offline-qualified at `f710a3f835e4dc033d2845994e31392c177fffd7`; independent review/CI/rollout remain pending. The original record below is preserved as history, not current instructions to authenticate Cline or start workers.
+
 ## Actual status
 
 Research and specification are completed and committed at `b5de5136141c5df03a54d95f30d611eb693082eb`. The owner approved **free-only coding workers and offline verification**, then authorized an attempt to handle Cline sign-in. **A2 runtime implementation has not begun.** Do not treat the specification, baseline passes, login attempt or approval as shipped A2 behavior.

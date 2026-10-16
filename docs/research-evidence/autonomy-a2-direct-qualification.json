@@ -1,0 +1,1144 @@
+{
+  "created_at_utc": "2026-10-16T17:51:21.456744+00:00",
+  "code_revision": "f710a3f835e4dc033d2845994e31392c177fffd7",
+  "new_focused_python_cases": 88,
+  "all_python_cases": 1794,
+  "ui_cases": 16,
+  "final_receipts": {
+    "direct-final-format": {
+      "label": "direct-final-format",
+      "kind": "format",
+      "started_at_utc": "2026-10-16T17:47:18.005378+00:00",
+      "completed_at_utc": "2026-10-16T17:47:18.370360+00:00",
+      "elapsed_seconds": 0.38,
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-m",
+        "ruff",
+        "format",
+        "--check",
+        "C:\\Users\\alphi\\agency-worktrees\\autonomy-verification-a2-20261016\\src",
+        "C:\\Users\\alphi\\agency-worktrees\\autonomy-verification-a2-20261016\\tests"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-a2-resume-20261016\\direct-final-format",
+      "head": "f710a3f835e4dc033d2845994e31392c177fffd7",
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false
+    },
+    "direct-final-full": {
+      "label": "direct-final-full",
+      "kind": "pytest",
+      "started_at_utc": "2026-10-16T17:45:14.667268+00:00",
+      "completed_at_utc": "2026-10-16T17:47:13.972139+00:00",
+      "elapsed_seconds": 119.3,
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "C:\\Users\\alphi\\agency-worktrees\\autonomy-verification-a2-20261016\\tests",
+        "-q",
+        "-o",
+        "faulthandler_timeout=0",
+        "-o",
+        "cache_dir=C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-a2-resume-20261016\\direct-final-full\\pytest-cache",
+        "--basetemp",
+        "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-a2-resume-20261016\\direct-final-full\\pytest-tmp",
+        "--junitxml=C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-full\\results.xml",
+        "-W",
+        "error::ResourceWarning",
+        "-W",
+        "error::pytest.PytestUnhandledThreadExceptionWarning",
+        "-W",
+        "error::pytest.PytestUnraisableExceptionWarning"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-a2-resume-20261016\\direct-final-full",
+      "head": "f710a3f835e4dc033d2845994e31392c177fffd7",
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false,
+      "junit": {
+        "tests": 1794,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "direct-final-import-1": {
+      "label": "direct-final-import-1",
+      "kind": "imports",
+      "started_at_utc": "2026-10-16T17:47:44.719858+00:00",
+      "completed_at_utc": "2026-10-16T17:47:46.480524+00:00",
+      "elapsed_seconds": 1.77,
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-c",
+        "import importlib; importlib.import_module('agency.tools.driver'); print(\"COLD_IMPORT_OK\")"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-a2-resume-20261016\\direct-final-import-1",
+      "head": "f710a3f835e4dc033d2845994e31392c177fffd7",
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false
+    },
+    "direct-final-import-2": {
+      "label": "direct-final-import-2",
+      "kind": "imports",
+      "started_at_utc": "2026-10-16T17:47:48.233113+00:00",
+      "completed_at_utc": "2026-10-16T17:47:50.310471+00:00",
+      "elapsed_seconds": 2.08,
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-c",
+        "import importlib; importlib.import_module('agency.llm.metered'); print(\"COLD_IMPORT_OK\")"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-a2-resume-20261016\\direct-final-import-2",
+      "head": "f710a3f835e4dc033d2845994e31392c177fffd7",
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false
+    },
+    "direct-final-import-3": {
+      "label": "direct-final-import-3",
+      "kind": "imports",
+      "started_at_utc": "2026-10-16T17:47:52.036664+00:00",
+      "completed_at_utc": "2026-10-16T17:47:53.720549+00:00",
+      "elapsed_seconds": 1.69,
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-c",
+        "import importlib; importlib.import_module('agency.telegram.handler'); print(\"COLD_IMPORT_OK\")"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-a2-resume-20261016\\direct-final-import-3",
+      "head": "f710a3f835e4dc033d2845994e31392c177fffd7",
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false
+    },
+    "direct-final-import-4": {
+      "label": "direct-final-import-4",
+      "kind": "imports",
+      "started_at_utc": "2026-10-16T17:47:55.369669+00:00",
+      "completed_at_utc": "2026-10-16T17:47:58.272037+00:00",
+      "elapsed_seconds": 2.91,
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-c",
+        "import importlib; importlib.import_module('telegram_bot'); print(\"COLD_IMPORT_OK\")"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-a2-resume-20261016\\direct-final-import-4",
+      "head": "f710a3f835e4dc033d2845994e31392c177fffd7",
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false
+    },
+    "direct-final-import-5": {
+      "label": "direct-final-import-5",
+      "kind": "imports",
+      "started_at_utc": "2026-10-16T17:47:59.828402+00:00",
+      "completed_at_utc": "2026-10-16T17:48:01.308109+00:00",
+      "elapsed_seconds": 1.47,
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-c",
+        "import importlib; importlib.import_module('agency.agents.assessment'); print(\"COLD_IMPORT_OK\")"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-a2-resume-20261016\\direct-final-import-5",
+      "head": "f710a3f835e4dc033d2845994e31392c177fffd7",
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false
+    },
+    "direct-final-lint": {
+      "label": "direct-final-lint",
+      "kind": "lint",
+      "started_at_utc": "2026-10-16T17:47:15.939020+00:00",
+      "completed_at_utc": "2026-10-16T17:47:16.310984+00:00",
+      "elapsed_seconds": 0.38,
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-m",
+        "ruff",
+        "check",
+        "C:\\Users\\alphi\\agency-worktrees\\autonomy-verification-a2-20261016\\src",
+        "C:\\Users\\alphi\\agency-worktrees\\autonomy-verification-a2-20261016\\tests"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-a2-resume-20261016\\direct-final-lint",
+      "head": "f710a3f835e4dc033d2845994e31392c177fffd7",
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false
+    },
+    "direct-final-mypy": {
+      "label": "direct-final-mypy",
+      "kind": "mypy",
+      "started_at_utc": "2026-10-16T17:47:19.923237+00:00",
+      "completed_at_utc": "2026-10-16T17:47:40.798859+00:00",
+      "elapsed_seconds": 20.88,
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-m",
+        "mypy",
+        "--config-file",
+        "C:\\Users\\alphi\\agency-worktrees\\autonomy-verification-a2-20261016\\pyproject.toml",
+        "--cache-dir",
+        "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-a2-resume-20261016\\direct-final-mypy\\mypy-cache",
+        "C:\\Users\\alphi\\agency-worktrees\\autonomy-verification-a2-20261016\\src"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-a2-resume-20261016\\direct-final-mypy",
+      "head": "f710a3f835e4dc033d2845994e31392c177fffd7",
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false
+    },
+    "direct-final-ui": {
+      "label": "direct-final-ui",
+      "kind": "ui",
+      "started_at_utc": "2026-10-16T17:47:42.580981+00:00",
+      "completed_at_utc": "2026-10-16T17:47:43.089196+00:00",
+      "elapsed_seconds": 0.52,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.EXE",
+        "--test",
+        "C:\\Users\\alphi\\agency-worktrees\\autonomy-verification-a2-20261016\\tests\\prototype_ui.test.mjs"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-a2-resume-20261016\\direct-final-ui",
+      "head": "f710a3f835e4dc033d2845994e31392c177fffd7",
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": false,
+      "os_sandbox": false,
+      "native_children_guarded": false
+    }
+  },
+  "boundary_verification": {
+    "started_at_utc": "2026-10-16T17:50:17.126078+00:00",
+    "completed_at_utc": "2026-10-16T17:50:21.130682+00:00",
+    "code_revision": "f710a3f835e4dc033d2845994e31392c177fffd7",
+    "src_tree": "3e5818e450be307b4d040f9c5252d2f30ba571a1",
+    "tests_tree": "81902cb80f3dd26dbe04a6f816150f02f72338bf",
+    "fingerprint": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+    "source_and_main_clean": true,
+    "dotenv_absent": true,
+    "child": {
+      "python": "3.11.16 (main, Sep  1 2026, 14:15:24) [MSC v.1944 64 bit (AMD64)]",
+      "source_files": [
+        "C:\\Users\\alphi\\agency-worktrees\\autonomy-verification-a2-20261016\\src\\agency\\orchestrator.py",
+        "C:\\Users\\alphi\\agency-worktrees\\autonomy-verification-a2-20261016\\src\\agency\\agents\\assessment.py"
+      ],
+      "guard_checks": [
+        "external DNS denied before lookup",
+        "external connect denied before connection"
+      ],
+      "provider": "echo"
+    },
+    "receipts_verified": 10,
+    "changed_paths_from_A1": [
+      "src/agency/agents/assessment.py",
+      "src/agency/agents/executor.py",
+      "src/agency/butler/service.py",
+      "src/agency/orchestrator.py",
+      "src/agency/prototype/app.py",
+      "src/agency/prototype/static/app.js",
+      "src/agency/telegram/handler.py",
+      "tests/prototype_ui.test.mjs",
+      "tests/test_autonomy_verification_assessment.py",
+      "tests/test_autonomy_verification_consumers.py",
+      "tests/test_beta_failure_integrity.py",
+      "tests/test_beta_principal_hop.py",
+      "tests/test_prototype_app.py"
+    ],
+    "os_sandbox": false,
+    "native_children_guarded": false
+  },
+  "iteration_summary": [
+    {
+      "label": "direct-baseline",
+      "kind": "pytest",
+      "exit_code": 0,
+      "source_test_before": "f65db62f1d628c3a085b38bc1d8e39d3503b0c6e4f82905ca65d8d5cae9cbaa9",
+      "source_test_after": "f65db62f1d628c3a085b38bc1d8e39d3503b0c6e4f82905ca65d8d5cae9cbaa9",
+      "junit": {
+        "tests": 42,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-classic-green",
+      "kind": "pytest",
+      "exit_code": 0,
+      "source_test_before": "f548f8c5b7895fb685b67921b3b4e4b79ee1e7c3d689a6a7129ebeed7d23ee20",
+      "source_test_after": "f548f8c5b7895fb685b67921b3b4e4b79ee1e7c3d689a6a7129ebeed7d23ee20",
+      "junit": {
+        "tests": 46,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-classic-red",
+      "kind": "pytest",
+      "exit_code": 1,
+      "source_test_before": "7f85718a2407cfa76b05fcd123659c50f52e5249e5ff494dc92979da5b608833",
+      "source_test_after": "7f85718a2407cfa76b05fcd123659c50f52e5249e5ff494dc92979da5b608833",
+      "junit": {
+        "tests": 4,
+        "failures": 2,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-consumers-green",
+      "kind": "pytest",
+      "exit_code": 0,
+      "source_test_before": "de7614b8b8061345070e3ba7aa0a87fe9ca340d5c83fb935d206d679d43a3bfd",
+      "source_test_after": "de7614b8b8061345070e3ba7aa0a87fe9ca340d5c83fb935d206d679d43a3bfd",
+      "junit": {
+        "tests": 117,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-consumers-red",
+      "kind": "pytest",
+      "exit_code": 1,
+      "source_test_before": "e1e16ed7533cf576f244e8923eb28f32b433cb79c6edbae1e6ba9503d139554b",
+      "source_test_after": "e1e16ed7533cf576f244e8923eb28f32b433cb79c6edbae1e6ba9503d139554b",
+      "junit": {
+        "tests": 13,
+        "failures": 13,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-failures-green",
+      "kind": "pytest",
+      "exit_code": 1,
+      "source_test_before": "2d7e8ca65a8c7ac6515869034152862d3ede5baadd186138682977a1d625ac17",
+      "source_test_after": "2d7e8ca65a8c7ac6515869034152862d3ede5baadd186138682977a1d625ac17",
+      "junit": {
+        "tests": 60,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-failures-green-2",
+      "kind": "pytest",
+      "exit_code": 0,
+      "source_test_before": "cde258e46903bc07044fb8929a80d313b385bc5b409024d1481dc9a5d16137b4",
+      "source_test_after": "cde258e46903bc07044fb8929a80d313b385bc5b409024d1481dc9a5d16137b4",
+      "junit": {
+        "tests": 60,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-failures-red",
+      "kind": "pytest",
+      "exit_code": 1,
+      "source_test_before": "5207b1d5c9d2f6bf592ab5108983f8e3432ba6f6bce0e4b3d5a52cde1fddcdcc",
+      "source_test_after": "5207b1d5c9d2f6bf592ab5108983f8e3432ba6f6bce0e4b3d5a52cde1fddcdcc",
+      "junit": {
+        "tests": 18,
+        "failures": 14,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-final-format",
+      "kind": "format",
+      "exit_code": 0,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33"
+    },
+    {
+      "label": "direct-final-full",
+      "kind": "pytest",
+      "exit_code": 0,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "junit": {
+        "tests": 1794,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-final-import-1",
+      "kind": "imports",
+      "exit_code": 0,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33"
+    },
+    {
+      "label": "direct-final-import-2",
+      "kind": "imports",
+      "exit_code": 0,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33"
+    },
+    {
+      "label": "direct-final-import-3",
+      "kind": "imports",
+      "exit_code": 0,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33"
+    },
+    {
+      "label": "direct-final-import-4",
+      "kind": "imports",
+      "exit_code": 0,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33"
+    },
+    {
+      "label": "direct-final-import-5",
+      "kind": "imports",
+      "exit_code": 0,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33"
+    },
+    {
+      "label": "direct-final-lint",
+      "kind": "lint",
+      "exit_code": 0,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33"
+    },
+    {
+      "label": "direct-final-mypy",
+      "kind": "mypy",
+      "exit_code": 0,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33"
+    },
+    {
+      "label": "direct-final-ui",
+      "kind": "ui",
+      "exit_code": 0,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33"
+    },
+    {
+      "label": "direct-format-before",
+      "kind": "format",
+      "exit_code": 1,
+      "source_test_before": "ac380d1509b6040ee1b09f5b3f1f271f2d3a9ab5af6cabeebe8b788f77e259ad",
+      "source_test_after": "ac380d1509b6040ee1b09f5b3f1f271f2d3a9ab5af6cabeebe8b788f77e259ad"
+    },
+    {
+      "label": "direct-format-candidate",
+      "kind": "format",
+      "exit_code": 0,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33"
+    },
+    {
+      "label": "direct-integration-full",
+      "kind": "pytest",
+      "exit_code": 1,
+      "source_test_before": "15a67b9b1e55063d9953b7c661c059981c1c911255325a19f383ee27cdfe1f4d",
+      "source_test_after": "15a67b9b1e55063d9953b7c661c059981c1c911255325a19f383ee27cdfe1f4d",
+      "junit": {
+        "tests": 1781,
+        "failures": 3,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-integration-lint",
+      "kind": "lint",
+      "exit_code": 1,
+      "source_test_before": "15a67b9b1e55063d9953b7c661c059981c1c911255325a19f383ee27cdfe1f4d",
+      "source_test_after": "15a67b9b1e55063d9953b7c661c059981c1c911255325a19f383ee27cdfe1f4d"
+    },
+    {
+      "label": "direct-integration-mypy",
+      "kind": "mypy",
+      "exit_code": 0,
+      "source_test_before": "15a67b9b1e55063d9953b7c661c059981c1c911255325a19f383ee27cdfe1f4d",
+      "source_test_after": "15a67b9b1e55063d9953b7c661c059981c1c911255325a19f383ee27cdfe1f4d"
+    },
+    {
+      "label": "direct-lint-candidate",
+      "kind": "lint",
+      "exit_code": 0,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33"
+    },
+    {
+      "label": "direct-review-green",
+      "kind": "pytest",
+      "exit_code": 0,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "junit": {
+        "tests": 183,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-review-red",
+      "kind": "pytest",
+      "exit_code": 1,
+      "source_test_before": "605a9bb875187522f02958c605db8fc9ac73395ba84980a0825401703e11c16b",
+      "source_test_after": "605a9bb875187522f02958c605db8fc9ac73395ba84980a0825401703e11c16b",
+      "junit": {
+        "tests": 82,
+        "failures": 6,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-review-red-2",
+      "kind": "pytest",
+      "exit_code": 1,
+      "source_test_before": "081dbb65f6d13020a22104d11fa1d075281a7f75cd71ceac89cd4f6a7071599b",
+      "source_test_after": "081dbb65f6d13020a22104d11fa1d075281a7f75cd71ceac89cd4f6a7071599b",
+      "junit": {
+        "tests": 88,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-schema-green",
+      "kind": "pytest",
+      "exit_code": 0,
+      "source_test_before": "cefeb8dbf89744cd43963b143fa05f72d21389dbe002950fd450e01951c90573",
+      "source_test_after": "cefeb8dbf89744cd43963b143fa05f72d21389dbe002950fd450e01951c90573",
+      "junit": {
+        "tests": 59,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-schema-red",
+      "kind": "pytest",
+      "exit_code": 1,
+      "source_test_before": "13e734db8c1c086890556a6b80822fd523cc70f81e646246739d391748baa12c",
+      "source_test_after": "13e734db8c1c086890556a6b80822fd523cc70f81e646246739d391748baa12c",
+      "junit": {
+        "tests": 59,
+        "failures": 32,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-tool-green",
+      "kind": "pytest",
+      "exit_code": 0,
+      "source_test_before": "0115e350917e1ab4debb0d9a597568af906800bbb5d794af9376734dca46513d",
+      "source_test_after": "0115e350917e1ab4debb0d9a597568af906800bbb5d794af9376734dca46513d",
+      "junit": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-tool-red",
+      "kind": "pytest",
+      "exit_code": 1,
+      "source_test_before": "3b8434efbaee018956becf7766d352524cf85a16ad7c5a985b71bb944c41102b",
+      "source_test_after": "3b8434efbaee018956becf7766d352524cf85a16ad7c5a985b71bb944c41102b",
+      "junit": {
+        "tests": 2,
+        "failures": 2,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-tool-red-valid",
+      "kind": "pytest",
+      "exit_code": 1,
+      "source_test_before": "b5e44440fe644532e074f5fa6a2dc8571706612bd96ed00ab03afe4682ae6665",
+      "source_test_after": "b5e44440fe644532e074f5fa6a2dc8571706612bd96ed00ab03afe4682ae6665",
+      "junit": {
+        "tests": 2,
+        "failures": 2,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "label": "direct-ui-bom-red",
+      "kind": "ui",
+      "exit_code": 1,
+      "source_test_before": "081dbb65f6d13020a22104d11fa1d075281a7f75cd71ceac89cd4f6a7071599b",
+      "source_test_after": "081dbb65f6d13020a22104d11fa1d075281a7f75cd71ceac89cd4f6a7071599b"
+    },
+    {
+      "label": "direct-ui-final-candidate",
+      "kind": "ui",
+      "exit_code": 0,
+      "source_test_before": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33",
+      "source_test_after": "e8a052ee73e97546cc2067ab39da416925ee7274ed15ca51f46180312cad8d33"
+    },
+    {
+      "label": "direct-ui-green",
+      "kind": "ui",
+      "exit_code": 0,
+      "source_test_before": "15a67b9b1e55063d9953b7c661c059981c1c911255325a19f383ee27cdfe1f4d",
+      "source_test_after": "15a67b9b1e55063d9953b7c661c059981c1c911255325a19f383ee27cdfe1f4d"
+    },
+    {
+      "label": "direct-ui-red",
+      "kind": "ui",
+      "exit_code": 1,
+      "source_test_before": "fe428571fad226e5c6dfa2c8819c4ed1583650d6d8efe72633edcab231bcf61d",
+      "source_test_after": "fe428571fad226e5c6dfa2c8819c4ed1583650d6d8efe72633edcab231bcf61d"
+    },
+    {
+      "label": "direct-ui-red-valid",
+      "kind": "ui",
+      "exit_code": 1,
+      "source_test_before": "75e978fd1535295f3ebac39c8078d00fc2548cbcd6dd7089d210d5a8b4f119dc",
+      "source_test_after": "75e978fd1535295f3ebac39c8078d00fc2548cbcd6dd7089d210d5a8b4f119dc"
+    }
+  ],
+  "raw_evidence_manifest": [
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-baseline\\output.log",
+      "sha256": "a815dd53ba3444655a57aa095c13bcb7ab57645f4abdd0b148b335f61eb74737",
+      "bytes": 101
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-baseline\\result.json",
+      "sha256": "255358133980401b997a7de3799d87874b965b5e625a1aae3050951e76c9848a",
+      "bytes": 1712
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-baseline\\results.xml",
+      "sha256": "dd0925e89e661e1cbc6abdf3b2986eb9a60be6ae2106412bf8f8b35ccf53da06",
+      "bytes": 7111
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-classic-green\\output.log",
+      "sha256": "4a60640bcb5461bd772becbbc2765400dc650a67616f45c07b69e10bfed54cf1",
+      "bytes": 101
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-classic-green\\result.json",
+      "sha256": "42e8ab5eac5a08b4787517cad9094d4c973ff87b21b499acd3124b6f88264e98",
+      "bytes": 1864
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-classic-green\\results.xml",
+      "sha256": "3f6e36363da03a37703b2c23c1b4e7f0ef29de80ea6886b4d54a47ff805156f5",
+      "bytes": 7807
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-classic-red\\output.log",
+      "sha256": "d6887a4328a73579f810325abe1a1b1dd12c1db8e47f6ee6e00e517acf5d5dcc",
+      "bytes": 13236
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-classic-red\\result.json",
+      "sha256": "54caeda32cf18c190bdb52f9f709572099e2dbd211eb2d7bca7e2cd2e66a7aaf",
+      "bytes": 1729
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-classic-red\\results.xml",
+      "sha256": "295b48435f7c4ec47697fef4a5acf5651290aff58843191ba08bb4ab2093e8c1",
+      "bytes": 4744
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-consumers-green\\output.log",
+      "sha256": "3e69d2f8ce51fdfe867011156558b986c0568d883124ac77715ed1b678d81571",
+      "bytes": 690
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-consumers-green\\result.json",
+      "sha256": "450d882bb737ea6b0e3a82bf1564c31c88b798c8d5642980da16f5c5e890cd22",
+      "bytes": 2001
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-consumers-green\\results.xml",
+      "sha256": "bf37a4f86e54c489017a83a6241740a61512c9d0a73f0d875961840bbc059dd6",
+      "bytes": 20148
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-consumers-red\\output.log",
+      "sha256": "8203f824a697f88410390d6b40b4735d4c003a0fe5fa142cfea19c8520514c45",
+      "bytes": 96105
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-consumers-red\\result.json",
+      "sha256": "d31c31bdc564c8b8b605458f7ec5e89567eb496196359634cd8051c9d4906363",
+      "bytes": 1740
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-consumers-red\\results.xml",
+      "sha256": "91ac5c9233d73ce50cb86884d57b5bfaf326b9e9154a33e3afe70eeb3f5346b4",
+      "bytes": 29204
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-failures-green\\output.log",
+      "sha256": "1024e8be5facfb284b58dff7f74acf00253860e1a5832083b77f646e87aaa703",
+      "bytes": 7444
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-failures-green\\result.json",
+      "sha256": "f2be7ea3cca1a60d5bea86a9a69b5611c7c305123a8fd0b91d2fa7e3182549c8",
+      "bytes": 1869
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-failures-green\\results.xml",
+      "sha256": "ce86b87d66871344bb699c798b4462e2bbc7542e91d5d499c91995af1d1ffa59",
+      "bytes": 14599
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-failures-green-2\\output.log",
+      "sha256": "211943bf3b7b735fbd88f48467c92336fe15d2a85a42f0ce3760f494e487c7a1",
+      "bytes": 101
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-failures-green-2\\result.json",
+      "sha256": "70950ee3fdbab1528c645011d64c3dfb5754d39f89ce37fce0b857ea201460f1",
+      "bytes": 1879
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-failures-green-2\\results.xml",
+      "sha256": "99f934d85896ef186782d46fd84aad80203714ba8a8bf09b4f003e06bab4a7b9",
+      "bytes": 10250
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-failures-red\\output.log",
+      "sha256": "17e92de07425b4fc34ce8fa882ce2eb4ef56b2fd590ab7e0448b8d38da8c2f07",
+      "bytes": 92480
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-failures-red\\result.json",
+      "sha256": "3926a30666ca9b25c973a79c80580ab83309a926e59eab0f9538b67f9d040840",
+      "bytes": 1736
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-failures-red\\results.xml",
+      "sha256": "0f3ad7bf777041edc0e03336645e219429528cb962e3386d3434e72a522ce40c",
+      "bytes": 40785
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-format\\output.log",
+      "sha256": "19dbcc6b41d5ff37d5fbccc79424256390bd6a5e680fa27e70cad9e57b1c6e58",
+      "bytes": 28
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-format\\result.json",
+      "sha256": "be14507971901289bf9948ca0ac15e595f0d0ac9da2d8ce9af3eab0e4d8e4a9f",
+      "bytes": 1048
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-full\\output.log",
+      "sha256": "99b9b57fbb7bf5d21461f858af859ca4b0dbe16cd17080609e4f2f4aec89601f",
+      "bytes": 2566
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-full\\result.json",
+      "sha256": "ce1faf7ad55d6116a61e48cd5dd942204a9c7945c3b6d200c4ab95b62d65399a",
+      "bytes": 1686
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-full\\results.xml",
+      "sha256": "3022f1a7a8378e409bcadf2434420b01449fe6da4319bc8ecb6f695d05bd3ee9",
+      "bytes": 226234
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-import-1\\output.log",
+      "sha256": "64ea07bd88d3e7d952ac75d4ecdc1c84c3a13796c07abfc83a479d38d09f8b27",
+      "bytes": 16
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-import-1\\result.json",
+      "sha256": "feaf66aa1c3691a87a245475c87167c2462db91b6157487c13a20b7cfd608971",
+      "bytes": 941
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-import-2\\output.log",
+      "sha256": "64ea07bd88d3e7d952ac75d4ecdc1c84c3a13796c07abfc83a479d38d09f8b27",
+      "bytes": 16
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-import-2\\result.json",
+      "sha256": "fa425218f2c129b1c10a7b26b0392a6de074e1ffd14b036ce3af3fae2aa2bfd3",
+      "bytes": 940
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-import-3\\output.log",
+      "sha256": "64ea07bd88d3e7d952ac75d4ecdc1c84c3a13796c07abfc83a479d38d09f8b27",
+      "bytes": 16
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-import-3\\result.json",
+      "sha256": "7767be0556b366468f9a3b2e3fe1fcf9a547b14e8fd682b61b5c28ac9d330442",
+      "bytes": 945
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-import-4\\output.log",
+      "sha256": "64ea07bd88d3e7d952ac75d4ecdc1c84c3a13796c07abfc83a479d38d09f8b27",
+      "bytes": 16
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-import-4\\result.json",
+      "sha256": "3aec1dca96ba3d90adae366108fa18dbda7ca482443f2af88f0ccdfafae76e0f",
+      "bytes": 934
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-import-5\\output.log",
+      "sha256": "64ea07bd88d3e7d952ac75d4ecdc1c84c3a13796c07abfc83a479d38d09f8b27",
+      "bytes": 16
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-import-5\\result.json",
+      "sha256": "1fb44fdbfee5679986da82f9bde5aae19141d202852fe3877cd8c90127d930e3",
+      "bytes": 946
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-lint\\output.log",
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "bytes": 19
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-lint\\result.json",
+      "sha256": "96e8f91e4d1af587973ce3bb69f18b0303ff5bd0f996693fef8d7025df843429",
+      "bytes": 1025
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-mypy\\output.log",
+      "sha256": "fd79775cdafd55878599a748608d6820173d539af213a0d7e37183fd4d28eb02",
+      "bytes": 46
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-mypy\\result.json",
+      "sha256": "88a3538110ec01f6514b8c1182f140abfdc2f1dffbbea40a5f217efa76759efe",
+      "bytes": 1186
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-ui\\output.log",
+      "sha256": "8d35f297d4811211800d940af2610fa64391dd7b0303080e3f2f0db990f2a66b",
+      "bytes": 1406
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-final-ui\\result.json",
+      "sha256": "ac2a64a99c8cfaaced17b06a2214f7ee6cfea001d8455e09cede6fc2fd0c1329",
+      "bytes": 917
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-format-before\\output.log",
+      "sha256": "afaedf638cc968b89e18becbd2ff6efeddbddb585d9ab54e7d0497601b320dc5",
+      "bytes": 56183
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-format-before\\result.json",
+      "sha256": "49c3f54821494e9a0ccd40f07942277b1b69462ef11b5d7b7d4454d2976bb5bf",
+      "bytes": 1050
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-format-candidate\\output.log",
+      "sha256": "19dbcc6b41d5ff37d5fbccc79424256390bd6a5e680fa27e70cad9e57b1c6e58",
+      "bytes": 28
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-format-candidate\\result.json",
+      "sha256": "829e498723def621be03dbcb62949ce3076fb098d42768da8e1d4df482387a9c",
+      "bytes": 1056
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-integration-full\\output.log",
+      "sha256": "1fb921fedbede41eaabf77e739e2cb96914de23539d81f220a778ad28ff73fdc",
+      "bytes": 7319
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-integration-full\\result.json",
+      "sha256": "17badef8c1e3fb2ce25f02d453ce39a498d92db6e93862610314d5422eaabea7",
+      "bytes": 1717
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-integration-full\\results.xml",
+      "sha256": "3bba4d8089a176a09668c083d25024ef9e68ff71f4cfcacac2b4823fe83a57cc",
+      "bytes": 228152
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-integration-lint\\output.log",
+      "sha256": "9f04abd39e84c979e56ccf860e78165e7583060d6b0f2bdc80770d3661e7d684",
+      "bytes": 9252
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-integration-lint\\result.json",
+      "sha256": "cacc13e52c707f1f5f23678912d0c1eeb41ce03f6712d441b60902c8a16212be",
+      "bytes": 1037
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-integration-mypy\\output.log",
+      "sha256": "fd79775cdafd55878599a748608d6820173d539af213a0d7e37183fd4d28eb02",
+      "bytes": 46
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-integration-mypy\\result.json",
+      "sha256": "ab46b5a49ca68d04ed720230ee069373e22a0e77982b93162edb3f7215d0ac2b",
+      "bytes": 1204
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-lint-candidate\\output.log",
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "bytes": 19
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-lint-candidate\\result.json",
+      "sha256": "e20a7ee5bd2703f5e439b73adc12a849e21d0cd4d9c0e24582340bfa35213dd0",
+      "bytes": 1033
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-review-green\\output.log",
+      "sha256": "c75a28757f2d87289da0d801e59ca2c5b9adf5d1d4ba7e5d19d088ddc7258301",
+      "bytes": 772
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-review-green\\result.json",
+      "sha256": "bac994f92e296fc4f57198acbc01f7111928971715087594b2e3a7540836c236",
+      "bytes": 2324
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-review-green\\results.xml",
+      "sha256": "b9831dc9b96252a0b918c34777ca17f63174862a2080f0849f3cb04cd37e649b",
+      "bytes": 28704
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-review-red\\output.log",
+      "sha256": "4bead6bec2682a5dffe4b5bf5247125c4dfc8851ca9551b0890385feb49fedad",
+      "bytes": 22007
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-review-red\\result.json",
+      "sha256": "00b9afefbbd5f29b2048a4f16a9a7a430287ab6bf9268e3453a7e6533f6b068e",
+      "bytes": 1851
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-review-red\\results.xml",
+      "sha256": "eaa3f40fd830fee016973dccefa7bf9a332d3c612a831d691d7699fc0386980a",
+      "bytes": 21533
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-review-red-2\\output.log",
+      "sha256": "ee9672e45d2b55caaae004f1a5761e5c2a40580e44f546d2fcfa8cd0ad2934b1",
+      "bytes": 9369
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-review-red-2\\result.json",
+      "sha256": "2a87634d253264421b64bcaea47e28e3f4500753eab86f37994d382862692bd3",
+      "bytes": 1861
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-review-red-2\\results.xml",
+      "sha256": "82ae5490a2422836bb5620c798bcfe00c61abf262b0086445f315bbda1bf94a0",
+      "bytes": 17243
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-schema-green\\output.log",
+      "sha256": "3a68910fe863da1514b1e0b1be11b3f0fe75b3ad88c0401c490edaf1a599d3bb",
+      "bytes": 101
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-schema-green\\result.json",
+      "sha256": "ae8aea5389de2f633ad762c9b10f73e8d53643038bf3420155c5495a2e0d7a7c",
+      "bytes": 1735
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-schema-green\\results.xml",
+      "sha256": "d40b10a2dc4e16df5b05bdb171ea4fe1540295064d160709c5122e1b3c907e0f",
+      "bytes": 10591
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-schema-red\\output.log",
+      "sha256": "9a40161f8212b92b219d63c27ad864a873c2321cc888835556407aa8e1a01da6",
+      "bytes": 60639
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-schema-red\\result.json",
+      "sha256": "533c8eb022bad3288fba3ce205582d856c2211b659e5e0ad290773ff683d8aec",
+      "bytes": 1726
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-schema-red\\results.xml",
+      "sha256": "06551edc40af7ed98c0d2c7b92d0bdd66e88e7a8a9f1ace7ca3059a4100233a3",
+      "bytes": 63589
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-tool-green\\output.log",
+      "sha256": "80141ad22bb5235f1d933a30fda24c5191c293e97e51d2667004d9f7071c021f",
+      "bytes": 100
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-tool-green\\result.json",
+      "sha256": "a6fd594563aefb370bc4a58fb5775767a92155988dde4ce23fc659900cd929ce",
+      "bytes": 1724
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-tool-green\\results.xml",
+      "sha256": "489910ed27c727a7bfdcec7e8d0d292d73b4d61e565347ef23fe9f57bf067190",
+      "bytes": 582
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-tool-red\\output.log",
+      "sha256": "2df0b2f61e6b83fd597e1fb24571bf1e4778a6e8ffbbc477d7a2deb6c3148b63",
+      "bytes": 11100
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-tool-red\\result.json",
+      "sha256": "8be16b323afcdc0e88f210900d2eb6ca5b5e0fda61fa2c3dfe7812c44d4094ee",
+      "bytes": 1714
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-tool-red\\results.xml",
+      "sha256": "dcb9b252ec33ec8b39ec85b0955fe6e6c054f782ad2aec94e551a60ab0134be9",
+      "bytes": 3531
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-tool-red-valid\\output.log",
+      "sha256": "01e15b89a3aa0e8470b8cc695ffaeb9808ea7cec0c4ba70af8cc419cd70ec0a2",
+      "bytes": 11430
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-tool-red-valid\\result.json",
+      "sha256": "06a1646337a2b6e4be9bd44ca8927a00d0a341cb36899e71cb1f04f484a71365",
+      "bytes": 1744
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-tool-red-valid\\results.xml",
+      "sha256": "2d7796d597a4f2655dfa4732fbdc06ad5daac847360cfaa8e58fbc2f07cd74ed",
+      "bytes": 3853
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-ui-bom-red\\output.log",
+      "sha256": "6895be541ec3ac6975bc02a0a87eee01f02cfc6caf41f6ece455badb1362ef9b",
+      "bytes": 2403
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-ui-bom-red\\result.json",
+      "sha256": "7aaea5c4f817a6d12f44ee3da8bc47a1de789cde1372c9e7454886fd2b30478a",
+      "bytes": 921
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-ui-final-candidate\\output.log",
+      "sha256": "9a5bdb34a295f44410172acea5257a791cf7fead8e7d9dc12d2acf26526ae15b",
+      "bytes": 1408
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-ui-final-candidate\\result.json",
+      "sha256": "5f347c702a6fab419bcf488360be9542dc51f586dba2e8e88beaa39a2d1742db",
+      "bytes": 937
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-ui-green\\output.log",
+      "sha256": "5d2278a12e5c31d53ee8488601cff4130ec5d998faeec33f2a348c8962d70ee8",
+      "bytes": 1408
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-ui-green\\result.json",
+      "sha256": "59ce19974b889c8b0412d0bc9ea8834ff41a5dcbf8c10f73f4169fb0c214f9d6",
+      "bytes": 917
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-ui-red\\output.log",
+      "sha256": "9b6d792408be89034d5dd4d224c58783e72fbe25019cb73f3444746df3139e60",
+      "bytes": 1399
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-ui-red\\result.json",
+      "sha256": "d35ca001e1a083b0a791d672ce56e15d83f5dc0e2a5be71710f0b599b8ce3a1e",
+      "bytes": 913
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-ui-red-valid\\output.log",
+      "sha256": "18cb086deea05b5374a45181b667ebc8fead5febf00d1ab89c7ec02d4207bf0d",
+      "bytes": 2957
+    },
+    {
+      "path": "C:\\Users\\alphi\\agency-evidence\\autonomy-verification-a2-20261016\\resume-20261016\\direct-ui-red-valid\\result.json",
+      "sha256": "32d16231f788f3005208d0d0f2c604442610b7ebe6557ebf7c4686efc34c7dfa",
+      "bytes": 925
+    }
+  ],
+  "independent_review": false,
+  "ci_run": false,
+  "live_provider_validation": false,
+  "deployment": false,
+  "limitations": [
+    "Python loopback-only socket/DNS guard is not an OS sandbox and does not guard arbitrary native children.",
+    "Node UI tests are a separate unguarded process scope.",
+    "One pre-existing Starlette/httpx deprecation warning remains.",
+    "Reports are not independently verified, signed, durable or authorization receipts.",
+    "Cross-store finalization is not atomic and has no crash recovery in A2."
+  ]
+}
