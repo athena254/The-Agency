@@ -1,9 +1,8 @@
 # The Agency — Governed Multi-Agent Execution System
 
-**Current checkpoint — October 15, 2026:** pre-production prototype, not a deployed decentralized runtime. Start with [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) for implemented/partial/planned boundaries and [`docs/PRODUCTION_READINESS_PLAN.md`](docs/PRODUCTION_READINESS_PLAN.md) for release gates. Both metering and local-recovery source histories are consolidated on `main`; historical PR/test totals below are not current release evidence. Beta model/tool ingress remains disabled and legacy business HTTP routes are health-only/closed. The browser UI is a local HTML/JS prototype, not an Electron/React production GUI.
+**Current checkpoint — October 18, 2026:** pre-production prototype, not daily-driver-qualified or a deployed decentralized runtime. Start with [`docs/STATUS_AND_RESUME_20261018.md`](docs/STATUS_AND_RESUME_20261018.md), [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) and completion tracker **#11**. A1 context, A2 honest execution/check reports, A3.1 gateway audit acknowledgements and lifecycle repairs exist on the latest development checkpoint; canonical main remains unchanged. Fresh lint/format/mypy and 16 UI tests pass, but Python qualification is blocked by an admission-worker bootstrap deadline failure. Historical passing totals below are not current release evidence. Beta model/tool ingress remains disabled and legacy HTTP business routes remain closed. The browser is a local HTML/JS prototype, not an Electron/React production GUI.
 
-> Human → Butler → orchestrator/agents/tools, with Lattice coordination,
-> memory, policies/audit/sandbox as cross-cutting infrastructure.
+> Target: Human ↔ Butler ↔ the Lattice-connected Agency peers. Butler is the human gateway, not a validator or unilateral authority. The in-process orchestrator diagram below shows prototype implementation, not the decentralized target.
 > Agent Factory and Forge now have narrow v1 foundations alongside partial thread,
 > skill, and workflow components. The full governed product is not built.
 

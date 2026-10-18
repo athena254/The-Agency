@@ -1,12 +1,18 @@
 # Known qualification issues
 
-Updated October 15, 2026. These are tracked engineering findings, not waived warnings or GitHub issue closures. Full results/source trees are in `research-evidence/late-review-verification.json`. Production gates remain open.
+Updated October 18, 2026. These are tracked engineering findings, not waived warnings. GitHub #11 and `STATUS_AND_RESUME_20261018.md` are the active resume checkpoint; fresh evidence is `research-evidence/status-audit-20261018.json`. Earlier qualification files remain historical. Production/daily-driver gates remain open.
+
+## Q-18 — Fresh admission-worker bootstrap failure (release blocker)
+
+At `6b1d4c4`, corrected fail-fast diagnostics collected 1,870 tests and stopped after 14 passed/1 failed. `test_parent_rejects_real_split_claim_two_ran_mutant` expected the two-tools-before-release mutant verdict but got `bootstrap deadline expired; pids=[15472, 3980]`. This prevents a fresh green-suite claim. An earlier full run had an unattributed failure marker and was interrupted by the outer 420-second tool timeout without final JUnit; do not assume it is the same defect. An omitted-target diagnostic collected zero tests and is retained as harness error, not product evidence.
+
+State: OPEN. Preserve child/phase diagnostics and determine whether startup/resource/test harness or runtime behavior caused the deadline. Do not blindly lengthen deadlines, weaken assertions, suppress warnings or retry until green. Initial mypy also timed out at 180 seconds; a separately recorded repeat passed on 151 source files. Lint/format and 16 UI tests passed. Historical 1,870-test qualification is not the October 18 result.
 
 ## W-01 — SQLite worker threads after event-loop shutdown
 
 Observed: integrated offline runs emit `PytestUnhandledThreadExceptionWarning`, with aiosqlite completion attempting `call_soon_threadsafe` after its event loop closed. Reports appear around Butler context/thread integration and research/handler fixtures; the point where pytest notices a worker exception is not definitive ownership evidence.
 
-State: OPEN. Metering worker tests now explicitly close their budget/audit stores, but suite-wide lifecycle cleanup is not established. Do not label these warnings benign or suppress them to pass a release gate.
+State: PARTIALLY REPAIRED, broad follow-up OPEN. Later service/webhook/Lattice lease and consumer-lifecycle slices repaired defined ownership/startup/cleanup boundaries; historical October 16 qualification passed with resource/thread/unraisable warnings treated as errors. This does not prove every store-internal publication/rollback boundary is covered or historical timeouts causally fixed. Fresh October 18 full qualification is blocked by Q-18. Do not label old warnings benign or suppress them.
 
 Closure: isolate each allocating fixture/service; inject pending DB work and cancellation, verify startup-failure/stop/teardown closes every owned connection and awaits work before the loop exits. Preserve shared-store ownership. Add deterministic focused regressions; run the full suite with thread warnings promoted to errors after baseline diagnosis. No broad global warning filter.
 
@@ -14,7 +20,7 @@ Closure: isolate each allocating fixture/service; inject pending DB work and can
 
 Observed: `src/agency/telegram/server.py` uses `on_event("shutdown")`; FastAPI emits a lifespan migration warning.
 
-State: OPEN. Move lifecycle handling to a tested lifespan context in a separate slice. Assert admitted/denied webhook behavior, startup failure cleanup and handler/store shutdown; do not enable unsupported beta webhooks as part of migration.
+State: IMPLEMENTED in the accepted repair ancestry (`87fc288`), with lifespan/startup rollback/owned handler cleanup tests. The observation above describes the old baseline, not current source. No beta webhook enablement or fresh release approval follows from this repair.
 
 ## W-03 — Test client dependency transition
 
@@ -26,7 +32,7 @@ State: OPEN. Pin and reproduce supported dependency matrices from a clean instal
 
 Observed: imported `TestStatus` enum in `src/agency/security/red/executor.py` is considered a test class by pytest but has a constructor, producing a collection warning.
 
-State: OPEN, small cleanup. Test an explicit non-collection marker or an import alias that does not masquerade as a test class. Preserve the public enum contract and actual security tests; never reduce collected coverage to silence output.
+State: IMPLEMENTED in accepted repair ancestry (`20603c6`), preserving intended security cases. The observation above describes the old baseline. This closure does not waive Q-18 or current CI/release gates.
 
 ## W-05 — Recovery subprocess test stability/diagnostics
 
@@ -36,7 +42,7 @@ State: OPEN, qualification debt. Preserve child stderr/exit codes in failed test
 
 ## Late assessment follow-ups
 
-Read `LATE_REVIEW_DISPOSITION.md` for the delayed assessments' exact source revision, superseded findings, closed strict-driver bypass and open R-01–R-06 product gaps. In particular, all-domain context continuity, actual specialist/DAG execution, blocking evidence verification, legacy memory-tool tenant isolation, runtime durability and authenticated capability publication remain unfinished. They are mandatory plan items where relevant, not capabilities inferred from passing tests or class names.
+Read `LATE_REVIEW_DISPOSITION.md` as an assessment of its recorded older source revision. A1 has since repaired routed recall propagation; A2 repaired externally observable execution/check truthfulness, not independent verification; A3.1 repaired required gateway audit acknowledgement, not durable task admission/recovery. Actual specialist/DAG dispatch, independent checker/approval/publication, legacy memory-tool resource isolation/privacy, end-to-end provider budgets/audit, task durability and authenticated capability publication remain unfinished. Use `AUTONOMY_READINESS_20261016.md` and GitHub #11 rather than reclassifying already repaired slices as unimplemented.
 
 ## Closed integration regressions in this pass
 
