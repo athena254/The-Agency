@@ -50,8 +50,12 @@ async def test_context_and_sender_cannot_mint_principal() -> None:
         "beta_principal": fake,
         "metadata": {"beta_principal": fake, "telegram_user_id": 999},
     }
-    await service.execute(agent, "hello", context)
-    assert "beta_principal" not in stub.execute_task.await_args.kwargs
+    await service._audit.initialize()
+    try:
+        await service.execute(agent, "hello", context)
+        assert "beta_principal" not in stub.execute_task.await_args.kwargs
+    finally:
+        await service._audit.close()
 
 
 @pytest.mark.asyncio
@@ -69,7 +73,7 @@ async def test_handle_message_does_not_promote_context_identity(
         await service.handle_message(
             "hello", "telegram:999", {"beta_principal": principal}, memory_enabled=False
         )
-        == "ok"
+        == "ok\n\nRuntime assessment: unavailable. No independent verification or authorization."
     )
     assert "beta_principal" not in stub.execute_task.await_args.kwargs
 

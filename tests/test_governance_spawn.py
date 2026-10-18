@@ -13,6 +13,7 @@ from agency.lattice.api import Lattice
 from agency.lattice.backends.base import LatticeBackend
 from agency.lattice.models import (
     ConsensusProposal,
+    LatticeConfig,
     LatticeEvent,
     NodeType,
     Vote,
@@ -327,13 +328,17 @@ def backend():
 
 
 @pytest.fixture
-def lattice(backend):
-    lat = Lattice.__new__(Lattice)
-    lat.config = MagicMock()
-    lat.backend = backend
+async def lattice(backend, monkeypatch):
+    # Run the public constructor so standalone lifecycle fields stay valid.
+    monkeypatch.setattr(Lattice, "_create_backend", lambda self: backend)
+    lat = Lattice(LatticeConfig(sqlite_path=":memory:"))
     lat.governance = MagicMock()
     lat.reputation = MagicMock()
-    return lat
+    try:
+        await lat.initialize()
+        yield lat
+    finally:
+        await lat.close()
 
 
 @pytest.mark.asyncio

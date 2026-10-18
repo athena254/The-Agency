@@ -10,6 +10,10 @@ import json
 import re
 import sqlite3
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from agency.workflows.recovery import RecoverableRun
 
 MAX_STEPS = 64
 MAX_JSON_BYTES = 64 * 1024
@@ -230,6 +234,23 @@ class WorkflowRegistry:
             "created_at TEXT NOT NULL, "
             "completed_at TEXT)"
         )
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS recoverable_runs ("
+            "run_id TEXT PRIMARY KEY, "
+            "workflow_id TEXT NOT NULL, "
+            "version TEXT NOT NULL, "
+            "actor_id TEXT NOT NULL, "
+            "status TEXT NOT NULL, "
+            "step_results_json TEXT NOT NULL, "
+            "input_digest TEXT NOT NULL, "
+            "definition_digest TEXT NOT NULL, "
+            "ops_binding_json TEXT NOT NULL, "
+            "schema_version INTEGER NOT NULL, "
+            "created_at TEXT NOT NULL, "
+            "updated_at TEXT)"
+        )
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=FULL")
         self._conn.commit()
 
     def register(self, definition: WorkflowDefinition) -> WorkflowDefinition:
@@ -367,6 +388,98 @@ class WorkflowRegistry:
     def close(self) -> None:
         """Close the SQLite connection."""
         self._conn.close()
+
+    @property
+    def db_path(self) -> str:
+        return self._db_path
+
+    def record_recoverable_run(self, run: RecoverableRun) -> RecoverableRun:
+        """Insert or replace a versioned recoverable run (FULL durable)."""
+        from agency.workflows.recovery import RECOVERY_SCHEMA_VERSION
+
+        status = str(run.status)
+        schema_version = int(run.schema_version)
+        if schema_version != RECOVERY_SCHEMA_VERSION:
+            raise ValueError("unsupported recovery schema version.")
+        step_results = run.step_results
+        step_results_json = _dumps_bounded(step_results, MAX_JSON_BYTES * (MAX_STEPS + 1))
+        ops_binding = run.ops_binding
+        ops_binding_json = _dumps_bounded(ops_binding)
+        self._conn.execute(
+            "INSERT OR REPLACE INTO recoverable_runs (run_id, workflow_id, version, "
+            "actor_id, status, step_results_json, input_digest, definition_digest, "
+            "ops_binding_json, schema_version, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                run.run_id,
+                run.workflow_id,
+                run.version,
+                run.actor_id,
+                status,
+                step_results_json,
+                run.input_digest,
+                run.definition_digest,
+                ops_binding_json,
+                schema_version,
+                run.created_at,
+                run.updated_at,
+            ),
+        )
+        self._conn.commit()
+        return run
+
+    def get_recoverable_run(self, run_id: str) -> RecoverableRun:
+        """Return a recoverable run; raises KeyError (never legacy)."""
+        from agency.workflows.recovery import RecoverableRun
+
+        if not isinstance(run_id, str) or not run_id.strip():
+            raise ValueError("run_id must be nonblank.")
+        row = self._conn.execute(
+            "SELECT run_id, workflow_id, version, actor_id, status, "
+            "step_results_json, input_digest, definition_digest, "
+            "ops_binding_json, schema_version, created_at, updated_at "
+            "FROM recoverable_runs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"unknown recoverable run {run_id!r}.")
+        try:
+            step_results = json.loads(row[5])
+            ops_binding = json.loads(row[8])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"corrupt recoverable record: {exc}") from None
+        if not isinstance(step_results, dict) or not isinstance(ops_binding, dict):
+            raise TypeError("corrupt recoverable record.")
+        return RecoverableRun(
+            run_id=row[0],
+            workflow_id=row[1],
+            version=row[2],
+            actor_id=row[3],
+            status=row[4],
+            step_results=step_results,
+            input_digest=row[6],
+            definition_digest=row[7],
+            ops_binding=ops_binding,
+            created_at=row[10],
+            updated_at=row[11],
+            schema_version=row[9],
+        )
+
+    def list_recoverable_runs(self, status: str | None = None) -> list[RecoverableRun]:
+        """List recoverable runs, optionally filtered by status."""
+        query = (
+            "SELECT run_id, workflow_id, version, actor_id, status, "
+            "step_results_json, input_digest, definition_digest, "
+            "ops_binding_json, schema_version, created_at, updated_at "
+            "FROM recoverable_runs"
+        )
+        params: tuple[object, ...] = ()
+        if status is not None:
+            query += " WHERE status = ?"
+            params = (status,)
+        query += " ORDER BY rowid"
+        rows = self._conn.execute(query, params).fetchall()
+        return [self.get_recoverable_run(str(row[0])) for row in rows]
 
 
 __all__ = [

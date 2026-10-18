@@ -1,0 +1,52 @@
+{
+  "spec_checkpoint": "b5de5136141c5df03a54d95f30d611eb693082eb",
+  "owner_approval": "Approve A2 implementation and offline verification using free-only coding workers",
+  "owner_auth_instruction": "Do it yourself",
+  "implementation_status": "blocked_before_any_runtime_or_test_edits",
+  "opencode_version": "1.19.0",
+  "opencode_smokes": [
+    {
+      "model": "opencode/muse-spark-1.3-contributor-free",
+      "exit_code": 1,
+      "completed_exact_smoke": false,
+      "error": "HTTP 403 FreeTierError: free tier restricted by service"
+    },
+    {
+      "model": "opencode/glm-5.3-flash-free",
+      "exit_code": 1,
+      "completed_exact_smoke": false,
+      "error": "HTTP 403 FreeTierError: free tier restricted by service"
+    }
+  ],
+  "cline_version": "3.0.72",
+  "cline_installation": "Official @cline/cli-windows-x64 package installed under Hermes scratch; no global installation or private runtime/provider settings changed by installation",
+  "cline_smokes": [
+    {
+      "model": "cline-free/muse-spark-1.3-contributor",
+      "exit_code": 1,
+      "error": "cline requires re-authentication.",
+      "completed_at_utc": "2026-10-16T16:09:42.242923+00:00"
+    },
+    {
+      "model": "cline-free/mimo-v2.6-flash",
+      "exit_code": 1,
+      "error": "cline requires re-authentication.",
+      "completed_at_utc": "2026-10-16T16:09:50.085240+00:00"
+    }
+  ],
+  "auth_attempt": {
+    "quick_setup": "Positional provider auth requires an API key; none supplied or guessed",
+    "interactive": "Cline device authorization initiated via interactive auth; no successful authentication",
+    "browser": "Reached official authkit.cline.bot sign-in page after browser navigation retry",
+    "vault": "No saved logins; save_login failed prompt_unavailable in this session",
+    "completion": "Device authorization timed out; only the owned auth process was terminated",
+    "credentials_or_codes_in_receipt": false
+  },
+  "no_paid_fallback": true,
+  "runtime_src_tree": "13ba5624a85ed91591a306e84eec337af09556db",
+  "tests_tree": "2cd9d492728377e5197cf9de89e157b940075657",
+  "canonical_main": "713a4e311b1e071fbd6c5cf103b995d17aa7e5a2",
+  "main_clean": true,
+  "bot_actions": 0,
+  "next_gate": "User completes Cline authentication or securely provisions a saved login; then require a NEW completed exact-free-model smoke before any coding worker."
+}

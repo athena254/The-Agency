@@ -8,6 +8,7 @@ from typing import Any
 
 import structlog
 
+from agency.agents.assessment import assessed_output
 from agency.agents.demo.agent import DemoAgent
 from agency.telegram.adapter import TelegramAdapter
 from agency.telegram.budget_store import BetaBudgetStore, BudgetUnavailable
@@ -24,6 +25,36 @@ BETA_REPLAY = "Request already received; status uncertain. Please do not resend 
 # These commands are deterministic and do not invoke a model or write a profile.
 # Trusted polling still reserves request quota before sending their replies.
 _BETA_EXEMPT_COMMANDS = frozenset({"/start", "/help", "/whoami", "/status", "/agents"})
+# Deterministic thread commands served from private nonbeta Telegram.
+# Suffix normalization applies only to this bot's own account
+# (@RemexMemorybot); another bot's suffix is never treated as ours.
+_THIS_BOT_USERNAME = "remexmemorybot"
+_THREAD_COMMANDS = frozenset({"new", "threads", "switch", "current"})
+# Slash-command stems answered deterministically in nonbeta mode (by the
+# handler or by Butler via commands_enabled). Any other "/" text gets the
+# shared unknown-command reply — never the LLM.
+_KNOWN_NONBETA_COMMANDS = frozenset(
+    {
+        "start",
+        "help",
+        "whoami",
+        "status",
+        "agents",
+        "name",
+        "research",
+        "proposals",
+        "propose-agent",
+        "propose_agent",
+        "new",
+        "threads",
+        "switch",
+        "current",
+    }
+)
+_THREAD_PRIVATE_ONLY = "Thread commands are available in a private chat with this bot."
+_AUDIT_UNAVAILABLE_NOTICE = (
+    "Audit unavailable; execution outcome unconfirmed. Do not automatically retry."
+)
 
 _CREATION_ATTEMPT = re.compile(
     r"\b(create|make|build|spawn|add|set\s+up|spin\s+up|stand\s+up|launch)\b.*\b(agent|bot)\b"
@@ -32,6 +63,58 @@ _CREATION_ATTEMPT = re.compile(
     r"|\b(create|make|build|spawn|add)\s+(?:(?:a|an|the|new)\s+)?one\s+(called|named|for)\b",
     re.IGNORECASE,
 )
+
+
+def unknown_command_text(command: str) -> str:
+    # Avoid eager Butler -> orchestrator -> ToolDriver -> metering cycles.
+    from agency.butler.commands import unknown_command_text as render
+
+    return render(command)
+
+
+def _normalize_thread_command(text: str) -> str | None:
+    """Return Butler-ready ``/command args`` for this bot's thread commands.
+
+    Strips an ``@RemexMemorybot`` suffix; returns None for non-commands,
+    other bots' suffixes, and non-thread commands.
+    """
+    from agency.butler.commands import ThreadCommands
+
+    parsed = ThreadCommands.parse(text.strip())
+    if parsed is None:
+        return None
+    command, args = parsed
+    base, sep, suffix = command.partition("@")
+    if sep:
+        if suffix != _THIS_BOT_USERNAME or base not in _THREAD_COMMANDS:
+            return None
+        command = base
+    elif command not in _THREAD_COMMANDS:
+        return None
+    return f"/{command}" if not args else f"/{command} {args}"
+
+
+def _unknown_command_name(text: str) -> str | None:
+    """Return the unknown slash-command name, or None when not unknown.
+
+    ``//`` escapes and known stems (handled by earlier deterministic
+    branches or by Butler via commands_enabled) return None. Anything
+    addressed to another bot is unknown to us: deterministic, never
+    executed.
+    """
+    from agency.butler.commands import ThreadCommands
+
+    parsed = ThreadCommands.parse(text.strip())
+    if parsed is None:
+        return None
+    command, _args = parsed
+    base, sep, suffix = command.partition("@")
+    if sep and suffix != _THIS_BOT_USERNAME:
+        return command
+    stem = base if sep else command
+    if stem in _KNOWN_NONBETA_COMMANDS:
+        return None
+    return stem
 
 
 class TelegramHandler:
@@ -298,10 +381,49 @@ class TelegramHandler:
 
         # Creation is refused before the Butler/LLM path until peer governance exists.
 
+        # Thread commands (/new, /threads, /switch, /current) are
+        # deterministic and owner-scoped. Only validated private nonbeta
+        # traffic with a stable numeric sender reaches Butler with
+        # commands_enabled; every other channel gets a deterministic
+        # reply with zero state change and zero model calls. Beta never
+        # reaches this block (unsupported-command guard above).
+        if not self._config.beta_mode:
+            normalized = _normalize_thread_command(text)
+            if normalized is not None:
+                if private:
+                    if self._butler is not None:
+                        response, audit_acknowledged = await self._call_butler(
+                            normalized,
+                            conversation_sender,
+                            {"chat_id": chat_id, "assistant_name": display_name},
+                            commands_enabled=True,
+                        )
+                    else:
+                        response = "Butler not running."
+                        audit_acknowledged = True
+                    if chat_id:
+                        await self._adapter.send_message(chat_id, response)
+                    if not audit_acknowledged:
+                        return {"status": "rejected", "reason": "audit unavailable"}
+                    thread_command = normalized.split(None, 1)[0]
+                    return {"status": "ok", "chat_id": chat_id, "command": thread_command}
+                if chat_id:
+                    await self._adapter.send_message(chat_id, _THREAD_PRIVATE_ONLY)
+                return {"status": "rejected", "reason": "thread commands require private chat"}
+            unknown = _unknown_command_name(text)
+            if unknown is not None:
+                if chat_id:
+                    await self._adapter.send_message(chat_id, unknown_command_text(unknown))
+                return {"status": "ok", "chat_id": chat_id, "command": f"/{unknown}"}
+
         # Process via Butler if available, else demo agent
+        audit_acknowledged = True
         if self._butler:
-            response = await self._butler.handle_message(
-                text, conversation_sender, {"chat_id": chat_id, "assistant_name": display_name}
+            response, audit_acknowledged = await self._call_butler(
+                text,
+                conversation_sender,
+                {"chat_id": chat_id, "assistant_name": display_name},
+                commands_enabled=(private and not self._config.beta_mode),
             )
         else:
             response = await self._demo.handle(text, {"sender": sender, "chat_id": chat_id})
@@ -310,7 +432,30 @@ class TelegramHandler:
         if chat_id:
             await self._adapter.send_message(chat_id, response)
 
+        if not audit_acknowledged:
+            return {"status": "rejected", "reason": "audit unavailable"}
         return {"status": "ok", "chat_id": chat_id, "response_length": len(response)}
+
+    async def _call_butler(
+        self,
+        message: str,
+        sender: str,
+        context: dict[str, Any],
+        *,
+        commands_enabled: bool = False,
+    ) -> tuple[str, bool]:
+        """Return reply and audit acknowledgement, never retry or use a fallback."""
+        # Import lazily: eager Butler imports introduce metering/ToolDriver cycles.
+        from agency.butler.service import ButlerAuditError
+
+        try:
+            response = await self._butler.handle_message(
+                message, sender, context, commands_enabled=commands_enabled
+            )
+        except ButlerAuditError:
+            self._log.warning("telegram.audit_unavailable")
+            return _AUDIT_UNAVAILABLE_NOTICE, False
+        return response, True
 
     async def _handle_research(self, args: str, sender: str, display_name: str = "Remex") -> str:
         """Run the research agent's tool loop on a topic."""
@@ -340,8 +485,15 @@ class TelegramHandler:
             if getattr(result, "status", None) == "timeout":
                 return "Research timed out. Please try again."
             return "Research could not be completed. Please try again."
-        output = result.output if isinstance(result.output, str) else str(result.output)
-        return f"🔍 *Research complete*\n\n{output}"
+        output = assessed_output(
+            result.output,
+            assessment=getattr(result, "assessment", None)
+            if getattr(result, "task_id", None) == task.task_id
+            else None,
+            task_id=task.task_id,
+            execution_status="completed",
+        )
+        return f"🔍 *Research execution finished*\n\n{output}"
 
     async def _send_long(self, chat_id: int, text: str, limit: int = 3800) -> None:
         """Send text, splitting into multiple messages above the limit."""
@@ -399,6 +551,14 @@ class TelegramHandler:
                 "The Telegram bot account is shared; this name is private to your conversations."
             )
         if command in ("/start", "/help"):
+            thread_lines = (
+                "• /new <title> — Start a thread\n"
+                "• /threads — List your threads\n"
+                "• /switch <title or id> — Continue a thread\n"
+                "• /current — Show the active thread\n"
+                if not self._config.beta_mode
+                else ""
+            )
             return (
                 f"🤖 *The Agency — {display_name}*\n\n"
                 "Commands:\n"
@@ -406,7 +566,8 @@ class TelegramHandler:
                 "• /agents — List registered agents\n"
                 "• /status — Live system health\n"
                 "• /whoami — What this bot is\n"
-                "• /name <nickname> — Your private name for me (/name reset to undo)\n\n"
+                "• /name <nickname> — Your private name for me (/name reset to undo)\n"
+                f"{thread_lines}\n"
                 "Or just chat — plain English routes to the right agent.\n"
                 "The Telegram bot account is shared; this name is private to your conversations."
             )
@@ -565,10 +726,28 @@ class TelegramHandler:
                 raise ValueError("missing Telegram chat ID")
             sender = f"telegram:chat:{chat_id}:user:{user_id}"
         display_name = (self._profiles.get_name(user_id) if private else None) or "Remex"
+        # Legacy entry point mirrors the update path: this bot's thread
+        # commands run owner-scoped via commands_enabled only in private
+        # chats; anything else slash-shaped is deterministic. (Beta raises
+        # before reaching here.)
+        normalized = _normalize_thread_command(text)
+        if normalized is not None:
+            if not private:
+                return _THREAD_PRIVATE_ONLY
+            if self._butler:
+                response, _audit_acknowledged = await self._call_butler(
+                    normalized, sender, {"assistant_name": display_name}, commands_enabled=True
+                )
+                return str(response)
+            return "Butler not running."
+        unknown = _unknown_command_name(text)
+        if unknown is not None:
+            return unknown_command_text(unknown)
         if self._butler:
-            return str(
-                await self._butler.handle_message(text, sender, {"assistant_name": display_name})
+            response, _audit_acknowledged = await self._call_butler(
+                text, sender, {"assistant_name": display_name}, commands_enabled=private
             )
+            return str(response)
         return await self._demo.handle(text, {"sender": sender})
 
     async def send_response(self, chat_id: int, text: str) -> dict[str, Any]:
@@ -576,5 +755,14 @@ class TelegramHandler:
         return await self._adapter.send_message(chat_id, text)
 
     async def close(self) -> None:
-        await self._adapter.close()
-        self._profiles.close()
+        """Close transport/profile resources, not injected backend services."""
+        try:
+            await self._adapter.close()
+        except BaseException as primary:
+            try:
+                self._profiles.close()
+            except BaseException:  # noqa: BLE001 - preserve primary failure/cancellation
+                primary.add_note("Telegram profile cleanup also failed")
+            raise
+        else:
+            self._profiles.close()

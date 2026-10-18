@@ -46,7 +46,17 @@ sandbox-workspaces/
 
 # Environment / secrets (never commit filled-in .env files)
 .env
+.env.*
 !.env.example
+
+# Mutable runtime data stays local; preserve the directory in fresh clones.
+data/*
+!data/.gitkeep
+
+# Temporary coding-agent inputs and tool caches
+.agent-input/
+.mypy_cache/
+.ruff_cache/
 
 # OS
 .DS_Store

@@ -20,12 +20,21 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from agency.agents.assessment import (
+    ExecutionAssessment,
+    assessed_output,
+    bound_assessment,
+    render_output,
+)
 from agency.agents.executor import ExecutionStatus
+from agency.butler.commands import CommandError, ThreadCommands
 from agency.butler.config import ButlerConfig
+from agency.butler.context import ThreadContextEngine
 from agency.butler.router import MessageRouter
 from agency.butler.threads import Thread, ThreadMessage, ThreadStore, Workspace
 from agency.kernel.audit import AuditEntry, AuditLog
 from agency.kernel.identity import Agent
+from agency.llm.metered import MeteredDenied, MeteredError
 from agency.memory.sms.models import MemoryItem, MemoryTier
 from agency.memory.sms.retrieval import RetrievalEngine
 from agency.memory.sms.store import MemoryStore
@@ -55,10 +64,19 @@ class ButlerReply:
 
     text: str
     status: str
+    assessment: ExecutionAssessment | None = None
+    task_id: str | None = None
 
 
 class ButlerExecutionError(RuntimeError):
     """Non-completed orchestrator execution without raw output or secrets."""
+
+
+class ButlerAuditError(RuntimeError):
+    """A required audit acknowledgement is unavailable; effects may be uncertain."""
+
+    def __init__(self) -> None:
+        super().__init__("butler audit unavailable")
 
 
 class ButlerService:
@@ -77,18 +95,22 @@ class ButlerService:
         self._config = config or ButlerConfig()
         self._orchestrator = orchestrator or AgencyOrchestrator()
         self._router = router or MessageRouter()
-        self._audit = audit_log or AuditLog(":memory:")
+        self._owns_audit = audit_log is None
+        self._audit = audit_log if audit_log is not None else AuditLog(":memory:")
         # Share the orchestrator's memory store — one store, one truth.
         # (A standalone MemoryStore here was a second, separate DB.)
         self._memory = memory_store or self._orchestrator._memory_store
         self._memory_retrieval = RetrievalEngine(self._memory)
         self._threads = thread_store
         self._owns_threads = thread_store is None
+        self._engine: ThreadContextEngine | None = None
+        self._commands: ThreadCommands | None = None
         self._lattice: Lattice | None = None  # Will be set from orchestrator
         self._llm = llm
         self._log = structlog.get_logger(__name__)
         self._started = False
         self._seeded = False
+        self._orchestrator_active = False
 
     @property
     def lattice(self) -> Lattice | None:
@@ -132,6 +154,20 @@ class ButlerService:
             self._threads = ThreadStore(thread_path)
         return self._threads
 
+    @property
+    def thread_context_engine(self) -> ThreadContextEngine:
+        """Layered per-thread context engine over the shared stores."""
+        if self._engine is None:
+            self._engine = ThreadContextEngine(self.thread_store, self._memory)
+        return self._engine
+
+    @property
+    def commands(self) -> ThreadCommands:
+        """Deterministic thread-command executor."""
+        if self._commands is None:
+            self._commands = ThreadCommands(self.thread_store, self.thread_context_engine)
+        return self._commands
+
     def create_workspace(self, owner: str, title: str) -> Workspace:
         """Create a persistent workspace for a trusted caller identity."""
         return self.thread_store.create_workspace(owner, title)
@@ -151,28 +187,57 @@ class ButlerService:
     # ------------------------------------------------------------------ #
 
     async def start(self) -> None:
-        """Initialise stores, orchestrator and default agents (idempotent)."""
+        """Initialise stores and services, rolling back failed startup."""
         if self._started:
             return
-        await self._audit.initialize()
-        await self._memory.initialize()
-        await self._orchestrator.start()
-        # Pick up the Lattice from orchestrator after it starts
-        if hasattr(self._orchestrator, "_lattice") and self._orchestrator._lattice is not None:
+        try:
+            await self._audit.initialize()
+            # The orchestrator alone initializes/closes its shared memory.
+            self._orchestrator_active = True
+            await self._orchestrator.start()
+            if self._memory is not self._orchestrator._memory_store:
+                await self._memory.initialize()
             self._lattice = self._orchestrator._lattice
-        await self._ensure_default_agents()
+            await self._ensure_default_agents()
+        except BaseException:
+            try:
+                await self.stop()
+            except BaseException as exc:  # noqa: BLE001 — finish cleanup before re-raising.
+                self._log.warning("butler.rollback_failed", error_type=type(exc).__name__)
+            raise
         self._started = True
         self._log.info("butler.started")
 
     async def stop(self) -> None:
-        """Shut down background services (memory lifecycle only; stores stay open)."""
-        if not self._started:
-            return
-        await self._orchestrator.stop()
-        if self._owns_threads and self._threads is not None:
-            self._threads.close()
-            self._threads = None
+        """Stop the orchestrator; close only Butler-owned audit/thread stores."""
         self._started = False
+        self._lattice = None
+        self._engine = None
+        self._commands = None
+        error: BaseException | None = None
+        if self._orchestrator_active:
+            try:
+                await self._orchestrator.stop()
+            except BaseException as exc:  # noqa: BLE001 — finish cleanup before re-raising.
+                error = exc
+            else:
+                self._orchestrator_active = False
+        if self._owns_threads and self._threads is not None:
+            try:
+                self._threads.close()
+            except BaseException as exc:  # noqa: BLE001 — finish cleanup before re-raising.
+                if error is None:
+                    error = exc
+            else:
+                self._threads = None
+        if self._owns_audit:
+            try:
+                await self._audit.close()
+            except BaseException as exc:  # noqa: BLE001 — finish cleanup before re-raising.
+                if error is None:
+                    error = exc
+        if error is not None:
+            raise error
         self._log.info("butler.stopped")
 
     async def _ensure_started(self) -> None:
@@ -215,11 +280,17 @@ class ButlerService:
         *,
         memory_enabled: bool = True,
         beta_principal: BetaPrincipal | None = None,
+        commands_enabled: bool = False,
     ) -> str:
         """Validate and execute a turn; anonymous channels disable memory.
 
         Only trusted in-process admission may supply ``beta_principal``. Beta
         execution is dormant: reject it before startup, routing or persistence.
+
+        ``commands_enabled`` opts a trusted channel into deterministic thread
+        commands (``/new``, ``/threads``, ``/switch``, ``/current``) and the
+        persisted active-thread fallback. Unauthenticated channels must leave
+        it off: commands create and mutate owner-scoped thread state.
         """
         if beta_principal is not None and not isinstance(beta_principal, BetaPrincipal):
             raise TypeError("beta_principal must be a BetaPrincipal")
@@ -232,7 +303,6 @@ class ButlerService:
         if len(text) > self._config.max_message_length:
             self._log.warning(
                 "butler.message_truncated",
-                sender=sender,
                 length=len(text),
                 max_length=self._config.max_message_length,
             )
@@ -247,17 +317,39 @@ class ButlerService:
             self.thread_store.get_thread(sender, thread_id)
         started = datetime.now(UTC)
 
+        # Deterministic conversation commands run before any routing. They are
+        # opt-in per call so unauthenticated channels (public HTTP) can never
+        # create or mutate thread state.
+        await self._audit_append(
+            agent=None,
+            action="butler.request",
+            result="received",
+            target="converse",
+            evidence={"message_length": len(text)},
+        )
+        parsed = ThreadCommands.parse(text) if commands_enabled else None
+        if parsed is not None:
+            command, args = parsed
+            return await self._run_command(sender, command, args, started)
+
+        # Effective thread: an explicit authorized thread_id wins; otherwise a
+        # persisted active thread applies only when the caller opted into
+        # conversational commands (trusted channels).
+        if thread_id is None and commands_enabled:
+            active = self.thread_store.get_active_thread(sender)
+            if active is not None:
+                thread_id = active.id
+        engine = self.thread_context_engine if thread_id is not None else None
+
         # Recall earlier conversation with this sender so the agent has
         # continuity (parity with OpenClaw/Hermes). Best-effort — never
         # blocks the turn.
-        if thread_id is not None:
-            history = self.thread_store.list_messages(sender, thread_id)[-10:]
-            memory_context = (
-                "Earlier conversation:\n"
-                + "\n".join(f"- [{item.role}] {item.content[:300]}" for item in history)
-                if history
-                else ""
-            )
+        if engine is not None:
+            # One source per turn: layered thread context only — sender-global
+            # memory is never blended into a thread's prompt.
+            assert thread_id is not None  # engine is non-None only with a thread.
+            assembled = await engine.assemble(sender, thread_id, text)
+            memory_context = assembled.render()
         elif memory_enabled:
             memory_context = await self._recall_history(sender, text)
         else:
@@ -270,40 +362,48 @@ class ButlerService:
             agent=agent.id,
             action="butler.route",
             result="routed",
-            target=agent.domain,
-            evidence={"sender": sender, "message": text[:500]},
+            target=agent.id,
+            evidence={"message_length": len(text)},
         )
 
         try:
             execution = self.execute(agent, text, merged)
             response = await asyncio.wait_for(execution, timeout=self._config.timeout)
             result = "completed"
+        except (ButlerAuditError, MeteredDenied, MeteredError):
+            raise
         except TimeoutError as exc:
             response = f"Request timed out after {self._config.timeout:g}s. Please try again."
             result = "timeout"
-            self._log.warning("butler.execute_timeout", sender=sender, error=str(exc))
-        except Exception:  # noqa: BLE001 — execution errors become a failed turn.
+            self._log.warning("butler.execute_timeout", error_type=type(exc).__name__)
+        except Exception as exc:  # noqa: BLE001 — execution errors become a failed turn.
             response = "Sorry, I could not process that request."
             result = "failed"
-            self._log.exception("butler.execute_failed", sender=sender)
+            self._log.warning("butler.execute_failed", error_type=type(exc).__name__)
 
-        if thread_id is not None:
-            self.thread_store.append_message(sender, thread_id, "user", text)
-            self.thread_store.append_message(sender, thread_id, "assistant", response)
-        elif memory_enabled:
-            await self._store_turn(sender, agent, text, response)
         await self._audit_append(
             agent=agent.id,
             action="butler.handle_message",
             result=result,
-            target=agent.domain,
+            target=agent.id,
             evidence={
-                "sender": sender,
-                "message": text[:500],
-                "response": response[:500],
+                "message_length": len(text),
+                "response_length": len(response),
                 "duration_s": (datetime.now(UTC) - started).total_seconds(),
             },
         )
+        if thread_id is not None and engine is not None:
+            # Persist the conversation only after required gateway acknowledgement.
+            # These stores are still independent, not a cross-store transaction.
+            self.thread_store.append_message(sender, thread_id, "user", text)
+            self.thread_store.append_message(sender, thread_id, "assistant", response)
+            await engine.record_turn(sender, thread_id, text, response)
+            await self._maybe_summarize(sender, thread_id)
+        elif thread_id is not None:
+            self.thread_store.append_message(sender, thread_id, "user", text)
+            self.thread_store.append_message(sender, thread_id, "assistant", response)
+        elif memory_enabled:
+            await self._store_turn(sender, agent, text, response)
         return response
 
     async def handle_isolated_message(self, message: str, sender: str) -> ButlerReply:
@@ -330,7 +430,6 @@ class ButlerService:
         if len(text) > self._config.max_message_length:
             self._log.warning(
                 "butler.message_truncated",
-                sender=sender,
                 length=len(text),
                 max_length=self._config.max_message_length,
             )
@@ -339,17 +438,26 @@ class ButlerService:
         # No caller-supplied context is trusted; only the fixed sender.
         merged: dict[str, Any] = {"sender": sender}
         started = datetime.now(UTC)
+        await self._audit_append(
+            agent=None,
+            action="butler.isolated_request",
+            result="received",
+            target="isolated",
+            evidence={"message_length": len(text)},
+        )
         agent = await self.route(text, merged)
         await self._audit_append(
             agent=agent.id,
             action="butler.route_isolated",
             result="routed",
-            target=agent.domain,
-            evidence={"sender": sender, "message_length": len(text)},
+            target=agent.id,
+            evidence={"message_length": len(text)},
         )
 
         status = "failed"
         reply_text = "Sorry, I could not process that request."
+        assessment = None
+        task_id = None
         try:
             result = await asyncio.wait_for(
                 self._orchestrator.converse_isolated(text, agent.id, context=merged),
@@ -357,32 +465,84 @@ class ButlerService:
             )
             status = str(result.status.value)
             output = result.output
-            reply_text = output if isinstance(output, str) else str(output)
+            reply_text = render_output(output)
+            task_id = getattr(result, "task_id", None)
+            assessment = bound_assessment(
+                getattr(result, "assessment", None),
+                task_id=task_id or "",
+                execution_status=status,
+                output=output,
+            )
+        except (ButlerAuditError, MeteredDenied, MeteredError):
+            raise
         except TimeoutError as exc:
             status = "timeout"
             reply_text = f"Request timed out after {self._config.timeout:g}s. Please try again."
-            self._log.warning("butler.isolated_timeout", sender=sender, error=str(exc))
-        except Exception:  # noqa: BLE001 — never surface raw exception text or stack.
+            self._log.warning("butler.isolated_timeout", error_type=type(exc).__name__)
+        except Exception as exc:  # noqa: BLE001 — never surface raw exception text or stack.
             status = "failed"
-            self._log.exception("butler.isolated_failed", sender=sender)
+            self._log.warning("butler.isolated_failed", error_type=type(exc).__name__)
 
         # Sanitized audit: message/response bodies are never persisted here.
         await self._audit_append(
             agent=agent.id,
             action="butler.handle_isolated_message",
             result=status,
-            target=agent.domain,
+            target=agent.id,
             evidence={
-                "sender": sender,
                 "message_length": len(text),
                 "response_length": len(reply_text),
                 "duration_s": (datetime.now(UTC) - started).total_seconds(),
             },
         )
-        return ButlerReply(text=reply_text, status=status)
+        return ButlerReply(text=reply_text, status=status, assessment=assessment, task_id=task_id)
+
+    async def _run_command(self, sender: str, command: str, args: str, started: datetime) -> str:
+        """Execute a parsed command; errors become user-visible replies."""
+        outcome = "ok"
+        try:
+            command_result = self.commands.execute(sender, command, args)
+            reply = command_result.text
+        except CommandError as exc:
+            reply = str(exc)
+            outcome = "error"
+        command_code = command if command in {"new", "threads", "switch", "current"} else "unknown"
+        await self._audit_append(
+            agent=None,
+            action="butler.command",
+            result=outcome,
+            target=f"/{command_code}",
+            evidence={
+                "command": command_code,
+                "duration_s": (datetime.now(UTC) - started).total_seconds(),
+            },
+        )
+        return reply
+
+    async def _maybe_summarize(self, owner: str, thread_id: str) -> None:
+        """Compress older turns into the rolling summary (deterministic).
+
+        Runs once a thread holds at least two full windows of messages;
+        the newest window stays verbatim. Best-effort: summary failures
+        never fail the turn.
+        """
+        try:
+            engine = self.thread_context_engine
+            count = self.thread_store.count_messages(owner, thread_id)
+            if count >= engine.window * 2:
+                engine.summarize_prefix(owner, thread_id)
+        except Exception:  # noqa: BLE001 — summarization must not block turns.
+            self._log.debug("butler.summarize_failed", thread_id=thread_id)
 
     async def route(self, message: str, context: dict[str, Any]) -> Agent:
         """Select the handling agent, preferring the LLM when configured."""
+        await self._audit_append(
+            agent=None,
+            action="butler.route_intent",
+            result="pending",
+            target="routing",
+            evidence={"message_length": len(message)},
+        )
         llm = self._llm or self._build_llm_from_config()
         if llm is not None:
             try:
@@ -393,8 +553,10 @@ class ButlerService:
                             self._log.info("butler.llm_routed", domain=domain)
                             return agent
                     self._log.warning("butler.llm_unknown_domain", domain=domain)
-            except Exception:  # noqa: BLE001 — fallback to deterministic routing.
-                self._log.exception("butler.llm_route_failed")
+            except (ButlerAuditError, MeteredDenied, MeteredError):
+                raise
+            except Exception as exc:  # noqa: BLE001 — ordinary legacy failures may fall back.
+                self._log.warning("butler.llm_route_failed", error_type=type(exc).__name__)
         return await self._router.route(message, context)
 
     async def execute(
@@ -414,6 +576,13 @@ class ButlerService:
             raise TypeError("beta_principal must be a BetaPrincipal")
         if beta_principal is not None:
             raise RuntimeError("beta execution disabled: policy, budget and audit gates missing")
+        await self._audit_append(
+            agent=agent.id,
+            action="butler.execute_intent",
+            result="pending",
+            target=agent.id,
+            evidence={"message_length": len(message)},
+        )
         task = await self._orchestrator.submit_task(
             title=f"Butler message from {context.get('sender', 'unknown')}",
             description=message,
@@ -425,7 +594,7 @@ class ButlerService:
                 agent=agent.id,
                 action="butler.execute",
                 result=result.status.value,
-                target=task.title,
+                target=task.task_id,
                 evidence={"task_id": task.task_id},
             )
             self._log.warning(
@@ -435,13 +604,20 @@ class ButlerService:
                 status=result.status.value,
             )
             raise ButlerExecutionError(f"Task execution failed with status: {result.status.value}")
-        output = result.output if isinstance(result.output, str) else str(result.output)
+        output = assessed_output(
+            result.output,
+            assessment=getattr(result, "assessment", None)
+            if getattr(result, "task_id", None) == task.task_id
+            else None,
+            task_id=task.task_id,
+            execution_status=result.status.value,
+        )
         await self._audit_append(
             agent=agent.id,
             action="butler.execute",
             result=result.status.value,
-            target=task.title,
-            evidence={"task_id": task.task_id, "output": output[:500]},
+            target=task.task_id,
+            evidence={"task_id": task.task_id, "output_length": len(output)},
         )
         self._log.info(
             "butler.executed", agent_id=agent.id, task_id=task.task_id, status=result.status.value
@@ -538,24 +714,26 @@ class ButlerService:
         evidence: dict[str, Any] | None = None,
     ) -> None:
         try:
-            await self._audit.append(
-                AuditEntry(
-                    timestamp=datetime.now(UTC),
-                    agent=agent,
-                    target=target,
-                    authorization="butler",
-                    capability="converse",
-                    action=action,
-                    result=result,
-                    evidence=evidence,
-                    model=self._config.llm_model or None,
-                    model_version=self._config.llm_provider,
-                    tool_version="butler-0.1.0",
-                    environment={"name": "butler"},
-                )
+            entry = AuditEntry(
+                timestamp=datetime.now(UTC),
+                agent=agent,
+                target=target,
+                authorization="butler",
+                capability="converse",
+                action=action,
+                result=result,
+                evidence=evidence,
+                model=self._config.llm_model or None,
+                model_version=self._config.llm_provider,
+                tool_version="butler-0.1.0",
+                environment={"name": "butler"},
             )
-        except Exception:  # noqa: BLE001 — best-effort audit persistence.
-            self._log.exception("butler.audit_failed", action=action)
+            acknowledgement = await self._audit.append(entry)
+            if type(acknowledgement) is not str or acknowledgement != entry.entry_id:
+                raise ValueError("audit acknowledgement mismatch")
+        except Exception as exc:  # noqa: BLE001 — no private storage bodies or tracebacks.
+            self._log.warning("butler.audit_failed", error_type=type(exc).__name__)
+            raise ButlerAuditError from None
 
     async def _recall_history(self, sender: str, message: str) -> str:
         """Retrieve earlier turns with ``sender`` relevant to ``message``.
@@ -568,7 +746,7 @@ class ButlerService:
                 message, agent_id=f"chat-{sender}", limit=5
             )
         except Exception:  # noqa: BLE001 — optional recall cannot block a turn.
-            self._log.debug("butler.history_recall_failed", sender=sender)
+            self._log.debug("butler.history_recall_failed")
             return ""
         if not items:
             return ""
@@ -586,8 +764,14 @@ class ButlerService:
                     tags=["butler", "conversation", agent.domain, f"chat-{sender}"],
                 )
             )
-        except Exception:  # noqa: BLE001 — optional memory persistence cannot block a turn.
-            self._log.exception("butler.memory_store_failed")
+        except Exception as exc:  # noqa: BLE001 — optional transcript remains best effort.
+            self._log.warning("butler.memory_store_failed", error_type=type(exc).__name__)
 
 
-__all__ = ["ButlerExecutionError", "ButlerReply", "ButlerService", "LLMCallable"]
+__all__ = [
+    "ButlerAuditError",
+    "ButlerExecutionError",
+    "ButlerReply",
+    "ButlerService",
+    "LLMCallable",
+]

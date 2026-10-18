@@ -1,0 +1,120 @@
+{
+  "kind": "Synthetic pre-implementation baseline diagnostic, not A2 implementation/acceptance or autonomy proof",
+  "recorded_at_utc": "2026-10-16T15:25:51.779519+00:00",
+  "oracle_fixture_expected": "FIXTURE_VALUE: EXPECTED",
+  "model_fixture_actual": "FIXTURE_VALUE: WRONG. completeness accuracy safety.",
+  "scenarios": [
+    {
+      "domain": "security",
+      "execution_status": "completed",
+      "result_fields": [
+        "task_id",
+        "status",
+        "output",
+        "error",
+        "attempts",
+        "duration_s",
+        "model"
+      ],
+      "assessment_returned": false,
+      "verifier_calls": 1,
+      "risk_calls": 1,
+      "internal_reports": [
+        {
+          "verification": "passed",
+          "risk_category": "medium"
+        }
+      ]
+    },
+    {
+      "domain": "general",
+      "execution_status": "completed",
+      "result_fields": [
+        "task_id",
+        "status",
+        "output",
+        "error",
+        "attempts",
+        "duration_s",
+        "model"
+      ],
+      "assessment_returned": false,
+      "verifier_calls": 0,
+      "risk_calls": 0,
+      "internal_reports": [
+        {
+          "verification": "passed",
+          "risk_category": "none"
+        }
+      ]
+    },
+    {
+      "domain": "research",
+      "execution_status": "completed",
+      "result_fields": [
+        "task_id",
+        "status",
+        "output",
+        "error",
+        "attempts",
+        "duration_s",
+        "model"
+      ],
+      "assessment_returned": false,
+      "verifier_calls": 0,
+      "risk_calls": 0,
+      "internal_reports": [
+        {
+          "verification": "passed",
+          "risk_category": "none"
+        }
+      ]
+    }
+  ],
+  "tool_failure": {
+    "execution_status": "failed",
+    "verifier_calls": 0,
+    "risk_calls": 0,
+    "internal_reports": [
+      {
+        "verification": "passed",
+        "risk_category": "none"
+      }
+    ]
+  },
+  "empty_plan": {
+    "error_class": "ValidationError",
+    "task_status": "completed",
+    "model_calls": 0,
+    "execution_memory_writes": 1
+  },
+  "classic_findings": [
+    {
+      "verification_status": "verified",
+      "methodology": "agent_execution"
+    }
+  ],
+  "heuristic": {
+    "status": "passed",
+    "actual_checks": [
+      "completeness",
+      "safety"
+    ],
+    "accuracy_requested_but_not_run": true
+  },
+  "butler_body_only": true,
+  "prototype": {
+    "status": 200,
+    "body_fields": [
+      "response"
+    ],
+    "runtime_assessment_returned": false,
+    "spoofed_request_assessment_status": 422,
+    "spoofed_request_caused_model_calls": false
+  },
+  "synthetic_model_calls": 6,
+  "live_provider_calls": 0,
+  "tool_actions": 0,
+  "guard": "Python loopback-only DNS/socket guard, not OS isolation",
+  "runtime_source_changed": false
+}

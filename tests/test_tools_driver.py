@@ -201,7 +201,11 @@ async def test_tool_error_loop_continues() -> None:
     assert "boom failed" in llm.calls[1][0]
 
 
-async def test_beta_audit_failure_cannot_become_completed_answer() -> None:
+async def test_beta_audit_failure_cannot_become_completed_answer(tmp_path, monkeypatch) -> None:
+    from agency.llm.adapter import LLMAdapter
+    from tests.test_model_metering import _close, _setup
+
+    store, audit, principal, _inner, _binding, model = await _setup(tmp_path)
     registry = FakeRegistry()
     registry._beta_policy = object()  # type: ignore[attr-defined] — strict registry test double
     registry.add_spec(
@@ -213,22 +217,29 @@ async def test_beta_audit_failure_cannot_become_completed_answer() -> None:
             evidence={"status": "INDETERMINATE"},
         ),
     )
-    llm = FakeLLM(
-        [
-            '{"action": {"name": "web_search", "args": {"query": "secret"}}}',
-            '{"final": "Search completed"}',
-        ]
-    )
+    calls: list[str] = []
+
+    async def provider(self, prompt, context=None):
+        calls.append(prompt)
+        if len(calls) == 1:
+            return '{"action": {"name": "web_search", "args": {"query": "secret"}}}'
+        return '{"final": "Search completed"}'
+
+    monkeypatch.setattr(LLMAdapter, "generate", provider)
     ctx = make_ctx()
-    ctx.beta_principal = BetaPrincipal(telegram_user_id=123, private_chat=True)
-    result = await ToolDriver(registry, llm).run("research", "sys", ctx)
-    assert result.status == "audit_error"
-    assert result.final_answer == "Beta audit unavailable."
-    assert result.llm_calls == 1
-    assert len(llm.calls) == 1
-    assert len(result.steps) == 1
-    assert result.steps[0].args == {}
-    assert result.steps[0].tool == "beta_denied"
+    ctx.beta_principal = principal
+    ctx.audit = audit
+    try:
+        result = await ToolDriver(registry, model).run("research", "sys", ctx)
+        assert result.status == "audit_error"
+        assert result.final_answer == "Beta audit unavailable."
+        assert result.llm_calls == 1
+        assert len(calls) == 1
+        assert len(result.steps) == 1
+        assert result.steps[0].args == {}
+        assert result.steps[0].tool == "beta_denied"
+    finally:
+        await _close(store, audit)
 
 
 async def test_missing_beta_identity_policy_denial_cannot_become_completed_answer() -> None:
@@ -353,15 +364,31 @@ async def test_llm_raises() -> None:
     assert result.steps == []
 
 
-async def test_beta_model_failure_does_not_echo_private_provider_error() -> None:
+async def test_beta_model_failure_does_not_echo_private_provider_error(
+    tmp_path, monkeypatch
+) -> None:
+    from agency.llm.adapter import LLMAdapter
+    from tests.test_model_metering import _close, _setup
+
+    store, audit, principal, _inner, _binding, model = await _setup(tmp_path)
     registry = make_registry_with_search()
     registry._beta_policy = object()  # type: ignore[attr-defined] — strict registry test double
-    llm = FakeLLM([RuntimeError("private prompt and token in provider failure")])
+
+    async def fail_provider(self, prompt, context=None):
+        raise RuntimeError("private prompt and token in provider failure")
+
+    monkeypatch.setattr(LLMAdapter, "generate", fail_provider)
     ctx = make_ctx()
-    ctx.beta_principal = BetaPrincipal(telegram_user_id=123, private_chat=True)
-    result = await ToolDriver(registry, llm).run("private prompt", "sys", ctx)
-    assert result.status == "llm_error"
-    assert result.final_answer == "Model unavailable."
+    ctx.beta_principal = principal
+    ctx.audit = audit
+    try:
+        result = await ToolDriver(registry, model).run("private prompt", "sys", ctx)
+        assert result.status == "llm_error"
+        assert result.final_answer == "Model unavailable."
+        assert registry.calls == []
+        assert await audit.has_pending_calls() is True
+    finally:
+        await _close(store, audit)
 
 
 async def test_strict_registry_missing_principal_model_error_is_redacted() -> None:

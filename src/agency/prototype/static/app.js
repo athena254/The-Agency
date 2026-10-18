@@ -26,6 +26,54 @@
   var UNKNOWN = '\u2014';
   var ONLINE_RE = /^(ok|healthy|up|online)$/i;
 
+  function exactFields(value, fields) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value) &&
+      Object.keys(value).sort().join(',') === fields.slice().sort().join(',');
+  }
+
+  /** This endpoint is isolated only; other report shapes stay unavailable.
+   * The API checks task identity before delivery. The browser additionally
+   * binds both digests to the exact displayed body, without trusting model text.
+   */
+  async function isolatedAssessmentNotice(report, body) {
+    var unavailable = 'Runtime assessment: unavailable. No independent verification or authorization.';
+    try {
+      if (!exactFields(report, ['schema_version', 'task_id', 'execution_status', 'output_sha256',
+          'verification', 'risk_status', 'independently_verified', 'subtasks']) ||
+          report.schema_version !== 'a2.v1' || typeof report.task_id !== 'string' || !report.task_id ||
+          report.execution_status !== 'completed' || report.verification !== 'not_performed' ||
+          report.risk_status !== 'not_assessed' || report.independently_verified !== false ||
+          !Array.isArray(report.subtasks) || report.subtasks.length !== 1) return unavailable;
+      var sub = report.subtasks[0];
+      if (!exactFields(sub, ['subtask_id', 'path', 'execution_status', 'output_sha256', 'verification', 'checks', 'risk']) ||
+          sub.subtask_id !== 'isolated' || sub.path !== 'isolated' || sub.execution_status !== 'completed' ||
+          sub.verification !== 'not_performed' || !Array.isArray(sub.checks) || sub.checks.length !== 3 ||
+          !exactFields(sub.risk, ['status', 'method', 'category', 'finding_id']) ||
+          sub.risk.status !== 'not_assessed' || sub.risk.method !== 'not_performed' ||
+          sub.risk.category !== null || sub.risk.finding_id !== null) return unavailable;
+      var criteria = ['completeness', 'accuracy', 'safety'];
+      for (var i = 0; i < criteria.length; i++) {
+        var check = sub.checks[i];
+        if (!exactFields(check, ['criterion', 'status', 'method', 'reason', 'score']) ||
+            check.criterion !== criteria[i] || check.status !== 'not_performed' ||
+            check.method !== 'not_performed' || check.reason !== 'isolated_path_unchecked' ||
+            check.score !== null) return unavailable;
+      }
+      if (typeof body !== 'string' || !body.trim()) return unavailable;
+      var bytes = new TextEncoder().encode(body);
+      // TextEncoder replaces lone surrogates; never hash replacement bytes.
+      if (new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(bytes) !== body) return unavailable;
+      var digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+      var hex = Array.from(new Uint8Array(digest), function (byte) {
+        return byte.toString(16).padStart(2, '0');
+      }).join('');
+      if (report.output_sha256 !== hex || sub.output_sha256 !== hex) return unavailable;
+      return 'Runtime assessment: execution completed; checks not performed; risk not assessed. No independent verification or authorization.';
+    } catch (err) {
+      return unavailable;
+    }
+  }
+
   /** Coerce a primitive API value to display text; anything else is ''. */
   function displayValue(value) {
     if (typeof value === 'string') return value;
@@ -400,7 +448,12 @@
           failMessage(replyMsg, 'The server returned no response text.');
           return false;
         }
+        var runtimeText = await isolatedAssessmentNotice(result.payload.assessment, reply);
         succeedMessage(replyMsg, reply);
+        var runtimeLine = doc.createElement('p');
+        runtimeLine.className = 'msg-runtime-assessment';
+        runtimeLine.textContent = runtimeText;
+        replyMsg.article.appendChild(runtimeLine);
         delivered = true;
         if (els.messageInput.value === submittedDraft) {
           els.messageInput.value = '';

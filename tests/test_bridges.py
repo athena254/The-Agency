@@ -1,7 +1,9 @@
 """Tests for bridges: base types, circuit breaker, coordinator, all 4 bridges (mocked)."""
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 from agency.bridges.base import BridgeConfig, BridgeResult, BridgeStatus, BridgeUsage
@@ -190,15 +192,103 @@ async def test_bridges_execute_mocked():
         await openclaw.aclose()
 
 
-async def test_bridges_health_check_bool():
-    assert isinstance(await ClaudeCodeBridge(ClaudeConfig()).health_check(), bool)
-    codex = CodexBridge(CodexConfig())
-    assert isinstance(await codex.health_check(), bool)
-    await codex.aclose()
-    assert isinstance(await HermesBridge(HermesConfig()).health_check(), bool)
-    openclaw = OpenClawBridge(OpenClawConfig(base_url="http://localhost:9999"))
-    assert isinstance(await openclaw.health_check(), bool)
-    await openclaw.aclose()
+async def test_bridges_health_check_bool(monkeypatch):
+    """Exercise real health methods without host CLIs, credentials or sockets."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr("agency.bridges.claude.bridge.shutil.which", lambda _path: "synthetic-cli")
+    process = AsyncMock()
+    process.returncode = 0
+    process.wait.return_value = 0
+    spawn = AsyncMock(return_value=process)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    claude = ClaudeCodeBridge(ClaudeConfig(cli_path="synthetic-claude"))
+    assert await claude.health_check() is True
+    hermes = HermesBridge(HermesConfig(cli_path="synthetic-hermes"))
+    handshake = AsyncMock(return_value={"result": {"protocol": "acp/1"}})
+    monkeypatch.setattr(hermes, "_roundtrip", handshake)
+    assert await hermes.health_check() is True
+    handshake.assert_awaited_once()
+    request = handshake.call_args.args[0]
+    assert request["method"] == "initialize"
+    assert request["params"] == {"protocol": "acp/1"}
+    assert [call.args for call in spawn.call_args_list] == [
+        ("synthetic-claude", "auth", "status"),
+        ("synthetic-claude", "--version"),
+        ("synthetic-hermes", "--version"),
+    ]
+    requests = []
+
+    def healthy(request):
+        requests.append(request)
+        return httpx.Response(200, json={"ok": True})
+
+    base_url = "https://bridge-fixture.invalid"
+    async with httpx.AsyncClient(
+        base_url=base_url, transport=httpx.MockTransport(healthy)
+    ) as client:
+        codex = CodexBridge(CodexConfig(base_url=base_url), client=client)
+        openclaw = OpenClawBridge(OpenClawConfig(base_url=base_url), client=client)
+        assert await codex.health_check() is True
+        assert await openclaw.health_check() is True
+        await codex.aclose()
+        await openclaw.aclose()
+        assert not client.is_closed  # Injected clients remain caller-owned.
+    assert client.is_closed
+    assert [request.url.path for request in requests] == ["/v1/models", "/api/health"]
+    assert all(request.url.host == "bridge-fixture.invalid" for request in requests)
+
+
+@pytest.mark.parametrize("failure", ["missing", "exit", "spawn-error", "timeout"])
+async def test_cli_bridge_health_failures_are_hermetic(monkeypatch, failure):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "agency.bridges.claude.bridge.shutil.which",
+        lambda _path: None if failure == "missing" else "synthetic-cli",
+    )
+    process = AsyncMock()
+    process.returncode = 17
+    process.wait.return_value = 17
+    spawn = AsyncMock(return_value=process)
+    if failure in ("spawn-error", "timeout"):
+        spawn.side_effect = OSError("synthetic") if failure == "spawn-error" else TimeoutError()
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    assert await ClaudeCodeBridge(ClaudeConfig(cli_path="synthetic-claude")).health_check() is False
+    assert await HermesBridge(HermesConfig(cli_path="synthetic-hermes")).health_check() is False
+    if failure == "missing":
+        spawn.assert_not_called()
+    else:
+        assert spawn.await_count == 3
+
+
+@pytest.mark.parametrize("kind", ["codex", "openclaw"])
+@pytest.mark.parametrize("failure", ["status", "transport"])
+async def test_http_bridge_health_failures_are_hermetic(kind, failure):
+    requests = []
+
+    def unhealthy(request):
+        requests.append(request)
+        if failure == "transport":
+            raise httpx.ConnectError("synthetic", request=request)
+        return httpx.Response(503)
+
+    base_url = "https://bridge-fixture.invalid"
+    async with httpx.AsyncClient(
+        base_url=base_url, transport=httpx.MockTransport(unhealthy)
+    ) as client:
+        bridge = (
+            CodexBridge(CodexConfig(base_url=base_url), client=client)
+            if kind == "codex"
+            else OpenClawBridge(OpenClawConfig(base_url=base_url), client=client)
+        )
+        assert await bridge.health_check() is False
+        await bridge.aclose()
+        assert not client.is_closed
+    assert client.is_closed
+    assert requests
+    expected = ["/v1/models"] if kind == "codex" else ["/api/health"]
+    if kind == "openclaw" and failure == "status":
+        expected.append("/api/agent")
+    assert [request.url.path for request in requests] == expected
 
 
 async def test_openclaw_non_dict_status_rejected():
