@@ -1,0 +1,95 @@
+# Owner pilot M2/M3 frozen integration contract
+
+Base: bf65fb7, October 19 2026. Addendum to SPEC_LIMITED_AUTONOMY_RELEASE_20261019.md. Owner's current implementation/live-test authorization applies. Research map preserved externally at C:/Users/alphi/agency-evidence/limited-autonomy-20261019/architecture-findings.md; normative decisions below override proposals there. No requirement to wait for another routine approval round; no consequential BFT policy, paid-provider fallback, public rollout or main merge is authorized.
+
+## Scope and decisions
+
+- Single-owner opt-in local pilot. Local owner bearer is independent from Telegram identities. No fabricated BetaPrincipal. Preserve closed peer-authority routes and beta denial. Butler remains the human gateway, not an autonomous boss or validator.
+- Reuse SAME MeteredModel, ToolDriver, existing calculator/UTC/search builtins, Butler ThreadStore/ThreadContextEngine, AgencyOrchestrator and execution assessment helpers. No second assistant or open legacy path. Add explicitly admitted execution mode.
+- Low-risk allowlist exactly calculator, utc_time, web_search. No memory tools, fetch, shell, arbitrary code/files, bridges, governance, agent activation or release. Conversation persistence is owner-admitted task output, not an unrestricted worker tool.
+- Local UI at GET /pilot, separate pilot.html/pilot.js/pilot.css; preserve existing isolated prototype UI. In pilot-configured app POST /api/chat is disabled503, preventing unmetered alternate ingress; no-pilot behavior unchanged.
+- API bearer kept only in browser JS memory, never storage/cookie/URL/static source/logs. All pilot reads and writes authenticated; CSRF for writes; exact same Origin scheme/hostname/port when present; loopback peer AND Host. Missing Origin allowed only with valid bearer for native local clients. Auth/transport/content-size checks BEFORE body decoding. No secret means unavailable503, not open access. No CORS. Request content32KiB, prompt64KiB, output64KiB; no arbitrary exception bodies in responses/logs. CSP/no-store/nosniff/referrer protections for pilot.
+- One owner workspace, task/prompt deadline120s, per-model timeout at most45s, model attempts<=8 and tool attempts<=4. Existing BudgetLimits hourly/day ceilings remain. Configuration may lower, not increase these. Provider support for owner mode: explicit OpenAI-compatible HTTPS endpoint (or explicit loopback endpoint for synthetic tests), with frozen effective model/key/base_url/limits; echo test-only. No provider defaults/context overrides/environment fallback for admitted dispatch. Public config ID random/stable configured label, not a credential digest. Never print raw key or owner bearer.
+- Default runtime model must not silently use stale nemotron-3-super-free (preflight400 and absent catalog). Existing catalog-listed free nemotron-3.5-lightning-free preflight timed out; not yet qualified. Parent alone handles secrets/config and live qualification; workers use concrete echo adapters with scripted provider leaf only. OpenCode's verified free DeepSeek alias is UI helper, not an unreviewed runtime proxy.
+
+## Public shared types — admission/models.py
+
+Frozen dataclasses (capabilities repr=False, no serialized grants):
+
+OwnerPrincipal(owner_id:str, transport:Literal['local','telegram'], subject_id:str)
+RequestLease(principal:OwnerPrincipal, request_id:str, task_id:str, sequence:int, quota_subject_id:int, capability:str, deadline_at:float)
+OwnerExecutionGrant(lease:RequestLease, budget:OwnerBudgetAdapter, allowed_tools:frozenset[str]=frozenset({'calculator','utc_time','web_search'}), max_tool_calls:int=4, max_model_calls:int=8)
+OwnerMeteredBinding(grant:OwnerExecutionGrant, provider:str, model:str, provider_config_id:str)
+
+Exact concrete validation; grant is an internal restricted owner capability, NOT peer consensus or general authority. Mutable Python internals are not protected from the host administrator. TYPE_CHECKING/lazy imports avoid cycles.
+
+All wire models Pydantic extra='forbid'; preserve input identifiers exactly. Request IDs ASCII regex ^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$. Message1..8000 chars; title1..120.
+
+PilotUsage{model_attempts:int,tool_attempts:int}
+PilotLimits{requests_per_hour:int,requests_per_day:int,model_calls_per_hour:int,model_calls_per_day:int,model_calls_per_request:int,tool_calls_per_request:int}
+PilotCapabilities{enabled:bool,ready:bool,mode:Literal['single_owner_pilot'],tools:list[str],disabled:list[str],limits:PilotLimits,provider_ready:bool,uncertainty_blocked:bool}
+ThreadView{id:str,title:str,parent_thread_id:str|null,state:str,created_at:str,updated_at:str}
+MessageView{id:str,thread_id:str,role:Literal['user','assistant','system'],content:str,created_at:str}
+RequestReceipt{request_id:str,state:str,replayed:bool,resource_id:str|null}
+OwnerTaskRequest{request_id:str,thread_id:str,message:str}
+OwnerTaskView{request_id:str,task_id:str,thread_id:str,state:Literal['ADMITTED','RUNNING','COMPLETED','FAILED','DENIED','CANCELLED','UNCERTAIN'],replayed:bool,cancel_requested:bool,response:str|null,assessment:ExecutionAssessment|null,error_code:str|null,uncertain:bool,usage:PilotUsage,created_at:str,updated_at:str}
+OwnerError{error:str,code:str,request_id:str|null,task_id:str|null,uncertain:bool,retryable:bool}
+
+Internal AdmissionRecord dataclass exposes exact pilot request columns below plus replayed:bool. Do not serialize private payload or capabilities into views. Errors: PilotError(code:str,status_code:int=503,uncertain:bool=False) with fixed allowlisted codes/messages; API translates, never prints raw str(exception).
+
+## Foundation — exclusive worker F1
+
+NEW admission/__init__.py minimal exports (avoid eager service imports), models.py, auth.py, store.py, budget.py; new tests/test_owner_{auth,store,budget}.py. Do not edit legacy budget_store.py or existing ThreadStore implementation unless parent approves a specifically demonstrated necessary helper.
+
+OwnerAuthenticator.__init__(*,owner_id:str,subject_id:str,bearer_secret:SecretStr,telegram_user_id:int|None=None,telegram_polling_marker:object|None=None); authenticate_local(authorization:str|None)->OwnerPrincipal. Constant-time exact bearer comparison; empty configured secret denies, no caller owner claims. authenticate_telegram(*,user_id:int,chat_id:int,chat_type:str,update_id:int,polling_marker:object)->OwnerPrincipal only if configured real owner and exact injected marker. API does not deserialize principal/grant.
+
+OwnerPilotStore.__init__(db_path:str); async initialize(),close(); async ensure_workspace(principal)->str; async admit(principal,request_id,*,operation:str,payload:dict[str,Any])->AdmissionRecord; async get(principal,task_id)->AdmissionRecord; async get_request(principal,request_id)->AdmissionRecord; async list_tasks(principal,*,limit:int=50)->list[AdmissionRecord]; async transition(sequence,*,expected:str,state:str,phase:str,error_code:str|None=None)->None; async stage_result(sequence,result:dict[str,Any])->None; async commit_turn(sequence,*,text:str,assessment:ExecutionAssessment|None)->None; async request_cancel(principal,task_id,request_id)->AdmissionRecord; async recover_interrupted()->list[AdmissionRecord]; async reserve_attempt(sequence,*,kind:Literal['model','tool'],limit:int)->bool; async create_thread(principal,request_id,title,parent_thread_id:str|None=None)->tuple[RequestReceipt,ThreadView]; async list_threads(principal)->list[ThreadView]; async list_messages(principal,thread_id)->list[MessageView].
+
+Store owns exclusive reused RecoverableLock for its lifetime; a second live store refuses startup (do not mark another live worker interrupted). SQLite connections per operation/offloaded thread, BEGIN IMMEDIATE, WAL+FULL verified, closed on errors. initialize existing thread schema by reusing ThreadStore; same protected file for thread tables and pilot tables, no source/runtime DB reuse.
+
+Tables (extend with constraints/indexes as necessary, no undocumented private public API):
+- pilot_subjects(owner_id UNIQUE, quota_subject_id INTEGER PRIMARY KEY AUTOINCREMENT, workspace_id TEXT UNIQUE NOT NULL)
+- pilot_requests(sequence INTEGER PRIMARY KEY AUTOINCREMENT,owner_id,request_id,operation,input_digest,input_json,task_id UNIQUE nullable,thread_id nullable,resource_id nullable,state,phase,cancel_requested DEFAULT0,model_attempts DEFAULT0,tool_attempts DEFAULT0,result_json nullable,result_digest nullable,error_code nullable,provider_config_id nullable,user_message_id nullable,assistant_message_id nullable,created_at REAL,updated_at REAL,UNIQUE(owner_id,request_id))
+- pilot_events(event_id PK,sequence,phase,code,created_at) sanitized lifecycle only.
+
+For operation turn admit creates stable task UUID and user/assistant message UUIDs before work; row deadline derives created_at+120. For operation new_thread create_thread atomically admits/replays and inserts same existing workspaces/threads schema. Same key/body returns same resource; changed operation/body409. Owner/thread checks before exposing or mutating; foreign/unknown404. Durable idempotency never pruned with quota48h policy. Canonical input JSON sort-keys preserves message values/request ID exactly; no caller authority fields allowed. commit_turn binds staged exact task/output/assessment digest, checks owner/thread/RUNNING and not cancelled, atomically writes terminal result+exactly one user/assistant message pair with preallocated IDs. No successful transcript for failed/uncertain tasks. stage_result does not declare success. Request cancellation durable flag; ADMITTED without attempts->CANCELLED, dispatched/running->conservative UNCERTAIN on interruption. Terminal success immutable. recover_interrupted under exclusive lock marks ADMITTED/RUNNING UNCERTAIN, never reexecutes. Staged output retained private, not returned as completed. Returned times ISO UTC views.
+
+OwnerBudgetAdapter.__init__(backend:BetaBudgetStore,store:OwnerPilotStore,*,namespace:str='owner-pilot:v1'); async reserve_request(principal,request_id,task_id)->RequestLease; async mark_running(lease); async reserve_model_call(lease)->bool; async reserve_tool_call(lease,tool)->bool; async finish_request(lease,*,success:bool); owns(lease)->bool; revoke(lease); async close(). Concrete backend; durable mapping uses (bot_id=namespace,update_id=sequence,user_id=quota_subject_id) only as PRIVATE accounting keys, not Telegram identity. Existing admitted store row required; no capability mint on replay/restart. Exact capability/deadline/state checks. Model reservation increments conservative durable pilot attempt before backend authorization; failure never dispatches/refunds. Per-tool attempts durable before effect. Budget owns only leases it minted; mismatch/subclass/stale/expired/revoked denies. Cap ceilings unchanged. No cross-store atomicity claim.
+
+## Runtime — exclusive worker F2 AFTER F1 delivery
+
+Files llm/adapter.py, llm/metered.py, tools/base.py,registry.py,driver.py, orchestrator.py,butler/service.py; NEW admission/policy.py,service.py; new tests/test_owner_{runtime,provider_binding,policy,service}.py. Preserve integrated W2 typed blockers/asyncio.timeout repairs and concrete beta restrictions.
+
+Add ToolContext.owner_grant:OwnerExecutionGrant|None=None. OwnerToolPolicy exact allowlist + read_only + args/default bounds + live grant. Registry additive owner_policy parameter rejects both policy kinds; reuse strict BetaAuditLog intent/outcome pipeline, reserve each tool attempt, check grant again after awaits. No legacy-open owner path. Driver validates exact owner policy+grant+MeteredModel+matching audit/binding, rejects mixed beta/owner or absent binding; both model leaves pass owner_grant context. No changes weaken beta.
+
+MeteredModel supports exact pairing original MeteredBinding/BetaBudgetStore OR OwnerMeteredBinding/OwnerBudgetAdapter; owner branch still uses concrete LLMAdapter and SAME reservation/audit/generation/uncertainty code. Snapshot all effective adapter/provider configuration once; owner dispatch reads immutable snapshot-local values, no environment/mutable fields after await. Add LLMAdapter.freeze_dispatch()-> frozen effective config type and async generate_bound(prompt,snapshot)->str; only explicit openai-compatible config and echo test provider in owner path. Snapshot private api_key repr=False; HTTPS external endpoints, loopback http only test. Exact context owner grant, no override fields, no beta injection. Every call reserves before provider effect and checks liveness after awaited stores/audit. Typed errors at wrapper including outcome ack normalization (direct callers too), cancellation unknown retained. Durable audit uses dedicated leaf file; gateway phases request/result/recovery NOT phase=intent, so a task does not block its own calls.
+
+OwnerPilotService.__init__(*,butler:ButlerService,store:OwnerPilotStore,budget:OwnerBudgetAdapter,audit:BetaAuditLog,provider_config:LLMConfig,owner_id:str,workspace_id:str=''); async start(),stop(); async submit(principal,payload:OwnerTaskRequest)->OwnerTaskView; async get_task(principal,task_id)->OwnerTaskView; async list_tasks(principal,*,limit=50)->list[OwnerTaskView]; async cancel(principal,task_id,request_id)->OwnerTaskView; async capabilities(principal)->PilotCapabilities; async create_thread(principal,request_id,title,parent_thread_id=None)->tuple[RequestReceipt,ThreadView]; async list_threads(principal)->list[ThreadView]; async list_messages(principal,thread_id)->list[MessageView]. Expose authenticator separately via API injection; service methods accept only configured owner.
+
+One tracked admitted execution at a time; durable tasks/views separate from in-memory TaskManager. submit persists before scheduling and returns ADMITTED/RUNNING202. Replay returns same task no rerun. Pending audit blocks new execution. Butler.handle_owner_message(message,thread_id,*,grant,model,registry)->ButlerReply authorizes thread and assembles quoted untrusted existing ThreadContext, no global memory. Orchestrator.execute_owner_request(message,*,grant,model,registry,memory_context='')->ExecutionResult uses existing ToolDriver with safe context (no memory/sandbox/Lattice handles), fixed general/research instructions, no separate unmetered routing/planner/LLM judge and no private Lattice mirroring. Exact task/body-bound unchecked assessment. Service stages result, requires gateway result audit ack and quota finish, then atomic store.commit_turn; only committed COMPLETED exposes response. Failure/unknown never success or retry; all awaited cancellation tracked/drained. stop closes only owned stores/tasks, lifecycle idempotent. startup recovers interrupted under exclusive store; no auto resume or uncertain intent clearance.
+
+## API — exclusive worker F3 AFTER F2 delivery
+
+prototype/app.py additive create_app(butler=None,*,pilot=None,authenticator=None). NEW prototype/pilot.py router. All routes exposed but503 if unconfigured; pilot-configured mode disables legacy model chat. GET /pilot serves new local static shell. Existing prototype/static app.js behavior unchanged.
+
+Routes (fixed wire models above):
+GET /api/pilot/capabilities ->200 PilotCapabilities
+GET /api/pilot/threads ->200 {threads:list[ThreadView]}
+POST /api/pilot/threads {request_id,title,parent_thread_id:null|str} ->201 {request:RequestReceipt,thread:ThreadView}, replay200
+GET /api/pilot/threads/{thread_id}/messages ->200 {messages:list[MessageView]}
+POST /api/pilot/tasks OwnerTaskRequest ->202 OwnerTaskView, replay200
+GET /api/pilot/tasks?limit=50 ->200 {tasks:list[OwnerTaskView]}
+GET /api/pilot/tasks/{task_id} ->200 OwnerTaskView
+POST /api/pilot/tasks/{task_id}/cancel {request_id} ->202 {task:OwnerTaskView}, replay200
+
+Error OwnerError fixed strings: missing/wrong bearer401, foreign host/origin/CSRF403, resource404, replay/transition409, length413,media415,shape422,quota429,disabled/audit/store/uncertainty503. Unknown/error cannot include raw message/key/error bodies. No retry/reconcile/unblock/general workspace CRUD routes. Response no-store. Auth guard before parse/body exposure; bounded streaming request body. Mount does not bypass old /v1 routes. Registry of route acceptance assertions must match actual app.routes including generated docs, static mounts, wrong-method and redirect checks.
+
+## UI — exclusive OpenCode worker F4 can work from frozen HTTP schema NOW
+
+NEW static/pilot.html,pilot.js,pilot.css; NEW tests/pilot_ui.test.mjs; optional one local /pilot link in existing index.html only. No app.py or backend edits, no modifications to legacy app.js/style.css/tests. Use no dependencies/CDN/framework/innerHTML/storage/cookies/URL secrets. JS in-memory bearer, X-Prototype-CSRF from existing /api/session; same-origin fetch, exact paths above, encodeURIComponent IDs, random stable request ID retained on uncertain submission (no auto retry). Unlock requires capabilities success, not mere health. New thread/list/select/messages; POST task then bounded read-only polling; states completed/failed/uncertain/cancelled; cancellation only active tasks and no optimistic cancelled claim; separate execution/independent-check labels, digest/task binding of exact output via crypto.subtle and existing assessment shape (read source), unavailable if malformed. Limits actual server facts, explicit disabled shell/fetch/governance. Lock/401 clears in-memory auth and sensitive UI. Responsive dark tokens/accessibility/reduced motion. Tests mock HTTP leaves only, all new routes tested, XSS-safe rendering and secret nondisclosure. No network before unlock except bootstrap CSRF; no mock production data, scaffold buttons or TODO unsupported actions advertised as real. API is being implemented by separate worker; do not invent private backend fallbacks.
+
+## Operations and acceptance
+
+Parent owns explicit startup secrets and provider selection, no worker may read canonical .env/runtime data. Supported launcher must load exact selected source; isolated pilot data directory not canonical data, provision high-entropy owner token in protected private file, loopback bind only, no token printed. No public daemon autostart unless explicitly qualified. Telegram pilot is OPTIONAL separate later slice; existing no-pilot Telegram behavior retained, don't claim live Telegram integration from local pilot results.
+
+Each route positive/auth denial/malformed/store-error/replay/restart matrix; all tools direct+loop denied cases; exact effective provider leaf under mutation/awaits; cross-transport budgets if Telegram added. No success before atomic transcript/result; concurrent duplicate submit once; crash/kill -> durable uncertainty/no rerun; pending leaf audit blocks across restart. Full integrated Python/Node/Ruff/format/strict Windows+Linux targets plus independent review and actual HTTP/browser/provider task evidence. Echo is offline contract evidence only. All changes isolated scoped commits, parent reviews/reruns; no worker pushes or merges. Preserve original failed evidence and report partial/open gates honestly.
