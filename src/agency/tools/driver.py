@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -9,7 +10,7 @@ import structlog
 from pydantic import BaseModel, Field
 
 from agency.kernel.audit import BetaAuditLog
-from agency.llm.metered import MeteredBinding, MeteredModel
+from agency.llm.metered import MeteredBinding, MeteredDenied, MeteredError, MeteredModel
 from agency.tools.base import BetaPrincipal, ToolContext
 
 logger = structlog.get_logger(__name__)
@@ -40,6 +41,7 @@ class ToolLoopResult(BaseModel):
     final_answer: str
     steps: list[ToolLoopStep] = Field(default_factory=list)
     evidence: dict[str, Any] = Field(default_factory=dict)
+    # Generation attempts, including failures; not provider quota authority.
     llm_calls: int = 0
     status: str = "completed"
 
@@ -178,6 +180,18 @@ class ToolDriver:
         error = getattr(result, "error", None) or "unknown error"
         return f"Tool '{tool_name}' failed: {error}"
 
+    async def _generate(self, prompt: str, context: dict[str, Any]) -> Any:
+        try:
+            return await self._llm.generate(prompt, context)
+        except (MeteredDenied, MeteredError):
+            raise
+        except (Exception, asyncio.CancelledError) as exc:
+            # Required outcome persistence may fail/be interrupted after dispatch.
+            # Do not let the gateway downgrade uncertainty into ordinary failure.
+            if type(self._llm) is MeteredModel:
+                raise MeteredError("metered: model unavailable") from exc
+            raise
+
     async def run(
         self,
         task: str,
@@ -236,8 +250,12 @@ class ToolDriver:
                 }
             else:
                 llm_context = {"task_id": task_id, "strict": True}
+            llm_calls += 1
             try:
-                raw = await self._llm.generate(prompt, llm_context)
+                raw = await self._generate(prompt, llm_context)
+            except (MeteredDenied, MeteredError):
+                # Preserve the blocking type through the executor/gateway.
+                raise
             except Exception as exc:  # noqa: BLE001 — surfaced as llm_error
                 return ToolLoopResult(
                     final_answer=("Model unavailable." if beta_path else f"LLM error: {exc}"),
@@ -246,7 +264,6 @@ class ToolDriver:
                     llm_calls=llm_calls,
                     status="llm_error",
                 )
-            llm_calls += 1
             raw_text = raw if isinstance(raw, str) else str(raw)
             parsed = _extract_json(raw_text)
 
@@ -336,8 +353,11 @@ class ToolDriver:
                         }
                     else:
                         forced_context = {"task_id": task_id, "strict": True}
+                    llm_calls += 1
                     try:
-                        forced_raw = await self._llm.generate(forced_prompt, forced_context)
+                        forced_raw = await self._generate(forced_prompt, forced_context)
+                    except (MeteredDenied, MeteredError):
+                        raise
                     except Exception as exc:  # noqa: BLE001
                         return ToolLoopResult(
                             final_answer=(
@@ -348,7 +368,6 @@ class ToolDriver:
                             llm_calls=llm_calls,
                             status="llm_error",
                         )
-                    llm_calls += 1
                     forced_text = forced_raw if isinstance(forced_raw, str) else str(forced_raw)
                     forced_parsed = _extract_json(forced_text)
                     forced_final = (
