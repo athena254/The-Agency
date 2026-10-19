@@ -11,12 +11,17 @@ import secrets
 import sqlite3
 import time
 from collections.abc import Awaitable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, TypeVar
 
 from agency.admission.models import AdmissionRecord, OwnerPrincipal, PilotError, RequestLease
 from agency.admission.store import OwnerPilotStore
-from agency.telegram.budget_store import BetaBudgetStore, BudgetUnavailable, Reservation
+from agency.telegram.budget_store import (
+    BetaBudgetStore,
+    BudgetLimits,
+    BudgetUnavailable,
+    Reservation,
+)
 
 _T = TypeVar("_T")
 
@@ -57,6 +62,23 @@ class OwnerBudgetAdapter:
         self._owned: dict[int, _Owned] = {}
         self._closed = False
         self._gate = asyncio.Lock()
+
+    @property
+    def limits(self) -> BudgetLimits:
+        try:
+            actual = self._backend._limits
+            if type(actual) is not BudgetLimits:
+                raise PilotError("store")
+            return replace(actual)
+        except (ValueError, TypeError, AttributeError):
+            raise PilotError("store") from None
+
+    async def initialize(self) -> None:
+        async with self._gate:
+            if self._closed:
+                raise PilotError("disabled")
+            _ = self.limits
+            await self._wait(self._backend.initialize())
 
     async def _wait(self, operation: Awaitable[_T]) -> _T:
         task = asyncio.ensure_future(operation)
@@ -209,15 +231,17 @@ class OwnerBudgetAdapter:
             raise
         return self.owns(lease)
 
-    async def reserve_model_call(self, lease: RequestLease) -> bool:
+    async def reserve_model_call(self, lease: RequestLease, *, limit: int = 8) -> bool:
         async with self._gate:
             try:
                 if not await self._active(lease):
                     return False
                 owned = self._require(lease)
                 counted = await self._wait(
-                    self._store.reserve_attempt(lease.sequence, kind="model", limit=8)
+                    self._store.reserve_attempt(lease.sequence, kind="model", limit=limit)
                 )
+                if type(counted) is not bool:
+                    raise PilotError("store", uncertain=True)
                 if not counted or not self.owns(lease):
                     return False
                 reserved = await self._wait(
@@ -235,7 +259,7 @@ class OwnerBudgetAdapter:
                 self.revoke(lease)
                 raise
 
-    async def reserve_tool_call(self, lease: RequestLease, tool: str) -> bool:
+    async def reserve_tool_call(self, lease: RequestLease, tool: str, *, limit: int = 4) -> bool:
         if type(tool) is not str or tool not in {"calculator", "utc_time", "web_search"}:
             return False
         async with self._gate:
@@ -243,8 +267,10 @@ class OwnerBudgetAdapter:
                 if not await self._active(lease):
                     return False
                 counted = await self._wait(
-                    self._store.reserve_attempt(lease.sequence, kind="tool", limit=4)
+                    self._store.reserve_attempt(lease.sequence, kind="tool", limit=limit)
                 )
+                if type(counted) is not bool:
+                    raise PilotError("store", uncertain=True)
                 return counted and await self._active(lease)
             except BaseException:
                 self.revoke(lease)
