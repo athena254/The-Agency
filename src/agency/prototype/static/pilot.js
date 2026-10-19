@@ -290,7 +290,8 @@
       return risk.method === 'not_performed' && risk.category === null && risk.finding_id === null;
     }
     if (risk.status !== 'assessed') return false;
-    return risk.method === 'legacy_risk_engine/v1' && nonEmptyString(risk.category) &&
+    return risk.method === 'legacy_risk_engine/v1' &&
+      ['critical', 'high', 'medium', 'low', 'negligible'].indexOf(risk.category) >= 0 &&
       nonEmptyString(risk.finding_id);
   }
 
@@ -499,13 +500,23 @@
     var capabilities = null;
     var locked = true;
     var epoch = 0;
+    var authAbort = typeof AbortController === 'function' ? new AbortController() : null;
+    var bootstrapGeneration = 0;
     var unlockBusy = false;
     var writeBusy = false;
+    var writeOwner = null;
     var threads = [];
+    var threadListGeneration = 0;
     var selectedThreadId = null;
     var messages = [];
+    var messageGeneration = 0;
     var tasks = [];
+    var taskListGeneration = 0;
     var activeTask = null;
+    var selectedTaskId = null;
+    var taskGeneration = 0;
+    var taskViewGeneration = 0;
+    var taskReadGeneration = 0;
     var pendingSubmission = null;
     var pendingThread = null;
     var pendingWrite = null;
@@ -516,8 +527,38 @@
       return typeof options.now === 'function' ? options.now() : Date.now();
     }
 
+    function live(startEpoch) {
+      return !locked && startEpoch === epoch;
+    }
+
+    function advanceEpoch() {
+      epoch += 1;
+      if (authAbort) authAbort.abort();
+      authAbort = typeof AbortController === 'function' ? new AbortController() : null;
+      return epoch;
+    }
+
     function announce(text) {
       setText(els.announcer, text);
+    }
+
+    function beginWrite() {
+      var owner = { epoch: epoch };
+      writeOwner = owner;
+      writeBusy = true;
+      updateSendState();
+      return owner;
+    }
+
+    function ownsWrite(owner) {
+      return live(owner.epoch) && writeOwner === owner;
+    }
+
+    function endWrite(owner) {
+      if (!ownsWrite(owner)) return;
+      writeOwner = null;
+      writeBusy = false;
+      updateSendState();
     }
 
     function setLockedVisuals() {
@@ -567,7 +608,8 @@
     }
 
     function lock(reason) {
-      epoch += 1;
+      advanceEpoch();
+      messageGeneration += 1;
       stopPolling();
       bearerToken = null;
       csrfToken = null;
@@ -575,12 +617,15 @@
       locked = true;
       unlockBusy = false;
       writeBusy = false;
+      writeOwner = null;
       threads = [];
       selectedThreadId = null;
       messages = [];
       tasks = [];
       activeTask = null;
       pendingSubmission = null;
+      selectedTaskId = null;
+      taskGeneration += 1;
       pendingThread = null;
       pendingWrite = null;
 
@@ -605,6 +650,13 @@
 
     function updateSendState() {
       var hasText = els.messageInput.value.trim() !== '';
+      els.createThread.disabled = locked || writeBusy;
+      els.refreshTask.disabled = locked || !activeTask;
+      Array.from(els.taskList.children).forEach(function (row) {
+        if (row.firstChild) row.firstChild.disabled = locked || writeBusy;
+      });
+      els.cancelTask.disabled = locked || writeBusy || !activeTask ||
+        !ACTIVE_STATES[activeTask.state] || activeTask.cancel_requested;
       els.sendTask.disabled = locked || writeBusy || !selectedThreadId || !canRun() || !hasText;
       els.messageInput.setAttribute('aria-busy', writeBusy ? 'true' : 'false');
       els.workspace.setAttribute('aria-busy', (writeBusy || (pollState !== null)) ? 'true' : 'false');
@@ -628,13 +680,18 @@
     }
 
     async function bootstrapSession() {
+      var startEpoch = epoch;
+      var generation = ++bootstrapGeneration;
       try {
         var res = await fetchFn(ENDPOINTS.session, {
           method: 'GET',
           headers: { 'Accept': 'application/json' },
+          signal: authAbort ? authAbort.signal : undefined,
           credentials: 'same-origin'
         });
+        if (startEpoch !== epoch || generation !== bootstrapGeneration) return false;
         var payload = await readJsonSafe(res);
+        if (startEpoch !== epoch || generation !== bootstrapGeneration) return false;
         if (!res.ok || !payload || typeof payload.csrf_token !== 'string' || payload.csrf_token === '') {
           csrfToken = null;
           setText(els.sessionDetail, 'Request protection unavailable; writes remain blocked until bootstrap succeeds.');
@@ -644,6 +701,7 @@
         setText(els.sessionDetail, 'Request protection ready.');
         return true;
       } catch (err) {
+        if (startEpoch !== epoch || generation !== bootstrapGeneration) return false;
         csrfToken = null;
         setText(els.sessionDetail, 'Request protection unavailable; writes remain blocked until bootstrap succeeds.');
         return false;
@@ -657,6 +715,7 @@
     }
 
     async function apiFetch(url, settings) {
+      var startEpoch = epoch;
       var opts = settings || {};
       var headers = { 'Accept': 'application/json' };
       var token = Object.prototype.hasOwnProperty.call(opts, 'token') ? opts.token : bearerToken;
@@ -666,6 +725,7 @@
       var init = {
         method: opts.method || 'GET',
         headers: headers,
+        signal: authAbort ? authAbort.signal : undefined,
         credentials: 'same-origin'
       };
       if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
@@ -674,13 +734,16 @@
       try {
         res = await fetchFn(url, init);
       } catch (err) {
+        if (startEpoch !== epoch) return { locked: true, stale: true };
         return { networkError: true, res: null, payload: null };
       }
+      if (startEpoch !== epoch) return { locked: true, stale: true };
       if (res.status === 401) {
         lock('Owner session rejected (401). Credentials and sensitive data were cleared.');
         return { res: res, payload: null, locked: true };
       }
       var payload = await readJsonSafe(res);
+      if (startEpoch !== epoch) return { locked: true, stale: true };
       return { res: res, payload: payload };
     }
 
@@ -828,8 +891,13 @@
         ? ' task reported by the server.' : ' tasks reported by the server.'));
       tasks.forEach(function (task) {
         var li = doc.createElement('li');
-        var label = doc.createElement('span');
-        label.textContent = task.task_id;
+        var label = doc.createElement('button');
+        label.setAttribute('type', 'button');
+        label.className = 'thread-button';
+        label.textContent = task.task_id + ' · conversation ' + task.thread_id;
+        label.setAttribute('aria-pressed', selectedTaskId === task.task_id ? 'true' : 'false');
+        label.disabled = locked || writeBusy;
+        label.addEventListener('click', function () { track(selectTask(task.task_id)); });
         var state = doc.createElement('span');
         state.className = 'task-state';
         state.textContent = task.uncertain ? task.state + ' · uncertain' : task.state;
@@ -840,6 +908,8 @@
     }
 
     function upsertTask(task) {
+      taskListGeneration += 1;
+      task = retainedTask(task);
       var replaced = false;
       for (var i = 0; i < tasks.length; i++) {
         if (tasks[i].task_id === task.task_id) {
@@ -850,19 +920,25 @@
       }
       if (!replaced) tasks.unshift(task);
       renderTaskList();
+      return task;
     }
 
-    async function failTaskBinding(task) {
-      if (task.state === 'COMPLETED') {
-        setText(els.taskNote,
-          'Task state COMPLETED, but the assessment is unavailable or did not bind to this task and exact output bytes. Result text withheld.');
+    function retainedTask(task) {
+      for (var i = 0; i < tasks.length; i++) {
+        var previous = tasks[i];
+        if (previous.task_id !== task.task_id) continue;
+        // Frozen store contract: terminal success/failure/uncertainty is immutable.
+        if (TERMINAL_STATES[previous.state]) return previous;
+        var before = Date.parse(previous.updated_at);
+        var after = Date.parse(task.updated_at);
+        if (isFinite(before) && isFinite(after) && after < before) return previous;
       }
+      return task;
     }
 
-    async function renderCompleted(task) {
-      var startEpoch = epoch;
+    async function renderCompleted(task, stillCurrent) {
       var bind = await bindAssessment(task.assessment, task, task.response);
-      if (locked || startEpoch !== epoch || !activeTask || activeTask.task_id !== task.task_id) {
+      if (!stillCurrent()) {
         return false;
       }
       if (!bind.bound) {
@@ -880,7 +956,7 @@
       return true;
     }
 
-    async function renderTask(task) {
+    async function renderTask(task, stillCurrent) {
       hideResult();
       setText(els.taskState, task.state + (task.uncertain ? ' · uncertain' : '') +
         (task.cancel_requested ? ' · cancellation requested' : ''));
@@ -899,8 +975,8 @@
             'Task reported COMPLETED with uncertainty; the result is withheld because the state is contradictory. No automatic retry.');
           return { bound: false };
         }
-        var bound = await renderCompleted(task);
-        if (!bound) await failTaskBinding(task);
+        var bound = await renderCompleted(task, stillCurrent);
+        if (!stillCurrent()) return { bound: false, stale: true };
         return { bound: bound };
       }
       if (task.state === 'FAILED') {
@@ -926,14 +1002,24 @@
     }
 
     async function applyTask(task) {
+      var startEpoch = epoch;
+      var generation = taskGeneration;
+      var viewGeneration = ++taskViewGeneration;
+      selectedTaskId = task.task_id;
+      task = upsertTask(task);
       activeTask = task;
-      upsertTask(task);
-      var info = await renderTask(task);
+      function stillCurrent() {
+        return live(startEpoch) && generation === taskGeneration &&
+          viewGeneration === taskViewGeneration && activeTask === task;
+      }
+      var info = await renderTask(task, stillCurrent);
+      if (!stillCurrent()) return { bound: false, stale: true };
       if (TERMINAL_STATES[task.state] === true) {
         if (pollState !== null && pollState.taskId === task.task_id) stopPolling();
         if (task.state === 'COMPLETED' && info.bound && !locked &&
             selectedThreadId === task.thread_id) {
           await refreshMessages(task.thread_id);
+          if (!stillCurrent()) return { bound: false, stale: true };
         }
       }
       updateSendState();
@@ -943,8 +1029,9 @@
     async function refreshThreads() {
       if (locked) return null;
       var startEpoch = epoch;
+      var generation = ++threadListGeneration;
       var result = await apiFetch(ENDPOINTS.threads);
-      if (result.locked || locked || startEpoch !== epoch) return null;
+      if (result.locked || !live(startEpoch) || generation !== threadListGeneration) return null;
       if (result.networkError) {
         setText(els.threadsNote, 'Conversations unavailable: the local pilot service could not be reached.');
         return null;
@@ -969,8 +1056,9 @@
     async function refreshTasks() {
       if (locked) return null;
       var startEpoch = epoch;
+      var generation = ++taskListGeneration;
       var result = await apiFetch(ENDPOINTS.tasks + '?limit=50');
-      if (result.locked || locked || startEpoch !== epoch) return null;
+      if (result.locked || !live(startEpoch) || generation !== taskListGeneration) return null;
       if (result.networkError) {
         setText(els.tasksNote, 'Tasks unavailable: the local pilot service could not be reached.');
         return null;
@@ -986,7 +1074,7 @@
         setText(els.tasksNote, 'Tasks unavailable: the server response was malformed. Nothing was rendered.');
         return null;
       }
-      tasks = list;
+      tasks = list.map(retainedTask);
       renderTaskList();
       return tasks;
     }
@@ -1001,9 +1089,10 @@
     async function refreshMessages(threadId) {
       if (locked || selectedThreadId !== threadId) return null;
       var startEpoch = epoch;
+      var generation = ++messageGeneration;
       setText(els.messagesNote, 'Loading committed messages…');
       var result = await apiFetch(ENDPOINTS.threads + '/' + encodeURIComponent(threadId) + '/messages');
-      if (result.locked || locked || startEpoch !== epoch || selectedThreadId !== threadId) {
+      if (result.locked || !live(startEpoch) || selectedThreadId !== threadId || generation !== messageGeneration) {
         return null;
       }
       if (result.networkError) {
@@ -1035,6 +1124,8 @@
 
     async function selectThread(threadId) {
       if (locked || !nonEmptyString(threadId)) return false;
+      var startEpoch = epoch;
+      var generation = messageGeneration + 1;
       selectedThreadId = threadId;
       var title = threadTitleFor(threadId);
       setText(els.threadHeading, title || 'Conversation');
@@ -1044,7 +1135,8 @@
       clearNode(els.messages);
       renderThreads();
       await refreshMessages(threadId);
-      if (!locked && selectedThreadId === threadId) els.messages.focus();
+      if (!live(startEpoch) || generation !== messageGeneration || selectedThreadId !== threadId) return false;
+      els.messages.focus();
       updateSendState();
       return true;
     }
@@ -1061,24 +1153,23 @@
         setText(els.threadsNote, 'Conversation titles are limited to 120 characters.');
         return false;
       }
-      if (!(await ensureCsrf())) {
-        setText(els.threadsNote,
-          'No CSRF session token is available; the conversation was not created.');
-        return false;
-      }
       var requestId = pendingThread && pendingThread.title === title
         ? pendingThread.requestId : newRequestId();
       pendingThread = { requestId: requestId, title: title };
-      writeBusy = true;
-      els.createThread.disabled = true;
-      updateSendState();
+      var owner = beginWrite();
       try {
+        var protectedWrite = await ensureCsrf();
+        if (!ownsWrite(owner)) return false;
+        if (!protectedWrite) {
+          setText(els.threadsNote, 'No CSRF session token is available; the conversation was not created.');
+          return false;
+        }
         var result = await apiFetch(ENDPOINTS.threads, {
           method: 'POST',
           csrf: true,
           body: { request_id: requestId, title: title, parent_thread_id: null }
         });
-        if (result.locked) return false;
+        if (result.locked || !ownsWrite(owner)) return false;
         if (result.networkError) {
           setText(els.threadsNote,
             'Conversation creation outcome unknown. The same request ID is retained; no automatic retry was made.');
@@ -1104,13 +1195,13 @@
         pendingThread = null;
         els.threadTitle.value = '';
         await refreshThreads();
-        if (!locked) await selectThread(payload.thread.id);
+        if (!ownsWrite(owner)) return false;
+        var selected = await selectThread(payload.thread.id);
+        if (!ownsWrite(owner) || !selected) return false;
         announce('Conversation created and selected.');
         return true;
       } finally {
-        writeBusy = false;
-        els.createThread.disabled = false;
-        updateSendState();
+        endWrite(owner);
       }
     }
 
@@ -1132,8 +1223,8 @@
       var state = pollState;
       if (!state || locked || !scheduleTimer) return;
       pollTimer = scheduleTimer(function () {
-        pollTimer = null;
         if (pollState !== state || locked) return;
+        pollTimer = null;
         var pending = pollOnce(state);
         if (pending && typeof pending.then === 'function') {
           pending.then(function () {
@@ -1148,9 +1239,13 @@
     }
 
     async function fetchTask(taskId) {
+      if (locked || selectedTaskId !== taskId) return null;
       var startEpoch = epoch;
+      var generation = taskGeneration;
+      var readGeneration = ++taskReadGeneration;
       var result = await apiFetch(ENDPOINTS.tasks + '/' + encodeURIComponent(taskId));
-      if (result.locked || locked || startEpoch !== epoch) return null;
+      if (result.locked || !live(startEpoch) || generation !== taskGeneration ||
+          readGeneration !== taskReadGeneration || selectedTaskId !== taskId) return null;
       if (result.networkError) {
         setText(els.taskNote,
           'Task status unavailable: the local pilot service could not be reached. Polling remains bounded and read-only.');
@@ -1172,8 +1267,10 @@
           'Task status response was malformed or did not match the requested task. Polling stopped; no success is implied.');
         return null;
       }
-      await applyTask(task);
-      return task;
+      var info = await applyTask(task);
+      if (info.stale || !live(startEpoch) || generation !== taskGeneration ||
+          readGeneration !== taskReadGeneration || selectedTaskId !== taskId) return null;
+      return activeTask;
     }
 
     async function pollOnce(state) {
@@ -1191,14 +1288,33 @@
       try {
         task = await fetchTask(state.taskId);
       } finally {
-        state.busy = false;
+        if (pollState === state && !locked) state.busy = false;
       }
-      if (task) state.lastTask = task;
+      if (task && pollState === state && !locked) state.lastTask = task;
     }
 
     async function refreshTask(taskId) {
       if (locked || !nonEmptyString(taskId)) return null;
+      if (selectedTaskId !== taskId) return selectTask(taskId);
       return fetchTask(taskId);
+    }
+
+    async function selectTask(taskId) {
+      if (locked || writeBusy || !nonEmptyString(taskId)) return null;
+      var startEpoch = epoch;
+      var generation = ++taskGeneration;
+      stopPolling();
+      selectedTaskId = taskId;
+      activeTask = null;
+      resetTaskPanel();
+      setText(els.taskNote, 'Loading selected task ' + taskId + ' from the server…');
+      renderTaskList();
+      updateSendState();
+      var task = await fetchTask(taskId);
+      if (!live(startEpoch) || generation !== taskGeneration || selectedTaskId !== taskId) return null;
+      if (task && activeTask && ACTIVE_STATES[activeTask.state]) startPolling(taskId);
+      if (task) els.refreshTask.focus();
+      return task;
     }
 
     async function submitTask(raw) {
@@ -1220,33 +1336,35 @@
         setText(els.taskNote, 'Messages are limited to 8000 characters; nothing was sent.');
         return false;
       }
-      if (!(await ensureCsrf())) {
-        setText(els.taskNote,
-          'No CSRF session token is available; the task was not sent.');
-        return false;
-      }
-
+      var threadId = selectedThreadId;
+      var submittedDraft = els.messageInput.value;
       var requestId = pendingSubmission &&
-        pendingSubmission.threadId === selectedThreadId &&
+        pendingSubmission.threadId === threadId &&
         pendingSubmission.message === text
         ? pendingSubmission.requestId : newRequestId();
       pendingSubmission = {
         requestId: requestId,
-        threadId: selectedThreadId,
+        threadId: threadId,
         message: text
       };
-      var threadId = selectedThreadId;
-      var submittedDraft = els.messageInput.value;
-      writeBusy = true;
-      updateSendState();
+      var owner = beginWrite();
       setText(els.taskNote, 'Submitting task ' + requestId + ' to the pilot…');
+      var generation = ++taskGeneration;
+      selectedTaskId = null;
+      stopPolling();
       try {
+        var protectedWrite = await ensureCsrf();
+        if (!ownsWrite(owner) || generation !== taskGeneration) return false;
+        if (!protectedWrite) {
+          setText(els.taskNote, 'No CSRF session token is available; the task was not sent.');
+          return false;
+        }
         var result = await apiFetch(ENDPOINTS.tasks, {
           method: 'POST',
           csrf: true,
           body: { request_id: requestId, thread_id: threadId, message: text }
         });
-        if (result.locked) return false;
+        if (result.locked || !ownsWrite(owner) || generation !== taskGeneration) return false;
         if (result.networkError) {
           setText(els.taskNote,
             'Submission outcome unknown: the service could not be reached. The same request ID is retained; no automatic retry was made.');
@@ -1263,15 +1381,17 @@
           return false;
         }
         var task = normalizeTask(result.payload);
-        if (!task || task.request_id !== requestId) {
+        if (!task || task.request_id !== requestId || task.thread_id !== threadId) {
           setText(els.taskNote,
             'Submission response was malformed or did not match the request ID. The outcome is unknown; the same request ID is retained and no automatic retry was made.');
           return false;
         }
         pendingSubmission = null;
-        await applyTask(task);
-        if (!locked && ACTIVE_STATES[task.state] === true) startPolling(task.task_id);
-        if (els.messageInput.value === submittedDraft) {
+        var info = await applyTask(task);
+        if (info.stale || !ownsWrite(owner) || generation !== taskGeneration) return false;
+        task = activeTask;
+        if (ACTIVE_STATES[task.state] === true) startPolling(task.task_id);
+        if (selectedThreadId === threadId && els.messageInput.value === submittedDraft) {
           els.messageInput.value = '';
         }
         updateSendState();
@@ -1279,34 +1399,35 @@
         announce('Task admitted with state ' + task.state + '.');
         return true;
       } finally {
-        writeBusy = false;
-        updateSendState();
+        endWrite(owner);
       }
     }
 
     async function cancelTask() {
-      if (locked || !activeTask || !ACTIVE_STATES[activeTask.state] ||
+      if (locked || writeBusy || !activeTask || !ACTIVE_STATES[activeTask.state] ||
           activeTask.cancel_requested) {
         return null;
       }
       var requestId = newRequestId();
-      writeBusy = true;
-      updateSendState();
+      var target = activeTask;
+      var owner = beginWrite();
+      var generation = ++taskGeneration;
       setText(els.cancelNote,
         'Cancellation requested; waiting for the server-confirmed task state. No local cancellation is claimed.');
-      if (!(await ensureCsrf())) {
-        writeBusy = false;
-        updateSendState();
-        setText(els.cancelNote,
-          'No CSRF session token is available; no cancellation request was sent.');
-        return null;
-      }
       try {
+        var protectedWrite = await ensureCsrf();
+        if (!ownsWrite(owner) || generation !== taskGeneration || !activeTask ||
+            activeTask.task_id !== target.task_id || !ACTIVE_STATES[activeTask.state] ||
+            activeTask.cancel_requested) return null;
+        if (!protectedWrite) {
+          setText(els.cancelNote, 'No CSRF session token is available; no cancellation request was sent.');
+          return null;
+        }
         var result = await apiFetch(
-          ENDPOINTS.tasks + '/' + encodeURIComponent(activeTask.task_id) + '/cancel',
+          ENDPOINTS.tasks + '/' + encodeURIComponent(target.task_id) + '/cancel',
           { method: 'POST', csrf: true, body: { request_id: requestId } }
         );
-        if (result.locked) return null;
+        if (result.locked || !ownsWrite(owner) || generation !== taskGeneration) return null;
         if (result.networkError) {
           setText(els.cancelNote,
             'Cancellation outcome unknown: the service could not be reached. UI state was not changed and no automatic retry was made.');
@@ -1317,25 +1438,26 @@
           return null;
         }
         var task = normalizeCancelPayload(result.payload);
-        if (!task) {
+        if (!task || task.task_id !== target.task_id || task.thread_id !== target.thread_id) {
           setText(els.cancelNote,
             'Cancellation response was malformed; UI state was not changed.');
           return null;
         }
-        await applyTask(task);
+        var info = await applyTask(task);
+        if (info.stale || !ownsWrite(owner) || generation !== taskGeneration) return null;
+        task = activeTask;
         setText(els.cancelNote, 'Server-confirmed task state: ' + task.state + '.');
         if (task.state === 'UNCERTAIN') {
           announce('Cancellation returned an uncertain server state.');
         }
         return task.state;
       } finally {
-        writeBusy = false;
-        updateSendState();
+        endWrite(owner);
       }
     }
 
     async function unlock(raw) {
-      if (unlockBusy) return false;
+      if (!locked || unlockBusy) return false;
       var candidate = typeof raw === 'string' ? raw.trim() : '';
       if (candidate === '') {
         setText(els.unlockNote, 'Enter the owner bearer before unlocking.');
@@ -1343,13 +1465,15 @@
         return false;
       }
       unlockBusy = true;
+      var startEpoch = advanceEpoch();
       els.unlockButton.disabled = true;
       setText(els.unlockButton, 'Unlocking…');
       updateSendState();
       try {
         if (!csrfToken) await bootstrapSession();
+        if (startEpoch !== epoch) return false;
         var result = await apiFetch(ENDPOINTS.capabilities, { method: 'GET', token: candidate });
-        if (result.locked) return false;
+        if (result.locked || startEpoch !== epoch) return false;
         if (result.networkError) {
           setText(els.unlockNote,
             'Could not reach the pilot service; still locked. No credential was retained.');
@@ -1388,14 +1512,16 @@
         els.threadTitle.focus();
 
         await Promise.all([refreshThreads(), refreshTasks()]);
-        if (locked) return false;
+        if (!live(startEpoch)) return false;
         updateSendState();
         return true;
       } finally {
-        unlockBusy = false;
-        els.unlockButton.disabled = false;
-        setText(els.unlockButton, 'Unlock');
-        updateSendState();
+        if (startEpoch === epoch) {
+          unlockBusy = false;
+          els.unlockButton.disabled = false;
+          setText(els.unlockButton, 'Unlock');
+          updateSendState();
+        }
       }
     }
 
@@ -1436,10 +1562,12 @@
     }
 
     async function init() {
+      var startEpoch = epoch;
       setLockedVisuals();
       resetTaskPanel();
       resetCapabilities();
       await bootstrapSession();
+      if (startEpoch !== epoch) return api;
       setText(els.unlockNote, 'Enter the owner bearer to request authenticated capabilities.');
       updateSendState();
       els.tokenInput.focus();
@@ -1462,6 +1590,7 @@
       createThread: createThread,
       submitTask: submitTask,
       refreshTask: refreshTask,
+      selectTask: selectTask,
       cancelTask: cancelTask,
       stop: stopPolling,
       settled: function () {
