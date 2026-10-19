@@ -8,10 +8,10 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-import os
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, BinaryIO, Protocol, cast
+from typing import TYPE_CHECKING, Any, BinaryIO, Protocol
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agency.workflows.registry import WorkflowDefinition
@@ -116,7 +116,7 @@ class RecoverableLock:
             return True
         handle: BinaryIO = open(self._path, "a+b")  # noqa: SIM115 - lock handle
         try:
-            if os.name == "nt":
+            if sys.platform == "win32":
                 import msvcrt
 
                 handle.seek(0)
@@ -128,11 +128,8 @@ class RecoverableLock:
             else:
                 import fcntl
 
-                flock = cast(Any, fcntl).flock
-                lock_ex = cast(Any, fcntl).LOCK_EX
-                lock_nb = cast(Any, fcntl).LOCK_NB
                 try:
-                    flock(handle.fileno(), lock_ex | lock_nb)
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except OSError:
                     handle.close()
                     return False
@@ -148,7 +145,7 @@ class RecoverableLock:
         if handle is None:
             return
         try:
-            if os.name == "nt":
+            if sys.platform == "win32":
                 import msvcrt
 
                 try:
@@ -160,7 +157,7 @@ class RecoverableLock:
                 import fcntl
 
                 try:
-                    cast(Any, fcntl).flock(handle.fileno(), cast(Any, fcntl).LOCK_UN)
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
                 except OSError:
                     pass
         finally:
