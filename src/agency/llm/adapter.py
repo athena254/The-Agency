@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from collections.abc import AsyncIterator
+from dataclasses import dataclass, field, replace
+from ipaddress import ip_address
 from typing import Any
+from urllib.parse import urlsplit
 
 import structlog
 from dotenv import load_dotenv
@@ -19,6 +23,98 @@ def _response_text(value: Any) -> str:
     if not isinstance(value, str):
         raise TypeError("LLM response content must be text")
     return value
+
+
+def _bounded_dispatch_text(value: object) -> str:
+    """Owner prompt/output byte limit, without coercion or private error bodies."""
+    if type(value) is not str:
+        raise TypeError("Owner dispatch requires exact text")
+    if len(value) > 65536:
+        raise ValueError("Owner dispatch text exceeds 64 KiB")
+    try:
+        size = len(value.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise ValueError("Owner dispatch text must be UTF-8") from None
+    if size > 65536:
+        raise ValueError("Owner dispatch text exceeds 64 KiB")
+    return value
+
+
+@dataclass(frozen=True)
+class LLMDispatchSnapshot:
+    """Independent effective owner configuration; never serialize credentials."""
+
+    provider: str
+    model: str
+    base_url: str
+    api_key: str = field(repr=False)
+    max_tokens: int
+    temperature: float
+    timeout: float
+
+    def __post_init__(self) -> None:
+        for name in ("provider", "model", "base_url", "api_key"):
+            if type(getattr(self, name)) is not str:
+                raise TypeError("Owner dispatch requires exact text fields")
+        if self.provider not in ("openai", "echo"):
+            raise ValueError("Unsupported owner dispatch provider")
+        if not self.model or any(char.isspace() or ord(char) < 32 for char in self.model):
+            raise ValueError("Invalid owner dispatch model")
+        if type(self.max_tokens) is not int or self.max_tokens <= 0:
+            raise ValueError("Invalid owner dispatch max_tokens")
+        if (
+            type(self.temperature) is not float
+            or not math.isfinite(self.temperature)
+            or not 0.0 <= self.temperature <= 2.0
+        ):
+            raise ValueError("Invalid owner dispatch temperature")
+        if (
+            type(self.timeout) is not float
+            or not math.isfinite(self.timeout)
+            or not 0.0 < self.timeout <= 45.0
+        ):
+            raise ValueError("Invalid owner dispatch timeout")
+        if self.provider == "echo":
+            # Echo is an explicit offline test provider, never an HTTP fallback.
+            if self.base_url or self.api_key:
+                raise ValueError("Echo dispatch cannot carry an endpoint or credentials")
+            return
+        if not self.api_key or any(not 33 <= ord(char) <= 126 for char in self.api_key):
+            raise ValueError("Invalid owner dispatch credential")
+        _validate_dispatch_endpoint(self.base_url)
+
+
+def _validate_dispatch_endpoint(base_url: str) -> None:
+    """Accept explicit HTTPS or literal loopback HTTP, without lossy cleanup."""
+    invalid = ValueError("Invalid owner dispatch endpoint")
+    if not base_url or any(char.isspace() or ord(char) < 32 for char in base_url):
+        raise invalid
+    if any(char in base_url for char in ("\\", "?", "#")):
+        raise invalid
+    try:
+        endpoint = urlsplit(base_url)
+        host = endpoint.hostname
+        port = endpoint.port
+    except ValueError:
+        raise invalid from None
+    if (
+        not host
+        or endpoint.username is not None
+        or endpoint.password is not None
+        or (port is not None and port <= 0)
+    ):
+        raise invalid
+    if endpoint.scheme == "https":
+        return
+    if endpoint.scheme == "http":
+        if host == "localhost":
+            return
+        try:
+            if ip_address(host).is_loopback:
+                return
+        except ValueError:
+            pass
+    raise invalid
 
 
 class LLMAdapter:
@@ -47,6 +143,37 @@ class LLMAdapter:
         timeout: float = 60.0,
         config: Any = None,
     ) -> None:
+        # Owner provenance is separate from legacy environment/default resolution.
+        # Preserve the old constructor and generate path, but never admit values
+        # that that path silently filled or coerced from invalid source types.
+        from pydantic import SecretStr
+
+        from agency.llm.config import LLMConfig, ProviderKind
+
+        if config is not None:
+            self._dispatch_explicit = (
+                type(config) is LLMConfig
+                and type(config.provider) is ProviderKind
+                and type(config.model) is str
+                and (config.base_url is None or type(config.base_url) is str)
+                and (config.api_key is None or type(config.api_key) is SecretStr)
+            )
+        else:
+            self._dispatch_explicit = (
+                type(provider) is str
+                and bool(provider)
+                and type(model) is str
+                and bool(model)
+                and (
+                    provider == "echo"
+                    or (
+                        type(base_url) is str
+                        and bool(base_url)
+                        and type(api_key) is str
+                        and bool(api_key)
+                    )
+                )
+            )
         # Compatibility: accept an LLMConfig instance (from agency.llm.config)
         if config is not None:
             self._provider = str(config.provider)
@@ -80,6 +207,58 @@ class LLMAdapter:
             model=self._model,
             has_api_key=bool(self._api_key),
         )
+
+    def freeze_dispatch(self) -> LLMDispatchSnapshot:
+        """Freeze effective configuration for a separate owner-only dispatch."""
+        if not self._dispatch_explicit:
+            raise ValueError("Owner dispatch requires explicit configuration")
+        return LLMDispatchSnapshot(
+            provider=self._provider,
+            model=self._model,
+            base_url=self._base_url,
+            api_key=self._api_key,
+            max_tokens=self._max_tokens,
+            temperature=self._temperature,
+            timeout=self._timeout,
+        )
+
+    async def generate_bound(self, prompt: str, snapshot: LLMDispatchSnapshot) -> str:
+        """Dispatch exactly one owner call using pre-await snapshot-local values."""
+        import httpx
+
+        if type(snapshot) is not LLMDispatchSnapshot:
+            raise TypeError("Owner dispatch requires an exact snapshot")
+        # Reconstruct and validate a private copy before any suspension; never
+        # read the supplied snapshot, adapter configuration or environment later.
+        snapshot = replace(snapshot)
+        prompt = _bounded_dispatch_text(prompt)
+        provider = snapshot.provider
+        model = snapshot.model
+        base_url = snapshot.base_url
+        api_key = snapshot.api_key
+        max_tokens = snapshot.max_tokens
+        temperature = snapshot.temperature
+        timeout = snapshot.timeout
+        if provider == "echo":
+            return _bounded_dispatch_text(_response_text(self._echo_generate(prompt)))
+        url = f"{base_url.rstrip('/')}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        async with httpx.AsyncClient(
+            timeout=timeout, trust_env=False, follow_redirects=False
+        ) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+        return _bounded_dispatch_text(_response_text(data["choices"][0]["message"]["content"]))
 
     def _detect_provider(self) -> str:
         """Auto-detect provider from available credentials."""
