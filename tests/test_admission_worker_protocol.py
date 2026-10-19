@@ -133,6 +133,30 @@ def test_spawn_support_has_only_stdlib_top_level_imports():
     assert "test_beta_tool_boundary" not in Path(admission.__file__).read_text(encoding="utf8")
 
 
+def test_protocol_error_retains_bounded_redacted_observations():
+    from tests.worker_support.admission import AdmissionProtocolError
+
+    observations = [
+        {
+            "event": "bootstrap_started",
+            "pid": 101 + index,
+            "phase": "bootstrap",
+            "output": "private tool output",
+            "error": "private exception text",
+            "audit": "private audit path",
+        }
+        for index in range(20)
+    ]
+    error = AdmissionProtocolError("bootstrap deadline expired", observations)
+    assert str(error) == "bootstrap deadline expired"
+    assert error.observations == observations
+    notes = " ".join(getattr(error, "__notes__", []))
+    assert "observations=20" in notes
+    assert "bootstrap_started" in notes and "bootstrap" in notes
+    assert "pid=120" in notes and "pid=101" not in notes
+    assert "private" not in notes
+
+
 def test_parent_rejects_real_split_claim_two_ran_mutant(tmp_path):
     from tests.worker_support.admission import AdmissionProtocolError, run_admission_race
 
@@ -491,6 +515,7 @@ def test_partially_failed_start_reaps_every_owned_child(tmp_path, wait_for_boots
         ("early_ready", "bootstrap unexpected event=ready"),
         ("wrong_pid", "bootstrap unknown worker PID"),
         ("late_completion", "bootstrap absolute deadline expired"),
+        ("stalled_bootstrap", "bootstrap deadline expired"),
     ],
 )
 def test_parent_fails_fast_on_invalid_bootstrap(tmp_path, monkeypatch, fault, expected):
@@ -518,6 +543,8 @@ def test_parent_fails_fast_on_invalid_bootstrap(tmp_path, monkeypatch, fault, ex
             worker.pid, worker.live = 101 + index, True
             if index == 0:
                 event_name = "ready" if fault == "early_ready" else "worker_error"
+                if fault == "stalled_bootstrap":
+                    event_name = "bootstrap_started"
                 messages.put(
                     {
                         "event": event_name,
@@ -535,6 +562,17 @@ def test_parent_fails_fast_on_invalid_bootstrap(tmp_path, monkeypatch, fault, ex
                         return item
 
                     messages.get = late_get
+                elif fault == "stalled_bootstrap":
+                    original_get = messages.get
+
+                    def stalled_get(**kwargs):
+                        try:
+                            return original_get(**kwargs)
+                        except queue.Empty:
+                            clock[0] = 61.0  # Stalled after start, not a late message.
+                            raise
+
+                    messages.get = stalled_get
 
         def terminate():
             worker.live, worker.exitcode = False, -15
@@ -554,8 +592,11 @@ def test_parent_fails_fast_on_invalid_bootstrap(tmp_path, monkeypatch, fault, ex
     context = SimpleNamespace(
         Event=event, Barrier=lambda count: None, Queue=lambda: messages, Process=process
     )
-    with pytest.raises(admission.AdmissionProtocolError, match=expected):
+    with pytest.raises(admission.AdmissionProtocolError, match=expected) as caught:
         admission.run_admission_race(str(tmp_path / "invalid-bootstrap.db"), context=context)
+    if fault == "stalled_bootstrap":
+        assert caught.value.observations[0]["event"] == "bootstrap_started"
+        assert "event=bootstrap_started pid=101 phase=bootstrap" in caught.value.__notes__[0]
     assert len(workers) == 2 and all(w.closed for w in workers)
     assert events == []
     assert not (tmp_path / "invalid-bootstrap.db").exists()
