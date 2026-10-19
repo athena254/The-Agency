@@ -108,12 +108,19 @@ class ThreadContextEngine:
         owner: str,
         thread_id: str,
         message: str,
+        *,
+        local_only: bool = False,
     ) -> ThreadContext:
         """Assemble context for ``owner``'s turn in ``thread_id``.
 
         Raises ``KeyError`` when the thread does not exist or belongs to
         another owner (no existence oracle). Never raises for empty
         threads: empty context is a valid result.
+
+        With ``local_only=True``, use only committed thread messages and
+        their rolling summary; skip shared-memory topical recall entirely.
+        This does not mirror turns into memory. The default retains legacy
+        thread-scoped recall. Both modes share the same summary/window logic.
 
         No-gap guarantee: before rendering, the stored summary is
         extended forward to cover every message behind the verbatim
@@ -143,7 +150,7 @@ class ThreadContextEngine:
         window_rows = [m for rowid, m in rows if rowid > covered_rowid]
         window_text = self._render_window(window_rows[-self._window :])
 
-        topical_text = await self._topical_recall(owner, thread_id, message)
+        topical_text = "" if local_only else await self._topical_recall(owner, thread_id, message)
         return ThreadContext(
             thread_id=thread_id,
             owner=owner,
