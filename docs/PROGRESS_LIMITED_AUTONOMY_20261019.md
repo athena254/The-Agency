@@ -1,6 +1,33 @@
-# Limited-autonomy build checkpoint — October 19, 2026
+# Limited-autonomy build progress
 
-Status: IN PROGRESS. Do not mistake this checkpoint for usable/released/deployed autonomy. Owner authorized research/implementation, harmless live qualification and milestone reports; consequential peer policy/public release/main merge/paid fallback remain outside scope.
+## Current checkpoint — October 20, 2026
+
+Status: IN PROGRESS, NOT DAILY-DRIVER READY. No release/deployment claim. Owner authorized continued implementation and milestone reports; no paid-provider fallback, consequential peer-policy changes, public rollout or main merge is authorized.
+
+### Implemented, integrated and parent-qualified
+
+- Owner model/budget/policy, immutable actual dispatch, thread-only context and HTTP guard are integrated. Earlier parent checks: 125 model/policy/budget, 168 context/HTTP/auth and 61 Node UI tests; these are separate overlapping scopes, not additive totals.
+- Durable uncertainty helper worker edac630 is integrated. It checks ALL owner-scoped uncertain turns, including those older than the visible task list, and fails closed on storage/lifecycle errors.
+- Public owner timeout defect was behaviorally reproduced: 45.0001/60.0 seconds failed to raise. Worker c9daf84 added the minimal owner-only >45-second rejection; beta timers and all deadlines remain unchanged. Parent integrated timeout/uncertainty/store/model/policy qualification at 3209655 passed **152 tests in 46.64 seconds**, zero failures/errors/skips.
+- Registry/Driver worker 73a281c is reviewed and integrated as **e05919d**. It uses exact owner model/registry/policy/grant/audit/task binding, durable tool reservations, shared audited intent/outcome pipeline, normal/forced-final owner contexts and blocking typed uncertainty. Parent integrated owner/tool/model/policy/budget/beta/legacy qualification passed **361 tests in 58.65 seconds**, zero failures/errors/skips. HTTP provider leaves were synthetic and external Python network traffic blocked; not live provider evidence or an OS sandbox.
+
+### Actual work now running / next gates
+
+- Service contract committed at **b0f2f1e**, docs/SPEC_OWNER_SERVICE_EXECUTION_20261020.md. Exclusive service worker owns admission/service.py plus additive Butler/orchestrator helpers and tests. It must use the SAME real model/Driver, no broad legacy startup/Lattice activation/shared memory, one tracked durable execution, cancellation-safe ownership, stage -> gateway audit acknowledgement -> quota finish -> atomic transcript/result commit. Service delivery and parent qualification remain pending.
+- Fresh full **pre-service Core** qualification at **55d77f5** completed: **2399 Python tests passed**, zero failures/errors/skips, one retained Starlette/httpx dependency deprecation warning; reported line coverage **75%**. Root Ruff lint and format passed (265 files); whole-source strict mypy passed for Windows and Linux targets (158 source files each); **61 Node UI tests passed**. Parent parsed JUnit and verified all six receipt/source fingerprints match the same unchanged src/tests tree. Linux was a static target on Windows, not native Linux execution. These results qualify the integrated Core, NOT the not-yet-integrated service/API or live model. Evidence integration/owner-core-full-pre-service-20261020 and sibling owner-core root/UI/Linux receipts.
+- Free OpenCode/DeepSeek fresh smoke passed with reported cost zero. Its strictly test-only API tracer is preserved on separate branch test/owner-api-red-20261020 at **e712de3**. Parent reproduced exactly one behavioral failure, zero collection errors: actual GET /api/pilot/capabilities returns404 instead of the required sanitized503 when unconfigured. No API production fix is authorized before real service delivery; this intentionally failing test is NOT in the integration branch.
+- Route harness worker **97c72f2** delivered a real inventory/receipt artifact, reporting72 surfaces and94 ASGI cases, with28 safe-handler and44 boundary-only classifications. Eight pilot API routes plus GET /pilot are explicitly missing; its exit2 is NOT readiness. Independent read-only review is checking counts, containment and future-source guard assumptions before integration/rerun. Do not claim all handlers work from boundary responses.
+- Terminal/file startup failures no longer prevented the latest parent checks; the earlier220s/140s/no-JUnit attempts remain INCOMPLETE. Root cause is not established. No production deadline was increased.
+
+### Remaining release blockers
+
+The actual owner execution service, API/router and supported isolated launcher are unfinished/unqualified. Real browser/keyboard, provider/tool loop, duplicate/cancellation/restart/recovery matrices, final full gates and independent integrated-runtime review remain open. Nara's last actual bound inference still timed out at45 seconds; no working replacement or paid-spend approval has been received. Configured-provider validity is not successful live qualification. No bot/poller/Agency runtime is deployed by this work; canonical main and private runtime configuration/data remain untouched.
+
+## Historical checkpoints — October 19, 2026
+
+The sections below preserve earlier source-pinned findings and worker states. They are historical, not current activity/readiness claims. The October20 checkpoint above supersedes their progress status.
+
+Historical status: IN PROGRESS. Do not mistake the earlier checkpoint for usable/released/deployed autonomy. Owner authorized research/implementation, harmless live qualification and milestone reports; consequential peer policy/public release/main merge/paid fallback remain outside scope.
 
 ## Workspace and preservation
 
