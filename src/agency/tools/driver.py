@@ -180,6 +180,49 @@ class ToolDriver:
         error = getattr(result, "error", None) or "unknown error"
         return f"Tool '{tool_name}' failed: {error}"
 
+    def _owner_binding(self, ctx: ToolContext) -> tuple[Any, ...]:
+        from agency.admission.models import OwnerExecutionGrant, OwnerMeteredBinding, PilotError
+        from agency.admission.policy import OwnerToolPolicy
+        from agency.tools.registry import ToolRegistry
+
+        if (
+            type(self._llm) is not MeteredModel
+            or type(self._registry) is not ToolRegistry
+            or type(self._registry._owner_policy) is not OwnerToolPolicy
+            or self._registry._beta_policy is not None
+            or type(ctx.owner_grant) is not OwnerExecutionGrant
+            or type(ctx.audit) is not BetaAuditLog
+            or self._registry._audit is not ctx.audit
+            or self._llm.audit is not ctx.audit
+        ):
+            raise PilotError("forbidden")
+        binding = self._llm.binding
+        if type(binding) is not OwnerMeteredBinding or binding.grant is not ctx.owner_grant:
+            raise PilotError("forbidden")
+        return (self._registry, self._llm, binding, self._registry._owner_binding(ctx))
+
+    async def _check_owner(self, ctx: ToolContext, binding: tuple[Any, ...]) -> None:
+        from agency.admission.models import PilotError
+
+        registry, model, model_binding, tool_binding = binding
+        if (
+            self._registry is not registry
+            or self._llm is not model
+            or model.binding is not model_binding
+            or model_binding.grant is not ctx.owner_grant
+            or model.audit is not ctx.audit
+        ):
+            raise PilotError("forbidden")
+        await registry._check_owner(ctx, tool_binding)
+        if (
+            self._registry is not registry
+            or self._llm is not model
+            or model.binding is not model_binding
+            or model_binding.grant is not ctx.owner_grant
+            or model.audit is not ctx.audit
+        ):
+            raise PilotError("forbidden")
+
     async def _generate(self, prompt: str, context: dict[str, Any]) -> Any:
         try:
             return await self._llm.generate(prompt, context)
@@ -209,6 +252,16 @@ class ToolDriver:
         llm_calls = 0
         parse_failures = 0
         tool_calls = 0
+        from agency.admission.models import OwnerMeteredBinding, PilotError
+
+        owner = (
+            ctx.owner_grant is not None
+            or getattr(self._registry, "_owner_policy", None) is not None
+            or isinstance(getattr(self._llm, "binding", None), OwnerMeteredBinding)
+        )
+        owner_binding = self._owner_binding(ctx) if owner else None
+        if owner_binding is not None:
+            await self._check_owner(ctx, owner_binding)
         task_id = getattr(ctx, "task_id", "")
         strict_registry = getattr(self._registry, "_beta_policy", None) is not None
         beta_path = strict_registry or ctx.beta_principal is not None
@@ -221,11 +274,12 @@ class ToolDriver:
             # without invoking a tool. Test doubles belong below this boundary.
             if type(self._llm) is not MeteredModel:
                 return ToolLoopResult(final_answer="Beta tool unavailable.", status="tool_error")
+            binding = self._llm.binding
             if (
-                not isinstance(self._llm.binding, MeteredBinding)
+                not isinstance(binding, MeteredBinding)
                 or not isinstance(ctx.beta_principal, BetaPrincipal)
                 or ctx.beta_principal.private_chat is not True
-                or self._llm.binding.principal != ctx.beta_principal
+                or binding.principal != ctx.beta_principal
                 or type(ctx.audit) is not BetaAuditLog
                 or self._llm.audit is not ctx.audit
             ):
@@ -242,8 +296,14 @@ class ToolDriver:
 
         while True:
             prompt = self._build_prompt(task, system_prompt, specs, history)
-            if metered is not None:
+            if owner:
                 llm_context: dict[str, Any] = {
+                    "owner_grant": ctx.owner_grant,
+                    "task_id": task_id,
+                    "strict": True,
+                }
+            elif metered is not None:
+                llm_context = {
                     "task_id": task_id,
                     "strict": True,
                     "beta_principal": ctx.beta_principal,
@@ -252,8 +312,12 @@ class ToolDriver:
                 llm_context = {"task_id": task_id, "strict": True}
             llm_calls += 1
             try:
+                if owner_binding is not None:
+                    await self._check_owner(ctx, owner_binding)
                 raw = await self._generate(prompt, llm_context)
-            except (MeteredDenied, MeteredError):
+                if owner_binding is not None:
+                    await self._check_owner(ctx, owner_binding)
+            except (MeteredDenied, MeteredError, PilotError):
                 # Preserve the blocking type through the executor/gateway.
                 raise
             except Exception as exc:  # noqa: BLE001 — surfaced as llm_error
@@ -288,9 +352,17 @@ class ToolDriver:
                 tool_name: str = action["name"].strip()
                 args: dict[str, Any] = action.get("args", {})
                 try:
+                    if owner_binding is not None:
+                        await self._check_owner(ctx, owner_binding)
                     result = await self._registry.call(tool_name, args, ctx)
+                    if owner_binding is not None:
+                        await self._check_owner(ctx, owner_binding)
+                except (MeteredDenied, MeteredError, PilotError):
+                    raise
                 except Exception as exc:  # noqa: BLE001 — surfaced as a failed step
                     result = _failed_result(tool_name, f"{type(exc).__name__}: {exc}")
+                if owner and not getattr(result, "ok", False):
+                    raise PilotError("forbidden")
                 error_text = getattr(result, "error", None)
                 audit_status = getattr(result, "evidence", {}).get("status")
                 # Strict registry still fails closed when identity is absent
@@ -345,8 +417,14 @@ class ToolDriver:
                         specs,
                         [*history, {"assistant": "", "observation": _FORCED_FINAL_MESSAGE}],
                     )
-                    if metered is not None:
+                    if owner:
                         forced_context: dict[str, Any] = {
+                            "owner_grant": ctx.owner_grant,
+                            "task_id": task_id,
+                            "strict": True,
+                        }
+                    elif metered is not None:
+                        forced_context = {
                             "task_id": task_id,
                             "strict": True,
                             "beta_principal": ctx.beta_principal,
@@ -355,8 +433,12 @@ class ToolDriver:
                         forced_context = {"task_id": task_id, "strict": True}
                     llm_calls += 1
                     try:
+                        if owner_binding is not None:
+                            await self._check_owner(ctx, owner_binding)
                         forced_raw = await self._generate(forced_prompt, forced_context)
-                    except (MeteredDenied, MeteredError):
+                        if owner_binding is not None:
+                            await self._check_owner(ctx, owner_binding)
+                    except (MeteredDenied, MeteredError, PilotError):
                         raise
                     except Exception as exc:  # noqa: BLE001
                         return ToolLoopResult(
