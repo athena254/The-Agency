@@ -42,7 +42,10 @@ from agency.orchestrator import AgencyOrchestrator
 from agency.tools.base import BetaPrincipal
 
 if TYPE_CHECKING:
+    from agency.admission.models import OwnerExecutionGrant
     from agency.lattice.api import Lattice
+    from agency.llm.metered import MeteredModel
+    from agency.tools.registry import ToolRegistry
 
 log = structlog.get_logger(__name__)
 
@@ -405,6 +408,55 @@ class ButlerService:
         elif memory_enabled:
             await self._store_turn(sender, agent, text, response)
         return response
+
+    async def handle_owner_message(
+        self,
+        message: str,
+        thread_id: str,
+        *,
+        grant: OwnerExecutionGrant,
+        model: MeteredModel,
+        registry: ToolRegistry,
+    ) -> ButlerReply:
+        """Carry an admitted turn with thread-local context; never start legacy services."""
+        import json
+
+        from agency.admission.models import OwnerExecutionGrant, PilotError
+
+        if type(grant) is not OwnerExecutionGrant or self._threads is None or self._owns_threads:
+            raise PilotError("forbidden")
+        grant.__post_init__()
+        row = await grant.budget._store.get_request(grant.lease.principal, grant.lease.request_id)
+        grant.__post_init__()
+        if row.task_id != grant.lease.task_id or row.thread_id != thread_id:
+            raise PilotError("forbidden")
+        owner = grant.lease.principal.owner_id
+        try:
+            self._threads.get_thread(owner, thread_id)
+            context = await self.thread_context_engine.assemble(
+                owner, thread_id, message, local_only=True
+            )
+        except KeyError:
+            raise PilotError("not_found") from None
+        result = await self._orchestrator.execute_owner_request(
+            message,
+            grant=grant,
+            model=model,
+            registry=registry,
+            memory_context=json.dumps(context.render(), ensure_ascii=False),
+        )
+        if result.task_id != row.task_id or result.status is not ExecutionStatus.COMPLETED:
+            raise PilotError("conflict")
+        text = render_output(result.output)
+        assessment = bound_assessment(
+            result.assessment,
+            task_id=row.task_id or "",
+            execution_status=result.status.value,
+            output=text,
+        )
+        if assessment is None:
+            raise PilotError("conflict")
+        return ButlerReply(text, result.status.value, assessment, result.task_id)
 
     async def handle_isolated_message(self, message: str, sender: str) -> ButlerReply:
         """Run a read-only, tool-free, memory-free turn for a local caller.
