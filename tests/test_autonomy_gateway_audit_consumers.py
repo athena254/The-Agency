@@ -12,11 +12,21 @@ from structlog.testing import capture_logs
 from agency.butler.config import ButlerConfig
 from agency.butler.service import ButlerService
 from agency.kernel.audit import AuditLog
+from agency.lattice import config as lattice_config
+from agency.lattice.models import LatticeConfig
 from agency.llm.adapter import LLMAdapter
 from agency.orchestrator import AgencyOrchestrator
 from agency.prototype.app import create_app
 
 NOTICE = "Audit unavailable; execution outcome unconfirmed. Do not automatically retry."
+
+
+@pytest.fixture(autouse=True)
+def isolated_lattice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Do not rely on the outer runner to protect the runtime Lattice."""
+    monkeypatch.setattr(
+        lattice_config, "_config_singleton", LatticeConfig(sqlite_path=str(tmp_path / "lattice.db"))
+    )
 
 
 def gateway(tmp_path: Path) -> ButlerService:
@@ -27,6 +37,16 @@ def gateway(tmp_path: Path) -> ButlerService:
         orchestrator=orchestrator,
         audit_log=AuditLog(tmp_path / "gateway-audit.db"),
     )
+
+
+async def test_gateway_helper_binds_its_own_lattice_database(tmp_path: Path) -> None:
+    service = gateway(tmp_path)
+    await service.start()
+    try:
+        assert (tmp_path / "lattice.db").is_file()
+    finally:
+        await service.stop()
+        await service._audit.close()
 
 
 @pytest.mark.parametrize("phase", ["butler.isolated_request", "butler.handle_isolated_message"])

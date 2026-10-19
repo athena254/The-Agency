@@ -12,8 +12,18 @@ import pytest_asyncio
 from agency.butler.config import ButlerConfig
 from agency.butler.service import ButlerService
 from agency.kernel.audit import AuditLog
+from agency.lattice import config as lattice_config
+from agency.lattice.models import LatticeConfig
 from agency.llm.adapter import LLMAdapter
 from agency.orchestrator import AgencyOrchestrator
+
+
+@pytest.fixture(autouse=True)
+def isolated_lattice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Do not rely on the outer runner to protect the runtime Lattice."""
+    monkeypatch.setattr(
+        lattice_config, "_config_singleton", LatticeConfig(sqlite_path=str(tmp_path / "lattice.db"))
+    )
 
 
 @pytest_asyncio.fixture
@@ -30,6 +40,12 @@ async def service(tmp_path: Path) -> AsyncIterator[ButlerService]:
     finally:
         await gateway.stop()
         await audit.close()
+
+
+async def test_service_fixture_binds_its_own_lattice_database(
+    service: ButlerService, tmp_path: Path
+) -> None:
+    assert (tmp_path / "lattice.db").is_file()
 
 
 async def test_required_audit_exception_is_fixed_and_not_retried(
