@@ -1,6 +1,11 @@
 /* The Agency — single-owner local pilot.
  * Static stylesheet: no external fonts, images, imports, or remote URLs. */
 
+/* Author display rules must never reveal locked or withheld content. */
+[hidden] {
+  display: none !important;
+}
+
 :root {
   --bg: #0d1117;
   --bg-elev: #161b22;
