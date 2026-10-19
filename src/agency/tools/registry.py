@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Iterable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import structlog
@@ -21,6 +21,10 @@ from agency.tools.base import (
     ToolResult,
     ToolSpec,
 )
+
+if TYPE_CHECKING:
+    from agency.admission.models import OwnerExecutionGrant
+    from agency.admission.policy import OwnerToolPolicy
 
 logger = structlog.get_logger(__name__)
 
@@ -129,6 +133,13 @@ class ToolRegistry:
         behavior. A denial returns ``ToolResult(ok=False, ...)`` and is
         audited; policy errors fail closed.
 
+    owner_policy:
+        Concrete, exclusive OwnerToolPolicy. Requires the exact live owner grant,
+        task and shared durable audit. Uses the same intent/outcome gate as beta,
+        plus a durable grant-lowered tool reservation before dispatch. Owner quota,
+        audit and uncertain outcomes raise sanitized PilotError, never retryable
+        observations. Privileged context handles and mixed identities are denied.
+
     Beta audit gate
     ---------------
     Beta-only calls require an initialized ``BetaAuditLog``: a concrete
@@ -154,14 +165,27 @@ class ToolRegistry:
         audit: Any | None = None,
         default_timeout_s: float = 30.0,
         beta_policy: ToolPolicy | None = None,
+        *,
+        owner_policy: OwnerToolPolicy | None = None,
     ) -> None:
+        from agency.admission.policy import OwnerToolPolicy
+
+        if owner_policy is not None and (
+            type(owner_policy) is not OwnerToolPolicy or beta_policy is not None
+        ):
+            raise TypeError("owner policy must be concrete and exclusive")
         self._tools: dict[str, Tool] = {}
         self._timeouts: dict[str, float] = {}
         self._audit = audit
         self._default_timeout_s = default_timeout_s
+        self._owner_policy = owner_policy
         self._beta_policy = beta_policy
         self._beta_suspended = False
         self._log = structlog.get_logger(__name__)
+
+    @property
+    def _strict(self) -> bool:
+        return self._beta_policy is not None or self._owner_policy is not None
 
     def register(self, tool: Tool) -> None:
         """Register a tool; raises ToolError on duplicate name."""
@@ -195,33 +219,43 @@ class ToolRegistry:
         self._timeouts[name] = seconds
 
     async def call(self, name: str, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-        """Call a tool by name with validated args; never raises to caller.
+        """Call a tool by name with validated args.
+
+        Legacy/beta tool failures return results; owner blockers raise PilotError.
 
         Unknown tools, schema violations, timeouts, and tool exceptions
         all become ``ToolResult(ok=False, ...)``.
 
-        With ``beta_policy`` set, the call additionally fails closed when a
+        With either strict policy set, the call additionally fails closed when a
         sanitized pre-execution intent or the final outcome cannot be
         persisted; see the class docstring.
         """
+        from agency.admission.models import PilotError
+
+        owner = self._owner_policy is not None
+        owner_binding = self._owner_binding(ctx) if owner else None
+        if owner_binding is not None:
+            await self._check_owner(ctx, owner_binding)
+        elif ctx.owner_grant is not None:
+            raise PilotError("forbidden")
         tool = self._tools.get(name)
         if tool is None:
-            safe_name = "unknown" if self._beta_policy is not None else name
+            safe_name = "unknown" if self._strict else name
             result = ToolResult(tool=safe_name, ok=False, error=f"unknown tool: {safe_name}")
             await self._audit_call(ctx, safe_name, result)
             return result
 
         violation = _validate_args(tool.spec, args)
         if violation is not None:
-            detail = (
-                "invalid args" if self._beta_policy is not None else f"invalid args: {violation}"
-            )
+            detail = "invalid args" if self._strict else f"invalid args: {violation}"
             result = ToolResult(tool=name, ok=False, error=detail)
             await self._audit_call(ctx, name, result)
             return result
 
-        if self._beta_policy is not None:
+        if self._strict:
             if self._beta_suspended:
+                if owner:
+                    raise PilotError("audit", uncertain=True)
                 return ToolResult(
                     tool=name,
                     ok=False,
@@ -229,7 +263,9 @@ class ToolRegistry:
                     evidence={"status": "INDETERMINATE"},
                 )
             try:
-                verdict = self._beta_policy(tool.spec, args, ctx)
+                policy = self._owner_policy if owner else self._beta_policy
+                assert policy is not None
+                verdict = policy(tool.spec, args, ctx)
             except Exception as exc:  # noqa: BLE001 — policy errors fail closed
                 result = ToolResult(
                     tool=name,
@@ -253,8 +289,22 @@ class ToolRegistry:
                     error=_BETA_AUDIT_ERROR,
                     evidence={"status": "INDETERMINATE"},
                 )
+            if owner:
+                assert ctx.owner_grant is not None
+                reserved = await ctx.owner_grant.budget.reserve_tool_call(
+                    ctx.owner_grant.lease, name, limit=ctx.owner_grant.max_tool_calls
+                )
+                assert owner_binding is not None
+                await self._check_owner(ctx, owner_binding)
+                if reserved is not True:
+                    raise PilotError("quota")
             call_id = uuid4().hex
             claim = await self._beta_claim(audit, name, call_id)
+            if owner_binding is not None:
+                await self._check_owner(ctx, owner_binding)
+                if claim is not True:
+                    self._beta_suspended = True
+                    raise PilotError("audit", uncertain=True)
             if claim is False:
                 # A live call may still write its outcome; do not latch.
                 return ToolResult(
@@ -276,7 +326,17 @@ class ToolRegistry:
         timeout = self._timeouts.get(name, self._default_timeout_s)
         start = time.perf_counter()
         try:
-            raw = await asyncio.wait_for(tool.run(args, ctx), timeout=timeout)
+
+            async def dispatch() -> ToolResult:
+                if owner_binding is not None:
+                    await self._check_owner(ctx, owner_binding)
+                    policy = self._owner_policy
+                    assert policy is not None
+                    if policy(tool.spec, args, ctx).allowed is not True:
+                        raise PilotError("forbidden")
+                return await tool.run(args, ctx)
+
+            raw = await asyncio.wait_for(dispatch(), timeout=timeout)
             duration_ms = int((time.perf_counter() - start) * 1000)
             if isinstance(raw, ToolResult):
                 raw.duration_ms = duration_ms
@@ -286,11 +346,17 @@ class ToolRegistry:
             else:
                 result = ToolResult(tool=name, ok=True, output=raw, duration_ms=duration_ms)
         except asyncio.CancelledError:
-            if self._beta_policy is not None:
+            if owner:
+                self._beta_suspended = True
+                raise PilotError("uncertainty", uncertain=True) from None
+            if self._strict:
                 # No completion can be asserted: the intent remains pending.
                 self._beta_suspended = True
             raise
         except TimeoutError:
+            if owner:
+                self._beta_suspended = True
+                raise PilotError("uncertainty", uncertain=True) from None
             duration_ms = int((time.perf_counter() - start) * 1000)
             result = ToolResult(
                 tool=name,
@@ -298,7 +364,12 @@ class ToolRegistry:
                 error=f"TimeoutError: tool {name!r} timed out after {timeout}s",
                 duration_ms=duration_ms,
             )
-        except Exception as exc:  # noqa: BLE001 — surfaced as ToolResult
+        except Exception as exc:  # surfaced as ToolResult
+            if owner:
+                if isinstance(exc, PilotError):
+                    raise
+                self._beta_suspended = True
+                raise PilotError("uncertainty", uncertain=True) from None
             duration_ms = int((time.perf_counter() - start) * 1000)
             result = ToolResult(
                 tool=name,
@@ -306,7 +377,9 @@ class ToolRegistry:
                 error=f"{type(exc).__name__}: {exc}",
                 duration_ms=duration_ms,
             )
-        if self._beta_policy is not None:
+        if owner_binding is not None:
+            await self._check_owner(ctx, owner_binding, uncertain=True)
+        if self._strict:
             if not result.ok:
                 result = ToolResult(
                     tool=name, ok=False, error="beta tool failed", duration_ms=result.duration_ms
@@ -321,7 +394,12 @@ class ToolRegistry:
                 extra=extra,
                 call_id=call_id,
             )
+            if owner_binding is not None:
+                await self._check_owner(ctx, owner_binding, uncertain=True)
             if not persisted:
+                if owner:
+                    self._beta_suspended = True
+                    raise PilotError("audit", uncertain=True)
                 # Outward effects may already have happened; they cannot be
                 # rolled back, so the honest status is INDETERMINATE.
                 self._beta_suspended = True
@@ -338,9 +416,84 @@ class ToolRegistry:
         await self._audit_call(ctx, name, result)
         return result
 
+    @staticmethod
+    def _owner_facts(grant: OwnerExecutionGrant) -> tuple[Any, ...]:
+        return (
+            id(grant.lease),
+            id(grant.budget),
+            grant.allowed_tools,
+            grant.max_tool_calls,
+            grant.max_model_calls,
+        )
+
+    def _owner_binding(self, ctx: ToolContext) -> tuple[Any, ...]:
+        from agency.admission.models import OwnerExecutionGrant, PilotError
+
+        if type(ctx.owner_grant) is not OwnerExecutionGrant:
+            raise PilotError("forbidden")
+        return (
+            ctx.owner_grant,
+            self._owner_policy,
+            self._audit,
+            self._owner_facts(ctx.owner_grant),
+        )
+
+    def _validate_owner(self, ctx: ToolContext, binding: tuple[Any, ...]) -> OwnerExecutionGrant:
+        from agency.admission.models import OwnerExecutionGrant, PilotError
+        from agency.admission.policy import OwnerToolPolicy
+
+        grant, policy, audit, facts = binding
+        if (
+            type(self) is not ToolRegistry
+            or type(ctx) is not ToolContext
+            or type(grant) is not OwnerExecutionGrant
+            or ctx.owner_grant is not grant
+            or type(policy) is not OwnerToolPolicy
+            or self._owner_policy is not policy
+            or self._beta_policy is not None
+            or type(audit) is not BetaAuditLog
+            or self._audit is not audit
+            or ctx.audit is not audit
+            or ctx.beta_principal is not None
+            or ctx.memory_store is not None
+            or ctx.sandbox_manager is not None
+            or ctx.lattice is not None
+        ):
+            raise PilotError("forbidden")
+        assert isinstance(grant, OwnerExecutionGrant)
+        try:
+            grant.__post_init__()
+            if (
+                self._owner_facts(grant) != facts
+                or type(ctx.task_id) is not str
+                or ctx.task_id != grant.lease.task_id
+            ):
+                raise PilotError("forbidden")
+        except (AttributeError, TypeError, ValueError):
+            raise PilotError("forbidden") from None
+        return grant
+
+    async def _check_owner(
+        self, ctx: ToolContext, binding: tuple[Any, ...], *, uncertain: bool = False
+    ) -> None:
+        from agency.admission.models import PilotError
+
+        try:
+            grant = self._validate_owner(ctx, binding)
+            active = await grant.budget._active(grant.lease)
+            self._validate_owner(ctx, binding)
+            if active is not True:
+                raise PilotError("forbidden")
+        except (Exception, asyncio.CancelledError):  # noqa: BLE001 -- fail closed at storage boundary
+            raise PilotError(
+                "uncertainty" if uncertain else "forbidden", uncertain=uncertain
+            ) from None
+
     async def _beta_claim(self, audit: BetaAuditLog, name: str, call_id: str) -> bool | None:
         """True only for acknowledged admission, False for pending, None for outage."""
         entry = AuditEntry(
+            agent="owner-tools" if self._owner_policy is not None else None,
+            task="owner-pilot" if self._owner_policy is not None else None,
             target=name,
             action="tool.call",
             result="pending",
@@ -349,6 +502,11 @@ class ToolRegistry:
         try:
             return await BetaAuditLog.claim_intent(audit, entry)
         except asyncio.CancelledError:
+            if self._owner_policy is not None:
+                from agency.admission.models import PilotError
+
+                self._beta_suspended = True
+                raise PilotError("audit", uncertain=True) from None
             # The claim may have committed. Never execute or retry it.
             self._beta_suspended = True
             raise
@@ -383,6 +541,8 @@ class ToolRegistry:
             }
             evidence.update(extra)
             entry = AuditEntry(
+                agent="owner-tools" if self._owner_policy is not None else None,
+                task="owner-pilot" if self._owner_policy is not None else None,
                 target=name,
                 action=action,
                 result=outcome,
@@ -390,6 +550,11 @@ class ToolRegistry:
             )
             return await BetaAuditLog.append_beta(audit, entry) == entry.entry_id
         except asyncio.CancelledError:
+            if self._owner_policy is not None:
+                from agency.admission.models import PilotError
+
+                self._beta_suspended = True
+                raise PilotError("audit", uncertain=True) from None
             self._beta_suspended = True
             raise
         except Exception:  # noqa: BLE001 — never leak storage details
@@ -397,7 +562,7 @@ class ToolRegistry:
 
     async def _audit_call(self, ctx: ToolContext, name: str, result: ToolResult) -> None:
         """Audit one tool call; beta rejection evidence has no input or errors."""
-        if self._beta_policy is not None:
+        if self._strict:
             await self._beta_persist(
                 ctx, name, action="tool.error", outcome="denied", phase="denial", extra={}
             )
@@ -455,6 +620,7 @@ def build_default_registry(
     tools: Iterable[Tool] | None = None,
     *,
     beta_policy: ToolPolicy | None = None,
+    owner_policy: OwnerToolPolicy | None = None,
     **ctx_kwargs: Any,
 ) -> ToolRegistry:
     """Return a ToolRegistry for the Agency tool layer.
@@ -463,11 +629,16 @@ def build_default_registry(
     later brief); this factory intentionally does NOT import builtin
     modules so it stays dependency-light. Pass an optional list of
     ``Tool`` instances to pre-register them. An explicitly supplied
-    beta policy must survive this factory; other ``ctx_kwargs`` remain
-    ignored for compatibility.
+    beta policy must survive this factory. A concrete owner policy is exclusive
+    with beta; its explicitly supplied audit survives the factory as well.
+    Other ``ctx_kwargs`` remain ignored for compatibility.
     """
     _ = ctx_kwargs
-    registry = ToolRegistry(beta_policy=beta_policy)
+    registry = ToolRegistry(
+        beta_policy=beta_policy,
+        owner_policy=owner_policy,
+        audit=ctx_kwargs.get("audit") if owner_policy is not None else None,
+    )
     for tool in tools or []:
         registry.register(tool)
     return registry
