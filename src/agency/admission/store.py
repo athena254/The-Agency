@@ -425,6 +425,23 @@ class OwnerPilotStore:
             lambda conn: self._record(self._request_row(conn, principal, request_id))
         )
 
+    async def has_uncertainty(self, principal: OwnerPrincipal) -> bool:
+        """Check all durable owner turns, independently of visible task history."""
+        _principal(principal)
+        return await self._run(
+            lambda conn: bool(
+                conn.execute(
+                    "SELECT EXISTS ("
+                    "SELECT 1 FROM pilot_requests r "
+                    "JOIN threads t ON t.id=r.thread_id "
+                    "JOIN pilot_subjects s ON s.workspace_id=t.workspace_id "
+                    "WHERE r.owner_id=? AND t.owner=r.owner_id AND s.owner_id=r.owner_id "
+                    "AND r.operation='turn' AND r.state='UNCERTAIN')",
+                    (principal.owner_id,),
+                ).fetchone()[0]
+            )
+        )
+
     async def list_tasks(
         self, principal: OwnerPrincipal, *, limit: int = 50
     ) -> list[AdmissionRecord]:
