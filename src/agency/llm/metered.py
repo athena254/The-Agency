@@ -103,6 +103,8 @@ class MeteredModel:
         ):
             raise ValueError("binding user_id must agree with principal.telegram_user_id")
         if isinstance(binding, OwnerMeteredBinding):
+            if timeout_s > 45:
+                raise ValueError("owner timeout_s must not exceed 45 seconds")
             binding.__post_init__()
             if binding.grant.budget is not store:
                 raise TypeError("MeteredModel requires the grant's exact budget")
