@@ -15,6 +15,7 @@ from contextlib import closing
 from dataclasses import fields
 
 import pytest
+
 from agency.admission.models import OwnerPrincipal, PilotError
 
 OWNER = OwnerPrincipal("owner", "local", "local")

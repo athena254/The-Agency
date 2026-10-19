@@ -75,8 +75,9 @@ def test_telegram_requires_configured_owner_private_chat_and_exact_polling_marke
 
 
 def test_closed_wire_models_preserve_ids_and_bound_counts():
-    from agency.admission import models as m
     from pydantic import ValidationError
+
+    from agency.admission import models as m
 
     request = m.OwnerTaskRequest(request_id="A.b:-_9", thread_id="thread", message=" \ufeffhi\r\n ")
     assert request.message == " \ufeffhi\r\n "
