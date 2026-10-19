@@ -6,9 +6,12 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from agency.admission.models import OwnerExecutionGrant
 
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -84,6 +87,7 @@ class ToolContext:
     audit: Any = None
     metadata: dict[str, Any] = field(default_factory=dict)
     beta_principal: BetaPrincipal | None = None
+    owner_grant: OwnerExecutionGrant | None = None
 
 
 class ToolResult(BaseModel):
