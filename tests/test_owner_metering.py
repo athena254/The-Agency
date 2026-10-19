@@ -69,6 +69,54 @@ async def runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         await store.close()
 
 
+@pytest.mark.parametrize("timeout_s", [45.0001, 60.0])
+async def test_owner_timeout_cannot_exceed_45_seconds(runtime, timeout_s: float) -> None:
+    with pytest.raises(ValueError, match="timeout"):
+        MeteredModel(
+            runtime["inner"],
+            runtime["binding"],
+            runtime["budget"],
+            runtime["audit"],
+            timeout_s=timeout_s,
+        )
+    assert runtime["requests"] == []
+
+
+@pytest.mark.parametrize("timeout_s", [1.0, 45.0])
+async def test_owner_timeout_at_or_below_ceiling_can_dispatch(runtime, timeout_s: float) -> None:
+    model = MeteredModel(
+        runtime["inner"],
+        runtime["binding"],
+        runtime["budget"],
+        runtime["audit"],
+        timeout_s=timeout_s,
+    )
+    assert await model.generate("prompt", {"owner_grant": runtime["grant"]}) == "answer"
+    assert len(runtime["requests"]) == 1
+    assert not await runtime["audit"].has_pending_calls()
+
+
+@pytest.mark.parametrize("timeout_s", [45.0001, 60.0])
+async def test_legacy_beta_timeout_above_owner_ceiling_can_dispatch(
+    runtime, timeout_s: float
+) -> None:
+    from agency.llm.metered import MeteredBinding
+    from agency.tools.base import BetaPrincipal
+
+    backend = runtime["backend"]
+    reservation = await backend.reserve_request("synthetic-beta", 1, 7)
+    assert reservation.capability is not None
+    await backend.mark_running("synthetic-beta", 1, 7, capability=reservation.capability)
+    principal = BetaPrincipal(7, True)
+    binding = MeteredBinding(
+        "synthetic-beta", 1, 7, reservation.capability, principal, "openai", "synthetic-model"
+    )
+    model = MeteredModel(runtime["inner"], binding, backend, runtime["audit"], timeout_s=timeout_s)
+    assert await model.generate("prompt", {"beta_principal": principal}) == "answer"
+    assert len(runtime["requests"]) == 1
+    assert not await runtime["audit"].has_pending_calls()
+
+
 async def test_legacy_beta_leaf_denial_keeps_original_unknown_error_contract(
     runtime, monkeypatch
 ) -> None:
