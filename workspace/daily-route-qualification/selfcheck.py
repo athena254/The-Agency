@@ -132,6 +132,7 @@ class InventoryRegression(unittest.TestCase):
         code = textwrap.dedent("""
             import asyncio, json, pathlib, socket, sqlite3, subprocess, tempfile
             import qualify_routes as q
+            q.SCRATCH = pathlib.Path(tempfile.gettempdir())
             run = pathlib.Path(tempfile.mkdtemp(prefix="guard-", dir=q.SCRATCH))
             output = run / "evidence"
             output.mkdir()
@@ -178,13 +179,22 @@ class InventoryRegression(unittest.TestCase):
         self.assertIn('"temp_in_run": true', result.stdout)
 
 
+def load_tests(loader, tests, pattern):
+    # Running selfcheck includes the executable safety regressions as well.
+    tests.addTests(loader.loadTestsFromName("test_safety"))
+    return tests
+
+
 if __name__ == "__main__":
     # Keep even harness-only fixtures and tempfile allocations in approved scratch.
     import os
     import tempfile
 
     root = Path(
-        "C:/Users/alphi/AppData/Local/hermes/cache/scratch/agency-build-20261019/daily-routes/selfcheck"
+        os.environ.get(
+            "AGENCY_HARNESS_SCRATCH",
+            "C:/Users/alphi/AppData/Local/hermes/cache/scratch/daily-harness-worker-20261020/checks",
+        )
     )
     root.mkdir(parents=True, exist_ok=True)
     os.chdir(root)
