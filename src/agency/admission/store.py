@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 import sqlite3
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -94,6 +95,8 @@ class OwnerPilotStore:
         self._closed = False
         self._fresh_turns: set[int] = set()
         self._blocked_sequences: set[int] = set()
+        self._publication_gate = threading.Lock()
+        self._publication_closed = False
 
     async def _offload(self, work: Callable[[], _T]) -> _T:
         task = asyncio.create_task(asyncio.to_thread(work))
@@ -162,19 +165,39 @@ class OwnerPilotStore:
                     self._lock.release()
                     raise
 
+    def fence_publication(self) -> None:
+        """Linearize shutdown against the actual SQLite publication COMMIT.
+
+        No await, admission lock or finished quota lease is involved. A COMMIT
+        already owning this short gate wins; otherwise publication rolls back.
+        """
+        with self._publication_gate:
+            self._publication_closed = True
+
     async def close(self) -> None:
+        self.fence_publication()
         async with self._gate:
             self._ready = False
             self._closed = True
             self._lock.release()
 
-    def _transaction(self, work: Callable[[sqlite3.Connection], _T]) -> _T:
+    def _transaction(
+        self, work: Callable[[sqlite3.Connection], _T], *, publication: bool = False
+    ) -> _T:
         conn: sqlite3.Connection | None = None
         try:
             conn = self._connect()
             conn.execute("BEGIN IMMEDIATE")
             result = work(conn)
-            conn.execute("COMMIT")
+            if publication:
+                # Check under the same gate as synchronous shutdown. Keeping
+                # this gate through COMMIT removes the check/commit race.
+                with self._publication_gate:
+                    if self._publication_closed:
+                        raise PilotError("disabled", uncertain=True)
+                    conn.execute("COMMIT")
+            else:
+                conn.execute("COMMIT")
             return result
         except (sqlite3.Error, OSError, ValueError):
             raise PilotError("store") from None
@@ -182,11 +205,13 @@ class OwnerPilotStore:
             if conn is not None:
                 conn.close()  # closing rolls back any uncommitted writes
 
-    async def _run(self, work: Callable[[sqlite3.Connection], _T]) -> _T:
+    async def _run(
+        self, work: Callable[[sqlite3.Connection], _T], *, publication: bool = False
+    ) -> _T:
         async with self._gate:
             if not self._ready or self._closed:
                 raise PilotError("store")
-            return await self._offload(lambda: self._transaction(work))
+            return await self._offload(lambda: self._transaction(work, publication=publication))
 
     @staticmethod
     def _workspace(conn: sqlite3.Connection, principal: OwnerPrincipal) -> str:
@@ -649,7 +674,7 @@ class OwnerPilotStore:
             self._blocked_sequences.add(sequence)
             self._fresh_turns.discard(sequence)
 
-        await self._run(work)
+        await self._run(work, publication=True)
 
     async def request_cancel(
         self, principal: OwnerPrincipal, task_id: str, request_id: str

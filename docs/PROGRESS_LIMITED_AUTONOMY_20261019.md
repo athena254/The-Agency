@@ -1,8 +1,23 @@
 # Limited-autonomy build progress
 
-## Current checkpoint — October 20, 2026
+## Current checkpoint — service/API publication, October 20, 2026
 
-Status: IN PROGRESS, NOT DAILY-DRIVER READY. No release/deployment claim. Owner authorized continued implementation and milestone reports; no paid-provider fallback, consequential peer-policy changes, public rollout or main merge is authorized.
+Status: **IN PROGRESS, NOT DAILY-DRIVER READY.** The owner authorized committing and pushing completed development work, not a main merge, release, public rollout or deployment.
+
+- The real persistent owner execution service, eight pilot API routes and `/pilot` are integrated. Owner authentication, CSRF/origin/loopback/body limits, durable replay/cancellation and disabled unmetered legacy chat are exercised through the actual application.
+- Independent review found a queued-publication shutdown race. Parent reproduced both queued and uncommitted-write windows and repaired the actual SQLite COMMIT boundary with an independent synchronous publication fence. The service/store/budget/API/fence selection passed80cases; already committed success remains immutable.
+- Full integrated qualification: **2450 Python tests passed**, zero failures/errors/skips, one retained Starlette/httpx dependency warning, reported **76% line coverage**. Source/test fingerprint `21ceacff0a45ec75eb40f1d4beb0cc6bf86c51e24ff9ba76b2b0445f5678b7cf` matches the publication candidate. Fresh root Ruff/format checks passed (270files), strict whole-source mypy passed for Windows and Linux targets (160sourcefiles each), and61NodeUItests passed. Linux was a static target on Windows; fake-DOM UI checks are not browser qualification. Overlapping focused selections are not additive totals.
+- The separate route-harness repair passed the parent's12self-checks plus scoped lint/format. It remains separate from application integration and deliberately rejects later unreviewed source before importing it. Passing boundary responses do not prove business handlers work.
+- Actual free-provider progress: `nemotron-3.5-lightning-free` returned literal `READY` through the frozen HTTP leaf within45seconds. This standalone diagnostic does not qualify an admitted calculator/conversation/recall workflow. `minimax-m3.1-flash:free` rejected the configured key withHTTP403; its admitted attempt remainedUNCERTAIN without a transcript or automatic retry. No paid fallback or canonical configuration change occurred.
+- Launcher/browser workers were interrupted waiting for model responses. Partial launcher work is preserved separately and excluded from the completed checkpoint; its last saved selection has two failing cases. No completed real-browser qualification was delivered.
+
+Remaining release gates: finish/qualify/integrate the isolated launcher, review/integrate/rerun the harness on deliberately reviewed current source, real browser/keyboard and start/stop/restart/crash tests, actual admitted live provider/tool/recall success, final whole-product checks and independent review, then owner trial. No bot/poller/Agency runtime was deployed. Canonical main and private runtime data remain untouched. See `DAILY_DRIVER_COMPLETION_20261020.md` and the sanitized publication receipt in `research-evidence/owner-service-api-publication-20261020.json`.
+
+## Historical pre-service checkpoint — b00a7bc
+
+The following pre-service findings preserve the earlier checkpoint. Their pending/running/missing-route statements are historical and superseded by the current service/API checkpoint above.
+
+Historical status: IN PROGRESS, NOT DAILY-DRIVER READY. No release/deployment claim. Owner authorized continued implementation and milestone reports; no paid-provider fallback, consequential peer-policy changes, public rollout or main merge was authorized.
 
 ### Implemented, integrated and parent-qualified
 
