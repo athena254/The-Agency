@@ -6,6 +6,17 @@ serves the same-origin local browser UI and a restricted Butler chat API.
 
 from __future__ import annotations
 
-from agency.prototype.app import create_app
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from agency.prototype.app import create_app as create_app
 
 __all__ = ["create_app"]
+
+
+def __getattr__(name: str) -> Any:
+    if name == "create_app":
+        from agency.prototype.app import create_app
+
+        return create_app
+    raise AttributeError(name)
