@@ -55,6 +55,21 @@ def _reject_constant(value: str) -> NoReturn:
     raise ValueError("Non-JSON constant")
 
 
+def guard_owner_bootstrap(request: Request) -> None:
+    """Only nonsensitive local shell/session resources may bypass bearer auth."""
+    try:
+        if request.client is None or not ipaddress.ip_address(request.client.host).is_loopback:
+            raise PilotError("forbidden")
+    except ValueError:
+        raise PilotError("forbidden") from None
+    target = _authority(_header(request, b"host", "forbidden"), request.scope["scheme"])
+    origin = _header(request, b"origin", "forbidden")
+    if origin is not None:
+        match = re.fullmatch(r"(https?)://(.+)", origin, re.IGNORECASE)
+        if match is None or _authority(match[2], match[1].lower()) != target:
+            raise PilotError("forbidden")
+
+
 async def guard_owner_request(
     request: Request,
     authenticator: OwnerAuthenticator | None,
