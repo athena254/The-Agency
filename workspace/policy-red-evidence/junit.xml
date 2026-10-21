@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="4.907" timestamp="2026-10-19T21:22:08.756011+03:00" hostname="LUX"><testcase classname="tests.test_owner_policy" name="test_owner_policy_admits_calculator_for_exact_live_owner_grant" time="0.266"><failure message="TypeError: ToolContext.__init__() got an unexpected keyword argument 'owner_grant'">tmp_path = WindowsPath('C:/Users/alphi/AppData/Local/Temp/opencode/owner-policy-red-run/tmp/pytest-of-alphi/pytest-0/test_owner_policy_admits_calcu0')
+
+    async def test_owner_policy_admits_calculator_for_exact_live_owner_grant(
+        tmp_path: Path,
+    ) -&gt; None:
+        """Admit the bounded calculator only through the exact live owner lease grant."""
+        owner = OwnerPrincipal("owner", "local", "local")
+        store = OwnerPilotStore(str(tmp_path / "owner-policy-pilot.db"))
+        backend = BetaBudgetStore(str(tmp_path / "owner-policy-budget.db"))
+        budget = OwnerBudgetAdapter(backend, store)
+        try:
+            await store.initialize()
+            await backend.initialize()
+            _, thread = await store.create_thread(owner, "owner-policy-thread", "Owner policy")
+            admitted = await store.admit(
+                owner,
+                "owner-policy-turn",
+                operation="turn",
+                payload={"thread_id": thread.id, "message": "2 + 3 * 4"},
+            )
+            assert admitted.task_id is not None
+            lease = await budget.reserve_request(owner, admitted.request_id, admitted.task_id)
+            await budget.mark_running(lease)
+            grant = OwnerExecutionGrant(lease, budget)
+    
+&gt;           ctx = ToolContext(
+                agent_id=owner.owner_id,
+                task_id=admitted.task_id,
+                owner_grant=grant,
+            )
+E           TypeError: ToolContext.__init__() got an unexpected keyword argument 'owner_grant'
+
+C:\Users\alphi\agency-worktrees\owner-policy-20261019\tests\test_owner_policy.py:38: TypeError</failure></testcase></testsuite></testsuites>
