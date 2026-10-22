@@ -1,4 +1,9 @@
-# Bounded actual-route qualification
+# Historical bounded actual-route qualification
+
+This is an archived, baseline-bound harness. The permanent worktree paths below
+were retired on 2026-10-22; they are historical provenance, not current execution
+instructions. Read `CONSOLIDATION_NOTE_20261022.md` before attempting recovery or
+review. This harness does not qualify the newer consolidated integration tree.
 
 This is an offline qualification harness, not a pilot feature or a runtime
 readiness check. Only an exact **reviewed source/dependency manifest** may reach
