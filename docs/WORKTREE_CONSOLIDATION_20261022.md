@@ -1,5 +1,36 @@
 # Worktree consolidation — 2026-10-22
 
+## Completed outcome
+
+Completed on 2026-10-22. Git and the filesystem now contain **four registered
+worktrees**: the canonical checkout, consolidated integration, and the two
+unchanged launcher alternatives. A new consolidated checkout was added and
+**23 original worktree directories** were removed without force. All original
+branch refs and both stashes remain unchanged.
+
+Six historical untracked files and one ignored private log were relocated into
+the hash-verified private retirement archive after consolidating their useful
+contents. Canonical credentials/runtime files and the shared environment matched
+their pre-cleanup hashes. The retained launchers matched their original file
+hashes and dirty statuses.
+
+The archived harness was syntax-parsed and actually invoked against current
+source: it correctly exited **2**, before any Agency import or application
+lifespan, with **zero product cases**. Its manifest reported four added and ten
+changed source files. This is a passing refusal-boundary check, **not a passing
+product qualification**. The full product suite was not rerun; runtime `src/`
+and active `tests/` trees remain exactly equal to baseline `760b9a99`.
+
+The initial secret scan matched four embedded source SHA-256 pins. Each literal
+was independently matched to the reviewed historical source file bytes; they are
+not API credentials. A rescan ignoring only those four exact fingerprints found
+no other matches. No repository/global secret-scanner policy was weakened.
+
+Machine-readable per-worktree results are in
+`docs/WORKTREE_CONSOLIDATION_RESULT_20261022.json`. The consolidation checkpoint
+is published on `athena254/The-Agency`, branch
+`consolidation/worktrees-20261022`; canonical `main` was not merged or deployed.
+
 ## Owner authorization and scope
 
 The owner requested: “start cleaning the worktrees in agency to a few unique ones, others merge.” This checkpoint specifies repository housekeeping and consolidation, not new product implementation, deployment, beta enablement or permission to discard conflicting work.
