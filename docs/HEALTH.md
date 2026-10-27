@@ -60,6 +60,7 @@ but production hardness was not established in this pass.
 |-----------|-------|-------|
 | Durable threads / workspaces | Partial | `butler/threads.py` persists owner-scoped threads/messages for trusted channels; public HTTP is anonymous/stateless pending authentication and project UI |
 | Agent Factory (versioned) | Partial v1 | `factory/service.py` versioned blueprints, approval gate, L0/UNKNOWN identity activation; no evaluation, automatic grants, or restart rehydration |
+| Prompt library (factory) | Partial v1 | `factory/prompts.py` versioned prompt records + deterministic composition; bundled segments and 26 REAP packs (MIT, pinned commit, safety-pairing enforced); runtime consumption and Forge tool-availability params implemented |
 | Skill registry / workflow registry + executor | Partial | Versioned registries and a bounded deterministic runner exist; no agent/Forge integration yet |
 | Forge + native coding agent | Partial inspection gate | `forge/inspection.py` read-only inventory/syntax reports; no tests, coding agent, security review or release; legacy prototypes are separate |
 | CI/CD lineage | CI verified, CD unverified | All seven GitHub CI checks passed for PR #7 commit `5c4720c`; this is not deployment or production approval |

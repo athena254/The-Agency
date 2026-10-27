@@ -67,6 +67,12 @@ from agency.forge.pipeline import (
     ForgePipelineStore,
     run_pipeline,
 )
+from agency.forge.prompt_params import (
+    AVAILABILITY_PROMPT_ID,
+    REA_TOOL_PARAM_NAMES,
+    forge_tool_params,
+    rea_prompt_params,
+)
 from agency.forge.reviewer import (
     MAX_ROUNDS,
     ReviewFinding,
@@ -101,6 +107,8 @@ from agency.forge.tool_catalog import (
 from agency.forge.worktree import WorktreeError, WorktreeInfo, create_worktree, remove_worktree
 
 __all__ = [
+    "AVAILABILITY_PROMPT_ID",
+    "CATALOG",
     "CAVEATS",
     "MAX_BACKLOG_ITEMS",
     "MAX_COMMAND_CHARS",
@@ -109,6 +117,7 @@ __all__ = [
     "MAX_FILE_BYTES",
     "MAX_ROUNDS",
     "MAX_SCHEDULE_CHARS",
+    "REA_TOOL_PARAM_NAMES",
     "BacklogItem",
     "BacklogReport",
     "BacklogStore",
@@ -145,13 +154,22 @@ __all__ = [
     "SecurityFinding",
     "SecurityReport",
     "TestReport",
+    "ToolSpec",
     "WorktreeError",
     "WorktreeInfo",
+    "available_tools",
     "capture_evidence",
     "create_worktree",
     "evaluate_merge",
+    "forge_tool_params",
     "generate_timer",
+    "get_tool",
     "inspect_changes",
+    "install_hint",
+    "is_available",
+    "list_tools",
+    "missing_tools",
+    "rea_prompt_params",
     "record_cost",
     "remove_worktree",
     "run_coding_agent",

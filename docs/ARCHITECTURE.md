@@ -108,6 +108,7 @@ patterns for future Forge/skills work — not a dependency, not auto-imported
 | CI workflow | Exists, outcome unverified | `.github/workflows/ci.yml`, `cd.yml` exist; success/live operation not verified here |
 | Threads / workspaces / projects | Partial | `butler/threads.py` persists owner-scoped threads/workspaces for trusted callers; unauthenticated HTTP ignores caller identity/context, denies thread selection and stores no history; projects/UI planned |
 | Agent Factory | Partial v1 | `factory/service.py` persists versioned blueprints, approval evidence, L0/UNKNOWN activation and revocation; no autonomous creation/evaluation, permission grants, or restart rehydration |
+| Prompt library (factory) | Partial v1 | `factory/prompts.py` versioned prompt records, deterministic composition (`factory/compose.py`), bundled segments + 26 REAP packs with pinned provenance; runtime consumption and Forge tool-availability params implemented; LLM generation not implemented |
 | Skill registry / workflow registry + executor | Partial | `skills/registry.py` and `workflows/` implement versioned metadata and a bounded deterministic runner; agent/Forge integration pending |
 | Forge + native coding agent | Partial inspection gate; coding agent planned | `forge/inspection.py` stores read-only inventory/syntax evidence; no tests, security review or release. Legacy dark/ghost factories are separate prototypes |
 

@@ -24,7 +24,7 @@ import copy
 import json
 import re
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
@@ -33,6 +33,12 @@ from typing import Any
 
 import structlog
 
+from agency.factory.compose import compose_system_prompt
+from agency.factory.prompts import (
+    REAP_SAFETY_PROMPT_ID,
+    PromptResolver,
+    reap_packs_missing_safety,
+)
 from agency.kernel.identity import Agent, Capability, TrustLevel
 from agency.kernel.policies import ActionClass
 
@@ -43,6 +49,7 @@ APPROVE_PERMISSION = "agent.approve"
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _CAP_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
+_PARAM_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
 MAX_ID_LEN = 128
 MAX_NAME_LEN = 200
@@ -50,6 +57,9 @@ MAX_EVIDENCE_LEN = 4096
 MAX_CAPS = 32
 MAX_REFS = 32
 MAX_JSON_BYTES = 64 * 1024
+MAX_PROMPT_PARAMS_BYTES = 8 * 1024
+MAX_PROMPT_PARAM_VALUE_LEN = 512
+MAX_PROMPT_OVERRIDE_LEN = 4096
 
 
 class BlueprintStatus(str, Enum):
@@ -178,6 +188,35 @@ def _check_json_bounded(payload: Any) -> None:
         raise ValueError(f"blueprint payload exceeds {MAX_JSON_BYTES} bytes.")
 
 
+def _normalize_prompt_params(value: Any) -> dict[str, str]:
+    """Normalize bounded ``{{SLOT}}`` parameters; values must be strings."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise TypeError("prompt_params must be a mapping of SLOT name to string.")
+    out: dict[str, str] = {}
+    for key, raw in value.items():
+        if not isinstance(key, str) or _PARAM_KEY_RE.match(key) is None:
+            raise ValueError(f"invalid prompt param name {key!r}.")
+        if not isinstance(raw, str):
+            raise TypeError("prompt param values must be strings.")
+        if len(raw) > MAX_PROMPT_PARAM_VALUE_LEN:
+            raise ValueError(f"prompt param {key!r} exceeds {MAX_PROMPT_PARAM_VALUE_LEN} chars.")
+        out[key] = raw
+    encoded = json.dumps(out, sort_keys=True, ensure_ascii=False)
+    if len(encoded.encode("utf-8")) > MAX_PROMPT_PARAMS_BYTES:
+        raise ValueError(f"prompt params exceed {MAX_PROMPT_PARAMS_BYTES} bytes.")
+    return out
+
+
+def _check_prompt_override(value: Any) -> str:
+    if not isinstance(value, str):
+        raise TypeError("prompt_override must be a string.")
+    if len(value) > MAX_PROMPT_OVERRIDE_LEN:
+        raise ValueError(f"prompt_override exceeds {MAX_PROMPT_OVERRIDE_LEN} chars.")
+    return value
+
+
 @dataclass(frozen=True)
 class Blueprint:
     """Immutable snapshot of one versioned agent blueprint."""
@@ -189,6 +228,9 @@ class Blueprint:
     capabilities: tuple[str, ...] = ()
     skill_refs: tuple[tuple[str, str], ...] = ()
     workflow_refs: tuple[tuple[str, str], ...] = ()
+    prompt_refs: tuple[tuple[str, str], ...] = ()
+    prompt_params: dict[str, str] = field(default_factory=dict)
+    prompt_override: str = ""
     creator: str = ""
     status: BlueprintStatus = BlueprintStatus.DRAFT
     approver: str | None = None
@@ -208,6 +250,9 @@ class Blueprint:
             "capabilities": list(self.capabilities),
             "skill_refs": [list(r) for r in self.skill_refs],
             "workflow_refs": [list(r) for r in self.workflow_refs],
+            "prompt_refs": [list(r) for r in self.prompt_refs],
+            "prompt_params": dict(self.prompt_params),
+            "prompt_override": self.prompt_override,
             "creator": self.creator,
             "status": self.status.value,
             "approver": self.approver,
@@ -229,6 +274,9 @@ class AgentFactory:
         authorizer: Callable[[str, str], bool] | None = None,
         is_skill_published: Callable[[str, str], bool] | None = None,
         is_workflow_published: Callable[[str, str], bool] | None = None,
+        is_prompt_published: Callable[[str, str], bool] | None = None,
+        prompt_resolver: PromptResolver | None = None,
+        prompt_param_provider: Callable[[Blueprint], Mapping[str, str]] | None = None,
         kernel_registry: Any | None = None,
         runtime_registry: Any | None = None,
         allowed_capabilities: frozenset[str] | set[str] | None = None,
@@ -237,6 +285,9 @@ class AgentFactory:
         self._authorizer = authorizer
         self._is_skill_published = is_skill_published
         self._is_workflow_published = is_workflow_published
+        self._is_prompt_published = is_prompt_published
+        self._prompt_resolver = prompt_resolver
+        self._prompt_param_provider = prompt_param_provider
         if kernel_registry is None:
             from agency.kernel.registry import AgentRegistry as KernelRegistry
 
@@ -258,7 +309,10 @@ class AgentFactory:
             "blueprint_id TEXT NOT NULL, version TEXT NOT NULL, "
             "name TEXT NOT NULL, domain TEXT NOT NULL, "
             "capabilities_json TEXT NOT NULL, skills_json TEXT NOT NULL, "
-            "workflows_json TEXT NOT NULL, creator TEXT NOT NULL, "
+            "workflows_json TEXT NOT NULL, prompts_json TEXT NOT NULL DEFAULT '[]', "
+            "prompt_params_json TEXT NOT NULL DEFAULT '{}', "
+            "prompt_override TEXT NOT NULL DEFAULT '', "
+            "creator TEXT NOT NULL, "
             "status TEXT NOT NULL, approver TEXT, evidence TEXT NOT NULL, "
             "runtime_agent_id TEXT, created_at TEXT NOT NULL, "
             "updated_at TEXT NOT NULL, "
@@ -271,7 +325,20 @@ class AgentFactory:
             "to_status TEXT NOT NULL, actor TEXT NOT NULL, "
             "evidence TEXT NOT NULL, at TEXT NOT NULL)"
         )
+        self._migrate_blueprints()
         self._conn.commit()
+
+    def _migrate_blueprints(self) -> None:
+        """Add prompt columns to blueprint tables created before this slice."""
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(blueprints)")}
+        additions = {
+            "prompts_json": "TEXT NOT NULL DEFAULT '[]'",
+            "prompt_params_json": "TEXT NOT NULL DEFAULT '{}'",
+            "prompt_override": "TEXT NOT NULL DEFAULT ''",
+        }
+        for name, ddl in additions.items():
+            if name not in columns:
+                self._conn.execute(f"ALTER TABLE blueprints ADD COLUMN {name} {ddl}")
 
     def close(self) -> None:
         """Close the underlying SQLite connection (idempotent)."""
@@ -289,6 +356,9 @@ class AgentFactory:
         capabilities: Any = (),
         skill_refs: Any = (),
         workflow_refs: Any = (),
+        prompt_refs: Any = (),
+        prompt_params: Any = None,
+        prompt_override: Any = "",
         creator: str,
     ) -> Blueprint:
         """Store a new blueprint in DRAFT; duplicates raise ValueError."""
@@ -304,16 +374,31 @@ class AgentFactory:
         caps = _normalize_caps(capabilities, self._allowed)
         skills = _normalize_refs(skill_refs, "skill")
         workflows = _normalize_refs(workflow_refs, "workflow")
-        _check_json_bounded({"caps": list(caps), "sk": skills, "wf": workflows})
+        prompts = _normalize_refs(prompt_refs, "prompt")
+        params = _normalize_prompt_params(prompt_params)
+        override = _check_prompt_override(prompt_override)
+        if (params or override.strip()) and not prompts:
+            raise ValueError("prompt params/override require at least one prompt ref.")
+        _check_json_bounded(
+            {
+                "caps": list(caps),
+                "sk": skills,
+                "wf": workflows,
+                "pr": prompts,
+                "pp": params,
+                "po": override,
+            }
+        )
         now = _now_iso()
         try:
             with self._conn:
                 self._conn.execute(
                     "INSERT INTO blueprints (blueprint_id, version, name, domain,"
-                    " capabilities_json, skills_json, workflows_json, creator,"
+                    " capabilities_json, skills_json, workflows_json, prompts_json,"
+                    " prompt_params_json, prompt_override, creator,"
                     " status, approver, evidence, runtime_agent_id,"
                     " created_at, updated_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         bid,
                         ver,
@@ -322,6 +407,9 @@ class AgentFactory:
                         json.dumps(list(caps)),
                         json.dumps([list(r) for r in skills]),
                         json.dumps([list(r) for r in workflows]),
+                        json.dumps([list(r) for r in prompts]),
+                        json.dumps(params),
+                        override,
                         creator,
                         BlueprintStatus.DRAFT.value,
                         None,
@@ -376,6 +464,21 @@ class AgentFactory:
                 raise ValueError(f"workflow ref {(wid, wver)!r} failed closed.") from exc
             if ok is not True:
                 raise ValueError(f"workflow ref {(wid, wver)!r} is not published.")
+        for pid, pver in bp.prompt_refs:
+            if self._is_prompt_published is None:
+                raise ValueError(f"prompt ref {(pid, pver)!r} unverifiable: no prompt callback.")
+            try:
+                ok = self._is_prompt_published(pid, pver)
+            except Exception as exc:
+                raise ValueError(f"prompt ref {(pid, pver)!r} failed closed.") from exc
+            if ok is not True:
+                raise ValueError(f"prompt ref {(pid, pver)!r} is not published.")
+        missing = reap_packs_missing_safety({pid for pid, _ in bp.prompt_refs})
+        if missing:
+            raise ValueError(
+                f"REAP prompt packs require {REAP_SAFETY_PROMPT_ID!r} to be pinned: "
+                + ", ".join(sorted(missing))
+            )
 
     def approve(
         self, blueprint_id: str, version: str, *, approver: str, evidence: str
@@ -439,6 +542,33 @@ class AgentFactory:
             )
         return self.get(bp.blueprint_id, bp.version)
 
+    def _resolve_prompt_params(self, bp: Blueprint) -> dict[str, str]:
+        """Merge blueprint params with provider-supplied params, fail closed.
+
+        The provider (for example the Forge tool-availability adapter) sees the
+        blueprint and returns extra slot values. Conflicts with explicitly
+        pinned blueprint values are rejected rather than silently overwritten.
+        """
+        params = dict(bp.prompt_params)
+        if self._prompt_param_provider is None:
+            return params
+        try:
+            extra = self._prompt_param_provider(bp)
+        except Exception as exc:
+            raise ValueError(f"prompt param provider failed closed: {exc}") from exc
+        if extra is None:
+            return params
+        if not isinstance(extra, Mapping):
+            raise TypeError("prompt param provider must return a mapping.")
+        normalized = _normalize_prompt_params(dict(extra))
+        for key, value in normalized.items():
+            if key in params and params[key] != value:
+                raise ValueError(
+                    f"prompt param {key!r} conflicts with the blueprint value (fail closed)."
+                )
+            params[key] = value
+        return _normalize_prompt_params(params)
+
     def activate(self, blueprint_id: str, version: str) -> Agent:
         """Activate an APPROVED blueprint into a runtime identity.
 
@@ -463,16 +593,34 @@ class AgentFactory:
                 if bp.runtime_agent_id:
                     raise ValueError("blueprint already active (race/restart ambiguity).")
                 self.validate(bp.blueprint_id, bp.version)
+                metadata: dict[str, Any] = {
+                    "blueprint_id": bp.blueprint_id,
+                    "blueprint_version": bp.version,
+                    "factory": "agent-factory-v1",
+                }
+                if bp.prompt_refs:
+                    if self._prompt_resolver is None:
+                        raise ValueError(
+                            "prompt refs pinned but no prompt resolver configured (fail closed)."
+                        )
+                    params = self._resolve_prompt_params(bp)
+                    composed = compose_system_prompt(
+                        bp.prompt_refs,
+                        resolver=self._prompt_resolver,
+                        params=params,
+                        override=bp.prompt_override,
+                    )
+                    metadata["system_prompt"] = composed.text
+                    metadata["prompt_refs"] = [list(r) for r in composed.prompt_refs]
+                    metadata["prompt_composed_sha256"] = composed.sha256
+                    if params:
+                        metadata["prompt_params"] = params
                 agent = Agent(
                     name=bp.name,
                     domain=bp.domain,
                     capabilities=[Capability(name=c) for c in bp.capabilities],
                     trust_level=TrustLevel.UNKNOWN,
-                    metadata={
-                        "blueprint_id": bp.blueprint_id,
-                        "blueprint_version": bp.version,
-                        "factory": "agent-factory-v1",
-                    },
+                    metadata=metadata,
                 )
                 for cap in agent.capabilities:
                     if cap.max_level != ActionClass.L0_OBSERVATION:
@@ -585,7 +733,8 @@ class AgentFactory:
         """Return one blueprint snapshot; unknown raises KeyError."""
         row = self._conn.execute(
             "SELECT blueprint_id, version, name, domain, capabilities_json,"
-            " skills_json, workflows_json, creator, status, approver, evidence,"
+            " skills_json, workflows_json, prompts_json, prompt_params_json,"
+            " prompt_override, creator, status, approver, evidence,"
             " runtime_agent_id, created_at, updated_at"
             " FROM blueprints WHERE blueprint_id = ? AND version = ?",
             (blueprint_id, version),
@@ -598,7 +747,8 @@ class AgentFactory:
         """Return all versions for blueprint_id sorted by semver."""
         rows = self._conn.execute(
             "SELECT blueprint_id, version, name, domain, capabilities_json,"
-            " skills_json, workflows_json, creator, status, approver, evidence,"
+            " skills_json, workflows_json, prompts_json, prompt_params_json,"
+            " prompt_override, creator, status, approver, evidence,"
             " runtime_agent_id, created_at, updated_at"
             " FROM blueprints WHERE blueprint_id = ?",
             (blueprint_id,),
@@ -627,6 +777,9 @@ class AgentFactory:
             caps_j,
             sk_j,
             wf_j,
+            pr_j,
+            pp_j,
+            po,
             creator,
             status,
             approver,
@@ -639,6 +792,8 @@ class AgentFactory:
             caps = tuple(json.loads(caps_j))
             skills = tuple(tuple(r) for r in json.loads(sk_j))
             wfs = tuple(tuple(r) for r in json.loads(wf_j))
+            prompts = tuple(tuple(r) for r in json.loads(pr_j))
+            params = dict(json.loads(pp_j))
         except (TypeError, ValueError) as exc:
             raise ValueError(f"corrupt blueprint record: {exc}") from None
         try:
@@ -653,6 +808,9 @@ class AgentFactory:
             capabilities=norm_caps,
             skill_refs=skills,
             workflow_refs=wfs,
+            prompt_refs=prompts,
+            prompt_params=params,
+            prompt_override=po,
             creator=creator,
             status=BlueprintStatus(status),
             approver=approver,
