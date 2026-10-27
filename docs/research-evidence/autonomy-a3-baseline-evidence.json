@@ -1,0 +1,257 @@
+{
+  "base_head": "d9377606de25e7dadbcf85d51480026022068085",
+  "source_tree": "3e5818e450be307b4d040f9c5252d2f30ba571a1",
+  "tests_tree": "81902cb80f3dd26dbe04a6f816150f02f72338bf",
+  "artifact_root": "C:\\Users\\alphi\\agency-evidence\\autonomy-admission-a3-20261016",
+  "raw_artifacts": [
+    {
+      "relative_path": "inventory_dispatch.py",
+      "bytes": 2962,
+      "sha256": "a71af4e1874ba6b3d596dc318ca58d2f83c93eaeed92b4910b023a0af7d57c9e"
+    },
+    {
+      "relative_path": "inventory_dispatch_v2.py",
+      "bytes": 3023,
+      "sha256": "08078c853ddf8e7b48251c67532e60a4f74724dd98dce45d4029514f29a5a320"
+    },
+    {
+      "relative_path": "classified-dispatch-map.json",
+      "bytes": 119258,
+      "sha256": "5daa01846cc8e19491a667df4ba59d6d9687db0bdc7c854ed2dec26686d1deae"
+    },
+    {
+      "relative_path": "classified-dispatch-map-v2.json",
+      "bytes": 119164,
+      "sha256": "5c2a90df54bd5595f2fdbcc8b34b47628a13313e2d80a4a2af52a55d54b57036"
+    },
+    {
+      "relative_path": "dispatch-inventory.json",
+      "bytes": 264845,
+      "sha256": "a624aa579039af124b478e07d6e895f0aade2ad0c8a4ab81464fd680a631970b"
+    },
+    {
+      "relative_path": "dispatch-inventory-v2.json",
+      "bytes": 316303,
+      "sha256": "6bcbc96d148823d4f715e06736c237a4b96ed617d90f8c362e02642a2bf61422"
+    },
+    {
+      "relative_path": "probe_admission.py",
+      "bytes": 6359,
+      "sha256": "6b38d74e22a132792cbd61a82f4ec4ec113ddde4ea248ee1a4faba758bb01ece"
+    },
+    {
+      "relative_path": "run_diagnostic.py",
+      "bytes": 2635,
+      "sha256": "7d24b56ada59ca71da9a2faece616630eb288b59654973bcb91ff58d28ba64d4"
+    },
+    {
+      "relative_path": "diagnostic-run.json",
+      "bytes": 816,
+      "sha256": "4f1ed0977b0e6a4a76f57e180c300b13708ddd4fa0af851b465d15f00cd31d83"
+    },
+    {
+      "relative_path": "diagnostic-observations.json",
+      "bytes": 1228,
+      "sha256": "8fef9f6f759b463e050e57abeee3b1aeb01f235df6d3d8eeba04e11313d3bbb3"
+    },
+    {
+      "relative_path": "diagnostic.log",
+      "bytes": 20587,
+      "sha256": "08d52f0622ac647705662e144f3a03f2e0b66c27d2b0db30fda38fc08cf36636"
+    },
+    {
+      "relative_path": "run_checks.py",
+      "bytes": 6078,
+      "sha256": "ef2f7fcc3ce9e46c6d30ba020122d72670833d6171a7d565d9345eb6be30c06b"
+    },
+    {
+      "relative_path": "full-baseline/result.json",
+      "bytes": 1650,
+      "sha256": "5f5aaffd952318f08a3399c90e2c1d1d7cfbe441d9be6a183072422edb58a404"
+    },
+    {
+      "relative_path": "full-baseline/output.log",
+      "bytes": 2566,
+      "sha256": "657b333a2948a0d48eaf34090a73d4fe91975bfe7c44b3132632aef75009b6c9"
+    },
+    {
+      "relative_path": "full-baseline/results.xml",
+      "bytes": 226234,
+      "sha256": "98f2b4abc5136b60ba1d18e9f841f7a32cf80b7820d14d54e1a1388c8e7b3029"
+    },
+    {
+      "relative_path": "fetch_primary_sources.py",
+      "bytes": 2541,
+      "sha256": "a76137af91f2d31cc4703fdadfdb0f2a26b5e87289d86d77c6f75bff270129a1"
+    },
+    {
+      "relative_path": "primary-source-receipts.json",
+      "bytes": 2927,
+      "sha256": "406168406269542afd0504e07e7c68f02d981c8d98b8f8dad899475fc6e035a5"
+    },
+    {
+      "relative_path": "retrieval-failure-correction.json",
+      "bytes": 551,
+      "sha256": "6c50cd76b70f605786a9f6532dc3153429dc9170829214657371bf58b5101f4f"
+    },
+    {
+      "relative_path": "citations.json",
+      "bytes": 1458,
+      "sha256": "2e4c4f95e98b343ee48bf7188fdca9dab07c49bd157080c9b0ae91591f7518c6"
+    },
+    {
+      "relative_path": "primary-1.html",
+      "bytes": 41749,
+      "sha256": "2545882fc9e0f24482dc03116ca223e11c8e888e2fe98ba536ad882d64e8dd0c"
+    },
+    {
+      "relative_path": "primary-1.txt",
+      "bytes": 8361,
+      "sha256": "0ad82e472f4930591897bfc81804dfed5b3604a34aeb839bd291de7c6e2c2ff9"
+    },
+    {
+      "relative_path": "primary-2.html",
+      "bytes": 860230,
+      "sha256": "8649c96573c67e8f2d4c275580a43a717c01f9d21193b165540c6254fddf16e2"
+    },
+    {
+      "relative_path": "primary-2.txt",
+      "bytes": 505367,
+      "sha256": "3070a8e94dbadc9cb98c853c7d2b0e315bcdec648cb17cf8c9ebc5d3ffe82e20"
+    },
+    {
+      "relative_path": "primary-3.html",
+      "bytes": 455504,
+      "sha256": "d0cc6915ceaa6627455f3946da9c3cbe75c231755c31056f9c20cf2dee667185"
+    },
+    {
+      "relative_path": "primary-3.txt",
+      "bytes": 37511,
+      "sha256": "28fb3ea529c7abf42d8ad99321c8bd38fd2646117c6012557e1ce4c69baa54ca"
+    },
+    {
+      "relative_path": "primary-4.html",
+      "bytes": 139936,
+      "sha256": "af75d7d7ab00c29e6eea98618cb1259a3919c308af60a6173215bf9798706034"
+    },
+    {
+      "relative_path": "primary-4.txt",
+      "bytes": 85334,
+      "sha256": "e7452a737127340db02ebe22ef38c1962f000bdc2262834cb09396634c22f779"
+    }
+  ],
+  "baseline": {
+    "label": "full-baseline",
+    "kind": "pytest",
+    "started_at_utc": "2026-10-16T19:54:49.135300+00:00",
+    "completed_at_utc": "2026-10-16T19:57:58.608081+00:00",
+    "elapsed_seconds": 189.49,
+    "command": [
+      "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+      "-m",
+      "pytest",
+      "C:\\Users\\alphi\\agency-worktrees\\autonomy-admission-a3-20261016\\tests",
+      "-q",
+      "-o",
+      "faulthandler_timeout=0",
+      "-o",
+      "cache_dir=C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-autonomy-a3-20261016\\full-baseline\\pytest-cache",
+      "--basetemp",
+      "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-autonomy-a3-20261016\\full-baseline\\pytest-tmp",
+      "--junitxml=C:\\Users\\alphi\\agency-evidence\\autonomy-admission-a3-20261016\\full-baseline\\results.xml",
+      "-W",
+      "error::ResourceWarning",
+      "-W",
+      "error::pytest.PytestUnhandledThreadExceptionWarning",
+      "-W",
+      "error::pytest.PytestUnraisableExceptionWarning"
+    ],
+    "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-autonomy-a3-20261016\\full-baseline",
+    "head": "d9377606de25e7dadbcf85d51480026022068085",
+    "exit_code": 0,
+    "timed_out": false,
+    "source_test_before": "ca1ebcf791c44a54c0720a6e702ee31bdff3d9c82a47e0158938dab49b6205d4",
+    "source_test_after": "ca1ebcf791c44a54c0720a6e702ee31bdff3d9c82a47e0158938dab49b6205d4",
+    "echo_provider_explicit": true,
+    "python_external_socket_guard": true,
+    "os_sandbox": false,
+    "native_children_guarded": false,
+    "junit": {
+      "tests": 1794,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "diagnostic_run": {
+    "started_at_utc": "2026-10-16T19:48:00.569660+00:00",
+    "completed_at_utc": "2026-10-16T19:48:15.797747+00:00",
+    "command": [
+      "C:/Users/alphi/theagency/.venv/Scripts/python.exe",
+      "C:\\Users\\alphi\\agency-evidence\\autonomy-admission-a3-20261016\\probe_admission.py"
+    ],
+    "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-autonomy-a3-20261016\\diagnostic",
+    "head": "d9377606de25e7dadbcf85d51480026022068085",
+    "exit_code": 0,
+    "source_test_before": "ca1ebcf791c44a54c0720a6e702ee31bdff3d9c82a47e0158938dab49b6205d4",
+    "source_test_after": "ca1ebcf791c44a54c0720a6e702ee31bdff3d9c82a47e0158938dab49b6205d4",
+    "provider": "echo + synthetic mocked leaf only",
+    "python_external_socket_guard": true,
+    "os_sandbox": false,
+    "native_children_guarded": false
+  },
+  "diagnostic_observations": {
+    "started_at_utc": "2026-10-16T19:48:14.405167+00:00",
+    "synthetic_inputs_only": true,
+    "live_provider_calls": 0,
+    "telegram_api_calls": 0,
+    "observations": {
+      "G1_butler_audit_failure_still_returns_completed": {
+        "status": "completed",
+        "routing": 1,
+        "execution": 1,
+        "audit_failures": 2,
+        "assessment_present": true
+      },
+      "G2_endpoint_and_request_limit_drift_not_pinned": {
+        "fake_dispatches": [
+          {
+            "endpoint": "https://changed.invalid/v1",
+            "model": "fixture-model",
+            "max_tokens": 9999
+          }
+        ],
+        "audit_pending_after_ack": false,
+        "real_network": false
+      },
+      "P1_closed_and_reopened_capabilities_fail_closed": {
+        "duplicate": true,
+        "allowed": false,
+        "state": "RUNNING",
+        "provider_calls_after_close": 1
+      },
+      "G3_driver_counter_is_not_attempt_accounting": {
+        "actual_synthetic_attempts": 1,
+        "driver_llm_calls": 0,
+        "status": "llm_error"
+      },
+      "P2_forged_beta_dictionary_remains_denied": {
+        "status": "rejected",
+        "reason": "trusted polling required"
+      }
+    },
+    "completed_at_utc": "2026-10-16T19:48:15.587748+00:00"
+  },
+  "raw_line_ending_comparison": {
+    "compared_files": 248,
+    "files_with_crlf_only_differences": 3,
+    "files_with_other_differences": 0
+  },
+  "limitations": [
+    "No A3 production/test implementation",
+    "Synthetic callback leaves; not live provider validation",
+    "Python loopback-permitting socket guard; not OS/native-child sandbox",
+    "No independent review or CI",
+    "AST candidate classification is not sound dynamic call-graph completeness"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "base": "c958b874e24938e2a3713963d4d5aa73f21a97ba",
+  "research_reviews": [
+    "consumer/serialization static inventory",
+    "verification/risk/evidence static audit"
+  ],
+  "verified_findings": [
+    "execute_task has two production consumer call sites; converse_isolated one plus dynamic prototype bridge",
+    "TaskManager terminal COMPLETED cannot transition back to FAILED",
+    "normal planner fallback makes injected empty-plan diagnostic a defensive-boundary case",
+    "finding risk confidence currently comes from a heuristic verifier score",
+    "prototype extra assessment input is rejected"
+  ],
+  "resolved_design_choices": [
+    "additive optional metadata with runtime-only creation",
+    "immutable nested snapshots and output binding",
+    "no trusted accuracy oracle in A2",
+    "finding UNVERIFIED with zero factual confidence established",
+    "move terminal status after result validation and required memory",
+    "zero-work failed result permits attempts=0 instead of inventing an attempt",
+    "preserve Telegram delivery statuses independent of checks",
+    "separate structured prototype assessment plus text-safe UI notice"
+  ],
+  "review_limit": "Read-only source audits, not runtime implementation approval, security certification or a review of future code."
+}

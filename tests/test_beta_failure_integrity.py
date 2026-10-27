@@ -292,9 +292,10 @@ async def test_butler_completed_task_control(
     svc = _service_with(_StubOrchestrator(completed))
     agent = _agent()
     _patch_service(svc, agent, monkeypatch)
-    assert await svc.execute(agent, "hello", {"sender": "tester"}) == "hello world"
+    expected = "hello world\n\nRuntime assessment: unavailable. No independent verification or authorization."
+    assert await svc.execute(agent, "hello", {"sender": "tester"}) == expected
     response = await svc.handle_message("hello", "tester", {}, memory_enabled=False)
-    assert response == "hello world"
+    assert response == expected
 
 
 @pytest.mark.asyncio

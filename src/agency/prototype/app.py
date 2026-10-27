@@ -41,8 +41,15 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
 from agency import __version__
-from agency.butler.service import ButlerService
+from agency.admission.auth import OwnerAuthenticator
+from agency.admission.models import PilotError
+from agency.admission.service import OwnerPilotService
+from agency.agents.assessment import ExecutionAssessment, bound_assessment
+from agency.butler.service import ButlerAuditError, ButlerService
 from agency.orchestrator import AgencyOrchestrator
+from agency.prototype.owner_guard import guard_owner_bootstrap, guard_owner_request
+from agency.prototype.pilot import pilot_error_response
+from agency.prototype.pilot import router as pilot_router
 
 log = structlog.get_logger(__name__)
 
@@ -201,6 +208,7 @@ class ChatResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     response: str
+    assessment: ExecutionAssessment | None = None
 
 
 class AgentView(BaseModel):
@@ -246,7 +254,24 @@ class SessionResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-    """Start exactly one Butler (injected or freshly built) and stop it cleanly."""
+    """Start only the selected lifecycle; owner mode never starts legacy services."""
+    if getattr(application.state, "pilot_configured", False):
+        pilot = application.state.pilot
+        if (
+            type(pilot) is not OwnerPilotService
+            or type(application.state.owner_authenticator) is not OwnerAuthenticator
+        ):
+            raise PilotError("disabled")
+        await pilot.start()
+        application.state.pilot_started = True
+        try:
+            yield
+        finally:
+            try:
+                await pilot.stop()
+            finally:
+                application.state.pilot_started = False
+        return
     service: ButlerService | None = getattr(application.state, "butler", None)
     if service is None:
         service = ButlerService(orchestrator=AgencyOrchestrator())
@@ -264,7 +289,12 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         log.info("prototype.api_shutdown")
 
 
-def create_app(butler: ButlerService | None = None) -> FastAPI:
+def create_app(
+    butler: ButlerService | None = None,
+    *,
+    pilot: OwnerPilotService | None = None,
+    authenticator: OwnerAuthenticator | None = None,
+) -> FastAPI:
     """Build the local prototype FastAPI application.
 
     ``butler`` may be injected (tests, or a pre-built service). When ``None``,
@@ -279,8 +309,18 @@ def create_app(butler: ButlerService | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.butler = butler
+    application.state.pilot = pilot
+    application.state.owner_authenticator = authenticator
+    application.state.pilot_configured = pilot is not None or authenticator is not None
+    application.state.pilot_started = False
     application.state.butler_started = False
     application.state.csrf_token = secrets.token_urlsafe(32)
+    application.include_router(pilot_router)
+
+    @application.exception_handler(PilotError)
+    async def _pilot_error_handler(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, PilotError)
+        return pilot_error_response(exc)
 
     @application.middleware("http")
     async def _local_only(request: Request, call_next: Any) -> Any:
@@ -291,7 +331,53 @@ def create_app(butler: ButlerService | None = None) -> FastAPI:
                 status_code=status.HTTP_403_FORBIDDEN,
                 content={"error": "This prototype accepts loopback requests only."},
             )
-        return await call_next(request)
+        path = request.url.path
+        configured = bool(request.app.state.pilot_configured)
+        owner_surface = (
+            configured or path.startswith(("/api/pilot/", "/assets/pilot.")) or path == "/pilot"
+        )
+        bootstrap = path in {
+            "/pilot",
+            "/assets/pilot.html",
+            "/assets/pilot.js",
+            "/assets/pilot.css",
+            "/api/session",
+        }
+        try:
+            if bootstrap and owner_surface:
+                guard_owner_bootstrap(request)
+            if configured:
+                if path == "/api/chat":
+                    raise PilotError("disabled")
+                if (
+                    path.startswith("/api/")
+                    and not path.startswith("/api/pilot/")
+                    and path != "/api/session"
+                ):
+                    await guard_owner_request(
+                        request, request.app.state.owner_authenticator, csrf_token=None
+                    )
+            try:
+                response = await call_next(request)
+            except Exception as exc:
+                if not path.startswith("/api/pilot/"):
+                    raise
+                log.error("prototype.pilot_unavailable", error_type=type(exc).__name__)
+                response = pilot_error_response(
+                    PilotError("disabled", uncertain=request.method == "POST")
+                )
+        except PilotError as exc:
+            response = pilot_error_response(exc)
+        if owner_surface:
+            response.headers.update(
+                {
+                    "Cache-Control": "no-store",
+                    "X-Content-Type-Options": "nosniff",
+                    "Referrer-Policy": "no-referrer",
+                    "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+                }
+            )
+        return response
 
     @application.exception_handler(HTTPException)
     async def _http_error_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -307,7 +393,7 @@ def create_app(butler: ButlerService | None = None) -> FastAPI:
 
     @application.exception_handler(Exception)
     async def _unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
-        log.exception("prototype.api_unhandled", path=str(request.url.path))
+        log.error("prototype.api_unhandled", error_type=type(exc).__name__)
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"error": "Internal server error."},
@@ -362,7 +448,14 @@ def create_app(butler: ButlerService | None = None) -> FastAPI:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Prototype chat is unavailable in this configuration.",
             )
-        reply = await isolated(payload.message, LOCAL_SENDER)
+        try:
+            reply = await isolated(payload.message, LOCAL_SENDER)
+        except ButlerAuditError:
+            log.warning("prototype.audit_unavailable")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Audit unavailable; execution outcome unconfirmed. Do not automatically retry.",
+            ) from None
         status_value = str(getattr(reply, "status", "failed"))
         if status_value == "timeout":
             raise HTTPException(
@@ -381,7 +474,17 @@ def create_app(butler: ButlerService | None = None) -> FastAPI:
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="The Butler returned no reply.",
             )
-        return ChatResponse(response=text)
+        report = bound_assessment(
+            getattr(reply, "assessment", None),
+            task_id=getattr(reply, "task_id", None) or "",
+            execution_status=status_value,
+            output=text,
+        )
+        return ChatResponse(response=text, assessment=report)
+
+    @application.get("/pilot", include_in_schema=False)
+    async def owner_pilot_shell() -> FileResponse:
+        return FileResponse(STATIC_DIR / "pilot.html")
 
     @application.get("/", include_in_schema=False)
     async def index() -> FileResponse:

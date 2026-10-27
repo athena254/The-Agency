@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
+
+from agency.llm.metered import MeteredError
 from agency.tools.base import BetaPrincipal, ToolContext, ToolResult, ToolSpec
 from agency.tools.driver import ToolDriver, _extract_json
 
@@ -362,6 +365,7 @@ async def test_llm_raises() -> None:
     assert result.status == "llm_error"
     assert result.final_answer == "LLM error: connection lost"
     assert result.steps == []
+    assert result.llm_calls == len(llm.calls) == 1
 
 
 async def test_beta_model_failure_does_not_echo_private_provider_error(
@@ -382,9 +386,8 @@ async def test_beta_model_failure_does_not_echo_private_provider_error(
     ctx.beta_principal = principal
     ctx.audit = audit
     try:
-        result = await ToolDriver(registry, model).run("private prompt", "sys", ctx)
-        assert result.status == "llm_error"
-        assert result.final_answer == "Model unavailable."
+        with pytest.raises(MeteredError, match="^metered: model unavailable$"):
+            await ToolDriver(registry, model).run("private prompt", "sys", ctx)
         assert registry.calls == []
         assert await audit.has_pending_calls() is True
     finally:
@@ -413,7 +416,8 @@ async def test_beta_principal_cannot_run_on_legacy_open_registry() -> None:
     assert llm.calls == []
 
 
-async def test_llm_raises_after_steps_preserved() -> None:
+@pytest.mark.parametrize("forced", [False, True])
+async def test_llm_raises_after_steps_preserved(forced: bool) -> None:
     registry = make_registry_with_search()
     llm = FakeLLM(
         [
@@ -421,11 +425,11 @@ async def test_llm_raises_after_steps_preserved() -> None:
             RuntimeError("went away"),
         ]
     )
-    driver = ToolDriver(registry, llm)
+    driver = ToolDriver(registry, llm, max_tool_iterations=1 if forced else 6)
     result = await driver.run("task", "sys", make_ctx())
     assert result.status == "llm_error"
     assert len(result.steps) == 1
-    assert result.llm_calls == 1
+    assert result.llm_calls == len(llm.calls) == 2
 
 
 # --- evidence ---

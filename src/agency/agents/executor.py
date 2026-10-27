@@ -3,7 +3,7 @@
 :class:`AgentExecutor` wraps an LLM (or any async/sync callable) with
 production hardening:
 
-* per-attempt timeouts via :func:`asyncio.wait_for`,
+* per-attempt timeouts via :func:`asyncio.timeout`,
 * bounded retries with exponential backoff on transient failures,
 * cancellation through :meth:`AgentExecutor.cancel`,
 * observable per-task status via :meth:`AgentExecutor.get_status`.
@@ -22,6 +22,7 @@ from uuid import uuid4
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
+from agency.agents.assessment import ExecutionAssessment
 from agency.llm.adapter import LLMAdapter
 
 logger = structlog.get_logger(__name__)
@@ -71,8 +72,9 @@ class ExecutionResult(BaseModel):
     task_id: str
     status: ExecutionStatus
     output: Any = None
+    assessment: ExecutionAssessment | None = None
     error: str | None = None
-    attempts: int = Field(default=1, ge=1)
+    attempts: int = Field(default=1, ge=0)
     duration_s: float = Field(default=0.0, ge=0.0)
     model: str = Field(default="")
 
@@ -154,8 +156,13 @@ class AgentExecutor:
 
         Retries transient errors up to ``max_retries`` with exponential
         backoff; non-retryable programmer errors (``ValueError``,
-        ``TypeError``, ``KeyError``, ``AttributeError``) fail fast.
+        ``TypeError``, ``KeyError``, ``AttributeError``) fail fast. Metered
+        policy denials and unknown outcomes set FAILED and propagate unchanged
+        to the gateway; they must never become retryable/result-only failures.
         """
+        # Deferred to keep cold imports independent of Telegram's package exports.
+        from agency.llm.metered import MeteredDenied, MeteredError
+
         ctx = self._coerce_context(context)
         prompt, payload = self._coerce_task(task)
         tid = task_id or payload.get("task_id", str(uuid4()))
@@ -188,15 +195,24 @@ class AgentExecutor:
                             ctx,
                         )
                 try:
-                    output = await asyncio.wait_for(
-                        _maybe_await(self._llm(prompt, {"task_id": tid, **ctx.metadata})),
-                        timeout=timeout,
-                    )
+                    # Keep cancellation in this task: wait_for can discard a
+                    # child's typed unknown outcome on caller cancellation.
+                    async with asyncio.timeout(timeout):
+                        output = await self._invoke_llm(prompt, {"task_id": tid, **ctx.metadata})
                     self._set_status(tid, ExecutionStatus.COMPLETED)
                     self._log.info("executor.completed", task_id=tid, attempts=attempts)
                     return self._result(
                         tid, ExecutionStatus.COMPLETED, output, None, attempts, started, ctx
                     )
+                except (MeteredDenied, MeteredError) as exc:
+                    self._set_status(tid, ExecutionStatus.FAILED)
+                    self._log.warning(
+                        "executor.metered_blocked",
+                        task_id=tid,
+                        attempt=attempts,
+                        error_class=type(exc).__name__,
+                    )
+                    raise
                 except asyncio.CancelledError:
                     self._set_status(tid, ExecutionStatus.CANCELLED)
                     self._log.warning("executor.cancelled", task_id=tid, attempts=attempts)
@@ -244,6 +260,20 @@ class AgentExecutor:
         finally:
             with self._lock:
                 self._running.pop(tid, None)
+
+    async def _invoke_llm(self, prompt: str, context: dict[str, Any]) -> Any:
+        # Audit acknowledgement can fail after the concrete wrapper dispatched.
+        # Classify raw/interrupted acknowledgement before retry/timeout handling.
+        from agency.llm.metered import MeteredDenied, MeteredError, MeteredModel
+
+        try:
+            return await _maybe_await(self._llm(prompt, context))
+        except (MeteredDenied, MeteredError):
+            raise
+        except (Exception, asyncio.CancelledError) as exc:
+            if type(getattr(self._llm, "__self__", None)) is MeteredModel:
+                raise MeteredError("metered: model unavailable") from exc
+            raise
 
     def cancel(self, task_id: str) -> bool:
         """Request cancellation of a running task.

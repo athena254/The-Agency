@@ -1,0 +1,2355 @@
+{
+  "base": "d9377606de25e7dadbcf85d51480026022068085",
+  "source_python_files_scanned": 151,
+  "candidate_calls": 332,
+  "groups": {
+    "adapter_construction": 9,
+    "agent_execution_or_tool_loop": 8,
+    "closed_gateway_route_body": 1,
+    "closed_http_business_or_health": 1,
+    "dynamic_extension_callback": 2,
+    "existing_metered_dispatch": 1,
+    "explicit_consensus_lab_process": 3,
+    "external_agent_bridge": 12,
+    "gateway_routing_or_execution": 8,
+    "http_route_declaration": 10,
+    "launcher_or_http_client": 8,
+    "local_sqlite_not_model": 232,
+    "nonmodel_tool_or_process": 11,
+    "passive_orchestrator_health": 1,
+    "provider_enum_not_dispatch": 3,
+    "registered_tool_callback": 1,
+    "shared_adapter_dispatch": 7,
+    "standalone_model_router": 2,
+    "standalone_provider_or_health": 8,
+    "telegram_transport_or_sqlite": 4
+  },
+  "unclassified": [],
+  "scope": "Every matched AST candidate classified; this is not a sound whole-program model-call or adversarial-egress proof.",
+  "rows": [
+    {
+      "path": "src/agency/addons/dark_factory/absorption.py",
+      "line": 144,
+      "scope": "RepoAbsorber.clone_repo",
+      "callee": "subprocess.run",
+      "group": "nonmodel_tool_or_process"
+    },
+    {
+      "path": "src/agency/addons/dark_factory/absorption.py",
+      "line": 262,
+      "scope": "RepoAbsorber.commit_changes",
+      "callee": "subprocess.run",
+      "group": "nonmodel_tool_or_process"
+    },
+    {
+      "path": "src/agency/addons/dark_factory/absorption.py",
+      "line": 267,
+      "scope": "RepoAbsorber.commit_changes",
+      "callee": "subprocess.run",
+      "group": "nonmodel_tool_or_process"
+    },
+    {
+      "path": "src/agency/addons/ghost_factory/factory.py",
+      "line": 167,
+      "scope": "GhostFactory.fork_repo",
+      "callee": "subprocess.run",
+      "group": "nonmodel_tool_or_process"
+    },
+    {
+      "path": "src/agency/addons/ghost_factory/languages.py",
+      "line": 294,
+      "scope": "LanguageSupport._run",
+      "callee": "subprocess.run",
+      "group": "nonmodel_tool_or_process"
+    },
+    {
+      "path": "src/agency/agents/demo/agent.py",
+      "line": 28,
+      "scope": "DemoAgent.__init__",
+      "callee": "LLMAdapter",
+      "group": "adapter_construction"
+    },
+    {
+      "path": "src/agency/agents/demo/agent.py",
+      "line": 102,
+      "scope": "DemoAgent._scan_with_llm",
+      "callee": "self._llm.generate",
+      "group": "agent_execution_or_tool_loop"
+    },
+    {
+      "path": "src/agency/agents/demo/agent.py",
+      "line": 115,
+      "scope": "DemoAgent._chat_with_llm",
+      "callee": "self._llm.generate",
+      "group": "agent_execution_or_tool_loop"
+    },
+    {
+      "path": "src/agency/agents/executor.py",
+      "line": 113,
+      "scope": "AgentExecutor.__init__",
+      "callee": "LLMAdapter",
+      "group": "adapter_construction"
+    },
+    {
+      "path": "src/agency/agents/executor.py",
+      "line": 194,
+      "scope": "AgentExecutor.execute",
+      "callee": "self._llm",
+      "group": "agent_execution_or_tool_loop"
+    },
+    {
+      "path": "src/agency/agents/planner.py",
+      "line": 193,
+      "scope": "AgentPlanner.plan",
+      "callee": "self._strategy",
+      "group": "dynamic_extension_callback"
+    },
+    {
+      "path": "src/agency/agents/verifier.py",
+      "line": 247,
+      "scope": "AgentVerifier._run_model_judges",
+      "callee": "judge",
+      "group": "dynamic_extension_callback"
+    },
+    {
+      "path": "src/agency/api/routers/agents.py",
+      "line": 90,
+      "scope": "register_agent",
+      "callee": "router.post",
+      "group": "http_route_declaration"
+    },
+    {
+      "path": "src/agency/api/routers/bridges.py",
+      "line": 94,
+      "scope": "execute_bridge",
+      "callee": "router.post",
+      "group": "http_route_declaration"
+    },
+    {
+      "path": "src/agency/api/routers/bridges.py",
+      "line": 130,
+      "scope": "bridge_health",
+      "callee": "bridge.health_check",
+      "group": "closed_http_business_or_health"
+    },
+    {
+      "path": "src/agency/api/routers/evidence.py",
+      "line": 91,
+      "scope": "create_finding",
+      "callee": "router.post",
+      "group": "http_route_declaration"
+    },
+    {
+      "path": "src/agency/api/routers/governance.py",
+      "line": 65,
+      "scope": "propose_agent",
+      "callee": "router.post",
+      "group": "http_route_declaration"
+    },
+    {
+      "path": "src/agency/api/routers/governance.py",
+      "line": 92,
+      "scope": "vote",
+      "callee": "router.post",
+      "group": "http_route_declaration"
+    },
+    {
+      "path": "src/agency/api/routers/tasks.py",
+      "line": 88,
+      "scope": "create_task",
+      "callee": "router.post",
+      "group": "http_route_declaration"
+    },
+    {
+      "path": "src/agency/api/routers/tasks.py",
+      "line": 147,
+      "scope": "add_task_message",
+      "callee": "router.post",
+      "group": "http_route_declaration"
+    },
+    {
+      "path": "src/agency/bridges/claude/bridge.py",
+      "line": 93,
+      "scope": "ClaudeCodeBridge.stream",
+      "callee": "asyncio.create_subprocess_exec",
+      "group": "external_agent_bridge"
+    },
+    {
+      "path": "src/agency/bridges/claude/bridge.py",
+      "line": 138,
+      "scope": "ClaudeCodeBridge.health_check",
+      "callee": "asyncio.create_subprocess_exec",
+      "group": "external_agent_bridge"
+    },
+    {
+      "path": "src/agency/bridges/claude/bridge.py",
+      "line": 169,
+      "scope": "ClaudeCodeBridge._cli_reports_auth",
+      "callee": "asyncio.create_subprocess_exec",
+      "group": "external_agent_bridge"
+    },
+    {
+      "path": "src/agency/bridges/claude/bridge.py",
+      "line": 189,
+      "scope": "ClaudeCodeBridge._run_once",
+      "callee": "asyncio.create_subprocess_exec",
+      "group": "external_agent_bridge"
+    },
+    {
+      "path": "src/agency/bridges/codex/bridge.py",
+      "line": 73,
+      "scope": "CodexBridge.execute",
+      "callee": "client.post",
+      "group": "external_agent_bridge"
+    },
+    {
+      "path": "src/agency/bridges/codex/bridge.py",
+      "line": 116,
+      "scope": "CodexBridge.stream",
+      "callee": "client.stream",
+      "group": "external_agent_bridge"
+    },
+    {
+      "path": "src/agency/bridges/coordinator.py",
+      "line": 235,
+      "scope": "ExternalCoordinator.route_task",
+      "callee": "bridge.execute",
+      "group": "external_agent_bridge"
+    },
+    {
+      "path": "src/agency/bridges/coordinator.py",
+      "line": 273,
+      "scope": "ExternalCoordinator.route_stream",
+      "callee": "bridge.stream",
+      "group": "external_agent_bridge"
+    },
+    {
+      "path": "src/agency/bridges/coordinator.py",
+      "line": 303,
+      "scope": "ExternalCoordinator._safe_health",
+      "callee": "self._bridges[name].health_check",
+      "group": "external_agent_bridge"
+    },
+    {
+      "path": "src/agency/bridges/hermes/bridge.py",
+      "line": 104,
+      "scope": "HermesBridge.health_check",
+      "callee": "asyncio.create_subprocess_exec",
+      "group": "external_agent_bridge"
+    },
+    {
+      "path": "src/agency/bridges/hermes/bridge.py",
+      "line": 147,
+      "scope": "HermesBridge._spawn",
+      "callee": "asyncio.create_subprocess_exec",
+      "group": "external_agent_bridge"
+    },
+    {
+      "path": "src/agency/bridges/openclaw/bridge.py",
+      "line": 177,
+      "scope": "OpenClawBridge._submit",
+      "callee": "client.post",
+      "group": "external_agent_bridge"
+    },
+    {
+      "path": "src/agency/butler/cli.py",
+      "line": 131,
+      "scope": "start",
+      "callee": "subprocess.Popen",
+      "group": "launcher_or_http_client"
+    },
+    {
+      "path": "src/agency/butler/cli.py",
+      "line": 141,
+      "scope": "start",
+      "callee": "uvicorn.run",
+      "group": "launcher_or_http_client"
+    },
+    {
+      "path": "src/agency/butler/server.py",
+      "line": 53,
+      "scope": "_build_llm_callable",
+      "callee": "ProviderKind",
+      "group": "provider_enum_not_dispatch"
+    },
+    {
+      "path": "src/agency/butler/server.py",
+      "line": 62,
+      "scope": "_build_llm_callable",
+      "callee": "LLMAdapter",
+      "group": "adapter_construction"
+    },
+    {
+      "path": "src/agency/butler/server.py",
+      "line": 217,
+      "scope": "create_app.post_message",
+      "callee": "service.route",
+      "group": "closed_gateway_route_body"
+    },
+    {
+      "path": "src/agency/butler/server.py",
+      "line": 196,
+      "scope": "create_app.post_message",
+      "callee": "application.post",
+      "group": "http_route_declaration"
+    },
+    {
+      "path": "src/agency/butler/service.py",
+      "line": 346,
+      "scope": "ButlerService.handle_message",
+      "callee": "self.route",
+      "group": "gateway_routing_or_execution"
+    },
+    {
+      "path": "src/agency/butler/service.py",
+      "line": 356,
+      "scope": "ButlerService.handle_message",
+      "callee": "self.execute",
+      "group": "gateway_routing_or_execution"
+    },
+    {
+      "path": "src/agency/butler/service.py",
+      "line": 430,
+      "scope": "ButlerService.handle_isolated_message",
+      "callee": "self.route",
+      "group": "gateway_routing_or_execution"
+    },
+    {
+      "path": "src/agency/butler/service.py",
+      "line": 489,
+      "scope": "ButlerService._run_command",
+      "callee": "self.commands.execute",
+      "group": "gateway_routing_or_execution"
+    },
+    {
+      "path": "src/agency/butler/service.py",
+      "line": 536,
+      "scope": "ButlerService.route",
+      "callee": "self._router.route",
+      "group": "gateway_routing_or_execution"
+    },
+    {
+      "path": "src/agency/butler/service.py",
+      "line": 621,
+      "scope": "ButlerService._llm_route",
+      "callee": "llm",
+      "group": "gateway_routing_or_execution"
+    },
+    {
+      "path": "src/agency/butler/service.py",
+      "line": 641,
+      "scope": "ButlerService._ollama_llm",
+      "callee": "client.generate",
+      "group": "gateway_routing_or_execution"
+    },
+    {
+      "path": "src/agency/butler/service.py",
+      "line": 658,
+      "scope": "ButlerService._http_llm",
+      "callee": "client.post",
+      "group": "gateway_routing_or_execution"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 201,
+      "scope": "ThreadStore.__init__",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 202,
+      "scope": "ThreadStore.__init__",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 203,
+      "scope": "ThreadStore.__init__",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 243,
+      "scope": "ThreadStore.create_workspace",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 253,
+      "scope": "ThreadStore.list_workspaces",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 267,
+      "scope": "ThreadStore._workspace_or_raise",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 277,
+      "scope": "ThreadStore._thread_row_or_raise",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 328,
+      "scope": "ThreadStore.create_thread",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 360,
+      "scope": "ThreadStore.list_threads",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 391,
+      "scope": "ThreadStore.append_message",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 402,
+      "scope": "ThreadStore.append_message",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 423,
+      "scope": "ThreadStore.list_message_rows",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 449,
+      "scope": "ThreadStore.count_messages",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 476,
+      "scope": "ThreadStore.set_summary",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 491,
+      "scope": "ThreadStore.set_summary",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 495,
+      "scope": "ThreadStore.set_summary",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 516,
+      "scope": "ThreadStore.get_summary",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 534,
+      "scope": "ThreadStore.set_active_thread",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 547,
+      "scope": "ThreadStore.get_active_thread",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/butler/threads.py",
+      "line": 563,
+      "scope": "ThreadStore.clear_active_thread",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/cli/main.py",
+      "line": 155,
+      "scope": "start",
+      "callee": "subprocess.Popen",
+      "group": "launcher_or_http_client"
+    },
+    {
+      "path": "src/agency/cli/main.py",
+      "line": 167,
+      "scope": "start",
+      "callee": "uvicorn.run",
+      "group": "launcher_or_http_client"
+    },
+    {
+      "path": "src/agency/cli/main.py",
+      "line": 302,
+      "scope": "agent_create",
+      "callee": "client.post",
+      "group": "launcher_or_http_client"
+    },
+    {
+      "path": "src/agency/cli/main.py",
+      "line": 338,
+      "scope": "agent_propose",
+      "callee": "client.post",
+      "group": "launcher_or_http_client"
+    },
+    {
+      "path": "src/agency/cli/main.py",
+      "line": 385,
+      "scope": "task_create",
+      "callee": "client.post",
+      "group": "launcher_or_http_client"
+    },
+    {
+      "path": "src/agency/evidence/store/store.py",
+      "line": 140,
+      "scope": "EvidenceStore.initialize",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/evidence/store/store.py",
+      "line": 141,
+      "scope": "EvidenceStore.initialize",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/evidence/store/store.py",
+      "line": 142,
+      "scope": "EvidenceStore.initialize",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/evidence/store/store.py",
+      "line": 166,
+      "scope": "EvidenceStore.add_finding",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/evidence/store/store.py",
+      "line": 192,
+      "scope": "EvidenceStore.get_finding",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/evidence/store/store.py",
+      "line": 238,
+      "scope": "EvidenceStore.list_findings",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/evidence/store/store.py",
+      "line": 266,
+      "scope": "EvidenceStore._replace_finding",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/evidence/store/store.py",
+      "line": 298,
+      "scope": "EvidenceStore.add_evidence",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/evidence/store/store.py",
+      "line": 331,
+      "scope": "EvidenceStore.evidence_for_finding",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/evidence/store/store.py",
+      "line": 341,
+      "scope": "EvidenceStore.latest_evidence_level",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/factory/service.py",
+      "line": 256,
+      "scope": "AgentFactory.__init__",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/factory/service.py",
+      "line": 267,
+      "scope": "AgentFactory.__init__",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/factory/service.py",
+      "line": 311,
+      "scope": "AgentFactory.create",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/factory/service.py",
+      "line": 334,
+      "scope": "AgentFactory.create",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/factory/service.py",
+      "line": 411,
+      "scope": "AgentFactory.approve",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/factory/service.py",
+      "line": 427,
+      "scope": "AgentFactory.approve",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/factory/service.py",
+      "line": 456,
+      "scope": "AgentFactory.activate",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/factory/service.py",
+      "line": 490,
+      "scope": "AgentFactory.activate",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/factory/service.py",
+      "line": 505,
+      "scope": "AgentFactory.activate",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/factory/service.py",
+      "line": 542,
+      "scope": "AgentFactory.revoke",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/factory/service.py",
+      "line": 547,
+      "scope": "AgentFactory.revoke",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/factory/service.py",
+      "line": 552,
+      "scope": "AgentFactory.revoke",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/factory/service.py",
+      "line": 586,
+      "scope": "AgentFactory.get",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/factory/service.py",
+      "line": 599,
+      "scope": "AgentFactory.list_versions",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/factory/service.py",
+      "line": 613,
+      "scope": "AgentFactory.list_events",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/forge/inspection.py",
+      "line": 379,
+      "scope": "InspectionStore.__init__",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/forge/inspection.py",
+      "line": 385,
+      "scope": "InspectionStore.save",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/forge/inspection.py",
+      "line": 401,
+      "scope": "InspectionStore.load",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "line": 152,
+      "scope": "AuditLog.initialize",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "line": 158,
+      "scope": "AuditLog.initialize",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "line": 159,
+      "scope": "AuditLog.initialize",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "line": 179,
+      "scope": "AuditLog.initialize",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "line": 246,
+      "scope": "AuditLog.append",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "line": 277,
+      "scope": "AuditLog.query",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "line": 289,
+      "scope": "AuditLog.count",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "line": 370,
+      "scope": "BetaAuditLog.has_pending_calls",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "line": 384,
+      "scope": "BetaAuditLog.claim_intent",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "line": 386,
+      "scope": "BetaAuditLog.claim_intent",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "line": 387,
+      "scope": "BetaAuditLog.claim_intent",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "line": 392,
+      "scope": "BetaAuditLog.claim_intent",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "line": 402,
+      "scope": "BetaAuditLog._insert_claimed_intent",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "line": 428,
+      "scope": "BetaAuditLog._verify_beta_connection",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "line": 431,
+      "scope": "BetaAuditLog._verify_beta_connection",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "line": 434,
+      "scope": "BetaAuditLog._verify_beta_connection",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "line": 444,
+      "scope": "BetaAuditLog.append_beta",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lab/comet_smoke.py",
+      "line": 521,
+      "scope": "_default_run",
+      "callee": "subprocess.run",
+      "group": "explicit_consensus_lab_process"
+    },
+    {
+      "path": "src/agency/lab/comet_smoke.py",
+      "line": 536,
+      "scope": "_default_popen",
+      "callee": "subprocess.Popen",
+      "group": "explicit_consensus_lab_process"
+    },
+    {
+      "path": "src/agency/lab/comet_smoke.py",
+      "line": 581,
+      "scope": "run_command",
+      "callee": "hooks.run",
+      "group": "explicit_consensus_lab_process"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 274,
+      "scope": "SQLiteLattice._open_locked",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 275,
+      "scope": "SQLiteLattice._open_locked",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 284,
+      "scope": "SQLiteLattice._migrate_locked",
+      "callee": "self._db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 285,
+      "scope": "SQLiteLattice._migrate_locked",
+      "callee": "self._db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 310,
+      "scope": "SQLiteLattice._append_event",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 375,
+      "scope": "SQLiteLattice.create_node",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 397,
+      "scope": "SQLiteLattice.get_node",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 415,
+      "scope": "SQLiteLattice.update_node",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 421,
+      "scope": "SQLiteLattice.update_node",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 444,
+      "scope": "SQLiteLattice.delete_node",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 449,
+      "scope": "SQLiteLattice.delete_node",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 452,
+      "scope": "SQLiteLattice.delete_node",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 483,
+      "scope": "SQLiteLattice.find_nodes",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 509,
+      "scope": "SQLiteLattice.add_edge",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 565,
+      "scope": "SQLiteLattice.get_edges",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 581,
+      "scope": "SQLiteLattice.remove_edge",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 586,
+      "scope": "SQLiteLattice.remove_edge",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 637,
+      "scope": "SQLiteLattice.traverse",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 663,
+      "scope": "SQLiteLattice.find_path",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 712,
+      "scope": "SQLiteLattice.upsert_vector",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 769,
+      "scope": "SQLiteLattice.delete_vectors",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 797,
+      "scope": "SQLiteLattice.submit_proposal",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 845,
+      "scope": "SQLiteLattice.cast_vote",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 852,
+      "scope": "SQLiteLattice.cast_vote",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 862,
+      "scope": "SQLiteLattice.cast_vote",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 870,
+      "scope": "SQLiteLattice.cast_vote",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 878,
+      "scope": "SQLiteLattice.cast_vote",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 912,
+      "scope": "SQLiteLattice.get_proposal_status",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 916,
+      "scope": "SQLiteLattice.get_proposal_status",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 949,
+      "scope": "SQLiteLattice.list_open_proposals",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 958,
+      "scope": "SQLiteLattice.check_quorum",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 965,
+      "scope": "SQLiteLattice.check_quorum",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 975,
+      "scope": "SQLiteLattice.check_quorum",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 990,
+      "scope": "SQLiteLattice.check_quorum",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 1003,
+      "scope": "SQLiteLattice.check_quorum",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 1033,
+      "scope": "SQLiteLattice.update_reputation",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 1057,
+      "scope": "SQLiteLattice.update_reputation",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 1093,
+      "scope": "SQLiteLattice.get_reputation",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 1134,
+      "scope": "SQLiteLattice.get_events",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 1154,
+      "scope": "SQLiteLattice.replay_events",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 1160,
+      "scope": "SQLiteLattice.replay_events",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 1175,
+      "scope": "SQLiteLattice.get_audit_trail",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 1182,
+      "scope": "SQLiteLattice.get_audit_trail",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 1195,
+      "scope": "SQLiteLattice._count",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/lattice/backends/sqlite.py",
+      "line": 1214,
+      "scope": "SQLiteLattice.get_status",
+      "callee": "db.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/llm/adapter.py",
+      "line": 155,
+      "scope": "LLMAdapter.stream",
+      "callee": "self.generate",
+      "group": "shared_adapter_dispatch"
+    },
+    {
+      "path": "src/agency/llm/adapter.py",
+      "line": 167,
+      "scope": "LLMAdapter._nous_generate",
+      "callee": "client.post",
+      "group": "shared_adapter_dispatch"
+    },
+    {
+      "path": "src/agency/llm/adapter.py",
+      "line": 191,
+      "scope": "LLMAdapter._openai_generate",
+      "callee": "client.post",
+      "group": "shared_adapter_dispatch"
+    },
+    {
+      "path": "src/agency/llm/adapter.py",
+      "line": 215,
+      "scope": "LLMAdapter._anthropic_generate",
+      "callee": "client.post",
+      "group": "shared_adapter_dispatch"
+    },
+    {
+      "path": "src/agency/llm/adapter.py",
+      "line": 239,
+      "scope": "LLMAdapter._openrouter_generate",
+      "callee": "client.post",
+      "group": "shared_adapter_dispatch"
+    },
+    {
+      "path": "src/agency/llm/adapter.py",
+      "line": 262,
+      "scope": "LLMAdapter._pollinations_generate",
+      "callee": "client.post",
+      "group": "shared_adapter_dispatch"
+    },
+    {
+      "path": "src/agency/llm/adapter.py",
+      "line": 313,
+      "scope": "LLMAdapter._ollama_generate",
+      "callee": "client.post",
+      "group": "shared_adapter_dispatch"
+    },
+    {
+      "path": "src/agency/llm/config.py",
+      "line": 165,
+      "scope": "load_config",
+      "callee": "ProviderKind",
+      "group": "provider_enum_not_dispatch"
+    },
+    {
+      "path": "src/agency/llm/config.py",
+      "line": 168,
+      "scope": "load_config",
+      "callee": "ProviderKind",
+      "group": "provider_enum_not_dispatch"
+    },
+    {
+      "path": "src/agency/llm/metered.py",
+      "line": 222,
+      "scope": "MeteredModel.generate",
+      "callee": "self._inner.generate",
+      "group": "existing_metered_dispatch"
+    },
+    {
+      "path": "src/agency/llm/providers/anthropic.py",
+      "line": 72,
+      "scope": "AnthropicProvider.generate",
+      "callee": "client.messages.create",
+      "group": "standalone_provider_or_health"
+    },
+    {
+      "path": "src/agency/llm/providers/anthropic.py",
+      "line": 98,
+      "scope": "AnthropicProvider.stream",
+      "callee": "client.messages.stream",
+      "group": "standalone_provider_or_health"
+    },
+    {
+      "path": "src/agency/llm/providers/base.py",
+      "line": 52,
+      "scope": "BaseProvider.health_check",
+      "callee": "self.generate",
+      "group": "standalone_provider_or_health"
+    },
+    {
+      "path": "src/agency/llm/providers/echo.py",
+      "line": 33,
+      "scope": "EchoProvider.stream",
+      "callee": "self.generate",
+      "group": "standalone_provider_or_health"
+    },
+    {
+      "path": "src/agency/llm/providers/ollama.py",
+      "line": 41,
+      "scope": "OllamaProvider.generate",
+      "callee": "client.chat",
+      "group": "standalone_provider_or_health"
+    },
+    {
+      "path": "src/agency/llm/providers/ollama.py",
+      "line": 59,
+      "scope": "OllamaProvider.stream",
+      "callee": "client.chat",
+      "group": "standalone_provider_or_health"
+    },
+    {
+      "path": "src/agency/llm/providers/openai.py",
+      "line": 54,
+      "scope": "OpenAIProvider.generate",
+      "callee": "client.chat.completions.create",
+      "group": "standalone_provider_or_health"
+    },
+    {
+      "path": "src/agency/llm/providers/openai.py",
+      "line": 76,
+      "scope": "OpenAIProvider.stream",
+      "callee": "client.chat.completions.create",
+      "group": "standalone_provider_or_health"
+    },
+    {
+      "path": "src/agency/llm/router.py",
+      "line": 125,
+      "scope": "LLMRouter.__init__",
+      "callee": "LLMAdapter",
+      "group": "adapter_construction"
+    },
+    {
+      "path": "src/agency/llm/router.py",
+      "line": 147,
+      "scope": "LLMRouter.route",
+      "callee": "adapter.generate",
+      "group": "standalone_model_router"
+    },
+    {
+      "path": "src/agency/llm/router.py",
+      "line": 155,
+      "scope": "LLMRouter.route_stream",
+      "callee": "adapter.stream",
+      "group": "standalone_model_router"
+    },
+    {
+      "path": "src/agency/llm/router.py",
+      "line": 220,
+      "scope": "LLMRouter._adapter_for_preset",
+      "callee": "LLMAdapter",
+      "group": "adapter_construction"
+    },
+    {
+      "path": "src/agency/memory/sms/secrets.py",
+      "line": 96,
+      "scope": "SecretsStore.initialize",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/secrets.py",
+      "line": 97,
+      "scope": "SecretsStore.initialize",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/secrets.py",
+      "line": 169,
+      "scope": "SecretsStore.store_secret",
+      "callee": "self.connection.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/secrets.py",
+      "line": 200,
+      "scope": "SecretsStore.get_secret",
+      "callee": "self.connection.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/secrets.py",
+      "line": 235,
+      "scope": "SecretsStore.rotate_secret",
+      "callee": "self.connection.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/secrets.py",
+      "line": 246,
+      "scope": "SecretsStore.rotate_secret",
+      "callee": "self.connection.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/secrets.py",
+      "line": 258,
+      "scope": "SecretsStore.revoke_secret",
+      "callee": "self.connection.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/secrets.py",
+      "line": 271,
+      "scope": "SecretsStore.list_secrets",
+      "callee": "self.connection.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/secrets.py",
+      "line": 282,
+      "scope": "SecretsStore._row_metadata",
+      "callee": "self.connection.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/store.py",
+      "line": 150,
+      "scope": "MemoryStore.initialize",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/store.py",
+      "line": 151,
+      "scope": "MemoryStore.initialize",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/store.py",
+      "line": 172,
+      "scope": "MemoryStore.store",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/store.py",
+      "line": 196,
+      "scope": "MemoryStore.store",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/store.py",
+      "line": 197,
+      "scope": "MemoryStore.store",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/store.py",
+      "line": 214,
+      "scope": "MemoryStore.get",
+      "callee": "self.connection.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/store.py",
+      "line": 249,
+      "scope": "MemoryStore.search",
+      "callee": "self.connection.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/store.py",
+      "line": 257,
+      "scope": "MemoryStore.update_tier",
+      "callee": "self.connection.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/store.py",
+      "line": 272,
+      "scope": "MemoryStore.delete",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/store.py",
+      "line": 273,
+      "scope": "MemoryStore.delete",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/store.py",
+      "line": 283,
+      "scope": "MemoryStore.list_by_agent",
+      "callee": "self.connection.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/store.py",
+      "line": 294,
+      "scope": "MemoryStore.list_by_tier",
+      "callee": "self.connection.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/store.py",
+      "line": 305,
+      "scope": "MemoryStore.list_all",
+      "callee": "self.connection.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/store.py",
+      "line": 324,
+      "scope": "MemoryStore.touch_many",
+      "callee": "self.connection.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/store.py",
+      "line": 335,
+      "scope": "MemoryStore.count",
+      "callee": "self.connection.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/store.py",
+      "line": 360,
+      "scope": "MemoryStore.search_fts",
+      "callee": "self.connection.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/memory/sms/store.py",
+      "line": 376,
+      "scope": "MemoryStore.auto_age",
+      "callee": "self.connection.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/orchestrator.py",
+      "line": 145,
+      "scope": "AgencyOrchestrator.__init__",
+      "callee": "LLMAdapter",
+      "group": "adapter_construction"
+    },
+    {
+      "path": "src/agency/orchestrator.py",
+      "line": 149,
+      "scope": "AgencyOrchestrator.__init__",
+      "callee": "LLMAdapter",
+      "group": "adapter_construction"
+    },
+    {
+      "path": "src/agency/orchestrator.py",
+      "line": 151,
+      "scope": "AgencyOrchestrator.__init__",
+      "callee": "LLMAdapter",
+      "group": "adapter_construction"
+    },
+    {
+      "path": "src/agency/orchestrator.py",
+      "line": 153,
+      "scope": "AgencyOrchestrator.__init__",
+      "callee": "LLMAdapter",
+      "group": "adapter_construction"
+    },
+    {
+      "path": "src/agency/orchestrator.py",
+      "line": 629,
+      "scope": "AgencyOrchestrator._execute_running",
+      "callee": "tool_driver.run",
+      "group": "agent_execution_or_tool_loop"
+    },
+    {
+      "path": "src/agency/orchestrator.py",
+      "line": 662,
+      "scope": "AgencyOrchestrator._execute_running",
+      "callee": "self._executor.execute",
+      "group": "agent_execution_or_tool_loop"
+    },
+    {
+      "path": "src/agency/orchestrator.py",
+      "line": 805,
+      "scope": "AgencyOrchestrator.converse_isolated",
+      "callee": "self._executor.execute",
+      "group": "agent_execution_or_tool_loop"
+    },
+    {
+      "path": "src/agency/prototype/app.py",
+      "line": 344,
+      "scope": "create_app.chat",
+      "callee": "application.post",
+      "group": "http_route_declaration"
+    },
+    {
+      "path": "src/agency/risk/scoring.py",
+      "line": 186,
+      "scope": "RiskScorer.initialize",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/risk/scoring.py",
+      "line": 187,
+      "scope": "RiskScorer.initialize",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/risk/scoring.py",
+      "line": 287,
+      "scope": "RiskScorer.record_outcome",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/risk/scoring.py",
+      "line": 296,
+      "scope": "RiskScorer.record_outcome",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/risk/scoring.py",
+      "line": 317,
+      "scope": "RiskScorer.accuracy",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/risk/scoring.py",
+      "line": 327,
+      "scope": "RiskScorer.accuracy",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/risk/scoring.py",
+      "line": 353,
+      "scope": "RiskScorer._record_score",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/risk/scoring.py",
+      "line": 369,
+      "scope": "RiskScorer._record_score",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/risk/scoring.py",
+      "line": 383,
+      "scope": "RiskScorer._scored_rows",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/risk/scoring.py",
+      "line": 392,
+      "scope": "RiskScorer._owning_agent",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/security/red/executor.py",
+      "line": 138,
+      "scope": "RedTeamExecutor.execute_test",
+      "callee": "self._sandboxes.execute",
+      "group": "nonmodel_tool_or_process"
+    },
+    {
+      "path": "src/agency/security/sandbox/manager.py",
+      "line": 84,
+      "scope": "DockerSandboxBackend._run",
+      "callee": "subprocess.run",
+      "group": "nonmodel_tool_or_process"
+    },
+    {
+      "path": "src/agency/security/sandbox/manager.py",
+      "line": 127,
+      "scope": "DockerSandboxBackend.exec_command",
+      "callee": "subprocess.run",
+      "group": "nonmodel_tool_or_process"
+    },
+    {
+      "path": "src/agency/security/sandbox/process.py",
+      "line": 78,
+      "scope": "ProcessSandboxBackend.exec_command",
+      "callee": "subprocess.run",
+      "group": "nonmodel_tool_or_process"
+    },
+    {
+      "path": "src/agency/skills/registry.py",
+      "line": 194,
+      "scope": "SkillRegistry.__init__",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/skills/registry.py",
+      "line": 208,
+      "scope": "SkillRegistry.__init__",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/skills/registry.py",
+      "line": 226,
+      "scope": "SkillRegistry.register",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/skills/registry.py",
+      "line": 253,
+      "scope": "SkillRegistry.get",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/skills/registry.py",
+      "line": 265,
+      "scope": "SkillRegistry.list_versions",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/skills/registry.py",
+      "line": 293,
+      "scope": "SkillRegistry.transition",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/skills/registry.py",
+      "line": 299,
+      "scope": "SkillRegistry.transition",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/skills/registry.py",
+      "line": 316,
+      "scope": "SkillRegistry.list_events",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/adapter.py",
+      "line": 91,
+      "scope": "TelegramAdapter.set_my_commands",
+      "callee": "client.post",
+      "group": "telegram_transport_or_sqlite"
+    },
+    {
+      "path": "src/agency/telegram/adapter.py",
+      "line": 118,
+      "scope": "TelegramAdapter.send_message",
+      "callee": "client.post",
+      "group": "telegram_transport_or_sqlite"
+    },
+    {
+      "path": "src/agency/telegram/adapter.py",
+      "line": 167,
+      "scope": "TelegramAdapter.set_webhook",
+      "callee": "client.post",
+      "group": "telegram_transport_or_sqlite"
+    },
+    {
+      "path": "src/agency/telegram/adapter.py",
+      "line": 174,
+      "scope": "TelegramAdapter.delete_webhook",
+      "callee": "client.post",
+      "group": "telegram_transport_or_sqlite"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 164,
+      "scope": "BetaBudgetStore._connect",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 165,
+      "scope": "BetaBudgetStore._connect",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 166,
+      "scope": "BetaBudgetStore._connect",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 183,
+      "scope": "BetaBudgetStore._init_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 189,
+      "scope": "BetaBudgetStore._init_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 196,
+      "scope": "BetaBudgetStore._init_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 200,
+      "scope": "BetaBudgetStore._init_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 204,
+      "scope": "BetaBudgetStore._init_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 219,
+      "scope": "BetaBudgetStore._advance_clock_txn",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 224,
+      "scope": "BetaBudgetStore._advance_clock_txn",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 232,
+      "scope": "BetaBudgetStore._prune_txn",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 241,
+      "scope": "BetaBudgetStore._prune_txn",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 251,
+      "scope": "BetaBudgetStore._reserve_request_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 256,
+      "scope": "BetaBudgetStore._reserve_request_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 262,
+      "scope": "BetaBudgetStore._reserve_request_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 264,
+      "scope": "BetaBudgetStore._reserve_request_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 266,
+      "scope": "BetaBudgetStore._reserve_request_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 271,
+      "scope": "BetaBudgetStore._reserve_request_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 280,
+      "scope": "BetaBudgetStore._reserve_request_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 282,
+      "scope": "BetaBudgetStore._reserve_request_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 287,
+      "scope": "BetaBudgetStore._reserve_request_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 291,
+      "scope": "BetaBudgetStore._reserve_request_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 297,
+      "scope": "BetaBudgetStore._reserve_request_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 310,
+      "scope": "BetaBudgetStore._mark_running_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 314,
+      "scope": "BetaBudgetStore._mark_running_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 324,
+      "scope": "BetaBudgetStore._mark_running_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 328,
+      "scope": "BetaBudgetStore._mark_running_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 331,
+      "scope": "BetaBudgetStore._mark_running_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 337,
+      "scope": "BetaBudgetStore._mark_running_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 350,
+      "scope": "BetaBudgetStore._reserve_model_call_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 355,
+      "scope": "BetaBudgetStore._reserve_model_call_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 360,
+      "scope": "BetaBudgetStore._reserve_model_call_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 362,
+      "scope": "BetaBudgetStore._reserve_model_call_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 366,
+      "scope": "BetaBudgetStore._reserve_model_call_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 371,
+      "scope": "BetaBudgetStore._reserve_model_call_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 381,
+      "scope": "BetaBudgetStore._reserve_model_call_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 383,
+      "scope": "BetaBudgetStore._reserve_model_call_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 388,
+      "scope": "BetaBudgetStore._reserve_model_call_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 394,
+      "scope": "BetaBudgetStore._reserve_model_call_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 398,
+      "scope": "BetaBudgetStore._reserve_model_call_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 404,
+      "scope": "BetaBudgetStore._reserve_model_call_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 419,
+      "scope": "BetaBudgetStore._finish_request_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 423,
+      "scope": "BetaBudgetStore._finish_request_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 434,
+      "scope": "BetaBudgetStore._finish_request_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 438,
+      "scope": "BetaBudgetStore._finish_request_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 441,
+      "scope": "BetaBudgetStore._finish_request_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 447,
+      "scope": "BetaBudgetStore._finish_request_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 460,
+      "scope": "BetaBudgetStore._inspect_reservation_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 461,
+      "scope": "BetaBudgetStore._inspect_reservation_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 465,
+      "scope": "BetaBudgetStore._inspect_reservation_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 469,
+      "scope": "BetaBudgetStore._inspect_reservation_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 482,
+      "scope": "BetaBudgetStore._crash_recovery_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 483,
+      "scope": "BetaBudgetStore._crash_recovery_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 488,
+      "scope": "BetaBudgetStore._crash_recovery_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 491,
+      "scope": "BetaBudgetStore._crash_recovery_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 494,
+      "scope": "BetaBudgetStore._crash_recovery_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/budget_store.py",
+      "line": 498,
+      "scope": "BetaBudgetStore._crash_recovery_sync",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/handler.py",
+      "line": 503,
+      "scope": "TelegramHandler._system_answer",
+      "callee": "self._butler.orchestrator.health_check",
+      "group": "passive_orchestrator_health"
+    },
+    {
+      "path": "src/agency/telegram/profile_store.py",
+      "line": 37,
+      "scope": "ProfileStore.__init__",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/profile_store.py",
+      "line": 44,
+      "scope": "ProfileStore.get_name",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/profile_store.py",
+      "line": 57,
+      "scope": "ProfileStore.set_name",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/profile_store.py",
+      "line": 65,
+      "scope": "ProfileStore.reset_name",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/telegram/server.py",
+      "line": 58,
+      "scope": "create_app.webhook",
+      "callee": "app.post",
+      "group": "http_route_declaration"
+    },
+    {
+      "path": "src/agency/tools/builtin/sandbox.py",
+      "line": 88,
+      "scope": "SandboxExecTool.run",
+      "callee": "manager.execute",
+      "group": "nonmodel_tool_or_process"
+    },
+    {
+      "path": "src/agency/tools/builtin/web.py",
+      "line": 474,
+      "scope": "WebFetchTool.run",
+      "callee": "client.stream",
+      "group": "nonmodel_tool_or_process"
+    },
+    {
+      "path": "src/agency/tools/driver.py",
+      "line": 240,
+      "scope": "ToolDriver.run",
+      "callee": "self._llm.generate",
+      "group": "agent_execution_or_tool_loop"
+    },
+    {
+      "path": "src/agency/tools/driver.py",
+      "line": 340,
+      "scope": "ToolDriver.run",
+      "callee": "self._llm.generate",
+      "group": "agent_execution_or_tool_loop"
+    },
+    {
+      "path": "src/agency/tools/registry.py",
+      "line": 279,
+      "scope": "ToolRegistry.call",
+      "callee": "tool.run",
+      "group": "registered_tool_callback"
+    },
+    {
+      "path": "src/agency/workflows/registry.py",
+      "line": 218,
+      "scope": "WorkflowRegistry.__init__",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/workflows/registry.py",
+      "line": 226,
+      "scope": "WorkflowRegistry.__init__",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/workflows/registry.py",
+      "line": 237,
+      "scope": "WorkflowRegistry.__init__",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/workflows/registry.py",
+      "line": 252,
+      "scope": "WorkflowRegistry.__init__",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/workflows/registry.py",
+      "line": 253,
+      "scope": "WorkflowRegistry.__init__",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/workflows/registry.py",
+      "line": 274,
+      "scope": "WorkflowRegistry.register",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/workflows/registry.py",
+      "line": 283,
+      "scope": "WorkflowRegistry.register",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/workflows/registry.py",
+      "line": 300,
+      "scope": "WorkflowRegistry.get",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/workflows/registry.py",
+      "line": 312,
+      "scope": "WorkflowRegistry.list_versions",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/workflows/registry.py",
+      "line": 328,
+      "scope": "WorkflowRegistry.record_run",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/workflows/registry.py",
+      "line": 363,
+      "scope": "WorkflowRegistry.get_run",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/workflows/registry.py",
+      "line": 408,
+      "scope": "WorkflowRegistry.record_recoverable_run",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/workflows/registry.py",
+      "line": 437,
+      "scope": "WorkflowRegistry.get_recoverable_run",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/agency/workflows/registry.py",
+      "line": 481,
+      "scope": "WorkflowRegistry.list_recoverable_runs",
+      "callee": "self._conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/telegram_bot.py",
+      "line": 170,
+      "scope": "TelegramBot._open_poll_db",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/telegram_bot.py",
+      "line": 175,
+      "scope": "TelegramBot._open_poll_db",
+      "callee": "conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/telegram_bot.py",
+      "line": 199,
+      "scope": "TelegramBot._persist_offset",
+      "callee": "self._poll_conn.execute",
+      "group": "local_sqlite_not_model"
+    },
+    {
+      "path": "src/telegram_bot.py",
+      "line": 392,
+      "scope": "",
+      "callee": "asyncio.run",
+      "group": "launcher_or_http_client"
+    }
+  ]
+}

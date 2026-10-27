@@ -1,0 +1,220 @@
+{
+  "completed_at": "2026-10-22T04:54:56.272598+03:00",
+  "starting_registered_worktrees": 26,
+  "new_consolidated_worktrees_added": 1,
+  "retired_worktree_directories": 23,
+  "remaining_worktrees": [
+    "C:/Users/alphi/theagency",
+    "C:/Users/alphi/agency-worktrees/consolidated-20261022",
+    "C:/Users/alphi/agency-worktrees/daily-launcher-20261020",
+    "C:/Users/alphi/agency-worktrees/pilot-launcher-completion-20261020"
+  ],
+  "canonical_main_changed": false,
+  "canonical_runtime_credentials_shared_venv_changed": false,
+  "retained_dirty_launcher_files_changed": false,
+  "original_branch_refs_deleted_or_changed": false,
+  "stashes_changed": false,
+  "removed_with_force": false,
+  "untracked_historical_files_relocated_to_private_archive": 6,
+  "ignored_private_logs_relocated_to_private_archive": 1,
+  "source_and_tests_baseline": "760b9a99d3d3860bb8c27e4fa19f5456b7de9bf6",
+  "runtime_src_and_tests_trees_identical_to_baseline": true,
+  "dependency_config_and_other_production_files_identical_to_baseline": true,
+  "historical_harness_syntax_parsed_python_modules": 3,
+  "historical_harness_current_source_refusal": {
+    "exit_code": 2,
+    "agency_import_attempted": false,
+    "application_lifespans": false,
+    "executed_product_cases": 0,
+    "added_source_files": [
+      "src/agency/admission/policy.py",
+      "src/agency/admission/service.py",
+      "src/agency/prototype/owner_guard.py",
+      "src/agency/prototype/pilot.py"
+    ],
+    "changed_source_files": 10,
+    "evidence": "C:\\Users\\alphi\\agency-evidence\\limited-autonomy-20261019\\daily-routes\\consolidation-refusal-20261022T014403Z-9f9aedc7",
+    "qualified": false
+  },
+  "new_full_product_suite_run": false,
+  "security_review": {
+    "initial_scanner_matches": 4,
+    "classified_source_sha256_pins_not_credentials": 4,
+    "classification_verified_against_original_reviewed_source_bytes": true,
+    "ignored_only_exact_reviewed_fingerprints": true,
+    "unreviewed_matches_remaining": 0,
+    "global_repo_scanner_policy_changed": false
+  },
+  "preservation": {
+    "precleanup_bundle_bare_recovery_and_fsck_passed": true,
+    "precleanup_refs_verified": 216,
+    "uncommitted_source_files_hash_checked": 19,
+    "private_log_files_hash_checked": 1,
+    "all_preserved_file_bytes_also_match_verified_encrypted_remote_machine_archive": true,
+    "local_private_archive": "C:/Users/alphi/agency-backups/worktree-consolidation-20261022",
+    "encrypted_remote_backup": "athena254/hermes-machine-backup-20261021, machine-migration-20261021"
+  },
+  "retired_worktrees": [
+    {
+      "name": "agency-status-20261018",
+      "branch": "refs/heads/docs/agency-status-20261018",
+      "head": "c8524190ecedae4b294aca0f2786db0336bd60f8",
+      "classification": "ancestor",
+      "branch_preserved": true
+    },
+    {
+      "name": "autonomy-admission-a3-20261016",
+      "branch": "refs/heads/docs/autonomy-admission-a3-20261016",
+      "head": "6b1d4c4347ad51e48a3ef478f0e2a2f6f5bcfbbf",
+      "classification": "ancestor",
+      "branch_preserved": true
+    },
+    {
+      "name": "autonomy-context-a1-20261016",
+      "branch": "refs/heads/fix/autonomy-context-a1-20261016",
+      "head": "c958b874e24938e2a3713963d4d5aa73f21a97ba",
+      "classification": "ancestor",
+      "branch_preserved": true
+    },
+    {
+      "name": "autonomy-verification-a2-20261016",
+      "branch": "refs/heads/docs/autonomy-verification-a2-20261016",
+      "head": "d9377606de25e7dadbcf85d51480026022068085",
+      "classification": "ancestor",
+      "branch_preserved": true
+    },
+    {
+      "name": "bounded-autonomy-20261016",
+      "branch": "refs/heads/docs/bounded-autonomy-20261016",
+      "head": "020c9883732ab3cd793bb63449263d9a2df0c1d5",
+      "classification": "ancestor",
+      "branch_preserved": true
+    },
+    {
+      "name": "daily-harness-20261020",
+      "branch": "refs/heads/fix/daily-harness-20261020",
+      "head": "bf214e8fdb673aed21e863e7c1b6d0a917ef1072",
+      "classification": "ancestor",
+      "branch_preserved": true
+    },
+    {
+      "name": "daily-route-qualification-20261019",
+      "branch": "refs/heads/test/daily-route-qualification-20261019",
+      "head": "97c72f29f3fa7d69421e9d0ab72ccf820f3b3ba3",
+      "classification": "ancestor",
+      "branch_preserved": true
+    },
+    {
+      "name": "limited-autonomy-20261019",
+      "branch": "refs/heads/feat/limited-autonomy-20261019",
+      "head": "760b9a99d3d3860bb8c27e4fa19f5456b7de9bf6",
+      "classification": "ancestor",
+      "branch_preserved": true
+    },
+    {
+      "name": "owner-admission-20261019",
+      "branch": "refs/heads/feat/owner-admission-20261019",
+      "head": "81dfdfa82222c587dc2fefe8706a6e439cc84e92",
+      "classification": "patch-equivalent",
+      "branch_preserved": true
+    },
+    {
+      "name": "owner-api-red-20261020",
+      "branch": "refs/heads/test/owner-api-red-20261020",
+      "head": "e712de33b94f937875ce69218b38d1c98d70dc54",
+      "classification": "reviewed-subsumed-older-variant",
+      "branch_preserved": true
+    },
+    {
+      "name": "owner-context-20261019",
+      "branch": "refs/heads/feat/owner-context-20261019",
+      "head": "f3f11db198f8f69ee5e43858339b935778ad828b",
+      "classification": "patch-equivalent",
+      "branch_preserved": true
+    },
+    {
+      "name": "owner-core-20261019",
+      "branch": "refs/heads/feat/owner-core-20261019",
+      "head": "ba1a42baecf76de2a620ab8fdd9f12a21e606112",
+      "classification": "ancestor",
+      "branch_preserved": true
+    },
+    {
+      "name": "owner-httpguard-20261019",
+      "branch": "refs/heads/feat/owner-httpguard-20261019",
+      "head": "40869e8e55a6fc513d17ec39437e1a78d6645064",
+      "classification": "patch-equivalent",
+      "branch_preserved": true
+    },
+    {
+      "name": "owner-metered-20261019",
+      "branch": "refs/heads/feat/owner-metered-20261019",
+      "head": "c9daf84d7641ebf75db1f7e3d54f565e3566f578",
+      "classification": "patch-equivalent",
+      "branch_preserved": true
+    },
+    {
+      "name": "owner-policy-20261019",
+      "branch": "refs/heads/feat/owner-policy-20261019",
+      "head": "55dcab4298c4b7438bd8267be292b7c1b7a8c601",
+      "classification": "patch-equivalent",
+      "branch_preserved": true
+    },
+    {
+      "name": "owner-provider-snapshot-20261019",
+      "branch": "refs/heads/feat/owner-provider-snapshot-20261019",
+      "head": "7cc374bc62276d4ae04a3b88b680bfb69a3e0784",
+      "classification": "patch-equivalent",
+      "branch_preserved": true
+    },
+    {
+      "name": "owner-service-20261020",
+      "branch": "refs/heads/feat/owner-service-20261020",
+      "head": "59648d14ae4bbd3218cd529e87c470fb128001f0",
+      "classification": "reviewed-subsumed-older-variant",
+      "branch_preserved": true
+    },
+    {
+      "name": "owner-tools-20261019",
+      "branch": "refs/heads/feat/owner-tools-20261019",
+      "head": "73a281c256863a36368c72c48b65b16a042b05ee",
+      "classification": "patch-equivalent",
+      "branch_preserved": true
+    },
+    {
+      "name": "owner-ui-races-20261019",
+      "branch": "refs/heads/fix/owner-ui-races-20261019",
+      "head": "4d7ec9e9108187a73f25858c177b187daae6a03a",
+      "classification": "patch-equivalent",
+      "branch_preserved": true
+    },
+    {
+      "name": "owner-uncertainty-20261019",
+      "branch": "refs/heads/feat/owner-uncertainty-20261019",
+      "head": "edac6303f551d5b2da66d18ffd6802d04f379fe6",
+      "classification": "patch-equivalent",
+      "branch_preserved": true
+    },
+    {
+      "name": "pilot-baseline-20261019",
+      "branch": "refs/heads/fix/pilot-baseline-20261019",
+      "head": "c4fbde551effa4eff95e9e25ad705b5667298a9b",
+      "classification": "patch-equivalent",
+      "branch_preserved": true
+    },
+    {
+      "name": "pilot-metering-leaf-20261019",
+      "branch": "refs/heads/fix/pilot-metering-leaf-20261019",
+      "head": "1473419c7f7a746ebabe3efd578b4034322f0321",
+      "classification": "patch-equivalent",
+      "branch_preserved": true
+    },
+    {
+      "name": "pilot-ui-20261019",
+      "branch": "refs/heads/feat/pilot-ui-20261019",
+      "head": "19de5e71185254aa8805aebe186342747395a8a9",
+      "classification": "patch-equivalent",
+      "branch_preserved": true
+    }
+  ]
+}

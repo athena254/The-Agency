@@ -27,6 +27,33 @@ class AdmissionProtocolError(AssertionError):
     def __init__(self, message: str, observations: list[dict[str, Any]]) -> None:
         super().__init__(message)
         self.observations = list(observations)
+        if self.observations:
+            # Regex-mismatch/JUnit failures otherwise discard this attribute.
+            # Keep only bounded protocol metadata, never tool output or paths.
+            # Diagnostic hooks must not replace the error or bypass reaping.
+            with suppress(BaseException):
+                events = {
+                    "bootstrap_started",
+                    "bootstrap_complete",
+                    "ready",
+                    "ran",
+                    "result",
+                    "worker_error",
+                }
+                phases = {"bootstrap", "arm", "start", "claim", "release"}
+                tail = []
+                for item in self.observations[-16:]:
+                    event = item.get("event")
+                    phase = item.get("phase")
+                    pid = item.get("pid")
+                    tail.append(
+                        f"event={event if event in events else 'invalid'} "
+                        f"pid={pid if type(pid) is int else 'invalid'} "
+                        f"phase={phase if phase in phases else 'invalid'}"
+                    )
+                self.add_note(
+                    f"admission observations={len(self.observations)}; " + "; ".join(tail)
+                )
 
 
 def admission_worker(

@@ -246,7 +246,7 @@ def test_chat_uses_isolated_tool_free_path_with_fixed_sender() -> None:
             headers=_post_headers(token),
         )
     assert response.status_code == 200
-    assert response.json() == {"response": "reply:hello there"}
+    assert response.json() == {"response": "reply:hello there", "assessment": None}
     assert len(butler.calls) == 1
     call = butler.calls[0]
     assert call["path"] == "isolated"

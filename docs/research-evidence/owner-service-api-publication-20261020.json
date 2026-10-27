@@ -1,0 +1,130 @@
+{
+  "scope": "Completed owner service/API and publication-fence checkpoint; not daily-driver release or deployment",
+  "base_commit": "b00a7bc04c5024f5d9ad20f036dcdb343000f3e2",
+  "source_test_fingerprint": "21ceacff0a45ec75eb40f1d4beb0cc6bf86c51e24ff9ba76b2b0445f5678b7cf",
+  "python_qualification": [
+    {
+      "label": "integrated-core-service-api-full01",
+      "kind": "pytest",
+      "started_at_utc": "2026-10-20T07:08:40.198371+00:00",
+      "completed_at_utc": "2026-10-20T07:13:35.620247+00:00",
+      "elapsed_seconds": 295.42,
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "21ceacff0a45ec75eb40f1d4beb0cc6bf86c51e24ff9ba76b2b0445f5678b7cf",
+      "source_test_after": "21ceacff0a45ec75eb40f1d4beb0cc6bf86c51e24ff9ba76b2b0445f5678b7cf",
+      "junit": {
+        "tests": 2450,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false
+    },
+    {
+      "label": "precommit-lint01",
+      "kind": "lint",
+      "started_at_utc": "2026-10-20T10:14:59.876340+00:00",
+      "completed_at_utc": "2026-10-20T10:15:02.813787+00:00",
+      "elapsed_seconds": 2.94,
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "21ceacff0a45ec75eb40f1d4beb0cc6bf86c51e24ff9ba76b2b0445f5678b7cf",
+      "source_test_after": "21ceacff0a45ec75eb40f1d4beb0cc6bf86c51e24ff9ba76b2b0445f5678b7cf",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false
+    },
+    {
+      "label": "precommit-format01",
+      "kind": "format",
+      "started_at_utc": "2026-10-20T10:15:03.852121+00:00",
+      "completed_at_utc": "2026-10-20T10:15:04.371281+00:00",
+      "elapsed_seconds": 0.52,
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "21ceacff0a45ec75eb40f1d4beb0cc6bf86c51e24ff9ba76b2b0445f5678b7cf",
+      "source_test_after": "21ceacff0a45ec75eb40f1d4beb0cc6bf86c51e24ff9ba76b2b0445f5678b7cf",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false
+    },
+    {
+      "label": "precommit-ui01",
+      "kind": "ui",
+      "started_at_utc": "2026-10-20T10:15:05.709601+00:00",
+      "completed_at_utc": "2026-10-20T10:15:07.874149+00:00",
+      "elapsed_seconds": 2.16,
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "21ceacff0a45ec75eb40f1d4beb0cc6bf86c51e24ff9ba76b2b0445f5678b7cf",
+      "source_test_after": "21ceacff0a45ec75eb40f1d4beb0cc6bf86c51e24ff9ba76b2b0445f5678b7cf",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": false,
+      "os_sandbox": false,
+      "native_children_guarded": false
+    },
+    {
+      "label": "precommit-mypy-win01",
+      "kind": "mypy",
+      "started_at_utc": "2026-10-20T10:16:14.217543+00:00",
+      "completed_at_utc": "2026-10-20T10:16:51.462929+00:00",
+      "elapsed_seconds": 37.25,
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "21ceacff0a45ec75eb40f1d4beb0cc6bf86c51e24ff9ba76b2b0445f5678b7cf",
+      "source_test_after": "21ceacff0a45ec75eb40f1d4beb0cc6bf86c51e24ff9ba76b2b0445f5678b7cf",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false
+    }
+  ],
+  "coverage": {
+    "lines-valid": "17605",
+    "lines-covered": "13343",
+    "line-rate": "0.7579"
+  },
+  "node_ui_counts": {
+    "tests": 61,
+    "pass": 61,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "linux_target_typecheck": {
+    "command": "python -m mypy --platform linux --config-file <checkout>/pyproject.toml --cache-dir <scratch>/mypy-cache <checkout>/src",
+    "observed_output": "Success: no issues found in 160 source files",
+    "native_execution_platform": "Windows",
+    "native_linux_runtime_qualified": false
+  },
+  "external_evidence_root": "daily-driver-20261020",
+  "limits": [
+    "One inherited Starlette/httpx dependency deprecation warning retained.",
+    "Provider leaves in offline Python tests were scripted; fake-DOM UI tests are not real browser evidence.",
+    "Python-level containment does not sandbox arbitrary native children; Node checks did not use the Python guard.",
+    "Full runtime/browser/provider/cancellation/restart/owner-trial release qualification remains open.",
+    "Separate harness repair and unfinished launcher are not included in this application source fingerprint."
+  ],
+  "provider_diagnostic": {
+    "model": "nemotron-3.5-lightning-free",
+    "standalone_literal_response": "READY",
+    "provider_timeout_s": 45,
+    "admitted_tool_recall_workflow_qualified": false,
+    "paid_fallback": false
+  },
+  "publication_secrets_scan": {
+    "known_private_value_matches": 0,
+    "pattern_findings": 0,
+    "scope": "90 unpublished historical commits plus current integration and harness working changes at preflight; pattern/known-value check, not security audit."
+  },
+  "independent_integrated_review": "Passed scoped independent pre-commit review of the service/API/publication-fence diff with no blocking security or logic findings. This is not final integrated-runtime or release approval.",
+  "daily_driver_ready": false,
+  "deployment_performed": false
+}

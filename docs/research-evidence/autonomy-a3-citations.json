@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": 1,
+      "url": "https://docs.python.org/3.11/library/contextvars.html",
+      "title": "",
+      "accessed": "2026-10-16",
+      "quotes": [
+        {
+          "text": "Context variables are natively supported in asyncio",
+          "added": "2026-10-16"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "url": "https://core.telegram.org/bots/api",
+      "title": "",
+      "accessed": "2026-10-16",
+      "quotes": [
+        {
+          "text": "An update is considered confirmed as soon as getUpdates is called with an offset higher than its update_id.",
+          "added": "2026-10-16"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "url": "https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs",
+      "title": "",
+      "accessed": "2026-10-16",
+      "quotes": [
+        {
+          "text": "Requests from the same caller with the same client request identifier can be considered duplicate requests",
+          "added": "2026-10-16"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "url": "https://www.sqlite.org/pragma.html",
+      "title": "",
+      "accessed": "2026-10-16",
+      "quotes": [
+        {
+          "text": "With synchronous=FULL in WAL mode, an additional sync operation of the WAL file happens after each transaction commit.",
+          "added": "2026-10-16"
+        }
+      ]
+    }
+  ]
+}

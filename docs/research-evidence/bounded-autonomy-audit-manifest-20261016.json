@@ -1,0 +1,180 @@
+{
+  "recorded_at_utc": "2026-10-16T08:45:51.147116+00:00",
+  "base_sha": "1c7e7da2774ee4687741a0e346cbf2d593a9c845",
+  "branch": "docs/bounded-autonomy-20261016",
+  "source_tree": "6860d80ec6f41c47aed432235949a58bc06f489d",
+  "tests_tree": "e39aaadbe841ea4a0d8a86c5cabc34b450698d3c",
+  "handoff_source_tests_equal_tested_ba9ec76": true,
+  "canonical_head": "713a4e311b1e071fbd6c5cf103b995d17aa7e5a2",
+  "canonical_branch": "main",
+  "canonical_status": "",
+  "source_inventory": [
+    {
+      "path": "src/agency/orchestrator.py",
+      "sha256": "cfb69bdb9568f58ad54f498a6494a3e4a55167e9fb599f5730268600ec1b70ab",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": "src/agency/butler/service.py",
+      "sha256": "369890cf0d94a8b45f1a437ca856329a0668243d388c2b17f20007c6c7c81b20",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": "src/agency/tools/driver.py",
+      "sha256": "e601e5fe98abb178000fe7e0507853a26e39819ebab495cfde953bb6e866dea2",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": "src/agency/tools/registry.py",
+      "sha256": "5ce957b8aa3f6b7713b637aff947c52bab47244c482fd105471fd256f0a0d4c1",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": "src/agency/tools/builtin/memory.py",
+      "sha256": "d00c50981adc64d8488f9be8fe80fb3207dca5ba9cbc21dc76eb2307a59c8c06",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": "src/agency/llm/metered.py",
+      "sha256": "1be811294bfcaf8eec6f2968d48b920a04611435b8a93de77ab5f6b88e3b1d24",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": "src/agency/llm/adapter.py",
+      "sha256": "8a5601bd4e7820a8d1c74e5df099932b6e9d911ca440fd4331b747aaef8299d0",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": "src/agency/agents/executor.py",
+      "sha256": "80971899f09e8a65c6f2270d5d0194d8d6ff3c2017c4c960abce880e9fbbac4e",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": "src/agency/agents/planner.py",
+      "sha256": "186a009475e382eb57479cea58a84c7c7a3f5966db5976be627ee18a6611bbbb",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": "src/agency/agents/verifier.py",
+      "sha256": "878655d5b00858b67c4d883d71bfbeb06eedaf36272199b7af416fb2aefb163f",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": "src/agency/kernel/tasks.py",
+      "sha256": "3ed82effb5df7aa45924af4f382818e14e060ff6bfde62e7e9ad44848d6650f2",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": "src/agency/kernel/audit.py",
+      "sha256": "53bfddb129594703f3235007b42b64350a14ec6de8e1060e43008890df871d30",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": "src/agency/workflows/executor.py",
+      "sha256": "1ef0170a5ea525527b28235c84c249ea09f68f1a45e6e06f30810ffac0451d93",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": "src/agency/workflows/recovery.py",
+      "sha256": "0036608b90e637f0e041f3cef97b0e46201757ebd5d5cb3ff294ee42a2808b97",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": "src/agency/api/authority.py",
+      "sha256": "d272c8fed4fec1583cf37208b73579cc208644114bed40c7a40d61ba76759be0",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": "src/agency/peer_envelope.py",
+      "sha256": "02350d3a854fe3f604ed21b001e0ca1ba4c8ccaa8c4b342ce4370feb9288ddc0",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": "tests/test_memory_continuity.py",
+      "sha256": "5ba53e136c1e01af29dbcdaded1ade6a95438f20c0ff9da32074f69653a934a4",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": "tests/test_orchestrator.py",
+      "sha256": "b9024c4b80ab8f4c3eea4eddbd3a05b3e5fbe78b7213a7b80dbcb8b1739cc8d0",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "f6f1167dcfc55d427906d120a29391555c3940a708fa8eec4fe9f83a68118cb5",
+      "scope": "selected-path/excerpt inspection; hash is not a full-file audit claim"
+    }
+  ],
+  "source_inventory_count": 19,
+  "public_retrievals": [
+    {
+      "id": 1,
+      "url": "https://hermes-agent.nousresearch.com/docs/developer-guide/agent-loop",
+      "final_url": "https://hermes-agent.nousresearch.com/docs/developer-guide/agent-loop",
+      "status": 200,
+      "sha256": "98a8f56b030e1050e60c7e6005a40578ed196a70ecd1a9cb6391976efa5a665d",
+      "bytes": 60927
+    },
+    {
+      "id": 2,
+      "url": "https://www.anthropic.com/engineering/building-effective-agents",
+      "final_url": "https://www.anthropic.com/engineering/building-effective-agents",
+      "status": 200,
+      "sha256": "3657457c518235c0c941fb75ce6ff6dd9e76231c6d9d1ac3a4cb412311741701",
+      "bytes": 175185
+    },
+    {
+      "id": 3,
+      "url": "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/transactional-outbox.html",
+      "final_url": "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/transactional-outbox.html",
+      "status": 200,
+      "sha256": "8444f45302b4af60a33ae465c2fac9a48190a915a5c2b1f893692799b6546d7f",
+      "bytes": 30822
+    },
+    {
+      "id": 4,
+      "url": "https://raw.githubusercontent.com/cometbft/cometbft/v0.38.26/spec/abci/abci%2B%2B_app_requirements.md",
+      "final_url": "https://raw.githubusercontent.com/cometbft/cometbft/v0.38.26/spec/abci/abci%2B%2B_app_requirements.md",
+      "status": 200,
+      "sha256": "1f2421dbe35d7b2d18434ba0560f115587a8fc68055702a31409fcafd9fccdb7",
+      "bytes": 58394
+    },
+    {
+      "id": 5,
+      "url": "https://www.sqlite.org/pragma.html",
+      "final_url": "https://www.sqlite.org/pragma.html",
+      "status": 200,
+      "sha256": "af75d7d7ab00c29e6eea98618cb1259a3919c308af60a6173215bf9798706034",
+      "bytes": 139936
+    }
+  ],
+  "archive_directory": "C:\\Users\\alphi\\agency-evidence\\bounded-autonomy-20261016",
+  "archive_manifest_sha256": "42ac8313d1a3d81700f95ed649105352b1a3d0dac98189c4824d92820bdd392f",
+  "archive_file_count_excluding_manifest": 19,
+  "archive_hash_readback_verified": true,
+  "diagnostic_attempts": [
+    {
+      "attempt": 1,
+      "exit_code": 1,
+      "meaning": "harness failed at Windows event-loop self-pipe; not Agency acceptance"
+    },
+    {
+      "attempt": 2,
+      "exit_code": 0,
+      "meaning": "expected baseline defects reproduced; not repair or autonomy acceptance"
+    }
+  ],
+  "successful_harness_sha256": "2cbe4a3202a387853877ed8c3371772ec60d933d400f4b994f26331adb185377",
+  "failed_harness_original_hash_available": false,
+  "failed_harness_copy_reconstructed": true,
+  "claims_not_made": [
+    "fresh full suite",
+    "independent security review",
+    "live provider",
+    "actual peer task",
+    "CI",
+    "push",
+    "merge",
+    "deployment"
+  ]
+}

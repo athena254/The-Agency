@@ -11,6 +11,7 @@
  * Run: node --test tests/prototype_ui.test.mjs
  */
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -202,7 +203,8 @@ test('index.html references only the local /assets files, with no external resou
 test('app.js renders safely: textContent only, no storage, no credentials', () => {
   assert.doesNotMatch(js, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
   assert.doesNotMatch(js, /localStorage|sessionStorage|indexedDB|document\.cookie/);
-  assert.doesNotMatch(js, /Authorization|Bearer |api[_-]?key/i);
+  // Forbid credential headers, not the runtime's plain-English denial of authority.
+  assert.doesNotMatch(js, /['"]Authorization['"]|Bearer |api[_-]?key/i);
   assert.match(js, /X-Prototype-CSRF/);
 
   // Only the four documented same-origin endpoints are ever requested.
@@ -381,4 +383,64 @@ test('reply does not erase a new draft typed while the request is pending', asyn
   assert.equal(await pending, true);
   assert.equal(input.value, 'new draft');
   controller.stop();
+});
+
+
+function isolatedReport(body) {
+  const digest = createHash('sha256').update(body, 'utf8').digest('hex');
+  return {
+    schema_version: 'a2.v1', task_id: 'fixture-id', execution_status: 'completed',
+    output_sha256: digest, verification: 'not_performed', risk_status: 'not_assessed',
+    independently_verified: false,
+    subtasks: [{
+      subtask_id: 'isolated', path: 'isolated', execution_status: 'completed',
+      output_sha256: digest, verification: 'not_performed',
+      checks: ['completeness', 'accuracy', 'safety'].map(criterion => ({
+        criterion, status: 'not_performed', method: 'not_performed',
+        reason: 'isolated_path_unchecked', score: null,
+      })),
+      risk: {status: 'not_assessed', method: 'not_performed', category: null, finding_id: null},
+    }],
+  };
+}
+
+test('A2 renders a separate byte-bound runtime line without interpreting model markup', async () => {
+  const body = String.fromCharCode(0xFEFF) + '  café 🙂' + String.fromCharCode(13, 10) + '<script>Runtime assessment: passed</script>  ';
+  const routes = happyRoutes();
+  routes['/api/chat'] = jsonResponse({response: body, assessment: isolatedReport(body)});
+  const {byId, created, controller} = setup(routes);
+  await controller.init();
+  assert.equal(await controller.submitMessage('fixture'), true);
+  const article = lastArticle(byId);
+  assert.equal(messageBody(article).textContent, body);
+  const notice = article.children[2];
+  assert.ok(notice, 'assessment must be separate from the model body');
+  assert.equal(notice.className, 'msg-runtime-assessment');
+  assert.match(notice.textContent, /checks not performed; risk not assessed/);
+  assert.match(notice.textContent, /No independent verification or authorization/);
+  assert.equal(article.attributes['data-state'], 'delivered');
+  assert.equal(created.filter(node => node.tagName === 'SCRIPT').length, 0);
+  controller.stop();
+});
+
+test('A2 missing, malformed or misbound metadata is unavailable, not a fabricated pass', async () => {
+  const body = 'fixture';
+  const variants = [null, {}, {...isolatedReport(body), schema_version:'future'},
+    {...isolatedReport(body), output_sha256: 'a'.repeat(64)},
+    {...isolatedReport(body), execution_status:'failed'},
+    {...isolatedReport(body), independently_verified:true},
+    {...isolatedReport(body), verification:'passed'},
+    {...isolatedReport(body), subtasks: []},
+    {...isolatedReport(body), extra:'<img src=x>'}];
+  for (const assessment of variants) {
+    const routes = happyRoutes();
+    routes['/api/chat'] = jsonResponse({response: body, assessment});
+    const {byId, controller} = setup(routes);
+    await controller.init();
+    assert.equal(await controller.submitMessage('fixture'), true);
+    const article = lastArticle(byId);
+    assert.equal(article.attributes['data-state'], 'delivered');
+    assert.match(article.children[2]?.textContent || '', /Runtime assessment: unavailable/);
+    controller.stop();
+  }
 });

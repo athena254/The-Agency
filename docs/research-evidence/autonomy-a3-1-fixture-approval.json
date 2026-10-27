@@ -1,0 +1,8 @@
+{
+  "recorded_at_utc": "2026-10-16T21:50:12.838071+00:00",
+  "user_response_exact": "Approve the one-test fixture update",
+  "allowed_file": "tests/test_beta_principal_hop.py",
+  "allowed_function": "test_context_and_sender_cannot_mint_principal",
+  "change": "Initialize and close actual audit store; preserve principal-forgery assertion unchanged",
+  "runtime_scope_unchanged": true
+}

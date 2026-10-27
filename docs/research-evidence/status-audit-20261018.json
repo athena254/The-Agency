@@ -1,0 +1,463 @@
+{
+  "audit_date": "2026-10-18",
+  "tested_head": "6b1d4c4347ad51e48a3ef478f0e2a2f6f5bcfbbf",
+  "source_tree": "5e24627025f00fe6a5e775e297f80c3fc1175ed1",
+  "tests_tree": "713bfd75b939b913113d3b4cd1c424e87497022f",
+  "remote_main_at_audit": "3417c79bf2056ab414f49b3c0281b5c723377493",
+  "local_main_at_audit": "713a4e311b1e071fbd6c5cf103b995d17aa7e5a2",
+  "local_branches": [
+    {
+      "branch": "docs/agency-status-20261018",
+      "sha": "6b1d4c4347ad51e48a3ef478f0e2a2f6f5bcfbbf",
+      "ancestor_of_checkpoint": true,
+      "unique_non_equivalent_patches": 0,
+      "patch_equivalent_commits": 0
+    },
+    {
+      "branch": "docs/autonomy-admission-a3-20261016",
+      "sha": "6b1d4c4347ad51e48a3ef478f0e2a2f6f5bcfbbf",
+      "ancestor_of_checkpoint": true,
+      "unique_non_equivalent_patches": 0,
+      "patch_equivalent_commits": 0
+    },
+    {
+      "branch": "docs/autonomy-verification-a2-20261016",
+      "sha": "d9377606de25e7dadbcf85d51480026022068085",
+      "ancestor_of_checkpoint": true,
+      "unique_non_equivalent_patches": 0,
+      "patch_equivalent_commits": 0
+    },
+    {
+      "branch": "docs/bounded-autonomy-20261016",
+      "sha": "020c9883732ab3cd793bb63449263d9a2df0c1d5",
+      "ancestor_of_checkpoint": true,
+      "unique_non_equivalent_patches": 0,
+      "patch_equivalent_commits": 0
+    },
+    {
+      "branch": "fix/agency-admission-diagnostics-20261015",
+      "sha": "d6c78fb93b20f50d436b85ef6334820ff88f0542",
+      "ancestor_of_checkpoint": false,
+      "unique_non_equivalent_patches": 0,
+      "patch_equivalent_commits": 3
+    },
+    {
+      "branch": "fix/agency-callbacks-20261015",
+      "sha": "1f669f95e35d3f7ac99564cf60452c148874049e",
+      "ancestor_of_checkpoint": false,
+      "unique_non_equivalent_patches": 0,
+      "patch_equivalent_commits": 1
+    },
+    {
+      "branch": "fix/agency-governance-fixture-20261015",
+      "sha": "0896c3eda6680d929c7373557304f0410fd43750",
+      "ancestor_of_checkpoint": false,
+      "unique_non_equivalent_patches": 0,
+      "patch_equivalent_commits": 1
+    },
+    {
+      "branch": "fix/agency-lattice-consumers-20261015",
+      "sha": "c201b37e58fa6acca112d17be55a5d4ebdbf4cfa",
+      "ancestor_of_checkpoint": false,
+      "unique_non_equivalent_patches": 0,
+      "patch_equivalent_commits": 4
+    },
+    {
+      "branch": "fix/agency-lattice-ownership-20261015",
+      "sha": "ba7cc1c1287237f62c0f8abb21dbed7a69e1b446",
+      "ancestor_of_checkpoint": false,
+      "unique_non_equivalent_patches": 0,
+      "patch_equivalent_commits": 2
+    },
+    {
+      "branch": "fix/agency-service-lifecycle-20261015",
+      "sha": "b88c858981521e2c47dae304f6698c45fd263eb5",
+      "ancestor_of_checkpoint": false,
+      "unique_non_equivalent_patches": 0,
+      "patch_equivalent_commits": 1
+    },
+    {
+      "branch": "fix/agency-test-diagnostics-20261015",
+      "sha": "6facff5bf4050cc3c0646cdefef9b7ac7902b5a3",
+      "ancestor_of_checkpoint": false,
+      "unique_non_equivalent_patches": 0,
+      "patch_equivalent_commits": 2
+    },
+    {
+      "branch": "fix/agency-webhook-20261015",
+      "sha": "cf1151ce77f72dedea4265700e888ae9a5a58721",
+      "ancestor_of_checkpoint": false,
+      "unique_non_equivalent_patches": 0,
+      "patch_equivalent_commits": 1
+    },
+    {
+      "branch": "fix/autonomy-context-a1-20261016",
+      "sha": "c958b874e24938e2a3713963d4d5aa73f21a97ba",
+      "ancestor_of_checkpoint": true,
+      "unique_non_equivalent_patches": 0,
+      "patch_equivalent_commits": 0
+    },
+    {
+      "branch": "fix/lattice-foundation-20261015",
+      "sha": "1c7e7da2774ee4687741a0e346cbf2d593a9c845",
+      "ancestor_of_checkpoint": true,
+      "unique_non_equivalent_patches": 0,
+      "patch_equivalent_commits": 0
+    },
+    {
+      "branch": "main",
+      "sha": "713a4e311b1e071fbd6c5cf103b995d17aa7e5a2",
+      "ancestor_of_checkpoint": true,
+      "unique_non_equivalent_patches": 0,
+      "patch_equivalent_commits": 0
+    }
+  ],
+  "local_branch_count": 15,
+  "worktrees": [
+    {
+      "path": "C:/Users/alphi/theagency",
+      "status": ""
+    },
+    {
+      "path": "C:/Users/alphi/agency-worktrees/agency-status-20261018",
+      "status": ""
+    },
+    {
+      "path": "C:/Users/alphi/agency-worktrees/autonomy-admission-a3-20261016",
+      "status": ""
+    },
+    {
+      "path": "C:/Users/alphi/agency-worktrees/autonomy-context-a1-20261016",
+      "status": ""
+    },
+    {
+      "path": "C:/Users/alphi/agency-worktrees/autonomy-verification-a2-20261016",
+      "status": ""
+    },
+    {
+      "path": "C:/Users/alphi/agency-worktrees/bounded-autonomy-20261016",
+      "status": ""
+    }
+  ],
+  "worktree_count": 6,
+  "receipts": [
+    {
+      "label": "format",
+      "kind": "format",
+      "started_at_utc": "2026-10-18T11:20:38.347167+00:00",
+      "completed_at_utc": "2026-10-18T11:20:39.360256+00:00",
+      "elapsed_seconds": 1.02,
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-m",
+        "ruff",
+        "format",
+        "--check",
+        "C:\\Users\\alphi\\agency-worktrees\\agency-status-20261018\\src",
+        "C:\\Users\\alphi\\agency-worktrees\\agency-status-20261018\\tests"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-status-20261018\\format",
+      "head": "6b1d4c4347ad51e48a3ef478f0e2a2f6f5bcfbbf",
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "source_test_after": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false,
+      "artifact_hashes": {
+        "output.log": "8c3c73cce79068c1c7d2facbdcd6e28be5623ab9e03dc82c7181d60440886139",
+        "result.json": "80727a76c1d28eb642839dcf5ab48a9486c022a7389444b06f994686588342c9"
+      }
+    },
+    {
+      "label": "full-diagnostic",
+      "kind": "pytest",
+      "started_at_utc": "2026-10-18T11:28:44.255026+00:00",
+      "completed_at_utc": "2026-10-18T11:28:49.491099+00:00",
+      "elapsed_seconds": 5.23,
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "-v",
+        "-x",
+        "--tb=short",
+        "-q",
+        "-o",
+        "faulthandler_timeout=0",
+        "-o",
+        "cache_dir=C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-status-20261018\\full-diagnostic\\pytest-cache",
+        "--basetemp",
+        "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-status-20261018\\full-diagnostic\\pytest-tmp",
+        "--junitxml=C:\\Users\\alphi\\agency-evidence\\status-audit-20261018\\full-diagnostic\\results.xml",
+        "-W",
+        "error::ResourceWarning",
+        "-W",
+        "error::pytest.PytestUnhandledThreadExceptionWarning",
+        "-W",
+        "error::pytest.PytestUnraisableExceptionWarning"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-status-20261018\\full-diagnostic",
+      "head": "6b1d4c4347ad51e48a3ef478f0e2a2f6f5bcfbbf",
+      "exit_code": 5,
+      "timed_out": false,
+      "source_test_before": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "source_test_after": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false,
+      "junit": {
+        "tests": 0,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "artifact_hashes": {
+        "output.log": "48d09e97aa6230f6354dbd9f739687745b3fdf73de3b155a360cc411d012bf90",
+        "result.json": "5d5f513dd52eac0fd45f773851fdc440c407cbbac4a66c928112b6d2bf71db03",
+        "results.xml": "8098cc3144fc0fd7316de267c625b5e71f5e490f91158fc41f7abbaba34ef875"
+      }
+    },
+    {
+      "label": "full-diagnostic-corrected",
+      "kind": "pytest",
+      "started_at_utc": "2026-10-18T11:30:30.703536+00:00",
+      "completed_at_utc": "2026-10-18T11:36:34.659045+00:00",
+      "elapsed_seconds": 363.95,
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "C:\\Users\\alphi\\agency-worktrees\\agency-status-20261018\\tests",
+        "-v",
+        "-x",
+        "--tb=short",
+        "-q",
+        "-o",
+        "faulthandler_timeout=0",
+        "-o",
+        "cache_dir=C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-status-20261018\\full-diagnostic-corrected\\pytest-cache",
+        "--basetemp",
+        "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-status-20261018\\full-diagnostic-corrected\\pytest-tmp",
+        "--junitxml=C:\\Users\\alphi\\agency-evidence\\status-audit-20261018\\full-diagnostic-corrected\\results.xml",
+        "-W",
+        "error::ResourceWarning",
+        "-W",
+        "error::pytest.PytestUnhandledThreadExceptionWarning",
+        "-W",
+        "error::pytest.PytestUnraisableExceptionWarning"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-status-20261018\\full-diagnostic-corrected",
+      "head": "6b1d4c4347ad51e48a3ef478f0e2a2f6f5bcfbbf",
+      "exit_code": 1,
+      "timed_out": false,
+      "source_test_before": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "source_test_after": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false,
+      "junit": {
+        "tests": 15,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0
+      },
+      "artifact_hashes": {
+        "output.log": "44eea54bc5b9af0416fcf531c02dcb2e5c87fe2f49cf97173f175ad2a231c5e6",
+        "result.json": "df7b6afeb70d61b06e2eea8948d25900e8e12f0aea31160c9d7f9872ffcea606",
+        "results.xml": "e4d9078fb65fae91fe813f3d742f2309bea7bba0a9a812d9befeb224c08e07e8"
+      }
+    },
+    {
+      "label": "import-assessment",
+      "kind": "imports",
+      "started_at_utc": "2026-10-18T11:27:00.719063+00:00",
+      "completed_at_utc": "2026-10-18T11:27:41.067967+00:00",
+      "elapsed_seconds": 40.36,
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-c",
+        "import importlib; importlib.import_module('agency.agents.assessment'); print(\"COLD_IMPORT_OK\")"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-status-20261018\\import-assessment",
+      "head": "6b1d4c4347ad51e48a3ef478f0e2a2f6f5bcfbbf",
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "source_test_after": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false,
+      "artifact_hashes": {
+        "output.log": "64ea07bd88d3e7d952ac75d4ecdc1c84c3a13796c07abfc83a479d38d09f8b27",
+        "result.json": "2f8cb84c6141860a900946a4672ec0074df252dd0b4c420440bc59fe9e22529b"
+      }
+    },
+    {
+      "label": "import-telegram",
+      "kind": "imports",
+      "started_at_utc": "2026-10-18T11:27:42.259404+00:00",
+      "completed_at_utc": "2026-10-18T11:27:50.791798+00:00",
+      "elapsed_seconds": 8.53,
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-c",
+        "import importlib; importlib.import_module('telegram_bot'); print(\"COLD_IMPORT_OK\")"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-status-20261018\\import-telegram",
+      "head": "6b1d4c4347ad51e48a3ef478f0e2a2f6f5bcfbbf",
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "source_test_after": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false,
+      "artifact_hashes": {
+        "output.log": "64ea07bd88d3e7d952ac75d4ecdc1c84c3a13796c07abfc83a479d38d09f8b27",
+        "result.json": "34c8afd32b67de039adfb3646bdbe6fc310e04ae1a3141ff50bda28ac19494a1"
+      }
+    },
+    {
+      "label": "lint",
+      "kind": "lint",
+      "started_at_utc": "2026-10-18T11:20:30.836259+00:00",
+      "completed_at_utc": "2026-10-18T11:20:36.637650+00:00",
+      "elapsed_seconds": 5.8,
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-m",
+        "ruff",
+        "check",
+        "C:\\Users\\alphi\\agency-worktrees\\agency-status-20261018\\src",
+        "C:\\Users\\alphi\\agency-worktrees\\agency-status-20261018\\tests"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-status-20261018\\lint",
+      "head": "6b1d4c4347ad51e48a3ef478f0e2a2f6f5bcfbbf",
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "source_test_after": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false,
+      "artifact_hashes": {
+        "output.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+        "result.json": "d7a2a4ca927476878400f47bb0a6509a1745341384a86ca8c82fcec932bd51e7"
+      }
+    },
+    {
+      "label": "mypy",
+      "kind": "mypy",
+      "started_at_utc": "2026-10-18T11:20:40.941403+00:00",
+      "completed_at_utc": "2026-10-18T11:23:41.561317+00:00",
+      "elapsed_seconds": 180.62,
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-m",
+        "mypy",
+        "--config-file",
+        "C:\\Users\\alphi\\agency-worktrees\\agency-status-20261018\\pyproject.toml",
+        "--cache-dir",
+        "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-status-20261018\\mypy\\mypy-cache",
+        "C:\\Users\\alphi\\agency-worktrees\\agency-status-20261018\\src"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-status-20261018\\mypy",
+      "head": "6b1d4c4347ad51e48a3ef478f0e2a2f6f5bcfbbf",
+      "exit_code": 124,
+      "timed_out": true,
+      "source_test_before": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "source_test_after": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false,
+      "artifact_hashes": {
+        "output.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "result.json": "8e38c0ce45500d3deeb824a0ea371ce9aab2569b40a7b2ed28d6a46f3f58a833"
+      }
+    },
+    {
+      "label": "mypy-repeat",
+      "kind": "mypy",
+      "started_at_utc": "2026-10-18T11:27:56.466322+00:00",
+      "completed_at_utc": "2026-10-18T11:29:10.810459+00:00",
+      "elapsed_seconds": 74.34,
+      "command": [
+        "C:\\Users\\alphi\\theagency\\.venv\\Scripts\\python.exe",
+        "-m",
+        "mypy",
+        "--config-file",
+        "C:\\Users\\alphi\\agency-worktrees\\agency-status-20261018\\pyproject.toml",
+        "--cache-dir",
+        "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-status-20261018\\mypy-repeat\\mypy-cache",
+        "C:\\Users\\alphi\\agency-worktrees\\agency-status-20261018\\src"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-status-20261018\\mypy-repeat",
+      "head": "6b1d4c4347ad51e48a3ef478f0e2a2f6f5bcfbbf",
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "source_test_after": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": true,
+      "os_sandbox": false,
+      "native_children_guarded": false,
+      "artifact_hashes": {
+        "output.log": "fd79775cdafd55878599a748608d6820173d539af213a0d7e37183fd4d28eb02",
+        "result.json": "42e84270fdbb2968c6c044dfff94651aa4838302e92c848aa8dc0e6e53274752"
+      }
+    },
+    {
+      "label": "ui",
+      "kind": "ui",
+      "started_at_utc": "2026-10-18T11:26:42.871999+00:00",
+      "completed_at_utc": "2026-10-18T11:27:00.090443+00:00",
+      "elapsed_seconds": 17.22,
+      "command": [
+        "C:\\Program Files\\nodejs\\node.EXE",
+        "--test",
+        "C:\\Users\\alphi\\agency-worktrees\\agency-status-20261018\\tests\\prototype_ui.test.mjs"
+      ],
+      "cwd": "C:\\Users\\alphi\\AppData\\Local\\hermes\\cache\\scratch\\agency-status-20261018\\ui",
+      "head": "6b1d4c4347ad51e48a3ef478f0e2a2f6f5bcfbbf",
+      "exit_code": 0,
+      "timed_out": false,
+      "source_test_before": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "source_test_after": "556ac9f3f6615b47d4fc981eb753344fbdf315798018bd1b6e2fb6980d9d2bb4",
+      "echo_provider_explicit": true,
+      "python_external_socket_guard": false,
+      "os_sandbox": false,
+      "native_children_guarded": false,
+      "artifact_hashes": {
+        "output.log": "d5f67253f880d1f15e0eec3f310c7792241b35ff63974707c5e7035bdb2a2164",
+        "result.json": "7463e29dd86cfbf21717267b971c92dc3dd9612ca283c18f215bbd26198ebdf9"
+      }
+    }
+  ],
+  "initial_full_run": {
+    "status": "incomplete_outer_tool_timeout",
+    "outer_timeout_seconds": 420,
+    "failure_marker_observed": true,
+    "junit_available": false,
+    "raw_log_sha256": "e77190b263f7661f6da074268488a0ae743e139789c395dd5c352d1e9d51695b"
+  },
+  "diagnostic_harness_mistake": {
+    "label": "full-diagnostic",
+    "status": "no_tests_ran_exit_5",
+    "reason": "explicit tests target omitted; corrected run retained separately"
+  },
+  "release_status": "BLOCKED",
+  "new_runtime_changes_in_audit": false,
+  "live_provider_or_telegram_used": false,
+  "os_sandbox": false,
+  "python_guard_not_native_child_containment": true,
+  "historical_suite_pass_is_not_fresh_qualification": true
+}

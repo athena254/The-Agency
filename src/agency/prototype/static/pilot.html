@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="Single-owner local pilot. Limited autonomy, not production-ready, not decentralized.">
+  <title>The Agency — owner pilot</title>
+  <link rel="stylesheet" href="/assets/pilot.css">
+</head>
+<body>
+  <a class="skip-link" href="#pilot-token-input">Skip to the owner unlock form</a>
+
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">The Agency</span>
+        <span class="brand-tag">owner pilot</span>
+      </div>
+      <div class="topbar-status">
+        <span id="pilot-lock-state" class="badge badge--locked" role="status" aria-live="polite">Locked</span>
+        <span id="pilot-session-detail" class="topbar-detail">CSRF bootstrap has not run.</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section id="pilot-lock" class="panel lock-panel" aria-labelledby="pilot-lock-title">
+        <h1 id="pilot-lock-title" class="panel-title">Owner unlock</h1>
+        <p class="panel-note">This single-owner local pilot uses an owner bearer that is kept only in this tab's JavaScript memory. It is not stored, put in the URL, or written to logs. The pilot is not production-ready and not decentralized.</p>
+        <form id="pilot-unlock-form" class="unlock-form" novalidate>
+          <label for="pilot-token-input" class="field-label">Owner bearer</label>
+          <input id="pilot-token-input" class="text-input" type="password" autocomplete="off" spellcheck="false" autocapitalize="none" placeholder="Paste the owner bearer">
+          <button type="submit" id="pilot-unlock-button" class="button button--primary">Unlock</button>
+        </form>
+        <p id="pilot-unlock-note" class="status-text" role="status" aria-live="polite">Enter the owner bearer to request authenticated capabilities.</p>
+        <p id="pilot-announcer" class="visually-hidden" role="status" aria-live="polite"></p>
+      </section>
+
+      <section id="pilot-workspace" class="workspace" aria-label="Owner pilot workspace" aria-busy="false" hidden>
+        <section class="panel" aria-labelledby="pilot-capabilities-title">
+          <div class="panel-heading">
+            <h2 id="pilot-capabilities-title" class="panel-title">Capabilities</h2>
+            <button type="button" id="pilot-lock-button" class="button button--quiet">Lock and clear</button>
+          </div>
+          <dl class="facts">
+            <div class="fact"><dt>Mode</dt><dd id="pilot-cap-mode">&mdash;</dd></div>
+            <div class="fact"><dt>Ready</dt><dd id="pilot-cap-ready">&mdash;</dd></div>
+            <div class="fact"><dt>Provider</dt><dd id="pilot-cap-provider">&mdash;</dd></div>
+            <div class="fact"><dt>Uncertainty</dt><dd id="pilot-cap-uncertainty">&mdash;</dd></div>
+          </dl>
+          <dl id="pilot-limits" class="limits" aria-label="Server-reported limits"></dl>
+          <p id="pilot-tools-allowed" class="panel-note">Allowed tools: calculator, utc_time, web_search.</p>
+          <p id="pilot-tools-disabled" class="panel-note">Disabled: shell, fetch, governance, memory tools, bridges, agent activation.</p>
+          <p id="pilot-readiness-note" class="status-text" role="status" aria-live="polite"></p>
+        </section>
+
+        <div class="workspace-grid">
+          <section class="panel" aria-labelledby="pilot-threads-title">
+            <h2 id="pilot-threads-title" class="panel-title">Conversations</h2>
+            <form id="pilot-thread-form" class="stack-form" novalidate>
+              <label for="pilot-thread-title" class="field-label">New conversation title</label>
+              <input id="pilot-thread-title" class="text-input" type="text" maxlength="120" autocomplete="off" spellcheck="true" placeholder="Short title">
+              <button type="submit" id="pilot-create-thread" class="button">Create conversation</button>
+            </form>
+            <p id="pilot-threads-note" class="status-text" role="status" aria-live="polite">No conversations loaded.</p>
+            <ul id="pilot-thread-list" class="thread-list" aria-label="Conversations"></ul>
+          </section>
+
+          <section class="panel chat-panel" aria-labelledby="pilot-thread-heading">
+            <h2 id="pilot-thread-heading" class="panel-title">Conversation</h2>
+            <p id="pilot-thread-note" class="status-text" role="status" aria-live="polite">No conversation selected.</p>
+            <div id="pilot-messages" class="messages" role="log" aria-live="polite" aria-relevant="additions text" tabindex="0"></div>
+            <p id="pilot-messages-note" class="panel-note">Committed messages are loaded from the selected conversation.</p>
+            <form id="pilot-task-form" class="stack-form" novalidate>
+              <label for="pilot-message-input" class="field-label">Message for the owner pilot</label>
+              <textarea id="pilot-message-input" class="text-input textarea" rows="3" maxlength="8000" autocomplete="off" spellcheck="true" placeholder="Describe one bounded task" aria-describedby="pilot-task-hint"></textarea>
+              <button type="submit" id="pilot-send-task" class="button button--primary" disabled>Send task</button>
+            </form>
+            <p id="pilot-task-hint" class="hint">Enter sends &middot; Shift+Enter adds a new line. Submission is admitted once; ambiguous outcomes retain the same request ID and are never retried automatically.</p>
+          </section>
+
+          <aside class="panel status-panel" aria-labelledby="pilot-task-title">
+            <h2 id="pilot-task-title" class="panel-title">Task status</h2>
+            <dl class="facts">
+              <div class="fact"><dt>State</dt><dd id="pilot-task-state">&mdash;</dd></div>
+              <div class="fact"><dt>Task ID</dt><dd id="pilot-task-id">&mdash;</dd></div>
+              <div class="fact"><dt>Request ID</dt><dd id="pilot-task-request">&mdash;</dd></div>
+              <div class="fact"><dt>Usage</dt><dd id="pilot-task-usage">&mdash;</dd></div>
+              <div class="fact"><dt>Error code</dt><dd id="pilot-task-error">&mdash;</dd></div>
+            </dl>
+            <p id="pilot-task-note" class="status-text" role="status" aria-live="polite">No task submitted.</p>
+
+            <section id="pilot-result" class="result" aria-labelledby="pilot-result-title" hidden>
+              <h3 id="pilot-result-title" class="result-title">Execution result</h3>
+              <p id="pilot-result-execution" class="result-execution"></p>
+              <pre id="pilot-result-body" class="result-body"></pre>
+              <h3 class="result-title">Independent check</h3>
+              <p id="pilot-result-check" class="result-check"></p>
+            </section>
+
+            <div class="button-row">
+              <button type="button" id="pilot-refresh-task" class="button button--quiet" disabled>Refresh status</button>
+              <button type="button" id="pilot-cancel-task" class="button button--danger" disabled>Request cancellation</button>
+            </div>
+            <p id="pilot-cancel-note" class="status-text" role="status" aria-live="polite">Cancellation is available only while a task is active.</p>
+
+            <h2 class="panel-title panel-title--sub">Recent tasks</h2>
+            <p id="pilot-tasks-note" class="panel-note">No tasks loaded.</p>
+            <ul id="pilot-task-list" class="task-list" aria-label="Recent tasks"></ul>
+          </aside>
+        </div>
+
+        <section class="panel disabled-panel" aria-labelledby="pilot-disabled-title">
+          <h2 id="pilot-disabled-title" class="panel-title">Not available in this pilot</h2>
+          <p class="panel-note">These actions are visible so the boundary is explicit. They are not implemented or advertised as working in this UI.</p>
+          <ul id="pilot-disabled-actions" class="disabled-list">
+            <li><span>Shell execution</span><span class="pill pill--disabled">Disabled</span></li>
+            <li><span>Network fetch</span><span class="pill pill--disabled">Disabled</span></li>
+            <li><span>Governance actions</span><span class="pill pill--disabled">Disabled</span></li>
+            <li><span>Memory tools</span><span class="pill pill--disabled">Disabled</span></li>
+            <li><span>Bridges and agent activation</span><span class="pill pill--disabled">Disabled</span></li>
+          </ul>
+        </section>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Single-owner local pilot for this computer only. Execution and checks are separate signals; the pilot does not claim independent verification. Not production-ready and not decentralized.</p>
+    </footer>
+  </div>
+
+  <noscript>
+    <p class="noscript">This pilot needs JavaScript enabled to talk to the local service.</p>
+  </noscript>
+
+  <script src="/assets/pilot.js" defer></script>
+</body>
+</html>
