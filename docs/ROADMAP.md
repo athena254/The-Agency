@@ -47,6 +47,7 @@
 |------|-------|----------------------------------------------|
 | Durable thread / workspace / project store | Partial | SQLite thread/workspace store for trusted callers; public HTTP is anonymous/stateless until authentication, project model pending |
 | Agent Factory (versioned) | Partial v1 | Versioned blueprints, approval, L0/UNKNOWN activation; no evaluation, autonomous creation or restart rehydration |
+| Prompt library (factory) | Partial v1 | Versioned prompt records, deterministic composition, bundled segments + REAP packs; runtime consumption and Forge tool-availability params implemented |
 | Skill registry (Agency-native) | Partial | Versioned metadata, lifecycle evidence, explicit permissions; skill runtime binding pending |
 | Workflow registry + deterministic executor | Partial product, explicit local recovery implemented | Bounded DAG/pinned allowlisted execution plus file-backed `run_recoverable/resume/reconcile`; Agent/Forge integration and distributed task recovery remain missing |
 | Forge (integrated) + native coding agent | Partial inspection gate | `forge/inspection.py` has bounded read-only hash/syntax reports; real coding, tests, security review, packaging and release remain planned |

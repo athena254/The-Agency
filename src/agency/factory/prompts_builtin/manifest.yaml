@@ -1,0 +1,333 @@
+# Generated from REAP upstream; kept in sync by replacing reap/*.md and
+# this manifest together. Do not hand-edit prompt bodies here.
+{
+  "library_version": "1.1.0",
+  "attribution": {
+    "upstream": "https://github.com/JoasASantos/REA-Prompts",
+    "commit": "ccb02b89721dd7d466beb17004a89d6bc25f5b02",
+    "license": "MIT",
+    "copyright": "Copyright (c) 2025 Joas Antonio dos Santos"
+  },
+  "prompts": [
+    {
+      "id": "reap-00-install-and-verify",
+      "version": "1.0.0",
+      "name": "Install and Verify",
+      "description": "REAP prompt pack: Install and Verify. Upstream REA investigation prompts (MIT).",
+      "domain": "setup",
+      "kind": "PACK",
+      "file": "reap/reap-00-install-and-verify.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-01-getting-started",
+      "version": "1.0.0",
+      "name": "Getting Started",
+      "description": "REAP prompt pack: Getting Started. Upstream REA investigation prompts (MIT).",
+      "domain": "onboarding",
+      "kind": "PACK",
+      "file": "reap/reap-01-getting-started.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-02-feature-tracing-any-program",
+      "version": "1.0.0",
+      "name": "Feature Tracing",
+      "description": "REAP prompt pack: Feature Tracing. Upstream REA investigation prompts (MIT).",
+      "domain": "feature-tracing",
+      "kind": "PACK",
+      "file": "reap/reap-02-feature-tracing-any-program.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-03-native-binary-exploration",
+      "version": "1.0.0",
+      "name": "Native Binary Exploration",
+      "description": "REAP prompt pack: Native Binary Exploration. Upstream REA investigation prompts (MIT).",
+      "domain": "native-binary",
+      "kind": "PACK",
+      "file": "reap/reap-03-native-binary-exploration.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-04-software-and-feature-cloning",
+      "version": "1.0.0",
+      "name": "Software and Feature Cloning",
+      "description": "REAP prompt pack: Software and Feature Cloning. Upstream REA investigation prompts (MIT).",
+      "domain": "cloning",
+      "kind": "PACK",
+      "file": "reap/reap-04-software-and-feature-cloning.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-05-games",
+      "version": "1.0.0",
+      "name": "Games",
+      "description": "REAP prompt pack: Games. Upstream REA investigation prompts (MIT).",
+      "domain": "games",
+      "kind": "PACK",
+      "file": "reap/reap-05-games.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-06-game-portability-to-wasm",
+      "version": "1.0.0",
+      "name": "Game Portability to WASM",
+      "description": "REAP prompt pack: Game Portability to WASM. Upstream REA investigation prompts (MIT).",
+      "domain": "wasm",
+      "kind": "PACK",
+      "file": "reap/reap-06-game-portability-to-wasm.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-07-firmware-and-embedded",
+      "version": "1.0.0",
+      "name": "Firmware and Embedded",
+      "description": "REAP prompt pack: Firmware and Embedded. Upstream REA investigation prompts (MIT).",
+      "domain": "firmware",
+      "kind": "PACK",
+      "file": "reap/reap-07-firmware-and-embedded.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-08-android",
+      "version": "1.0.0",
+      "name": "Android",
+      "description": "REAP prompt pack: Android. Upstream REA investigation prompts (MIT).",
+      "domain": "android",
+      "kind": "PACK",
+      "file": "reap/reap-08-android.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-09-kernel-analysis",
+      "version": "1.0.0",
+      "name": "Kernel Analysis",
+      "description": "REAP prompt pack: Kernel Analysis. Upstream REA investigation prompts (MIT).",
+      "domain": "kernel",
+      "kind": "PACK",
+      "file": "reap/reap-09-kernel-analysis.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-10-vulnerability-research",
+      "version": "1.0.0",
+      "name": "Vulnerability Research",
+      "description": "REAP prompt pack: Vulnerability Research. Upstream REA investigation prompts (MIT).",
+      "domain": "vulnerability-research",
+      "kind": "PACK",
+      "file": "reap/reap-10-vulnerability-research.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-11-electron-and-javascript",
+      "version": "1.0.0",
+      "name": "Electron and JavaScript",
+      "description": "REAP prompt pack: Electron and JavaScript. Upstream REA investigation prompts (MIT).",
+      "domain": "electron",
+      "kind": "PACK",
+      "file": "reap/reap-11-electron-and-javascript.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-12-anti-cheat-and-protection-research",
+      "version": "1.0.0",
+      "name": "Anti-Cheat and Protection Research",
+      "description": "REAP prompt pack: Anti-Cheat and Protection Research. Upstream REA investigation prompts (MIT).",
+      "domain": "anti-cheat",
+      "kind": "PACK",
+      "file": "reap/reap-12-anti-cheat-and-protection-research.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-13-dma-and-hardware-assisted-cheat-research-defensive",
+      "version": "1.0.0",
+      "name": "DMA and Hardware-Assisted Research",
+      "description": "REAP prompt pack: DMA and Hardware-Assisted Research. Upstream REA investigation prompts (MIT).",
+      "domain": "dma",
+      "kind": "PACK",
+      "file": "reap/reap-13-dma-and-hardware-assisted-cheat-research-defensive.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-14-software-cracking-research",
+      "version": "1.0.0",
+      "name": "Software Cracking Research",
+      "description": "REAP prompt pack: Software Cracking Research. Upstream REA investigation prompts (MIT).",
+      "domain": "cracking",
+      "kind": "PACK",
+      "file": "reap/reap-14-software-cracking-research.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-15-version-comparison-and-crash-work",
+      "version": "1.0.0",
+      "name": "Version Comparison and Crash Work",
+      "description": "REAP prompt pack: Version Comparison and Crash Work. Upstream REA investigation prompts (MIT).",
+      "domain": "version-comparison",
+      "kind": "PACK",
+      "file": "reap/reap-15-version-comparison-and-crash-work.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-16-long-running-investigations",
+      "version": "1.0.0",
+      "name": "Long-Running Investigations",
+      "description": "REAP prompt pack: Long-Running Investigations. Upstream REA investigation prompts (MIT).",
+      "domain": "long-running",
+      "kind": "PACK",
+      "file": "reap/reap-16-long-running-investigations.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-17-malware-analysis",
+      "version": "1.0.0",
+      "name": "Malware Analysis",
+      "description": "REAP prompt pack: Malware Analysis. Upstream REA investigation prompts (MIT).",
+      "domain": "malware",
+      "kind": "PACK",
+      "file": "reap/reap-17-malware-analysis.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-18-advanced-binary-exploration-and-deobfuscation",
+      "version": "1.0.0",
+      "name": "Advanced Binary Exploration and Deobfuscation",
+      "description": "REAP prompt pack: Advanced Binary Exploration and Deobfuscation. Upstream REA investigation prompts (MIT).",
+      "domain": "deobfuscation",
+      "kind": "PACK",
+      "file": "reap/reap-18-advanced-binary-exploration-and-deobfuscation.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-19-kernel-and-driver-exploitation-research",
+      "version": "1.0.0",
+      "name": "Kernel and Driver Exploitation Research",
+      "description": "REAP prompt pack: Kernel and Driver Exploitation Research. Upstream REA investigation prompts (MIT).",
+      "domain": "kernel-exploitation",
+      "kind": "PACK",
+      "file": "reap/reap-19-kernel-and-driver-exploitation-research.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-20-advanced-software-cloning-and-feature-reconstruction",
+      "version": "1.0.0",
+      "name": "Advanced Software Cloning",
+      "description": "REAP prompt pack: Advanced Software Cloning. Upstream REA investigation prompts (MIT).",
+      "domain": "advanced-cloning",
+      "kind": "PACK",
+      "file": "reap/reap-20-advanced-software-cloning-and-feature-reconstruction.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-21-protector-and-obfuscator-research",
+      "version": "1.0.0",
+      "name": "Protector and Obfuscator Research",
+      "description": "REAP prompt pack: Protector and Obfuscator Research. Upstream REA investigation prompts (MIT).",
+      "domain": "protector",
+      "kind": "PACK",
+      "file": "reap/reap-21-protector-and-obfuscator-research.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-22-go-and-rust-binary-source-recovery",
+      "version": "1.0.0",
+      "name": "Go and Rust Binary Source Recovery",
+      "description": "REAP prompt pack: Go and Rust Binary Source Recovery. Upstream REA investigation prompts (MIT).",
+      "domain": "go-rust",
+      "kind": "PACK",
+      "file": "reap/reap-22-go-and-rust-binary-source-recovery.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-prompt-writing-tips",
+      "version": "1.0.0",
+      "name": "Prompt-Writing Tips",
+      "description": "REAP prompt pack: Prompt-Writing Tips. Upstream REA investigation prompts (MIT).",
+      "domain": "methodology",
+      "kind": "PACK",
+      "file": "reap/reap-prompt-writing-tips.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-prompts",
+      "version": "1.0.0",
+      "name": "Prompt Index",
+      "description": "REAP prompt pack: Prompt Index. Upstream REA investigation prompts (MIT).",
+      "domain": "index",
+      "kind": "PACK",
+      "file": "reap/reap-prompts.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "reap-wildcard",
+      "version": "1.0.0",
+      "name": "Wildcard",
+      "description": "REAP prompt pack: Wildcard. Upstream REA investigation prompts (MIT).",
+      "domain": "wildcard",
+      "kind": "PACK",
+      "file": "reap/reap-wildcard.md",
+      "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
+    },
+    {
+      "id": "agency-base-identity",
+      "version": "1.0.0",
+      "name": "Agency Base Identity",
+      "description": "Shared baseline identity segment for every factory-issued agent.",
+      "domain": "agency",
+      "kind": "SEGMENT",
+      "file": "segments/agency-base-identity.md",
+      "provenance": "builtin:agency-factory/segments/agency-base-identity"
+    },
+    {
+      "id": "agency-evidence-discipline",
+      "version": "1.0.0",
+      "name": "Evidence Discipline",
+      "description": "Shared evidence and uncertainty discipline for every factory-issued agent.",
+      "domain": "agency",
+      "kind": "SEGMENT",
+      "file": "segments/agency-evidence-discipline.md",
+      "provenance": "builtin:agency-factory/segments/agency-evidence-discipline"
+    },
+    {
+      "id": "agency-l0-scope",
+      "version": "1.0.0",
+      "name": "Observation-First Scope",
+      "description": "Shared L0 observation-first scope segment for every factory-issued agent.",
+      "domain": "agency",
+      "kind": "SEGMENT",
+      "file": "segments/agency-l0-scope.md",
+      "provenance": "builtin:agency-factory/segments/agency-l0-scope"
+    },
+    {
+      "id": "reap-core-methodology",
+      "version": "1.0.0",
+      "name": "REA Investigation Methodology",
+      "description": "REAP investigation methodology derived from upstream prompt-writing tips (MIT).",
+      "domain": "methodology",
+      "kind": "SEGMENT",
+      "file": "segments/reap-core-methodology.md",
+      "provenance": "builtin:agency-factory/segments/reap-core-methodology"
+    },
+    {
+      "id": "reap-safety-scope",
+      "version": "1.0.0",
+      "name": "REA Authorization and Safety Scope",
+      "description": "REAP authorization and safety scope adapted from upstream (MIT).",
+      "domain": "methodology",
+      "kind": "SEGMENT",
+      "file": "segments/reap-safety-scope.md",
+      "provenance": "builtin:agency-factory/segments/reap-safety-scope"
+    },
+    {
+      "id": "reap-tool-availability",
+      "version": "1.0.0",
+      "name": "REA Tool Availability",
+      "description": "Host tool availability slots filled from the Forge catalog at activation.",
+      "domain": "tooling",
+      "kind": "SEGMENT",
+      "file": "segments/reap-tool-availability.md",
+      "provenance": "builtin:agency-factory/segments/reap-tool-availability"
+    }
+  ]
+}
