@@ -9,6 +9,8 @@ Fail-closed: any gate failure or high finding blocks PASS.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import sqlite3
 from datetime import UTC, datetime
@@ -304,6 +306,108 @@ def _one_round(
     return score, findings, tests_note
 
 
+def _llm_review_one_round(
+    llm: Any,
+    root: Path,
+    changed_paths: list[str],
+    test_paths: list[str] | None,
+    test_timeout_s: int,
+    run_tests_flag: bool,
+) -> tuple[int, list[ReviewFinding], str] | None:
+    """Try an Agency-native LLM critic. Returns None on any failure (fallback)."""
+    try:
+        # Build a compact evidence bundle for the model.
+        from agency.forge.inspection import inspect_changes
+        from agency.forge.security_scan import scan_changes
+
+        insp = inspect_changes(root, changed_paths)
+        sec = scan_changes(root, changed_paths)
+        findings_summary = {
+            "changed_paths": changed_paths,
+            "inspection_rejected": [r.reason for r in insp.rejected],
+            "security_findings": [
+                {
+                    "path": f.path,
+                    "line": f.line,
+                    "rule": f.rule_id,
+                    "sev": f.severity,
+                    "msg": f.message,
+                }
+                for f in sec.findings
+            ],
+            "lint": [],
+        }
+        # lint-ish
+        for p in changed_paths:
+            for lf in _lint_check(root, p):
+                findings_summary["lint"].append(
+                    {
+                        "path": lf.path,
+                        "line": lf.line,
+                        "rule": lf.rule_id,
+                        "sev": lf.severity,
+                        "msg": lf.message,
+                    }
+                )
+        tests_info = "not_run"
+        if run_tests_flag and test_paths:
+            try:
+                tr = run_tests(root, test_paths, timeout_s=test_timeout_s)
+                tests_info = tr.gate
+            except Exception:  # noqa: BLE001
+                tests_info = "error"
+        findings_summary["tests"] = tests_info
+
+        prompt = (
+            "You are a code reviewer for a software factory. Given the change set and "
+            "automated findings below, produce a JSON object with keys: "
+            '"score" (integer 0-5), "findings" (list of objects with keys path, line, '
+            "rule_id, severity (low/medium/high/critical), message, resolved (bool)), "
+            '"summary" (short string). Score 5 means clean. High/critical findings '
+            "block. Respond with JSON only.\n\n"
+            f"CHANGE SET:\n{json.dumps(findings_summary, indent=2)[:6000]}"
+        )
+        try:
+            response = asyncio.run(llm.generate(prompt))
+        except RuntimeError:
+            # already in an event loop; use a new loop
+            loop = asyncio.new_event_loop()
+            try:
+                response = loop.run_until_complete(llm.generate(prompt))
+            finally:
+                loop.close()
+        text = (response or "").strip()
+        # extract JSON
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1:
+            return None
+        data = json.loads(text[start : end + 1])
+        score = int(data.get("score", 0))
+        score = max(0, min(5, score))
+        llm_findings: list[ReviewFinding] = []
+        for raw in data.get("findings", []) or []:
+            if not isinstance(raw, dict):
+                continue
+            sev = raw.get("severity", "medium")
+            if sev not in ("low", "medium", "high", "critical"):
+                sev = "medium"
+            llm_findings.append(
+                ReviewFinding(
+                    path=str(raw.get("path", ""))[:512],
+                    line=int(raw.get("line", 1) or 1),
+                    rule_id=str(raw.get("rule_id", "LLM"))[:64] or "LLM",
+                    severity=sev,  # type: ignore[arg-type]
+                    message=str(raw.get("message", "llm finding"))[:500],
+                    resolved=bool(raw.get("resolved", False)),
+                )
+            )
+        tests_note = "tests_run" if (run_tests_flag and test_paths) else "tests_not_run"
+        return score, llm_findings, tests_note
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def run_review(
     root: str | Path,
     changed_paths: list[str] | None = None,
@@ -314,6 +418,8 @@ def run_review(
     test_paths: list[str] | None = None,
     test_timeout_s: int = 120,
     run_tests_flag: bool = False,
+    llm: Any = None,
+    use_llm: bool = False,
     **kwargs: Any,
 ) -> ReviewReport:
     real_root = _resolve_root(root)
@@ -341,18 +447,35 @@ def run_review(
     report_id = str(uuid4())
     created_at = datetime.now(UTC)
 
+    used_llm = False
     rounds_done = 0
     final_score = 0
     final_findings: list[ReviewFinding] = []
     for _ in range(max_rounds):
         rounds_done += 1
-        score, findings, _ = _one_round(
-            real_root,
-            changed_paths,
-            test_paths=test_paths,
-            test_timeout_s=test_timeout_s,
-            run_tests_flag=run_tests_flag,
-        )
+        if use_llm and llm is not None:
+            llm_result = _llm_review_one_round(
+                llm, real_root, changed_paths, test_paths, test_timeout_s, run_tests_flag
+            )
+            if llm_result is not None:
+                score, findings, _ = llm_result
+                used_llm = True
+            else:
+                score, findings, _ = _one_round(
+                    real_root,
+                    changed_paths,
+                    test_paths=test_paths,
+                    test_timeout_s=test_timeout_s,
+                    run_tests_flag=run_tests_flag,
+                )
+        else:
+            score, findings, _ = _one_round(
+                real_root,
+                changed_paths,
+                test_paths=test_paths,
+                test_timeout_s=test_timeout_s,
+                run_tests_flag=run_tests_flag,
+            )
         final_score = score
         final_findings = findings
         unresolved_high = sum(
@@ -367,6 +490,8 @@ def run_review(
     gate: ReviewGate = "PASS" if (final_score >= threshold and unresolved_high == 0) else "FAIL"
 
     caveats = list(CAVEATS)
+    if used_llm:
+        caveats = [c for c in caveats if c != "heuristic_review"]
     if run_tests_flag:
         caveats = [c for c in caveats if c != "tests_not_run"]
 

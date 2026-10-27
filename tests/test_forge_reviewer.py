@@ -61,3 +61,18 @@ def test_max_rounds_bound(tmp_path: Path):
     report = run_review(tmp_path, ["ok.py"], max_rounds=2)
     assert report.max_rounds == 2
     assert report.rounds <= 2
+
+
+class _FakeLLM:
+    async def generate(self, prompt, context=None):
+        return '{"score": 5, "findings": [], "summary": "clean"}'
+
+
+def test_llm_review_path(tmp_path):
+    (tmp_path / "ok.py").write_text("x = 1\n", encoding="utf-8")
+    from agency.forge.reviewer import run_review
+
+    report = run_review(tmp_path, ["ok.py"], use_llm=True, llm=_FakeLLM())
+    assert report.gate == "PASS"
+    assert report.score == 5
+    assert "heuristic_review" not in report.caveats
