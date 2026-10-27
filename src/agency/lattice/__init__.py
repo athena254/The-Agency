@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from agency.lattice.backends.base import Embedder, LatticeBackend
 from agency.lattice.config import get_config, load_config, reset_config
-from agency.lattice.factory import get_lattice, reset_lattice
+from agency.lattice.factory import LatticeLease, acquire_lattice, get_lattice, reset_lattice
 from agency.lattice.models import (
     ConsensusProposal,
     EdgeType,
@@ -28,9 +28,11 @@ __all__ = [
     "LatticeBackend",
     "LatticeConfig",
     "LatticeEvent",
+    "LatticeLease",
     "NodeType",
     "Reputation",
     "Vote",
+    "acquire_lattice",
     "ensure_utc",
     "get_config",
     "get_lattice",

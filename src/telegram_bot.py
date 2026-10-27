@@ -39,6 +39,9 @@ _POLL_STATE_KEY = "offset"
 _ADVANCING_STATUSES = frozenset({"ok", "ignored", "rejected"})
 # Hidden until peer governance can verify affected-consumer participation.
 _DISABLED_GOVERNANCE_COMMANDS = frozenset({"propose_agent", "proposals"})
+# Thread commands run only on the private nonbeta path; the beta menu must
+# not advertise what beta cannot execute.
+_THREAD_MENU_COMMANDS = frozenset({"new", "threads", "switch", "current"})
 _MAX_SEEN_IDS = 1000
 _MAX_BACKOFF_SECONDS = 30.0
 
@@ -76,6 +79,10 @@ class TelegramBot:
         {"command": "research", "description": "Research a topic: /research <topic>"},
         {"command": "whoami", "description": "What this bot is"},
         {"command": "name", "description": "Set your private name for this assistant"},
+        {"command": "new", "description": "Create a thread: /new <title>"},
+        {"command": "threads", "description": "List your threads"},
+        {"command": "switch", "description": "Switch thread: /switch <title or id>"},
+        {"command": "current", "description": "Show the active thread"},
     ]
 
     def __init__(
@@ -144,7 +151,12 @@ class TelegramBot:
 
     def commands_for_mode(self) -> list[dict[str, str]]:
         """Hide governance commands until peer voting is actually available."""
-        return [c for c in self.COMMANDS if c["command"] not in _DISABLED_GOVERNANCE_COMMANDS]
+        return [
+            c
+            for c in self.COMMANDS
+            if c["command"] not in _DISABLED_GOVERNANCE_COMMANDS
+            and (not self._config.beta_mode or c["command"] not in _THREAD_MENU_COMMANDS)
+        ]
 
     def _open_poll_db(self) -> None:
         """Open the poll-state DB and resume the persisted offset. Safe to retry."""

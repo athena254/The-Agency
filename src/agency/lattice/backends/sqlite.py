@@ -25,7 +25,7 @@ import sqlite3
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, TypeVar
 
 import aiosqlite
 
@@ -42,6 +42,19 @@ from agency.lattice.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+
+
+async def _drain_task(task: asyncio.Future[_T]) -> _T:
+    """Drain an owned worker operation before releasing lifecycle exclusion."""
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            continue
+    return task.result()
+
 
 SCHEMA_VERSION = 1
 
@@ -193,8 +206,22 @@ class SQLiteLattice:
 
         try:
             async with self._lock:
-                await self._open_locked()
-                await self._migrate_locked()
+                try:
+                    await self._open_locked()
+                    await self._migrate_locked()
+                except BaseException:
+                    if self._db is not None:
+                        cleanup = asyncio.create_task(self._db.close())
+                        try:
+                            await _drain_task(cleanup)
+                        except BaseException as exc:  # noqa: BLE001 - preserve primary failure
+                            # Retain the connection for an explicit cleanup retry.
+                            logger.warning(
+                                "SQLite initialization cleanup failed: %s", type(exc).__name__
+                            )
+                        else:
+                            self._db = None
+                    raise
         except Exception as exc:
             logger.exception("SQLiteLattice.initialize failed for %s", self._db_path)
             raise RuntimeError(f"Failed to initialize SQLiteLattice: {exc}") from exc
@@ -231,7 +258,18 @@ class SQLiteLattice:
             parent = os.path.dirname(os.path.abspath(self._db_path))
             if parent:
                 os.makedirs(parent, exist_ok=True)
-        db = await aiosqlite.connect(self._db_path)
+        # The connection worker must finish before rollback can own/close it.
+        # Cancelling aiosqlite's direct await can discard a late raw connection.
+        opening = asyncio.ensure_future(aiosqlite.connect(self._db_path))
+        try:
+            self._db = await asyncio.shield(opening)
+        except BaseException:
+            try:
+                self._db = await _drain_task(opening)
+            except BaseException as exc:  # noqa: BLE001 - preserve primary failure
+                logger.warning("SQLite connection opening failed: %s", type(exc).__name__)
+            raise
+        db = self._db
         db.row_factory = sqlite3.Row
         await db.execute("PRAGMA journal_mode=WAL")
         await db.execute("PRAGMA foreign_keys=ON")

@@ -1,0 +1,66 @@
+{
+  "schema": "agency.local-qualification.v1",
+  "recorded_at_utc": "2026-10-16T07:43:07.955593+00:00",
+  "tested_revision": "ba9ec76896cd70df290f0fe70fe7c9ac0a7528ee",
+  "source_tree": "6860d80ec6f41c47aed432235949a58bc06f489d",
+  "test_tree": "e39aaadbe841ea4a0d8a86c5cabc34b450698d3c",
+  "qualification_started_at_utc": "2026-10-15T21:50:38.077223+00:00",
+  "qualification_finished_at_utc": "2026-10-15T21:54:03.225596+00:00",
+  "wall_seconds": 205.14,
+  "python": {
+    "version": "3.11",
+    "tests": 1664,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "exit_code": 0,
+    "timed_out": false,
+    "warnings": [
+      {
+        "category": "StarletteDeprecationWarning",
+        "count": 1,
+        "description": "Starlette TestClient plain-httpx fallback is deprecated; httpx2 qualification remains pending."
+      }
+    ],
+    "strict_warning_categories": [
+      "ResourceWarning",
+      "pytest.PytestUnhandledThreadExceptionWarning",
+      "pytest.PytestUnraisableExceptionWarning"
+    ],
+    "faulthandler_timeout": 0
+  },
+  "other_checks": {
+    "ui_tests": 14,
+    "ui_failures": 0,
+    "ruff_lint": "passed",
+    "ruff_format": "passed",
+    "mypy_strict_source_files": 150,
+    "mypy_result": "passed"
+  },
+  "checkout_unchanged_during_run": true,
+  "clean_after_run": true,
+  "scope": "Offline Windows local checks with echo model, Python external DNS/socket guard and scratch-only working data. Not OS sandbox proof, CI, live-provider, peer-authority, release or deployment validation.",
+  "subsequent_commit_scope": "Handoff documentation/evidence only; src and tests trees must remain identical. Full suite was not rerun solely for documentation.",
+  "raw_evidence_sha256": {
+    "full-ba9ec76896cd.json": "aac7fdc2fede23a99088d156c3d0a6e4ecefd3827759c9a04063b86bff745fa8",
+    "full-ba9ec76896cd.log": "7e5cb2002a6b1d5bb0bcd10d30d81f499cc7ff4b1907e63dbb8fb73b07f8ed15",
+    "full-ba9ec76896cd.xml": "e1a6d01f1d21238bebf13e28b45ad50e44d6c73b2c9b6b279f3d36bdb8e06047",
+    "parent-ba9ec76-quality.json": "2d22ef370925bcbb117e2d0beb553b4a71dfd88e5e0e1c487096f8ae3550a2af"
+  },
+  "historical_incidents_retained": [
+    "Full 6e14d07 timed out without completed JUnit summary; not passing evidence.",
+    "Parent admission at959eb33 timed out after228 dots; later passes do not prove a causal fix.",
+    "Parent c201b37 startup timed out; timed diagnostic caused native access violation and was excluded.",
+    "Full d181b9e completed with3 governance-fixture failures; RED evidence retained and resolved by reviewed test-only ba9ec76 fixture repair."
+  ],
+  "publication_inventory": {
+    "local_main": "713a4e311b1e071fbd6c5cf103b995d17aa7e5a2",
+    "observed_remote_main": "3417c79bf2056ab414f49b3c0281b5c723377493",
+    "remote_main_is_ancestor_of_tested_revision": true,
+    "unpublished_commits_before_handoff_docs": 45,
+    "repair_slice_commits": 18,
+    "worker_branches_patch_equivalent": true,
+    "limited_added_line_secret_scan_findings": 0,
+    "runtime_database_history_change": "Only deletion of the same blob already on remote main; no new database blob, no runtime database content opened."
+  }
+}

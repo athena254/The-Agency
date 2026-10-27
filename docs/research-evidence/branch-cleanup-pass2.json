@@ -1,0 +1,200 @@
+{
+  "pass": 2,
+  "recorded": "2026-09-29",
+  "run_timestamp": "20260929-135409",
+  "trigger": "Owner asked to merge all agency branches so that only branches in active development remain, and to merge and clean the finished ones.",
+  "result": {
+    "branches_before": 5,
+    "branches_after": 3,
+    "branches_removed": 2,
+    "merges_required": 0,
+    "new_commits_merged": 0,
+    "main_head_before": "3417c79bf2056ab414f49b3c0281b5c723377493",
+    "source_tree": "8cee8b0b427ddaf17ec5babb76ba7a0455072b08",
+    "tests_tree": "cd6508b45314814f003322d57f7f5d99436f94ba"
+  },
+  "remaining_branches": [
+    {
+      "branch": "main",
+      "tip": "3417c79bf2056ab414f49b3c0281b5c723377493",
+      "role": "verified integrated baseline",
+      "upstream": "equal to origin/main at time of run (0 ahead, 0 behind)"
+    },
+    {
+      "branch": "feat/free-metering",
+      "tip": "6f6ee449a98d97405dc6ea358b8db97108a784d7",
+      "role": "active unfinished candidate",
+      "disposition": "preserved-not-merged",
+      "reason": "one commit (6f6ee44) is not in main; documented focused check 6 failed / 28 passed"
+    },
+    {
+      "branch": "feat/free-recovery",
+      "tip": "474e8a4fed9125d4dc980970ef6365a8112c44ed",
+      "role": "active unfinished candidate",
+      "disposition": "preserved-not-merged",
+      "reason": "one commit (474e8a4) is not in main; documented focused check 1 failed / 36 passed; executor integration missing"
+    }
+  ],
+  "retired_branches": [
+    {
+      "branch": "docs/free-lattice-gateway",
+      "tip": "07b2c4480cdc57e8077f57f89c034aac63904bed",
+      "disposition": "already-merged-ancestor-of-main",
+      "proof": [
+        "git merge-base --is-ancestor docs/free-lattice-gateway main -> true",
+        "git rev-list main..docs/free-lattice-gateway -> 0 commits"
+      ],
+      "archive_tag": "archive/cleanup-20260929-135409/docs/free-lattice-gateway"
+    },
+    {
+      "branch": "research/free-bft-lab",
+      "tip": "18b971776d824432266c39b6f5e5f79e3a593df1",
+      "disposition": "already-merged-ancestor-of-main",
+      "proof": [
+        "git merge-base --is-ancestor research/free-bft-lab main -> true",
+        "git rev-list main..research/free-bft-lab -> 0 commits"
+      ],
+      "archive_tag": "archive/cleanup-20260929-135409/research/free-bft-lab"
+    }
+  ],
+  "merge_statement": "Nothing was merged by this pass because nothing finished was left unmerged: both finished branch tips were already ancestors of main, so their content is already in main history. Deletion used 'git branch -d', which refuses to delete a branch that is not fully merged; both deletions succeeded.",
+  "deliberately_not_merged": {
+    "archive_tags_from_pass_1": "70 tags under archive/cleanup-20260928-215259/ preserve the old branches classified already-merged, patch-equivalent-in-main, superseded-reviewed-port-in-main or archived-unsafe-experiment. Re-merging them is not cleanup and would reintroduce code that was reviewed out or judged unsafe (see docs/BRANCH_CLEANUP.md).",
+    "stash": "refs/stash (a9c764e) retained unchanged: pre-consolidation root source and lockfile, not applied."
+  },
+  "worktree_scope": "Stage 1 (branch pass) only detached the two retired checkouts at the same commit, leaving their files unchanged. Stage 2 (folder cleanup, after the owner asked to delete the leftovers) then removed the merged checkouts themselves.",
+  "checkout_folder_cleanup": {
+    "folders_before": 44,
+    "folders_after": 12,
+    "composition_before": "43 non-canonical folders (37 registered git checkouts plus 6 unregistered folders: agency-backups, agency-runtime-backups, agency-consolidation-snapshot-20260927-105944, agency-beta-briefs, agency-mvp-briefs, agency-combined-verify) beside the canonical theagency checkout.",
+    "removed_worktrees": [
+      "agency-beta-audit-gate", "agency-beta-budget", "agency-beta-combined-verify",
+      "agency-beta-deterministic-budget", "agency-beta-failure-verify", "agency-beta-final-verify",
+      "agency-beta-final2-verify", "agency-beta-ingress-wiring", "agency-beta-profile-nonbeta",
+      "agency-beta-profile-outcome", "agency-beta-release-verify", "agency-beta-telegram-admission",
+      "agency-ci-audit-fix", "agency-comet-baseline-check", "agency-deploy-next",
+      "agency-driver-audit-status", "agency-free-audit-fix", "agency-free-bft-lab",
+      "agency-free-cline-audit", "agency-free-completed-merge", "agency-free-lattice-engine",
+      "agency-free-muse-audit", "agency-free-program", "agency-freebuff-audit",
+      "agency-ingress-cutover", "agency-integration-verify", "agency-local-tools",
+      "agency-peer-envelope", "agency-peer-protocol", "agency-route-deny", "agency-web-dns-async"
+    ],
+    "removed_non_worktree": [
+      "agency-combined-verify (empty scratch directory)",
+      "agency-beta-briefs (preserved then removed)",
+      "agency-mvp-briefs (preserved then removed)"
+    ],
+    "deletion_rule": "A folder was removed only when its HEAD was an ancestor of main (git merge-base --is-ancestor), or git cherry main <HEAD> reported zero unique patches (patch-equivalent-in-main). 16 were ancestor-merged and 15 patch-equivalent; none had unique work.",
+    "preserved_before_deletion": "checkout-local-content/<name>/ keeps each checkout's runtime lattice.db* plus every untracked file (.clineignore, *_BRIEF.md, .agent-input/*, untracked docs, recovered-evidence.md up to 165 KB) and a tracked-mods.patch that was empty for every one of them. non-worktree-content/ keeps the two brief folders.",
+    "only_thing_not_copied": "Reproducible build artifacts (.venv in three checkouts) and ignored caches (.pytest_cache, .mypy_cache, .ruff_cache, __pycache__).",
+    "restored_after_deletion": {
+      "path": "agency-deploy-next",
+      "commit": "a997abc6400861919af0e68866b0b7a00d3d9b83",
+      "reason": "The pinned launchers agency_run_a997abc.py and agency_run_8399b4f.py still load src/telegram_bot.py from it and docs/BETA_GAPS.md B-09 records the bot as running from it; the earlier cleanup script also listed it as protected.",
+      "state": "Recreated as a detached worktree at the identical commit and verified clean against HEAD."
+    },
+    "blocked_by_live_process": {
+      "path": "agency-free-bft-lab",
+      "state": "Files were deleted but the now-empty folder could not be removed: a live cline.exe (PID 1568) runs with --cwd pointing at it, so Windows denies the directory delete.",
+      "data_impact": "None. Commit 18b9717 is in main and tagged archive/cleanup-20260929-135409/research/free-bft-lab; its untracked briefs were preserved before deletion."
+    },
+    "kept_and_why": {
+      "theagency": "canonical repository and integrated baseline",
+      "agency-deploy-3417c79": "current live bot deployment pinned by the launcher",
+      "agency-deploy-main": "rollback deployment source used by agency_run_merged.py",
+      "agency-deploy-next": "rollback deployment source used by two launchers",
+      "agency-mvp": "holds unmerged local source edits (telegram handler/bot and tests) and the .venv the running bot interpreter uses",
+      "agency-free-metering / agency-free-recovery": "the only branches with work not in main",
+      "agency-free-lattice-gateway": "cwd of live Freebuff processes, so it cannot be deleted"
+    },
+    "backup_meaning_change": "agency-backups, agency-runtime-backups and agency-consolidation-snapshot-20260927-105944 hold the remaining runtime database copies; deleting the last database backups was not done without explicit approval."
+  },
+  "deployment_and_archive_consolidation": {
+    "removed_checkouts": [
+      {
+        "path": "agency-deploy-main",
+        "commit": "4cf28a7f66e1f104273502fbedde72cdeeb9df50",
+        "reason": "Clean, no local edits, HEAD is an ancestor of main, and no running process used it. Only the dormant launcher agency_run_merged.py referenced it.",
+        "recreate": "git -C C:/Users/alphi/theagency worktree add --detach C:/Users/alphi/agency-deploy-main 4cf28a7f66e1f104273502fbedde72cdeeb9df50"
+      },
+      {
+        "path": "agency-deploy-next",
+        "commit": "a997abc6400861919af0e68866b0b7a00d3d9b83",
+        "reason": "Clean, HEAD is an ancestor of main, no running process used it. Only the dormant launchers agency_run_a997abc.py and agency_run_8399b4f.py referenced it.",
+        "recreate": "git -C C:/Users/alphi/theagency worktree add --detach C:/Users/alphi/agency-deploy-next a997abc6400861919af0e68866b0b7a00d3d9b83"
+      }
+    ],
+    "consolidated_archives": {
+      "agency-runtime-backups": "moved to agency-backups/runtime-backups",
+      "agency-consolidation-snapshot-20260927-105944": "moved to agency-backups/consolidation-snapshot-20260927-105944",
+      "note": "docs/SPEC_WORKTREE_CONSOLIDATION.md still names the old snapshot path; that reference is historical."
+    },
+    "agency_mvp_finding": "agency-mvp is NOT newer than main. Its local edits are an older pre-consolidation state that main has superseded (main carries 89f857a, e29491a, 6cc06bf, ac1c42c, 2a022dd). Its only live dependency is the .venv used by the running bot interpreter, and its data directory is untouched by that process.",
+    "folders_after_this_stage": 8,
+    "still_held_by_live_processes": [
+      {"path": "agency-deploy-3417c79", "holder": "the running Telegram bot deployment pinned by C:/Users/alphi/AppData/Local/Temp/agency_run_3417c79.py; no process has the directory as cwd, but deleting it breaks a pinned restart"},
+      {"path": "agency-mvp", "holder": "the running bot interpreter is agency-mvp/.venv/Scripts/python.exe"},
+      {"path": "agency-free-lattice-gateway", "holder": "live Freebuff processes (node.exe 11744, freebuff.exe 12836)"},
+      {"path": "agency-free-bft-lab", "holder": "live cline.exe hub (PID 1568) with --cwd there; folder is now empty"}
+    ],
+    "requires_approval": "Stopping the running bot or the idle agent processes to delete the folders above was not done without explicit owner approval."
+  },
+  "bot_restart_on_main": {
+    "authorisation": "Owner instructed: stop the bot and everything running, then start it on the main repo after the merges.",
+    "stopped": {
+      "telegram_poller_tree": "launcher agency_run_3417c79.py, the agency-mvp/.venv interpreter shim and the underlying uv Python 3.11 process; the old poller was confirmed gone before the replacement started",
+      "freebuff_fleet": "node.exe 11744, freebuff.exe 12836 and their bash/sh wrappers (14132, 12384, 3580), which occupied agency-free-lattice-gateway",
+      "deliberately_not_stopped": "Cline hub PID 1568 is the ancestor of this session's own shell (PID 3972), so killing it would terminate the work in progress; the idle Cline CLI (2132/16148) and the unrelated Hermes processes were also left running",
+      "single_poller": "Exactly one independent poller tree has been verified since the restart; no 409 conflict appeared."
+    },
+    "retired_checkouts": ["agency-deploy-3417c79", "agency-mvp", "agency-free-lattice-gateway"],
+    "runtime_backup": {
+      "path": "C:/Users/alphi/agency-backups/pre-restart-main-20260929-142905",
+      "method": "sqlite3 online backup API taken while the bot was stopped",
+      "integrity_check": "ok for lattice.db, memory.db and remex_profiles.db; pending WAL content folded into the copies"
+    },
+    "new_environment": {
+      "path": "C:/Users/alphi/theagency/.venv",
+      "method": "copy of the known-working environment; the editable .pth was repointed from agency-mvp/src to theagency/src",
+      "verified": "interpreter resolves agency from C:/Users/alphi/theagency/src/agency/__init__.py and every runtime dependency imports",
+      "gitignored": true
+    },
+    "launcher": {
+      "path": "scripts/run_telegram_bot.py",
+      "start_command": "C:/Users/alphi/theagency/.venv/Scripts/python.exe -u C:/Users/alphi/theagency/scripts/run_telegram_bot.py",
+      "pin": "asserts src tree 8cee8b0b427ddaf17ec5babb76ba7a0455072b08 and tests tree cd6508b45314814f003322d57f7f5d99436f94ba plus a clean src/tests working tree",
+      "settings": "AGENCY_BETA_MODE=0, no TELEGRAM_WEBHOOK_URL, private .env untouched, working directory set to the checkout",
+      "lint": "ruff check and ruff format --check pass; CI lints src/ and tests/ only"
+    },
+    "verification": [
+      "startup markers: agency_deployment_revision=98ac98b7ee52bc577440e10057c256658e67ecf5, agency_deployment_source=theagency/src/telegram_bot.py, butler.started, telegram_commands_registered, telegram_polling_started",
+      "exactly one independent poller tree",
+      "no Traceback, no telegram_poll_conflict, no telegram_commands_register_failed",
+      "Telegram read-only getMe ok, webhook disabled, pending_update_count 0, six commands registered",
+      "private .env sha256 unchanged from the preflight baseline",
+      "the process is detached from the agent shell (parent is the WMI provider host)"
+    ],
+    "folders_after": 5,
+    "remaining_folders": [
+      "theagency (canonical checkout running the bot)",
+      "agency-backups (single archive: bundles, local content, runtime backups, deployment scripts)",
+      "agency-free-metering, agency-free-recovery (branches with unfinished work)",
+      "agency-free-bft-lab (empty; Windows blocks deletion while this session's Cline hub keeps it as cwd)"
+    ]
+  },
+  "historical_path_references": "docs/SPEC_FREE_ONLY_DECENTRALIZED_PROGRAM.md and research-evidence/*.md name checkouts that no longer exist (for example agency-free-program). Those are historical evidence statements, not current instructions, matching the retired-branch-name convention already recorded in docs/BRANCH_CLEANUP.md.",
+  "non_branch_clutter_left_alone": "refs/cline/checkpoints/* (41 Cline tool checkpoints, not branches) and 6 origin/dependabot/* remote PR refs were left untouched.",
+  "backup": "C:/Users/alphi/agency-backups/branch-cleanup-pass2-20260929-135409",
+  "bundle": "all-refs.bundle (every ref, including all local branches and the stash)",
+  "bundle_sha256": "1c17172ffb0b6b307386eb2c266a585fc03a6fa5e094477d7ab2cc16b219e105",
+  "verification": [
+    "git branch -vv -> exactly main, feat/free-metering, feat/free-recovery",
+    "main 3417c79 unchanged; src/tests tree ids match the previously verified combined revision",
+    "canonical worktree status unchanged (same modified data/lattice.db and untracked runtime files)",
+    "git fsck --connectivity-only -> no missing or corrupt objects; dangling objects are pre-existing",
+    "both retired tips remain resolvable through archive tags and main ancestry"
+  ],
+  "remote_scope": "No push, no fetch, no remote branch deletion. origin/main unchanged.",
+  "runtime_scope": "No application code, test, configuration, runtime database, .env or deployment worktree was modified. No bot restart, deployment or provider call.",
+  "recovery_example": "git branch recovered-lattice-gateway archive/cleanup-20260929-135409/docs/free-lattice-gateway"
+}

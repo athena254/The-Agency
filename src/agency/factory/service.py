@@ -363,7 +363,7 @@ class AgentFactory:
                 ok = self._is_skill_published(sid, sver)
             except Exception as exc:
                 raise ValueError(f"skill ref {(sid, sver)!r} failed closed.") from exc
-            if not ok:
+            if ok is not True:
                 raise ValueError(f"skill ref {(sid, sver)!r} is not published.")
         for wid, wver in bp.workflow_refs:
             if self._is_workflow_published is None:
@@ -374,7 +374,7 @@ class AgentFactory:
                 ok = self._is_workflow_published(wid, wver)
             except Exception as exc:
                 raise ValueError(f"workflow ref {(wid, wver)!r} failed closed.") from exc
-            if not ok:
+            if ok is not True:
                 raise ValueError(f"workflow ref {(wid, wver)!r} is not published.")
 
     def approve(
@@ -403,7 +403,7 @@ class AgentFactory:
             raise
         except Exception as exc:
             raise PermissionError(f"authorizer failed closed: {exc}") from exc
-        if not allowed:
+        if allowed is not True:
             raise PermissionError(f"approver {approver!r} denied for agent.approve.")
         self._check_published_refs(bp)
         now = _now_iso()

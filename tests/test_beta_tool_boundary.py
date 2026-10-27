@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import multiprocessing
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -40,6 +39,7 @@ from agency.tools.base import (
 from agency.tools.builtin.memory import MemoryQueryTool, MemoryWriteTool
 from agency.tools.driver import ToolDriver
 from agency.tools.registry import ToolRegistry, build_default_registry
+from tests.worker_support.admission import run_admission_race
 
 
 class FakeAudit:
@@ -404,18 +404,13 @@ async def test_beta_policy_error_fails_closed() -> None:
     assert stub.run_calls == 0
 
 
-async def test_beta_driver_path_cannot_bypass_policy() -> None:
-    """Driver LLM loop routes through registry.call, so policy still denies."""
+async def test_beta_driver_path_cannot_bypass_policy(tmp_path, monkeypatch) -> None:
+    """Concrete metering reaches registry policy; denied fetch never runs."""
+    from agency.llm.adapter import LLMAdapter
+    from tests.test_model_metering import _close, _setup
 
-    class _ScriptedLLM:
-        def __init__(self, responses: list[str]) -> None:
-            self._responses = list(responses)
-
-        async def generate(self, prompt: str, context: dict[str, Any] | None = None) -> str:
-            assert self._responses, "LLM ran out of scripted responses"
-            return self._responses.pop(0)
-
-    registry = ToolRegistry(beta_policy=BetaToolPolicy())
+    store, audit, principal, _inner, _binding, model = await _setup(tmp_path)
+    registry = ToolRegistry(audit=audit, beta_policy=BetaToolPolicy())
     fetch = CountingTool(
         ToolSpec(
             name="web_fetch",
@@ -429,17 +424,27 @@ async def test_beta_driver_path_cannot_bypass_policy() -> None:
         )
     )
     registry.register(fetch)
-    llm = _ScriptedLLM(
-        [
-            '{"action": {"name": "web_fetch", "args": {"url": "https://example.com"}}}',
-            '{"final": "done"}',
-        ]
-    )
-    driver = ToolDriver(registry=registry, llm=llm)
-    outcome = await driver.run("fetch this", "sys", _trusted_ctx())
-    assert fetch.run_calls == 0
-    assert outcome.steps and outcome.steps[0].ok is False
-    assert "beta policy denied" in (outcome.steps[0].error or "").lower()
+    calls: list[str] = []
+
+    async def provider(self, prompt, context=None):
+        calls.append(prompt)
+        if len(calls) == 1:
+            return '{"action": {"name": "web_fetch", "args": {"url": "https://example.com"}}}'
+        return '{"final": "must not accept this"}'
+
+    monkeypatch.setattr(LLMAdapter, "generate", provider)
+    ctx = _trusted_ctx()
+    ctx.beta_principal = principal
+    ctx.audit = audit
+    try:
+        outcome = await ToolDriver(registry=registry, llm=model).run("fetch this", "sys", ctx)
+        assert fetch.run_calls == 0
+        assert outcome.steps and outcome.steps[0].ok is False
+        assert "beta policy denied" in (outcome.steps[0].error or "").lower()
+        assert outcome.status == "tool_error"
+        assert len(calls) == 1
+    finally:
+        await _close(store, audit)
 
 
 async def test_registry_factory_preserves_explicit_beta_policy() -> None:
@@ -950,85 +955,54 @@ async def test_beta_calls_have_opaque_distinct_correlated_ids(beta_log: BetaAudi
         assert hashlib.sha256(identity.encode()).hexdigest() not in blob
 
 
-def _beta_race_worker(path: str, start: Any, release: Any, barrier: Any, messages: Any) -> None:
-    """Separate process and connection; force the old read/check gap open."""
+def _assert_admission_rows(rows: list[AuditEntry], pending: bool) -> None:
+    assert len(rows) == 2
+    assert {(row.evidence["phase"], row.result) for row in rows} == {
+        ("intent", "pending"),
+        ("outcome", "ok"),
+    }
+    assert all(isinstance(row.evidence["call_id"], str) and row.evidence["call_id"] for row in rows)
+    assert len({row.evidence["call_id"] for row in rows}) == 1
+    assert all(row.target == "web_search" and row.action == "tool.call" for row in rows)
+    assert pending is False
 
-    async def run() -> None:
-        log = BetaAuditLog(path)
-        await log.initialize()
-        original = BetaAuditLog.has_pending_calls
 
-        async def synchronized_check(self: BetaAuditLog) -> bool:
-            pending = await original(self)
-            if not pending:
-                await asyncio.to_thread(barrier.wait, 5)
-            return pending
-
-        BetaAuditLog.has_pending_calls = synchronized_check  # type: ignore[method-assign]
-
-        class BlockingTool(CountingTool):
-            async def run(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
-                messages.put("ran")
-                await asyncio.to_thread(release.wait, 10)
-                return ToolResult(tool=self.spec.name, ok=True, output="ok")
-
-        registry = ToolRegistry(audit=log, beta_policy=BetaToolPolicy())
-        registry.register(BlockingTool(_search_spec()))
-        try:
-            messages.put("ready")
-            await asyncio.to_thread(start.wait, 10)
-            result = await registry.call("web_search", {"query": "private"}, _trusted_ctx())
-            messages.put((result.ok, result.error))
-        finally:
-            await log.close()
-
-    try:
-        asyncio.run(run())
-    except BaseException as exc:
-        messages.put(("worker_error", repr(exc)))
-        raise
+@pytest.mark.parametrize(
+    "pairs, call_id",
+    [
+        ((("intent", "ok"), ("outcome", "pending")), "correlated-call"),
+        ((("intent", "pending"), ("outcome", "ok")), ""),
+        ((("intent", "pending"), ("outcome", "ok")), None),
+        ((("intent", "pending"), ("outcome", "ok")), 123),
+    ],
+)
+def test_admission_rows_reject_malformed_pairs_or_call_id(pairs, call_id) -> None:
+    rows = [
+        AuditEntry(
+            target="web_search",
+            action="tool.call",
+            result=result,
+            evidence={"phase": phase, "call_id": call_id},
+        )
+        for phase, result in pairs
+    ]
+    with pytest.raises(AssertionError):
+        _assert_admission_rows(rows, False)
 
 
 def test_beta_cross_process_admission_allows_only_one_pending_call(tmp_path) -> None:
     """Two real processes must not both run while one intent lacks an outcome."""
-    ctx = multiprocessing.get_context("spawn")
-    start, release = ctx.Event(), ctx.Event()
-    barrier = ctx.Barrier(2)
-    messages = ctx.Queue()
     path = str(tmp_path / "cross-process-audit.db")
-    workers = [
-        ctx.Process(target=_beta_race_worker, args=(path, start, release, barrier, messages))
-        for _ in range(2)
-    ]
-    for worker in workers:
-        worker.start()
-    observations: list[Any] = []
-    try:
-        assert messages.get(timeout=15) == "ready"
-        assert messages.get(timeout=15) == "ready"
-        start.set()
-        # The successful call is held inside run until after admission is measured.
-        while len(observations) < 2:
-            observations.append(messages.get(timeout=15))
-        assert observations.count("ran") == 1, observations
-        assert (False, _BETA_AUDIT_ERROR) in observations
-    finally:
-        release.set()
-        for worker in workers:
-            worker.join(timeout=15)
-            if worker.is_alive():
-                worker.terminate()
-                worker.join(timeout=5)
-    assert all(worker.exitcode == 0 for worker in workers)
+    report = run_admission_race(path)
+    assert report["exitcodes"] == [0, 0]
+    print(f"admission aggregate bootstrap: {report['bootstrap_s']:.3f}s / 60s")
     log = BetaAuditLog(path)
 
     async def verify() -> None:
         await log.initialize()
         try:
             rows = await log.query()
-            assert len(rows) == 2
-            assert {row.result for row in rows} == {"pending", "ok"}
-            assert await log.has_pending_calls() is False
+            _assert_admission_rows(rows, await log.has_pending_calls())
         finally:
             await log.close()
 

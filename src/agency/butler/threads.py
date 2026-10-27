@@ -31,6 +31,7 @@ __all__ = [
     "Thread",
     "ThreadMessage",
     "ThreadStore",
+    "ThreadSummary",
     "Workspace",
 ]
 
@@ -65,6 +66,21 @@ CREATE TABLE IF NOT EXISTS thread_messages (
     created_at  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS thread_summaries (
+    id          TEXT PRIMARY KEY,
+    thread_id   TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    owner       TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    up_to_rowid INTEGER NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS active_threads (
+    owner       TEXT PRIMARY KEY,
+    thread_id   TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    updated_at  TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_workspaces_owner
     ON workspaces(owner);
 CREATE INDEX IF NOT EXISTS idx_threads_workspace
@@ -73,6 +89,8 @@ CREATE INDEX IF NOT EXISTS idx_threads_owner
     ON threads(owner);
 CREATE INDEX IF NOT EXISTS idx_thread_messages_thread
     ON thread_messages(thread_id);
+CREATE INDEX IF NOT EXISTS idx_thread_summaries_thread
+    ON thread_summaries(thread_id);
 """
 
 
@@ -128,6 +146,25 @@ class Thread:
     state: str
     created_at: str
     updated_at: str
+
+
+@dataclass(frozen=True)
+class ThreadSummary:
+    """Rolling summary of a thread's older turns.
+
+    ``up_to_rowid`` is the message rowid the summary covers; messages
+    with a higher rowid are newer than the summary and belong in the
+    verbatim window instead. Summaries are thread-keyed and owner-keyed
+    so one thread's summary can never be assembled into another
+    thread's context.
+    """
+
+    id: str
+    thread_id: str
+    owner: str
+    content: str
+    up_to_rowid: int
+    created_at: str
 
 
 @dataclass(frozen=True)
@@ -370,14 +407,158 @@ class ThreadStore:
 
     def list_messages(self, owner: str, thread_id: str) -> list[ThreadMessage]:
         """All messages in ``owner``'s thread, oldest first."""
+        return [message for _rowid, message in self.list_message_rows(owner, thread_id)]
+
+    def list_message_rows(self, owner: str, thread_id: str) -> list[tuple[int, ThreadMessage]]:
+        """Messages in ``owner``'s thread with their SQLite rowids, oldest first.
+
+        The rowid is the ordering anchor the context engine uses to split
+        summarized history from the verbatim window.
+        """
         clean_owner = _require_nonblank(owner, "owner")
         if not isinstance(thread_id, str) or not thread_id.strip():
             raise ValueError("thread_id must be a non-blank string.")
         self._thread_row_or_raise(clean_owner, thread_id)
         conn = self._connection()
         rows = conn.execute(
-            "SELECT id, thread_id, role, content, created_at FROM thread_messages"
+            "SELECT rowid, id, thread_id, role, content, created_at FROM thread_messages"
             " WHERE thread_id = ? ORDER BY rowid ASC",
             (thread_id,),
         ).fetchall()
-        return [ThreadMessage(**dict(row)) for row in rows]
+        return [
+            (
+                int(row["rowid"]),
+                ThreadMessage(
+                    id=row["id"],
+                    thread_id=row["thread_id"],
+                    role=row["role"],
+                    content=row["content"],
+                    created_at=row["created_at"],
+                ),
+            )
+            for row in rows
+        ]
+
+    def count_messages(self, owner: str, thread_id: str) -> int:
+        """Number of messages in ``owner``'s thread."""
+        clean_owner = _require_nonblank(owner, "owner")
+        if not isinstance(thread_id, str) or not thread_id.strip():
+            raise ValueError("thread_id must be a non-blank string.")
+        self._thread_row_or_raise(clean_owner, thread_id)
+        conn = self._connection()
+        row = conn.execute(
+            "SELECT COUNT(*) FROM thread_messages WHERE thread_id = ?",
+            (thread_id,),
+        ).fetchone()
+        return int(row[0])
+
+    # ------------------------------------------------------------------ #
+    # Summaries
+    # ------------------------------------------------------------------ #
+
+    def set_summary(
+        self, owner: str, thread_id: str, content: str, up_to_rowid: int
+    ) -> ThreadSummary:
+        """Replace the rolling summary of ``owner``'s thread.
+
+        One summary per thread, atomically replaced. ``up_to_rowid`` must
+        be a rowid of an actual message in the thread so the engine can
+        never summarize messages it has not seen.
+        """
+        clean_owner = _require_nonblank(owner, "owner")
+        if not isinstance(thread_id, str) or not thread_id.strip():
+            raise ValueError("thread_id must be a non-blank string.")
+        clean_content = _require_content(content)
+        if not isinstance(up_to_rowid, int) or up_to_rowid < 1:
+            raise ValueError("up_to_rowid must be a positive integer.")
+        self._thread_row_or_raise(clean_owner, thread_id)
+        conn = self._connection()
+        covered = conn.execute(
+            "SELECT 1 FROM thread_messages WHERE thread_id = ? AND rowid = ?",
+            (thread_id, up_to_rowid),
+        ).fetchone()
+        if covered is None:
+            raise ValueError("up_to_rowid must reference a message in the thread.")
+        summary = ThreadSummary(
+            id=uuid.uuid4().hex,
+            thread_id=thread_id,
+            owner=clean_owner,
+            content=clean_content,
+            up_to_rowid=up_to_rowid,
+            created_at=_utc_now_iso(),
+        )
+        with conn:
+            conn.execute(
+                "DELETE FROM thread_summaries WHERE thread_id = ? AND owner = ?",
+                (thread_id, clean_owner),
+            )
+            conn.execute(
+                "INSERT INTO thread_summaries (id, thread_id, owner, content,"
+                " up_to_rowid, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    summary.id,
+                    summary.thread_id,
+                    summary.owner,
+                    summary.content,
+                    summary.up_to_rowid,
+                    summary.created_at,
+                ),
+            )
+        return summary
+
+    def get_summary(self, owner: str, thread_id: str) -> ThreadSummary | None:
+        """The rolling summary for ``owner``'s thread, or None."""
+        clean_owner = _require_nonblank(owner, "owner")
+        if not isinstance(thread_id, str) or not thread_id.strip():
+            raise ValueError("thread_id must be a non-blank string.")
+        self._thread_row_or_raise(clean_owner, thread_id)
+        conn = self._connection()
+        row = conn.execute(
+            "SELECT id, thread_id, owner, content, up_to_rowid, created_at"
+            " FROM thread_summaries WHERE thread_id = ? AND owner = ?",
+            (thread_id, clean_owner),
+        ).fetchone()
+        if row is None:
+            return None
+        return ThreadSummary(**dict(row))
+
+    # ------------------------------------------------------------------ #
+    # Active thread pointer
+    # ------------------------------------------------------------------ #
+
+    def set_active_thread(self, owner: str, thread_id: str) -> Thread:
+        """Set ``owner``'s active thread (must be owned by ``owner``)."""
+        thread = self.get_thread(owner, thread_id)
+        conn = self._connection()
+        with conn:
+            conn.execute(
+                "INSERT INTO active_threads (owner, thread_id, updated_at)"
+                " VALUES (?, ?, ?)"
+                " ON CONFLICT(owner) DO UPDATE SET thread_id = excluded.thread_id,"
+                " updated_at = excluded.updated_at",
+                (owner, thread.id, _utc_now_iso()),
+            )
+        return thread
+
+    def get_active_thread(self, owner: str) -> Thread | None:
+        """``owner``'s active thread, or None when unset."""
+        clean_owner = _require_nonblank(owner, "owner")
+        conn = self._connection()
+        row = conn.execute(
+            "SELECT t.id, t.workspace_id, t.owner, t.title, t.parent_thread_id,"
+            " t.state, t.created_at, t.updated_at FROM active_threads a"
+            " JOIN threads t ON t.id = a.thread_id"
+            " WHERE a.owner = ? AND t.owner = ?",
+            (clean_owner, clean_owner),
+        ).fetchone()
+        if row is None:
+            return None
+        return Thread(**dict(row))
+
+    def clear_active_thread(self, owner: str) -> bool:
+        """Clear ``owner``'s active-thread pointer. True if one existed."""
+        clean_owner = _require_nonblank(owner, "owner")
+        conn = self._connection()
+        with conn:
+            cursor = conn.execute("DELETE FROM active_threads WHERE owner = ?", (clean_owner,))
+        return cursor.rowcount > 0
