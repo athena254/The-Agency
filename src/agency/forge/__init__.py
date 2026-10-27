@@ -32,6 +32,11 @@ from agency.forge.evidence import (
     EvidenceStore,
     capture_evidence,
 )
+from agency.forge.external_agent import (
+    ExternalAgentReport,
+    ExternalAgentStore,
+    run_external_agent,
+)
 from agency.forge.holdout import (
     HoldoutReport,
     HoldoutScenario,
@@ -83,6 +88,16 @@ from agency.forge.security_scan import (
     scan_changes,
 )
 from agency.forge.test_runner import TestReport, run_tests
+from agency.forge.tool_catalog import (
+    CATALOG,
+    ToolSpec,
+    available_tools,
+    get_tool,
+    install_hint,
+    is_available,
+    list_tools,
+    missing_tools,
+)
 from agency.forge.worktree import WorktreeError, WorktreeInfo, create_worktree, remove_worktree
 
 __all__ = [
@@ -104,6 +119,8 @@ __all__ = [
     "CostStore",
     "EvidenceReport",
     "EvidenceStore",
+    "ExternalAgentReport",
+    "ExternalAgentStore",
     "FileRecord",
     "ForgePipelineReport",
     "ForgePipelineStore",
@@ -138,6 +155,7 @@ __all__ = [
     "record_cost",
     "remove_worktree",
     "run_coding_agent",
+    "run_external_agent",
     "run_holdout",
     "run_pipeline",
     "run_review",

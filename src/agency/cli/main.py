@@ -40,6 +40,9 @@ from rich.json import JSON
 from rich.panel import Panel
 from rich.table import Table
 
+from agency.forge.external_agent import run_external_agent
+from agency.forge.tool_catalog import get_tool, is_available, list_tools
+
 log = structlog.get_logger(__name__)
 
 console = Console()
@@ -58,11 +61,14 @@ memory_app = typer.Typer(help="Search agent memory.", no_args_is_help=True)
 evidence_app = typer.Typer(help="Browse evidence findings.", no_args_is_help=True)
 risk_app = typer.Typer(help="Inspect risk assessments.", no_args_is_help=True)
 
+forge_app = typer.Typer(help="Run governed coding-agent tasks.", no_args_is_help=True)
+
 app.add_typer(agent_app, name="agent")
 app.add_typer(task_app, name="task")
 app.add_typer(memory_app, name="memory")
 app.add_typer(evidence_app, name="evidence")
 app.add_typer(risk_app, name="risk")
+app.add_typer(forge_app, name="forge")
 
 DEFAULT_SERVER_URL = os.environ.get("AGENCY_SERVER_URL", "http://127.0.0.1:8000")
 PID_FILE = Path(os.environ.get("AGENCY_PID_FILE", str(Path.home() / ".theagency" / "agency.pid")))
@@ -544,6 +550,115 @@ def risk_report(
         console.print(f"[bold]Category:[/bold] {payload['category']}")
 
 
+# --------------------------------------------------------------------------- #
+# Forge: governed coding-agent runs
+# --------------------------------------------------------------------------- #
+
+
+@forge_app.command("code")
+def forge_code(
+    task: str = typer.Argument(..., help="Natural-language coding task."),
+    repo: str = typer.Option("", "--repo", "-r", help="Repository root (must be a git repo)."),
+    agent: str = typer.Option("opencode", "--agent", help="Coding agent: opencode."),
+    model: str = typer.Option(
+        "opencode/beam-free", "--model", "-m", help="Model for opencode."
+    ),
+    run_tests: bool = typer.Option(False, "--run-tests", help="Run repository tests after edits."),
+    test_path: str = typer.Option("", "--test-path", help="Test path(s) to run (comma-separated)."),
+    cleanup: bool = typer.Option(False, "--cleanup", help="Remove the worktree after the run."),
+    output_json: bool = typer.Option(False, "--json", help="Emit the full report as JSON."),
+) -> None:
+    """Run a coding agent in an isolated worktree, then Forge gates."""
+    if repo == "":
+        repo = "."
+    repo_path = Path(repo).resolve()
+    if not repo_path.is_dir():
+        _fail(f"repo not found: {repo_path}")
+        return
+    if agent != "opencode":
+        _fail(f"unsupported agent: {agent}")
+        return
+    cmd = ["opencode", "run", "--auto", "--dir", "{workdir}", "--model", model]
+    test_paths = [p.strip() for p in test_path.split(",") if p.strip()] if test_path else []
+    report = run_external_agent(
+        repo_path,
+        cmd,
+        task,
+        run_tests_flag=run_tests,
+        test_paths=test_paths or None,
+        cleanup=cleanup,
+    )
+    if output_json:
+        _print_json(report.model_dump(mode="json"))
+        return
+    style = "green" if report.gate == "PASS" else "red"
+    console.print(f"Forge gate: [{style}]{report.gate}[/{style}]")
+    console.print(f"Worktree: {report.worktree_path}")
+    console.print(f"Changed: {', '.join(report.changed_paths) or '(none)'}")
+    console.print(f"Inspection: {report.inspection.gate}")
+    console.print(f"Security: {report.security.gate}")
+    if report.tests is not None:
+        console.print(f"Tests: {report.tests.gate}")
+    if report.gate != "PASS":
+        raise typer.Exit(1)
+
+
+
+# --------------------------------------------------------------------------- #
+# Forge: reverse-engineering tool catalog
+# --------------------------------------------------------------------------- #
+
+
+@forge_app.command("tools")
+def forge_tools(
+    category: str = typer.Option("", "--category", "-c", help="Filter by category."),
+    output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+) -> None:
+    """List reverse-engineering tools and whether they are installed."""
+    tools = list_tools()
+    if category:
+        tools = [t for t in tools if t.category == category]
+    if output_json:
+        _print_json(
+            [
+                {
+                    "name": t.name,
+                    "category": t.category,
+                    "command": t.command,
+                    "available": is_available(t),
+                    "install": t.install,
+                }
+                for t in tools
+            ]
+        )
+        return
+    table = _table("Forge tools", ["Name", "Category", "Command", "Status", "Install if missing"])
+    for t in tools:
+        status = "installed" if is_available(t) else "MISSING"
+        table.add_row(t.name, t.category, t.command or "(none)", status, t.install if not is_available(t) else "")
+    console.print(table)
+
+
+@forge_app.command("tool")
+def forge_tool(
+    name: str = typer.Argument(..., help="Tool name from `forge tools`."),
+) -> None:
+    """Show how to install/use a tool (Forge never auto-installs)."""
+    spec = get_tool(name)
+    if spec is None:
+        _fail(f"unknown tool: {name}")
+        return
+    console.print(f"[bold]{spec.name}[/bold] ({spec.category})")
+    console.print(f"Command: {spec.command or '(none)'}")
+    console.print(f"Available: {'yes' if is_available(spec) else 'no'}")
+    console.print(f"Install: {spec.install}")
+    if spec.args_hint:
+        console.print(f"Example: {spec.args_hint}")
+    if not is_available(spec):
+        console.print("[yellow]Tool not installed. Install it manually, then re-run.[/yellow]")
+        raise typer.Exit(1)
+
+
 def main() -> None:
     """Console-script entry point (``agency = agency.cli:main``)."""
     app()
@@ -551,3 +666,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
