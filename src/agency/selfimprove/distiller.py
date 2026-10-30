@@ -79,28 +79,22 @@ def distill_skill(
     if not trace.title.strip():
         return None
 
-    slug = _slugify(trace.title)
-    skill_id = f"learned-{slug}"
-    # Keep skill_id within a sane, non-path-like shape.
-    skill_id = skill_id[:64]
-
-    version = _next_version(registry, skill_id)
-    impl = _impl_name(slug)
-
-    spec = SkillSpec(
-        skill_id=skill_id,
-        version=version,
-        name=trace.title.strip()[:120],
-        description=_description_from_trace(trace),
-        inputs={"task": {"type": "string"}},
-        outputs={"result": {"type": "string"}},
-        permissions=(),
-        implementation=impl,
-        provenance=f"task:{trace.task_id}",
-        status=SkillStatus.DRAFT,
-    )
-
     try:
+        slug = _slugify(trace.title)
+        skill_id = f"learned-{slug}"[:64]
+        version = _next_version(registry, skill_id)
+        spec = SkillSpec(
+            skill_id=skill_id,
+            version=version,
+            name=trace.title.strip()[:120],
+            description=_description_from_trace(trace),
+            inputs={"task": {"type": "string"}},
+            outputs={"result": {"type": "string"}},
+            permissions=(),
+            implementation=_impl_name(slug),
+            provenance=f"task:{trace.task_id}",
+            status=SkillStatus.DRAFT,
+        )
         return registry.register(spec)
     except (ValueError, KeyError):
         return None
