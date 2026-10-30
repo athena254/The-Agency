@@ -63,10 +63,14 @@ class SkillExecutor:
         status = getattr(skill, "status", None)
         status_val = getattr(status, "value", status)
         if str(status_val).upper() != "PUBLISHED":
-            return SkillRunResult(skill_id=skill_id, version=version, success=False, error="skill not published")
+            return SkillRunResult(
+                skill_id=skill_id, version=version, success=False, error="skill not published"
+            )
         perms = tuple(getattr(skill, "permissions", ()) or ())
         if any(p not in self._granted for p in perms):
-            return SkillRunResult(skill_id=skill_id, version=version, success=False, error="permission denied")
+            return SkillRunResult(
+                skill_id=skill_id, version=version, success=False, error="permission denied"
+            )
         if inputs is None:
             payload: dict[str, Any] = {}
         elif not isinstance(inputs, dict):
@@ -80,12 +84,27 @@ class SkillExecutor:
             payload = inputs
         impl = getattr(skill, "implementation", "")
         if not isinstance(impl, str):
-            return SkillRunResult(skill_id=skill_id, version=version, success=False, error=f"unknown operation: {impl!r}")
+            return SkillRunResult(
+                skill_id=skill_id,
+                version=version,
+                success=False,
+                error=f"unknown operation: {impl!r}",
+            )
         fn = self._operations.get(impl)
         if fn is None:
-            return SkillRunResult(skill_id=skill_id, version=version, success=False, error=f"unknown operation: {impl!r}")
+            return SkillRunResult(
+                skill_id=skill_id,
+                version=version,
+                success=False,
+                error=f"unknown operation: {impl!r}",
+            )
         try:
             output = fn(payload)
             return SkillRunResult(skill_id=skill_id, version=version, success=True, output=output)
         except Exception as exc:  # noqa: BLE001 - surface as failure
-            return SkillRunResult(skill_id=skill_id, version=version, success=False, error=f"{type(exc).__name__}: {exc}")
+            return SkillRunResult(
+                skill_id=skill_id,
+                version=version,
+                success=False,
+                error=f"{type(exc).__name__}: {exc}",
+            )

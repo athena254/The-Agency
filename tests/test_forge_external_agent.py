@@ -13,7 +13,9 @@ def _git_repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
     (repo / "README.md").write_text("hi\n")
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "-m", "init"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-m", "init"], check=True, capture_output=True
+    )
     return repo
 
 

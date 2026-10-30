@@ -560,9 +560,7 @@ def forge_code(
     task: str = typer.Argument(..., help="Natural-language coding task."),
     repo: str = typer.Option("", "--repo", "-r", help="Repository root (must be a git repo)."),
     agent: str = typer.Option("opencode", "--agent", help="Coding agent: opencode."),
-    model: str = typer.Option(
-        "opencode/beam-free", "--model", "-m", help="Model for opencode."
-    ),
+    model: str = typer.Option("opencode/beam-free", "--model", "-m", help="Model for opencode."),
     run_tests: bool = typer.Option(False, "--run-tests", help="Run repository tests after edits."),
     test_path: str = typer.Option("", "--test-path", help="Test path(s) to run (comma-separated)."),
     cleanup: bool = typer.Option(False, "--cleanup", help="Remove the worktree after the run."),
@@ -603,7 +601,6 @@ def forge_code(
         raise typer.Exit(1)
 
 
-
 # --------------------------------------------------------------------------- #
 # Forge: reverse-engineering tool catalog
 # --------------------------------------------------------------------------- #
@@ -635,7 +632,13 @@ def forge_tools(
     table = _table("Forge tools", ["Name", "Category", "Command", "Status", "Install if missing"])
     for t in tools:
         status = "installed" if is_available(t) else "MISSING"
-        table.add_row(t.name, t.category, t.command or "(none)", status, t.install if not is_available(t) else "")
+        table.add_row(
+            t.name,
+            t.category,
+            t.command or "(none)",
+            status,
+            t.install if not is_available(t) else "",
+        )
     console.print(table)
 
 
@@ -666,5 +669,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
