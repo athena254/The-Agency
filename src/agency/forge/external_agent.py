@@ -258,7 +258,7 @@ def run_external_agent(
             logger.error("forge.external_agent_tests_error", error=str(exc))
             tests = None
 
-    overall = "PASS"
+    overall: ExternalAgentGate = "PASS"
     if exit_code not in (0, None):
         overall = "FAIL"
     if not changed:

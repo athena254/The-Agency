@@ -350,7 +350,7 @@ def run_coding_agent(
             tests = None
 
     # Overall gate.
-    overall = "PASS"
+    overall: CodingAgentGate = "PASS"
     if failure is not None:
         overall = "FAIL"
     if edits_applied == 0 and len(normalized_edits) > 0:

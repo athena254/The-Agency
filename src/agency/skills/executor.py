@@ -58,7 +58,6 @@ class SkillExecutor:
         skill: Any,
         inputs: dict[str, Any] | None = None,
     ) -> SkillRunResult:
-        inputs = inputs or {}
         skill_id = getattr(skill, "skill_id", "")
         version = getattr(skill, "version", "")
         status = getattr(skill, "status", None)
@@ -68,12 +67,25 @@ class SkillExecutor:
         perms = tuple(getattr(skill, "permissions", ()) or ())
         if any(p not in self._granted for p in perms):
             return SkillRunResult(skill_id=skill_id, version=version, success=False, error="permission denied")
+        if inputs is None:
+            payload: dict[str, Any] = {}
+        elif not isinstance(inputs, dict):
+            return SkillRunResult(
+                skill_id=skill_id,
+                version=version,
+                success=False,
+                error="inputs must be a dictionary",
+            )
+        else:
+            payload = inputs
         impl = getattr(skill, "implementation", "")
+        if not isinstance(impl, str):
+            return SkillRunResult(skill_id=skill_id, version=version, success=False, error=f"unknown operation: {impl!r}")
         fn = self._operations.get(impl)
         if fn is None:
             return SkillRunResult(skill_id=skill_id, version=version, success=False, error=f"unknown operation: {impl!r}")
         try:
-            output = fn(inputs)
+            output = fn(payload)
             return SkillRunResult(skill_id=skill_id, version=version, success=True, output=output)
         except Exception as exc:  # noqa: BLE001 - surface as failure
             return SkillRunResult(skill_id=skill_id, version=version, success=False, error=f"{type(exc).__name__}: {exc}")

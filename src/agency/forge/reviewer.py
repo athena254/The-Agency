@@ -217,7 +217,7 @@ def _one_round(
                     path=f.path,
                     line=f.line,
                     rule_id=f.rule_id,
-                    severity=sev,  # type: ignore[arg-type]
+                    severity=sev,
                     message=f.message,
                 )
             )
@@ -240,15 +240,15 @@ def _one_round(
                     message=f"INSP rejected path: {r.reason}",
                 )
             )
-        for f in insp.files:
-            if f.kind == "python" and f.syntax_ok is False:
+        for file_record in insp.files:
+            if file_record.kind == "python" and file_record.syntax_ok is False:
                 findings.append(
                     ReviewFinding(
-                        path=f.path,
+                        path=file_record.path,
                         line=1,
                         rule_id="SYNTAX",
                         severity="high",
-                        message=f"SYNTAX python syntax error: {f.syntax_error}",
+                        message=f"SYNTAX python syntax error: {file_record.syntax_error}",
                     )
                 )
 
@@ -322,7 +322,7 @@ def _llm_review_one_round(
 
         insp = inspect_changes(root, changed_paths)
         sec = scan_changes(root, changed_paths)
-        findings_summary = {
+        findings_summary: dict[str, Any] = {
             "changed_paths": changed_paths,
             "inspection_rejected": [r.reason for r in insp.rejected],
             "security_findings": [
@@ -397,7 +397,7 @@ def _llm_review_one_round(
                     path=str(raw.get("path", ""))[:512],
                     line=int(raw.get("line", 1) or 1),
                     rule_id=str(raw.get("rule_id", "LLM"))[:64] or "LLM",
-                    severity=sev,  # type: ignore[arg-type]
+                    severity=sev,
                     message=str(raw.get("message", "llm finding"))[:500],
                     resolved=bool(raw.get("resolved", False)),
                 )

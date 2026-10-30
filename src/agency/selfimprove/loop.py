@@ -22,12 +22,16 @@ class SelfImprovementLoop:
 
     def relevant_skills(self, description: str, *, limit: int = 5) -> list[SkillSpec]:
         """Return published skills whose name/description overlap the query."""
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise TypeError("limit must be an integer")
+        if limit <= 0:
+            return []
         if not description.strip():
             return []
         tokens = {t for t in re_split(description) if len(t) >= 3}
         if not tokens:
             return []
-        matches: list[tuple[int, SkillSpec]] = []
+        matches: dict[str, tuple[int, SkillSpec]] = {}
         # Collect all skill ids by scanning list_versions is not possible without
         # an index; iterate known ids via a best-effort scan of the DB.
         for skill_id in self._list_skill_ids():
@@ -37,15 +41,16 @@ class SelfImprovementLoop:
                 haystack = f"{spec.name} {spec.description}".lower()
                 score = sum(1 for t in tokens if t in haystack)
                 if score > 0:
-                    matches.append((score, spec))
-        matches.sort(key=lambda pair: (-pair[0], pair[1].skill_id, pair[1].version))
-        # Dedupe by skill_id keeping highest version.
-        seen: set[str] = set()
+                    current = matches.get(spec.skill_id)
+                    version_key = tuple(int(part) for part in spec.version.split("."))
+                    if current is None or version_key > tuple(
+                        int(part) for part in current[1].version.split(".")
+                    ):
+                        matches[spec.skill_id] = (score, spec)
+        # Dedupe by skill_id before ranking, keeping the highest published version.
+        ranked_matches = sorted(matches.values(), key=lambda pair: (-pair[0], pair[1].skill_id))
         result: list[SkillSpec] = []
-        for _score, spec in matches:
-            if spec.skill_id in seen:
-                continue
-            seen.add(spec.skill_id)
+        for _score, spec in ranked_matches:
             result.append(spec)
             if len(result) >= limit:
                 break

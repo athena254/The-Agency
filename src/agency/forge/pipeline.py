@@ -116,7 +116,7 @@ def run_pipeline(
     if run_tests_flag:
         tests = run_tests(real_root, test_paths or [], timeout_s=test_timeout_s)
 
-    overall = "PASS"
+    overall: PipelineGate = "PASS"
     if inspection.gate != "PASS":
         overall = "FAIL"
     if security.gate != "PASS":

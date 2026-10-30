@@ -489,8 +489,7 @@ class LLMAdapter:
 
         base_url = self._base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
         # Accept OpenAI-style base URLs (…/v1) by stripping the suffix.
-        if base_url.endswith("/v1"):
-            base_url = base_url[: -len("/v1")]
+        base_url = base_url.removesuffix("/v1")
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             resp = await client.post(
                 f"{base_url}/api/generate",

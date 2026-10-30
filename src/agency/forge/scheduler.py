@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, Self
+from typing import Any, Literal, Self
 from uuid import uuid4
 
 import structlog
@@ -137,7 +137,7 @@ class SchedulerStore:
         self.close()
 
 
-def generate_timer(config: SchedulerConfig | dict) -> SchedulerReport:
+def generate_timer(config: SchedulerConfig | dict[str, Any]) -> SchedulerReport:
     if isinstance(config, dict):
         config = SchedulerConfig(**config)
 

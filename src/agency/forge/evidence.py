@@ -296,8 +296,8 @@ def capture_evidence(
                 returncode = proc.returncode
             except subprocess.TimeoutExpired as exc:
                 duration = time.monotonic() - start
-                raw_out = exc.stdout
-                raw_err = exc.stderr
+                raw_out: bytes | bytearray | str | None = exc.stdout
+                raw_err: bytes | bytearray | str | None = exc.stderr
                 if isinstance(raw_out, (bytes, bytearray)):
                     raw_out = raw_out.decode("utf-8", errors="replace")
                 if isinstance(raw_err, (bytes, bytearray)):
