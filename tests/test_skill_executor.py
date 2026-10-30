@@ -106,7 +106,9 @@ def test_execution_reports_unknown_operation_and_operation_exceptions() -> None:
 
 
 @pytest.mark.parametrize("invalid_inputs", [[], ["not", "a", "mapping"], "not a mapping"])
-def test_execution_rejects_non_mapping_inputs_without_calling_operation(invalid_inputs: object) -> None:
+def test_execution_rejects_non_mapping_inputs_without_calling_operation(
+    invalid_inputs: object,
+) -> None:
     operations = OperationRegistry()
     calls: list[dict[str, object]] = []
     operations.register("search.documents", lambda payload: calls.append(payload))
