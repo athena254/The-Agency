@@ -20,7 +20,8 @@
     session: '/api/session',
     capabilities: '/api/pilot/capabilities',
     threads: '/api/pilot/threads',
-    tasks: '/api/pilot/tasks'
+    tasks: '/api/pilot/tasks',
+    spending: '/api/pilot/spending'
   });
   var CSRF_HEADER = 'X-Prototype-CSRF';
   var AUTH_HEADER = 'Authorization';
@@ -164,6 +165,28 @@
       if (!Object.prototype.hasOwnProperty.call(limits, key) || !nonNegativeInt(limits[key])) return null;
     }
     return payload;
+  }
+
+  // A separate endpoint: never widen the frozen capabilities/task schemas.
+  function normalizeSpending(value) {
+    if (!exactKeys(value, ['enabled', 'currency', 'limit_usd', 'reserved_usd',
+        'reported_cost_usd', 'prompt_tokens', 'completion_tokens', 'unresolved_calls',
+        'pricing_source'])) return null;
+    if (typeof value.enabled !== 'boolean' || value.currency !== 'USD') return null;
+    function dollars(text) {
+      return typeof text === 'string' && /^[0-9]+(?:\.[0-9]+)?$/.test(text);
+    }
+    if (!dollars(value.reserved_usd) || !dollars(value.reported_cost_usd)) return null;
+    if (![value.prompt_tokens, value.completion_tokens, value.unresolved_calls].every(function (count) {
+      return Number.isSafeInteger(count) && count >= 0;
+    })) return null;
+    if (value.enabled) {
+      if (!dollars(value.limit_usd) || typeof value.pricing_source !== 'string' ||
+          value.pricing_source.trim() === '') return null;
+    } else if (value.limit_usd !== null || value.pricing_source !== null) {
+      return null;
+    }
+    return value;
   }
 
   function normalizeThread(value) {
@@ -463,6 +486,9 @@
       toolsAllowed: doc.getElementById('pilot-tools-allowed'),
       toolsDisabled: doc.getElementById('pilot-tools-disabled'),
       readinessNote: doc.getElementById('pilot-readiness-note'),
+      spendingNote: doc.getElementById('pilot-spending-note'),
+      spendingDetails: doc.getElementById('pilot-spending-details'),
+      refreshSpending: doc.getElementById('pilot-refresh-spending'),
       threadForm: doc.getElementById('pilot-thread-form'),
       threadTitle: doc.getElementById('pilot-thread-title'),
       createThread: doc.getElementById('pilot-create-thread'),
@@ -498,6 +524,7 @@
     var bearerToken = null;
     var csrfToken = null;
     var capabilities = null;
+    var spendingGeneration = 0;
     var locked = true;
     var epoch = 0;
     var authAbort = typeof AbortController === 'function' ? new AbortController() : null;
@@ -591,6 +618,9 @@
     }
 
     function resetCapabilities() {
+      clearNode(els.spendingDetails);
+      setText(els.spendingNote, 'Unlock to read spending status. No monetary limit is assumed.');
+      els.refreshSpending.disabled = true;
       setText(els.capMode, UNKNOWN);
       setText(els.capReady, UNKNOWN);
       setText(els.capProvider, UNKNOWN);
@@ -825,6 +855,46 @@
         setText(els.lockState, 'Unlocked');
       }
       updateSendState();
+    }
+
+    async function refreshSpending() {
+      if (locked) return null;
+      var startEpoch = epoch;
+      var generation = ++spendingGeneration;
+      var result = await apiFetch(ENDPOINTS.spending);
+      if (result.locked || !live(startEpoch) || generation !== spendingGeneration) return null;
+      clearNode(els.spendingDetails);
+      els.refreshSpending.disabled = false;
+      var spending = result.res && result.res.ok ? normalizeSpending(result.payload) : null;
+      if (!spending) {
+        setText(els.spendingNote, 'Spending status unavailable. No monetary limit or zero cost can be inferred. Refresh to read again.');
+        return null;
+      }
+      if (spending.enabled === false) {
+        setText(els.spendingNote, 'Spending accounting is disabled. There is no configured monetary ceiling; attempt quotas still apply. Costs and token usage are not tracked here.');
+        return spending;
+      }
+      var rows = [
+        ['Configured ceiling (USD)', spending.limit_usd],
+        ['Reserved (USD)', spending.reserved_usd],
+        ['Estimated reported cost (USD)', spending.reported_cost_usd],
+        ['Provider-reported prompt tokens', spending.prompt_tokens],
+        ['Provider-reported completion tokens', spending.completion_tokens],
+        ['Unresolved calls', spending.unresolved_calls],
+        ['Pricing source', spending.pricing_source]
+      ];
+      rows.forEach(function (row) {
+        var div = doc.createElement('div');
+        var dt = doc.createElement('dt');
+        var dd = doc.createElement('dd');
+        dt.textContent = row[0];
+        dd.textContent = String(row[1]);
+        div.appendChild(dt);
+        div.appendChild(dd);
+        els.spendingDetails.appendChild(div);
+      });
+      setText(els.spendingNote, 'Last server snapshot: estimate from configured rates and provider-reported usage, not a provider invoice. Reservations include calls whose usage is unresolved; they are not automatically refunded. Refresh after a task to update this snapshot.');
+      return spending;
     }
 
     function renderThreads() {
@@ -1511,6 +1581,8 @@
         announce('Owner pilot unlocked.');
         els.threadTitle.focus();
 
+        setText(els.spendingNote, 'Spending status not read. Use Refresh spending to read the current server snapshot. No monetary limit or zero cost is assumed.');
+        els.refreshSpending.disabled = false;
         await Promise.all([refreshThreads(), refreshTasks()]);
         if (!live(startEpoch)) return false;
         updateSendState();
@@ -1531,6 +1603,9 @@
     }
 
     function wireEvents() {
+      els.refreshSpending.addEventListener('click', function () {
+        track(refreshSpending());
+      });
       els.unlockForm.addEventListener('submit', function (event) {
         event.preventDefault();
         track(unlock(els.tokenInput.value));
@@ -1583,6 +1658,7 @@
       refreshCapabilities: function () {
         return capabilities;
       },
+      refreshSpending: refreshSpending,
       refreshThreads: refreshThreads,
       refreshTasks: refreshTasks,
       selectThread: selectThread,

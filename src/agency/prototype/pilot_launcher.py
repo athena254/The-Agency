@@ -22,6 +22,7 @@ os.environ["PYTHON_DOTENV_DISABLED"] = "1"
 from pydantic import BaseModel, ConfigDict, SecretStr
 
 from agency.admission.models import OwnerPrincipal, PilotError
+from agency.admission.spending import SpendingConfig, SpendingLedger
 from agency.llm.adapter import LLMDispatchSnapshot
 from agency.llm.config import LLMConfig, ProviderKind
 
@@ -41,6 +42,7 @@ class _Config(BaseModel):
     max_tokens: int = 1024
     temperature: float = 0.2
     timeout: float = 45.0
+    spending: SpendingConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -54,7 +56,7 @@ class Settings:
 
 _RUNTIME_NAMES = frozenset({"owner.token", "pilot.db.recover.lock"}) | frozenset(
     name + suffix
-    for name in ("pilot.db", "quota.db", "audit.db")
+    for name in ("pilot.db", "quota.db", "audit.db", "spend.db")
     for suffix in ("", "-wal", "-shm", "-journal")
 )
 _ACL_READ = r"""
@@ -221,6 +223,8 @@ def validate(
         raw = _read(config_path, 65536)
         json.loads(raw, object_pairs_hook=_unique)
         config = _Config.model_validate_json(raw)
+        if config.spending is None and any(data_dir.glob("spend.db*")):
+            raise LauncherError("spending_history_requires_configuration")
         OwnerPrincipal(config.owner_id, "local", config.subject_id)
         LLMDispatchSnapshot(
             provider=config.provider,
@@ -390,6 +394,14 @@ async def serve(settings: Settings) -> None:
             audit=audit,
             provider_config=settings.provider_config,
             owner_id=settings.config.owner_id,
+            spending=(SpendingLedger(
+                settings.data_dir / "spend.db", settings.config.spending,
+                identity=json.dumps({
+                    "owner": settings.config.owner_id, "subject": settings.config.subject_id,
+                    "provider": settings.config.provider, "model": settings.config.model,
+                    "base_url": settings.config.base_url,
+                }, sort_keys=True, separators=(",", ":")),
+            ) if settings.config.spending is not None else None),
         )
         stack.push_async_callback(pilot.stop)
         authenticator = OwnerAuthenticator(

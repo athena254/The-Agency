@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from agency.admission.models import OwnerExecutionGrant, OwnerMeteredBinding, PilotError
+from agency.admission.spending import SpendingError, SpendingLedger
 from agency.kernel.audit import AuditEntry, BetaAuditLog
 from agency.llm.adapter import LLMAdapter, _bounded_dispatch_text
 from agency.telegram.budget_store import BetaBudgetStore
@@ -78,6 +79,8 @@ class MeteredModel:
         store: BetaBudgetStore | OwnerBudgetAdapter,
         audit: BetaAuditLog,
         timeout_s: float = 30.0,
+        *,
+        spending: SpendingLedger | None = None,
     ) -> None:
         from agency.admission.budget import OwnerBudgetAdapter
 
@@ -108,6 +111,11 @@ class MeteredModel:
             binding.__post_init__()
             if binding.grant.budget is not store:
                 raise TypeError("MeteredModel requires the grant's exact budget")
+        if spending is not None and (
+            type(spending) is not SpendingLedger or type(binding) is not OwnerMeteredBinding
+        ):
+            raise TypeError("Spending requires an exact owner ledger/binding")
+        self._spending = spending
         self._snapshot = (
             inner.freeze_dispatch() if isinstance(binding, OwnerMeteredBinding) else None
         )
@@ -204,6 +212,14 @@ class MeteredModel:
             raise MeteredDenied("metered: quota denied")
         await self._check_owner(context)
         call_id = uuid4().hex
+        if self._spending is not None:
+            assert self._snapshot is not None
+            try:
+                # One token per UTF-8 byte plus a conservative envelope allowance.
+                self._spending.reserve(call_id, len(prompt.encode("utf-8")) + 1024,
+                                       self._snapshot.max_tokens)
+            except SpendingError:
+                raise MeteredDenied("metered: spending unavailable") from None
         intent = self._entry(call_id, "pending", "intent")
         try:
             claimed = await self._audit.claim_intent(intent)
@@ -223,7 +239,8 @@ class MeteredModel:
         ):
             raise MeteredDenied("metered: provider binding denied")
         try:
-            dispatch = self._dispatch(prompt, context)
+            dispatch = (self._dispatch(prompt, context, call_id=call_id)
+                        if self._spending is not None else self._dispatch(prompt, context))
             raw = await asyncio.wait_for(dispatch, timeout=self._timeout_s)
         except MeteredDenied as exc:
             if self._owner_grant is not None:
@@ -319,9 +336,18 @@ class MeteredModel:
         if active is not True:
             raise MeteredDenied("metered: owner binding denied")
 
-    async def _dispatch(self, prompt: str, context: dict[str, Any] | None) -> str:
+    async def _dispatch(
+        self, prompt: str, context: dict[str, Any] | None, *, call_id: str | None = None,
+    ) -> str:
         await self._check_owner(context)
         if self._snapshot is not None:
+            if self._spending is not None:
+                if call_id is None:
+                    raise MeteredDenied("metered: spending unavailable")
+                return await self._inner.generate_bound(
+                    prompt, self._snapshot,
+                    usage_sink=lambda usage: self._spending.settle(call_id, usage),
+                )
             return await self._inner.generate_bound(prompt, self._snapshot)
         return await self._inner.generate(prompt, {})
 

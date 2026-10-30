@@ -70,6 +70,12 @@ async def capabilities(request: Request) -> PilotCapabilities:
     return await pilot.capabilities(principal)
 
 
+@router.get("/spending")
+async def spending(request: Request) -> JSONResponse:
+    pilot, principal, _ = await _boundary(request)
+    return JSONResponse(content=await pilot.spending(principal))
+
+
 @router.get("/threads")
 async def threads(request: Request) -> JSONResponse:
     pilot, principal, _ = await _boundary(request)

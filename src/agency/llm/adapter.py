@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field, replace
 from ipaddress import ip_address
 from typing import Any
@@ -222,7 +222,10 @@ class LLMAdapter:
             timeout=self._timeout,
         )
 
-    async def generate_bound(self, prompt: str, snapshot: LLMDispatchSnapshot) -> str:
+    async def generate_bound(
+        self, prompt: str, snapshot: LLMDispatchSnapshot, *,
+        usage_sink: Callable[[object], None] | None = None,
+    ) -> str:
         """Dispatch exactly one owner call using pre-await snapshot-local values."""
         import httpx
 
@@ -240,6 +243,8 @@ class LLMAdapter:
         temperature = snapshot.temperature
         timeout = snapshot.timeout
         if provider == "echo":
+            if usage_sink is not None:
+                usage_sink(None)  # Offline echo has no provider-reported usage.
             return _bounded_dispatch_text(_response_text(self._echo_generate(prompt)))
         url = f"{base_url.rstrip('/')}/chat/completions"
         headers = {
@@ -258,7 +263,12 @@ class LLMAdapter:
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
-        return _bounded_dispatch_text(_response_text(data["choices"][0]["message"]["content"]))
+        text = _bounded_dispatch_text(_response_text(data["choices"][0]["message"]["content"]))
+        if usage_sink is not None:
+            if not text.strip():
+                raise ValueError("Owner dispatch returned empty text")
+            usage_sink(data.get("usage") if type(data) is dict else None)
+        return text
 
     def _detect_provider(self) -> str:
         """Auto-detect provider from available credentials."""

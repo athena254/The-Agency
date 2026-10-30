@@ -336,7 +336,7 @@ def create_app(
         owner_surface = (
             configured or path.startswith(("/api/pilot/", "/assets/pilot.")) or path == "/pilot"
         )
-        bootstrap = path in {
+        bootstrap = (configured and path == "/") or path in {
             "/pilot",
             "/assets/pilot.html",
             "/assets/pilot.js",
@@ -488,7 +488,9 @@ def create_app(
 
     @application.get("/", include_in_schema=False)
     async def index() -> FileResponse:
-        index_file = STATIC_DIR / "index.html"
+        index_file = STATIC_DIR / (
+            "pilot.html" if application.state.pilot_configured else "index.html"
+        )
         if not index_file.is_file():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

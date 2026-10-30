@@ -29,6 +29,7 @@ from agency.admission.models import (
     ThreadView,
 )
 from agency.admission.policy import OwnerToolPolicy
+from agency.admission.spending import SpendingError, SpendingLedger
 from agency.admission.store import OwnerPilotStore
 from agency.agents.assessment import ExecutionAssessment, bound_assessment
 from agency.butler.service import ButlerService
@@ -57,6 +58,7 @@ class OwnerPilotService:
         provider_config: LLMConfig,
         owner_id: str,
         workspace_id: str = "",
+        spending: SpendingLedger | None = None,
     ) -> None:
         if (
             type(butler) is not ButlerService
@@ -84,6 +86,9 @@ class OwnerPilotService:
             ).freeze_dispatch()
         except (ValueError, TypeError):
             raise PilotError("invalid_request") from None
+        if spending is not None and type(spending) is not SpendingLedger:
+            raise PilotError("invalid_request")
+        self._spending = spending
         self._butler, self._store, self._budget, self._audit = butler, store, budget, audit
         self._owner_id, self._workspace_id = owner_id, workspace_id
         self._config_id = uuid4().hex
@@ -232,6 +237,19 @@ class OwnerPilotService:
         except Exception:  # noqa: BLE001 -- storage/child failures must fail closed
             raise PilotError("audit", uncertain=True) from None
         return durable or pending or self._blocked or self._stopping
+
+    async def spending(self, principal: OwnerPrincipal) -> dict[str, Any]:
+        await self._scope(principal)
+        if self._spending is not None:
+            try:
+                return self._spending.snapshot()
+            except SpendingError:
+                raise PilotError("store", uncertain=True) from None
+        return {
+            "enabled": False, "currency": "USD", "limit_usd": None,
+            "reserved_usd": "0", "reported_cost_usd": "0", "prompt_tokens": 0,
+            "completion_tokens": 0, "unresolved_calls": 0, "pricing_source": None,
+        }
 
     async def capabilities(self, principal: OwnerPrincipal) -> PilotCapabilities:
         await self._scope(principal)
@@ -432,6 +450,7 @@ class OwnerPilotService:
             self._budget,
             self._audit,
             timeout_s=config.timeout,
+            spending=self._spending,
         )
         registry = ToolRegistry(owner_policy=OwnerToolPolicy(), audit=self._audit)
         registry.register(CalculatorTool())

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <meta name="description" content="Single-owner local pilot. Limited autonomy, not production-ready, not decentralized.">
-  <title>The Agency — owner pilot</title>
+  <title>The Agency — persistent tasks</title>
   <link rel="stylesheet" href="/assets/pilot.css">
 </head>
 <body>
@@ -26,7 +26,8 @@
 
     <main class="layout">
       <section id="pilot-lock" class="panel lock-panel" aria-labelledby="pilot-lock-title">
-        <h1 id="pilot-lock-title" class="panel-title">Owner unlock</h1>
+        <h1 id="pilot-lock-title" class="panel-title">Your persistent task workspace</h1>
+        <p class="panel-note">Conversations and task history are saved by the local owner service, not in your browser. Unlock again after a reload to reopen them. Start with one bounded task, such as calculating a total or searching the web.</p>
         <p class="panel-note">This single-owner local pilot uses an owner bearer that is kept only in this tab's JavaScript memory. It is not stored, put in the URL, or written to logs. The pilot is not production-ready and not decentralized.</p>
         <form id="pilot-unlock-form" class="unlock-form" novalidate>
           <label for="pilot-token-input" class="field-label">Owner bearer</label>
@@ -53,6 +54,15 @@
           <p id="pilot-tools-allowed" class="panel-note">Allowed tools: calculator, utc_time, web_search.</p>
           <p id="pilot-tools-disabled" class="panel-note">Disabled: shell, fetch, governance, memory tools, bridges, agent activation.</p>
           <p id="pilot-readiness-note" class="status-text" role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="panel" aria-labelledby="pilot-spending-title">
+          <div class="panel-heading">
+            <h2 id="pilot-spending-title" class="panel-title">Spending estimate</h2>
+            <button type="button" id="pilot-refresh-spending" class="button button--quiet" disabled>Refresh spending</button>
+          </div>
+          <p id="pilot-spending-note" class="status-text" role="status" aria-live="polite">Unlock to read spending status. No monetary limit is assumed.</p>
+          <dl id="pilot-spending-details" class="limits" aria-label="Last spending snapshot"></dl>
         </section>
 
         <div class="workspace-grid">
@@ -90,6 +100,7 @@
               <div class="fact"><dt>Error code</dt><dd id="pilot-task-error">&mdash;</dd></div>
             </dl>
             <p id="pilot-task-note" class="status-text" role="status" aria-live="polite">No task submitted.</p>
+            <p class="panel-note">These are attempt counters, not a tool event log: they count model and tool attempts, not token usage or a bill. A completed task is not an independently verified answer. Spending is a separate server snapshot above.</p>
 
             <section id="pilot-result" class="result" aria-labelledby="pilot-result-title" hidden>
               <h3 id="pilot-result-title" class="result-title">Execution result</h3>
