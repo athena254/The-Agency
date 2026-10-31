@@ -53,6 +53,8 @@ from agency.api.routers import evidence as evidence_router
 from agency.api.routers import governance as governance_router
 from agency.api.routers import memory as memory_router
 from agency.api.routers import tasks as tasks_router
+from agency.agents.coding_bootstrap import bootstrap_coding_agent
+from agency.agents.registry import AgentRegistry as RuntimeAgentRegistry
 from agency.bridges.coordinator import ExternalCoordinator
 from agency.evidence.store.store import EvidenceStore
 from agency.kernel.registry import AgentRegistry
@@ -126,6 +128,8 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     state_names = (
         "task_manager",
         "agent_registry",
+        "runtime_registry",
+        "coding_agent",
         "risk_engine",
         "bridge_coordinator",
         "evidence_store",
@@ -138,6 +142,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     try:
         application.state.task_manager = TaskManager()
         application.state.agent_registry = AgentRegistry()
+        application.state.runtime_registry = RuntimeAgentRegistry()
         application.state.risk_engine = RiskEngine()
         application.state.bridge_coordinator = ExternalCoordinator()
 
@@ -153,6 +158,23 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         # Record ownership before exposing the borrowed handle or running hooks.
         lease = await acquire_lattice()
         application.state.lattice = lease.lattice
+
+        kernel_registry = getattr(application.state, "agent_registry", None)
+        if kernel_registry is None:
+            kernel_registry = getattr(application.state, "kernel_registry", None)
+        runtime_registry = getattr(application.state, "runtime_registry", None)
+        if kernel_registry is not None and runtime_registry is not None:
+            try:
+                application.state.coding_agent = bootstrap_coding_agent(
+                    kernel_registry, runtime_registry
+                )
+            except BaseException as exc:  # noqa: BLE001 - startup must not crash
+                application.state.coding_agent = None
+                log.warning(
+                    "api.startup.coding_agent_failed",
+                    error_type=type(exc).__name__,
+                )
+
         log.info("api.startup", version=__version__)
         yield
     except BaseException as exc:
