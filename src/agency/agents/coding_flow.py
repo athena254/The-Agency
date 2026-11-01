@@ -37,6 +37,7 @@ def run_described_task(
     agent: Any,
     *,
     branch: str,
+    file_context: dict[str, str] | None = None,
     **run_task_kwargs: Any,
 ) -> tuple[list[dict[str, Any]], Any]:
     """Plan edits for ``task`` with ``llm``, then run them via ``agent``.
@@ -47,6 +48,6 @@ def run_described_task(
 
     Any extra keyword arguments are forwarded to ``agent.run_task``.
     """
-    edits = plan_edits(llm, task)
+    edits = plan_edits(llm, task, file_context=file_context)
     report = _call_run_task(agent, branch, edits, run_task_kwargs)
     return edits, report

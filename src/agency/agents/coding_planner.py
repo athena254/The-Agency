@@ -21,8 +21,13 @@ __all__ = ["plan_edits"]
 _PROMPT_TEMPLATE = """You are a coding assistant. Given the task below, return ONLY a JSON array of edits.
 Each edit must be an object with keys "path", "old", and "new":
 [
-  {{"path": "file.py", "old": "old text", "new": "new text"}}
+  {{"path": "file.py", "old": "exact existing text to replace", "new": "replacement text"}}
 ]
+
+Rules:
+- "old" MUST be a non-empty exact substring of the current file content.
+- Do not return an empty "old" string.
+- Return valid JSON only, no prose.
 
 Task: {task}
 """
@@ -62,17 +67,24 @@ def _parse_edits(raw: Any) -> list[dict]:
         return []
     result: list[dict] = []
     for item in data:
-        if isinstance(item, dict):
+        if isinstance(item, dict) and isinstance(item.get("path"), str) and isinstance(item.get("old"), str) and item.get("old") != "" and isinstance(item.get("new"), str):
             result.append(item)
     return result
 
 
-def plan_edits(llm_callable: LLMCallable, task: str) -> list[dict]:
+def plan_edits(llm_callable: LLMCallable, task: str, file_context: dict[str, str] | None = None) -> list[dict]:
     """Ask ``llm_callable`` for a JSON list of ``{path, old, new}`` edits.
 
+    ``file_context`` maps relative paths to their current contents so the LLM
+    can copy exact "old" substrings.
     Returns ``[]`` when the LLM output cannot be parsed into such a list.
     """
-    prompt = _PROMPT_TEMPLATE.format(task=task)
+    context_block = ""
+    if file_context:
+        context_block = "\n\nCurrent file contents:\n"
+        for path, content in file_context.items():
+            context_block += f"\n--- {path} ---\n{content}\n"
+    prompt = _PROMPT_TEMPLATE.format(task=task) + context_block
     try:
         raw = _invoke(llm_callable, prompt)
     except Exception:  # noqa: BLE001 - treat any call failure as no edits
