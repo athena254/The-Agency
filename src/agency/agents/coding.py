@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from agency.forge import CodingAgentReport, CodingAgentStore, run_coding_agent
-
+from agency.forge.coding_agent import _normalize_edit, _resolve_edits
+from agency.forge.protected_paths import is_protected
 # Repository root = parents[3] of this file (src/agency/agents/coding.py).
 DEFAULT_WORKSPACE = Path(__file__).resolve().parents[3]
 
@@ -58,6 +59,12 @@ class AgencyCodingAgent:
         When ``persist`` is true and a ``store_path`` was configured, the report
         is also saved to :class:`CodingAgentStore` so it survives restarts.
         """
+        # Protected-paths guardrail: refuse before creating a worktree.
+        for raw_edit in _resolve_edits(edits):
+            parsed = _normalize_edit(raw_edit)
+            if parsed is not None and is_protected(parsed[0]):
+                raise ValueError(f"protected path: {parsed[0]}")
+
         report = run_coding_agent(
             self.workspace,
             branch,

@@ -29,6 +29,12 @@ class ProviderKind(str, Enum):
     LOCAL = "local"
     ECHO = "echo"
     POLLINATIONS = "pollinations"
+    INCEPTION = "inception"
+    INCEPTION_LABS = "inceptionlabs"
+    INCEPTIONLABS = "inceptionlabs"
+    MERCURY = "mercury"
+    MERCURY3 = "mercury3"
+    MERCURY_3 = "mercury-3"
 
     def __str__(self) -> str:
         return self.value
@@ -71,6 +77,12 @@ _DEFAULT_MODELS: dict[ProviderKind, str] = {
     ProviderKind.LOCAL: "local-model",
     ProviderKind.ECHO: "echo",
     ProviderKind.POLLINATIONS: "openai-fast",
+    ProviderKind.INCEPTION: "mercury-3",
+    ProviderKind.INCEPTION_LABS: "mercury-3",
+    ProviderKind.INCEPTIONLABS: "mercury-3",
+    ProviderKind.MERCURY: "mercury-3",
+    ProviderKind.MERCURY3: "mercury-3",
+    ProviderKind.MERCURY_3: "mercury-3",
 }
 
 # Named presets: ``load_named_provider("claude")`` etc.
@@ -85,6 +97,12 @@ _NAMED_PRESETS: dict[str, tuple[ProviderKind, str]] = {
     "local": (ProviderKind.OLLAMA, "llama3.1"),
     "ollama": (ProviderKind.OLLAMA, "llama3.1"),
     "echo": (ProviderKind.ECHO, "echo"),
+    "inception": (ProviderKind.INCEPTION, "mercury-3"),
+    "inceptionlabs": (ProviderKind.INCEPTION_LABS, "mercury-3"),
+    "inception-labs": (ProviderKind.INCEPTION_LABS, "mercury-3"),
+    "mercury": (ProviderKind.MERCURY, "mercury-3"),
+    "mercury3": (ProviderKind.MERCURY3, "mercury-3"),
+    "mercury-3": (ProviderKind.MERCURY_3, "mercury-3"),
 }
 
 
@@ -136,6 +154,8 @@ def detect_provider(env: dict[str, str] | None = None) -> ProviderKind:
         return ProviderKind.ANTHROPIC
     if _get(env, "OPENROUTER_API_KEY"):
         return ProviderKind.OPENROUTER
+    if _get(env, "INCEPTION_API_KEY", "INCEPTION_LABS_API_KEY"):
+        return ProviderKind.INCEPTION
     if _get(env, "OLLAMA_HOST", "OLLAMA_BASE_URL"):
         return ProviderKind.OLLAMA
     if _get(env, "OPENAI_BASE_URL", "LLM_BASE_URL", "LOCAL_LLM_URL"):
@@ -189,6 +209,31 @@ def load_config(
         resolved_model = (
             resolved_model or _get(env, "OLLAMA_MODEL", "LOCAL_LLM_MODEL") or _DEFAULT_MODELS[kind]
         )
+    elif kind in (
+        ProviderKind.INCEPTION,
+        ProviderKind.INCEPTION_LABS,
+        ProviderKind.INCEPTIONLABS,
+        ProviderKind.MERCURY,
+        ProviderKind.MERCURY3,
+        ProviderKind.MERCURY_3,
+    ):
+        api_key = api_key or _get(
+            env,
+            "INCEPTION_API_KEY",
+            "INCEPTION_LABS_API_KEY",
+            f"{str(kind).upper().replace('-', '_')}_API_KEY",
+        )
+        base_url = base_url or _get(
+            env,
+            "INCEPTION_BASE_URL",
+            "INCEPTION_LABS_BASE_URL",
+            "INCEPTION_API_BASE_URL",
+        )
+        resolved_model = (
+            resolved_model
+            or _get(env, "INCEPTION_MODEL", "INCEPTION_LABS_MODEL", "MERCURY_MODEL")
+            or _DEFAULT_MODELS[kind]
+        )
     else:  # echo
         resolved_model = resolved_model or _DEFAULT_MODELS[ProviderKind.ECHO]
 
@@ -231,7 +276,11 @@ def load_named_provider(
 
     model = str(overrides.pop("model", None) or _get(env, f"{prefix}_MODEL") or default_model)
     api_key = overrides.pop("api_key", None) or _get(env, f"{prefix}_API_KEY")
+    if not api_key and prefix not in ("INCEPTION",):
+        api_key = _get(env, "INCEPTION_API_KEY")
     base_url = overrides.pop("base_url", None) or _get(env, f"{prefix}_BASE_URL")
+    if not base_url:
+        base_url = _get(env, "INCEPTION_BASE_URL")
 
     base = load_config(provider=kind, model=model, load_dotenv=False)
     data: dict[str, Any] = base.model_dump()

@@ -18,6 +18,16 @@ load_dotenv()
 
 logger = structlog.get_logger(__name__)
 
+_INCEPTION_PROVIDERS = {
+    "inception",
+    "inceptionlabs",
+    "inception-labs",
+    "inception_labs",
+    "mercury",
+    "mercury3",
+    "mercury-3",
+}
+
 
 def _response_text(value: Any) -> str:
     if not isinstance(value, str):
@@ -278,6 +288,8 @@ class LLMAdapter:
             return "anthropic"
         if os.environ.get("OPENROUTER_API_KEY"):
             return "openrouter"
+        if os.environ.get("INCEPTION_API_KEY") or os.environ.get("INCEPTION_LABS_API_KEY"):
+            return "inception"
         if os.environ.get("OLLAMA_HOST") or os.environ.get("OLLAMA_BASE_URL"):
             return "ollama"
         # Default to Pollinations — keyless and free
@@ -291,6 +303,13 @@ class LLMAdapter:
             "anthropic": "claude-3-5-haiku-20241022",
             "openrouter": "qwen/qwen3.8-27b:free",
             "pollinations": "openai-fast",
+            "inception": "mercury-3",
+            "inceptionlabs": "mercury-3",
+            "inception-labs": "mercury-3",
+            "inception_labs": "mercury-3",
+            "mercury": "mercury-3",
+            "mercury3": "mercury-3",
+            "mercury-3": "mercury-3",
             "ollama": "llama3.1",
             "echo": "echo",
         }
@@ -317,6 +336,8 @@ class LLMAdapter:
                 return await self._openrouter_generate(prompt, model)
             elif provider == "pollinations":
                 return await self._pollinations_generate(prompt, model)
+            elif provider in _INCEPTION_PROVIDERS:
+                return await self._inception_generate(prompt, model)
             elif provider == "ollama":
                 return await self._ollama_generate(prompt, model)
             elif provider == "echo":
@@ -493,6 +514,31 @@ class LLMAdapter:
         if isinstance(content, str) and content.strip():
             return content
         raise ValueError(f"unexpected Pollinations response shape: {str(data)[:200]}")
+
+    async def _inception_generate(self, prompt: str, model: str) -> str:
+        """Generate via Inception Labs (OpenAI-compatible chat completions)."""
+        import httpx
+
+        base_url = self._base_url or "https://api.inceptionlabs.ai/v1"
+        api_key = self._api_key or os.environ.get("INCEPTION_API_KEY", "")
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            resp = await client.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": self._max_tokens,
+                    "temperature": self._temperature,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        return _response_text(data["choices"][0]["message"]["content"])
 
     async def _ollama_generate(self, prompt: str, model: str) -> str:
         import httpx
