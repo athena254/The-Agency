@@ -28,6 +28,7 @@ from agency.forge.inspection import (
     inspect_changes,
 )
 from agency.forge.pipeline import CAVEATS as _PIPELINE_CAVEATS
+from agency.forge.protected_paths import is_protected
 from agency.forge.security_scan import SecurityReport, scan_changes
 from agency.forge.test_runner import TestReport, run_tests
 from agency.forge.worktree import WorktreeError, WorktreeInfo, create_worktree, remove_worktree
@@ -222,6 +223,14 @@ def run_coding_agent(
         raise ValueError(f"repo_root must be an existing directory, got {repo_root!r}")
 
     normalized_edits = _resolve_edits(edits)
+    # Refuse the whole batch before worktree metadata or any earlier safe edit
+    # can change. Invalid shapes/names retain the existing fail-report path;
+    # validate traversal before the policy helper performs lexical normalization.
+    for raw_edit in normalized_edits:
+        parsed = _normalize_edit(raw_edit)
+        if parsed is not None and _rejects_for_name(parsed[0]) is None and is_protected(parsed[0]):
+            raise ValueError(f"protected path: {parsed[0]}")
+
     if len(normalized_edits) > max_edits:
         # Fail closed: still create a worktree? We'll create then report FAIL with no edits.
         pass
@@ -275,6 +284,20 @@ def run_coding_agent(
                 break
 
             try:
+                # Windows junctions can resolve inside the root and are not
+                # necessarily reported by islink(). Refuse every reparse
+                # component before reading/writing through a policy alias.
+                probe = worktree_path
+                for part in parts:
+                    probe = probe / part
+                    component_st = os.lstat(probe)
+                    if getattr(component_st, "st_file_attributes", 0) & getattr(
+                        stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0
+                    ):
+                        failure = "reparse_point_not_allowed"
+                        break
+                if failure is not None:
+                    break
                 st = os.lstat(candidate)
             except FileNotFoundError:
                 failure = "missing_file"
@@ -344,10 +367,17 @@ def run_coding_agent(
     if run_tests_flag:
         tp = test_paths or []
         try:
-            tests = run_tests(worktree_path, tp, timeout_s=test_timeout_s)
+            result = run_tests(worktree_path, tp, timeout_s=test_timeout_s)
+            # Revalidate original field values without coercion: construction
+            # and copying can bypass validation, including bool/string/float exits.
+            tests = TestReport.model_validate(
+                dict(result) if isinstance(result, TestReport) else result, strict=True
+            )
         except Exception as exc:  # noqa: BLE001
             logger.error("forge.coding_agent_tests_error", error=str(exc))
             tests = None
+            if failure is None:
+                failure = "tests_unavailable"
 
     # Overall gate.
     overall: CodingAgentGate = "PASS"
@@ -362,7 +392,7 @@ def run_coding_agent(
         overall = "FAIL"
     if security.gate != "PASS":
         overall = "FAIL"
-    if tests is not None and tests.gate != "PASS":
+    if run_tests_flag and (tests is None or tests.gate != "PASS" or tests.returncode != 0):
         overall = "FAIL"
 
     # Caveats.

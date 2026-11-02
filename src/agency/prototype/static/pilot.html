@@ -88,6 +88,15 @@
               <button type="submit" id="pilot-send-task" class="button button--primary" disabled>Send task</button>
             </form>
             <p id="pilot-task-hint" class="hint">Enter sends &middot; Shift+Enter adds a new line. Submission is admitted once; ambiguous outcomes retain the same request ID and are never retried automatically.</p>
+
+            <h3 class="panel-title panel-title--sub">Integer calculation check</h3>
+            <form id="pilot-calculator-form" class="stack-form calculator-form" novalidate>
+              <label for="pilot-calculator-expression" class="field-label">Integer calculation expression</label>
+              <input id="pilot-calculator-expression" class="text-input" type="text" maxlength="120" autocomplete="off" spellcheck="false" autocapitalize="none" inputmode="text" placeholder="e.g. (2 + 3) * 4" aria-describedby="pilot-calculator-hint">
+              <button type="submit" id="pilot-calculator-submit" class="button" disabled>Submit calculation</button>
+            </form>
+            <p id="pilot-calculator-hint" class="hint">Bounded integer arithmetic only: digits, spaces or tabs, +, -, *, and parentheses. No division, decimals, exponentiation, names, or newlines. At most 120 characters, 64 tokens, 12 nesting levels, and magnitude 10^15.</p>
+            <p id="pilot-calculator-note" class="status-text" role="status" aria-live="polite">Calculation requests are separate from ordinary messages and are never retried automatically.</p>
           </section>
 
           <aside class="panel status-panel" aria-labelledby="pilot-task-title">
@@ -121,6 +130,24 @@
             <ul id="pilot-task-list" class="task-list" aria-label="Recent tasks"></ul>
           </aside>
         </div>
+
+        <section id="pilot-verification" class="panel verification-panel" aria-labelledby="pilot-verification-title">
+          <div class="panel-heading">
+            <h2 id="pilot-verification-title" class="panel-title">Calculation check</h2>
+            <button type="button" id="pilot-refresh-verification" class="button button--quiet" disabled>Refresh check</button>
+          </div>
+          <p id="pilot-verification-note" class="status-text" role="status" aria-live="polite">No calculation check loaded. Select a task and use Refresh check.</p>
+          <dl class="facts verification-facts">
+            <div class="fact"><dt>Execution state</dt><dd id="pilot-verification-state">&mdash;</dd></div>
+            <div class="fact"><dt>Checker verdict</dt><dd id="pilot-verification-verdict" role="status" aria-live="polite">&mdash;</dd></div>
+            <div class="fact"><dt>Expression</dt><dd id="pilot-verification-expression">&mdash;</dd></div>
+            <div class="fact"><dt>Expected</dt><dd id="pilot-verification-expected">&mdash;</dd></div>
+            <div class="fact"><dt>Observed</dt><dd id="pilot-verification-observed">&mdash;</dd></div>
+            <div class="fact"><dt>Method</dt><dd id="pilot-verification-method">&mdash;</dd></div>
+          </dl>
+          <p id="pilot-verification-binding" class="panel-note">No stored response binding.</p>
+          <p id="pilot-verification-scope" class="panel-note">Scope: bounded integer arithmetic on the admitted expression only. This is not proof of model honesty, tool use, peer approval, or other answer claims. The existing a2.v1 report remains independently_verified=false.</p>
+        </section>
 
         <section class="panel disabled-panel" aria-labelledby="pilot-disabled-title">
           <h2 id="pilot-disabled-title" class="panel-title">Not available in this pilot</h2>

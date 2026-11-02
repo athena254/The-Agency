@@ -534,6 +534,49 @@ body {
   font-size: 13px;
 }
 
+.calculator-form {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.verification-panel {
+  border-color: var(--border-strong);
+}
+
+.verification-facts {
+  margin-top: 12px;
+}
+
+.verification-facts .fact dd {
+  overflow-wrap: anywhere;
+}
+
+.verification-verdict {
+  font-weight: 700;
+}
+
+.verification-verdict--passed {
+  color: var(--ok);
+}
+
+.verification-verdict--failed {
+  color: var(--err);
+}
+
+.verification-verdict--unable {
+  color: var(--warn);
+}
+
+.verification-verdict--neutral {
+  color: var(--text-dim);
+}
+
+#pilot-verification-binding,
+#pilot-verification-scope {
+  overflow-wrap: anywhere;
+}
+
 .disabled-panel {
   border-style: dashed;
 }

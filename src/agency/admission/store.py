@@ -15,6 +15,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, TypeVar, cast
 
+from agency.admission.calculator_verification import admitted_expression, validate_receipt
+from agency.admission import coding_store
+from agency.factory.coding_models import CodingBinding, CodingEdit, FactoryCodingRequest
 from agency.admission.models import (
     AdmissionRecord,
     MessageView,
@@ -48,7 +51,7 @@ CREATE TABLE IF NOT EXISTS pilot_events (
  event_id INTEGER PRIMARY KEY AUTOINCREMENT, sequence INTEGER NOT NULL REFERENCES pilot_requests(sequence),
  phase TEXT NOT NULL, code TEXT NOT NULL, created_at REAL NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_pilot_owner_tasks ON pilot_requests(owner_id, sequence);
-"""
+""" + coding_store.CODING_SCHEMA
 
 
 def _iso(moment: float) -> str:
@@ -364,6 +367,7 @@ class OwnerPilotStore:
             if existing is not None:
                 if (
                     existing["operation"] != operation
+                    or coding_store.is_coding(conn, existing["sequence"])
                     or existing["input_digest"] != digest
                     or existing["input_json"] != text
                 ):
@@ -392,6 +396,60 @@ class OwnerPilotStore:
             return self._record(row)
 
         return await self._run(work)
+
+    async def admit_coding(
+        self, principal: OwnerPrincipal, payload: FactoryCodingRequest, binding: CodingBinding,
+        *, profile_snapshot: dict,
+    ) -> AdmissionRecord:
+        _principal(principal)
+        snapshot = coding_store.admission_snapshot(payload, binding, profile_snapshot)
+        record = await self._run(lambda conn: coding_store.admit(self, conn, principal, snapshot))
+        # Grant a fresh claim only after an acknowledged committed transaction.
+        # Cancellation/lost acknowledgment must never produce a new dispatch.
+        if not record.replayed:
+            self._fresh_turns.add(record.sequence)
+        return record
+
+    async def get_coding_record(
+        self, principal: OwnerPrincipal, task_id: str, workspace_id: str = '',
+    ) -> coding_store.CodingRecord | None:
+        _principal(principal)
+        _id(task_id)
+        if type(workspace_id) is not str:
+            raise PilotError('invalid_request')
+        return await self._run(
+            lambda conn: coding_store.read_record(self, conn, principal, task_id, workspace_id)
+        )
+
+    async def record_coding_intent(
+        self, sequence: int, *, binding: CodingBinding, edits: tuple[CodingEdit, ...],
+        plan_sha256: str, branch: str,
+    ) -> None:
+        binding = coding_store.model_snapshot(CodingBinding, binding)
+        snapshot = coding_store.intent_snapshot(binding, edits, plan_sha256, branch)
+        await self._run(lambda conn: coding_store.record_intent(self, conn, sequence, binding, snapshot))
+
+    async def stage_coding_result(
+        self, sequence: int, *, binding: CodingBinding, evidence: coding_store.CodingEvidence,
+    ) -> None:
+        binding = coding_store.model_snapshot(CodingBinding, binding)
+        evidence = coding_store.evidence_snapshot(evidence, binding)
+        await self._run(lambda conn: coding_store.stage(self, conn, sequence, binding, evidence))
+
+    async def commit_coding_turn(self, sequence: int, *, binding: CodingBinding) -> None:
+        binding = coding_store.model_snapshot(CodingBinding, binding)
+        await self._run(lambda conn: coding_store.commit(self, conn, sequence, binding), publication=True)
+        self._blocked_sequences.add(sequence)
+        self._fresh_turns.discard(sequence)
+
+    async def mark_coding_uncertain(
+        self, sequence: int, *, binding: CodingBinding, phase: str, reason: str,
+    ) -> None:
+        binding = coding_store.model_snapshot(CodingBinding, binding)
+        coding_store.validate_uncertainty(phase, reason)
+        await self._run(lambda conn: coding_store.uncertain(self, conn, sequence, binding, phase, reason))
+        self._blocked_sequences.add(sequence)
+        self._fresh_turns.discard(sequence)
 
     async def _claim(
         self, principal: OwnerPrincipal, request_id: str, task_id: str
@@ -449,6 +507,27 @@ class OwnerPilotStore:
         return await self._run(
             lambda conn: self._record(self._request_row(conn, principal, request_id))
         )
+
+    async def verification_record(
+        self, principal: OwnerPrincipal, task_id: str, workspace_id: str
+    ) -> AdmissionRecord:
+        """Read an owner task and enforce configured workspace without provisioning."""
+        _principal(principal)
+        _id(task_id)
+
+        def work(conn: sqlite3.Connection) -> AdmissionRecord:
+            row = conn.execute(
+                "SELECT * FROM pilot_requests WHERE owner_id=? AND task_id=? AND operation='turn'",
+                (principal.owner_id, task_id),
+            ).fetchone()
+            if row is None:
+                raise PilotError("not_found")
+            thread = self._thread(conn, principal, row["thread_id"])
+            if workspace_id and workspace_id != thread["workspace_id"]:
+                raise PilotError("forbidden")
+            return self._record(row)
+
+        return await self._run(work)
 
     async def has_uncertainty(self, principal: OwnerPrincipal) -> bool:
         """Check all durable owner turns, independently of visible task history."""
@@ -579,7 +658,10 @@ class OwnerPilotStore:
 
     @staticmethod
     def _result(
-        row: sqlite3.Row, text: str, assessment: ExecutionAssessment | None
+        row: sqlite3.Row,
+        text: str,
+        assessment: ExecutionAssessment | None,
+        verification: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if type(text) is not str or not text.strip():
             raise PilotError("invalid_request")
@@ -598,14 +680,38 @@ class OwnerPilotStore:
                 or assessment.execution_status != "completed"
             ):
                 raise PilotError("conflict")
-        return {
+        result = {
             "task_id": row["task_id"],
             "response": text,
             "assessment": None if assessment is None else assessment.model_dump(mode="json"),
         }
+        try:
+            expression = admitted_expression(
+                row["input_json"], row["input_digest"], row["thread_id"]
+            )
+        except (ValueError, UnicodeError, RecursionError):
+            raise PilotError("store") from None
+        if expression is not None and verification is None:
+            raise PilotError("conflict")
+        if verification is not None:
+            try:
+                result["verification"] = validate_receipt(
+                    verification,
+                    task_id=row["task_id"],
+                    request_id=row["request_id"],
+                    thread_id=row["thread_id"],
+                    expression=expression,
+                    response=text,
+                )
+            except (ValueError, UnicodeError):
+                raise PilotError("conflict") from None
+        return result
 
     async def stage_result(self, sequence: int, result: dict[str, Any]) -> None:
-        if type(result) is not dict or set(result) != {"task_id", "response", "assessment"}:
+        if type(result) is not dict or set(result) not in (
+            {"task_id", "response", "assessment"},
+            {"task_id", "response", "assessment", "verification"},
+        ):
             raise PilotError("invalid_request")
         # Snapshot before the first await; caller mutation cannot rewrite a result.
         encoded, _ = _canonical(result, maximum=524288)
@@ -614,13 +720,17 @@ class OwnerPilotStore:
         def work(conn: sqlite3.Connection) -> None:
             row = self._turn(conn, sequence)
             self._live(row)
+            if coding_store.is_coding(conn, sequence):
+                raise PilotError('conflict')
             try:
                 assessment = (
                     None
                     if snapshot["assessment"] is None
                     else ExecutionAssessment.model_validate(snapshot["assessment"])
                 )
-                bound = self._result(row, snapshot["response"], assessment)
+                bound = self._result(
+                    row, snapshot["response"], assessment, snapshot.get("verification")
+                )
             except ValueError:
                 raise PilotError("invalid_request") from None
             if snapshot != bound:
@@ -639,12 +749,26 @@ class OwnerPilotStore:
         await self._run(work)
 
     async def commit_turn(
-        self, sequence: int, *, text: str, assessment: ExecutionAssessment | None
+        self,
+        sequence: int,
+        *,
+        text: str,
+        assessment: ExecutionAssessment | None,
+        verification: dict[str, Any] | None = None,
     ) -> None:
+        # Freeze mutable caller evidence before the lifecycle await.
+        if verification is not None:
+            encoded, _ = _canonical(verification, maximum=32768)
+            verification = json.loads(encoded)
+
         def work(conn: sqlite3.Connection) -> None:
             row = self._turn(conn, sequence)
             self._live(row)
-            result, digest = _canonical(self._result(row, text, assessment), maximum=524288)
+            if coding_store.is_coding(conn, sequence):
+                raise PilotError('conflict')
+            result, digest = _canonical(
+                self._result(row, text, assessment, verification), maximum=524288
+            )
             if row["result_json"] != result or row["result_digest"] != digest:
                 raise PilotError("conflict")
             now = time.time()

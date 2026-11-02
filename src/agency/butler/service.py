@@ -43,6 +43,12 @@ from agency.tools.base import BetaPrincipal
 
 if TYPE_CHECKING:
     from agency.admission.models import OwnerExecutionGrant
+    from agency.agents.factory_coding import (
+        NativeCodingExecutor,
+        NativeCodingHooks,
+        NativeCodingOutcome,
+        NativeCodingRequest,
+    )
     from agency.lattice.api import Lattice
     from agency.llm.metered import MeteredModel
     from agency.tools.registry import ToolRegistry
@@ -408,6 +414,40 @@ class ButlerService:
         elif memory_enabled:
             await self._store_turn(sender, agent, text, response)
         return response
+
+    async def handle_owner_coding(
+        self, request: NativeCodingRequest, *, grant: OwnerExecutionGrant,
+        model: MeteredModel, executor: NativeCodingExecutor, hooks: NativeCodingHooks,
+    ) -> NativeCodingOutcome:
+        """Forward only the complete admitted native sidecar; no legacy context/tools."""
+        from pathlib import Path
+
+        from agency.admission.models import OwnerExecutionGrant, PilotError
+        from agency.agents.factory_coding import NativeCodingExecutor, NativeCodingRequest
+        from agency.butler.threads import ThreadStore
+
+        if (type(grant) is not OwnerExecutionGrant or type(request) is not NativeCodingRequest
+                or type(executor) is not NativeCodingExecutor
+                or type(self._threads) is not ThreadStore or self._owns_threads):
+            raise PilotError("forbidden")
+        grant.__post_init__()
+        lease = grant.lease
+        if Path(self._threads.db_path).resolve() != Path(grant.budget._store._db_path).resolve():
+            raise PilotError("forbidden")
+        saved = await grant.budget._store.get_coding_record(
+            lease.principal, lease.task_id, request.binding.workspace_id
+        )
+        grant.__post_init__()
+        if (saved is None or saved.request != request.request or saved.binding != request.binding
+                or saved.admission.state != "RUNNING"
+                or saved.admission.request_id != lease.request_id
+                or saved.binding.owner_id != lease.principal.owner_id):
+            raise PilotError("forbidden")
+        try:
+            self._threads.get_thread(lease.principal.owner_id, saved.binding.thread_id)
+        except KeyError:
+            raise PilotError("not_found") from None
+        return await executor.execute(request, grant=grant, model=model, hooks=hooks)
 
     async def handle_owner_message(
         self,

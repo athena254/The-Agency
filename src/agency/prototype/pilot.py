@@ -9,6 +9,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from agency.admission.calculator_verification import CalculatorTaskRequest
 from agency.admission.models import (
     OwnerError,
     OwnerPrincipal,
@@ -131,6 +132,25 @@ async def tasks(request: Request) -> JSONResponse:
         raise PilotError("invalid_request")
     rows = await pilot.list_tasks(principal, limit=int(raw))
     return JSONResponse(content={"tasks": [row.model_dump(mode="json") for row in rows]})
+
+
+@router.post("/calculator-tasks")
+async def submit_calculator(request: Request) -> JSONResponse:
+    pilot, principal, body = await _boundary(request, write=True)
+    try:
+        payload = CalculatorTaskRequest.model_validate(body).as_owner_task()
+    except ValidationError:
+        raise PilotError("invalid_request") from None
+    view = await pilot.submit(principal, payload)
+    return JSONResponse(
+        status_code=200 if view.replayed else 202, content=view.model_dump(mode="json")
+    )
+
+
+@router.get("/tasks/{task_id}/verification")
+async def verification(request: Request, task_id: str) -> JSONResponse:
+    pilot, principal, _ = await _boundary(request)
+    return JSONResponse(content=await pilot.get_verification(principal, task_id))
 
 
 @router.get("/tasks/{task_id}")

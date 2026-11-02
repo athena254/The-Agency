@@ -21,6 +21,7 @@
     capabilities: '/api/pilot/capabilities',
     threads: '/api/pilot/threads',
     tasks: '/api/pilot/tasks',
+    calculatorTasks: '/api/pilot/calculator-tasks',
     spending: '/api/pilot/spending'
   });
   var CSRF_HEADER = 'X-Prototype-CSRF';
@@ -65,6 +66,23 @@
     heuristic_passed: true,
     heuristic_failed: true
   });
+  var CALCULATOR_STATUS = Object.freeze({
+    passed: true, failed: true, unable_to_verify: true
+  });
+  var CALCULATOR_REASON = Object.freeze({
+    matches: true, mismatch: true, answer_not_integer: true
+  });
+  var VERIFICATION_REASONS = Object.freeze({
+    available: true, not_requested: true, not_completed: true, legacy_result: true
+  });
+  var INTEGER_RE = /^(?:0|-?[1-9][0-9]*)$/;
+  var MAX_EXPRESSION_CHARS = 120;
+  var MAX_EXPRESSION_TOKENS = 64;
+  var MAX_EXPRESSION_DEPTH = 12;
+  var MAX_MAGNITUDE = BigInt('1000000000000000');
+  var CALCULATION_SCOPE = 'Scope: bounded integer arithmetic on the admitted expression only. ' +
+    'This is not proof of model honesty, tool use, peer approval, or other answer claims. ' +
+    'The existing a2.v1 report remains independently_verified=false.';
   var UNKNOWN = '\u2014';
 
   /* ------------------------------------------------------------------ *
@@ -143,6 +161,239 @@
     } catch (err) {
       return null;
     }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Bounded calculator expression and verification contract
+   * ------------------------------------------------------------------ */
+
+  function boundedIntegerString(text) {
+    if (typeof text !== 'string' || !INTEGER_RE.test(text)) return false;
+    if (typeof BigInt !== 'function') return false;
+    var digits = text.charAt(0) === '-' ? text.slice(1) : text;
+    if (digits.length > 16) return false;
+    try {
+      var value = BigInt(text);
+      return value <= MAX_MAGNITUDE && value >= -MAX_MAGNITUDE;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function tokenizeExpression(expression) {
+    var tokens = [];
+    var i = 0;
+    while (i < expression.length) {
+      var ch = expression.charAt(i);
+      if (ch === ' ' || ch === '\t') {
+        i += 1;
+        continue;
+      }
+      if (ch >= '0' && ch <= '9') {
+        var start = i;
+        if (ch === '0') {
+          i += 1;
+          if (i < expression.length && expression.charAt(i) >= '0' &&
+              expression.charAt(i) <= '9') return null;
+        } else {
+          while (i < expression.length && expression.charAt(i) >= '0' &&
+              expression.charAt(i) <= '9') i += 1;
+        }
+        tokens.push({ type: 'number', value: expression.slice(start, i) });
+      } else if (ch === '+' || ch === '-' || ch === '*' || ch === '(' || ch === ')') {
+        tokens.push({ type: ch });
+        i += 1;
+      } else {
+        return null;
+      }
+      if (tokens.length > MAX_EXPRESSION_TOKENS) return null;
+    }
+    return tokens.length === 0 ? null : tokens;
+  }
+
+  /** Deterministic, non-eval parser used only for client-side pre-admission bounds. */
+  function validateExpression(expression) {
+    if (typeof expression !== 'string' || expression.length < 1 ||
+        expression.length > MAX_EXPRESSION_CHARS) return false;
+    for (var i = 0; i < expression.length; i++) {
+      var code = expression.charCodeAt(i);
+      if (code > 127) return false;
+    }
+    var tokens = tokenizeExpression(expression);
+    if (!tokens) return false;
+    var position = 0;
+
+    function peek() {
+      return position < tokens.length ? tokens[position] : null;
+    }
+
+    function parseExpression(depth) {
+      var left = parseTerm(depth);
+      if (left === null) return null;
+      var token = peek();
+      while (token && (token.type === '+' || token.type === '-')) {
+        position += 1;
+        var right = parseTerm(depth);
+        if (right === null) return null;
+        left = token.type === '+' ? left + right : left - right;
+        if (left > MAX_MAGNITUDE || left < -MAX_MAGNITUDE) return null;
+        token = peek();
+      }
+      return left;
+    }
+
+    function parseTerm(depth) {
+      var left = parseUnary(depth);
+      if (left === null) return null;
+      var token = peek();
+      while (token && token.type === '*') {
+        position += 1;
+        var right = parseUnary(depth);
+        if (right === null) return null;
+        left = left * right;
+        if (left > MAX_MAGNITUDE || left < -MAX_MAGNITUDE) return null;
+        token = peek();
+      }
+      return left;
+    }
+
+    function parseUnary(depth) {
+      var token = peek();
+      if (token && (token.type === '+' || token.type === '-')) {
+        if (depth >= MAX_EXPRESSION_DEPTH) return null;
+        position += 1;
+        var value = parseUnary(depth + 1);
+        if (value === null) return null;
+        return token.type === '-' ? -value : value;
+      }
+      return parsePrimary(depth);
+    }
+
+    function parsePrimary(depth) {
+      var token = peek();
+      if (!token) return null;
+      if (token.type === 'number') {
+        position += 1;
+        var value;
+        try {
+          value = BigInt(token.value);
+        } catch (err) {
+          return null;
+        }
+        if (value > MAX_MAGNITUDE || value < -MAX_MAGNITUDE) return null;
+        return value;
+      }
+      if (token.type === '(') {
+        if (depth >= MAX_EXPRESSION_DEPTH) return null;
+        position += 1;
+        var inner = parseExpression(depth + 1);
+        if (inner === null) return null;
+        var close = peek();
+        if (!close || close.type !== ')') return null;
+        position += 1;
+        return inner;
+      }
+      return null;
+    }
+
+    try {
+      var result = parseExpression(0);
+      return result !== null && position === tokens.length;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function normalizeCalculatorReceipt(value) {
+    if (!exactKeys(value, ['schema_version', 'method', 'task_id', 'request_id', 'thread_id',
+        'expression', 'criteria_sha256', 'output_sha256', 'status', 'reason', 'expected',
+        'observed'])) return null;
+    if (value.schema_version !== 'calculator.v1' ||
+        value.method !== 'bounded_integer_arithmetic/v1') return null;
+    if (!nonEmptyString(value.task_id) || !nonEmptyString(value.thread_id)) return null;
+    if (!nonEmptyString(value.request_id) || !REQUEST_ID_RE.test(value.request_id)) return null;
+    if (!nonEmptyString(value.expression) || !validateExpression(value.expression)) return null;
+    if (typeof value.criteria_sha256 !== 'string' || !DIGEST_RE.test(value.criteria_sha256)) return null;
+    if (typeof value.output_sha256 !== 'string' || !DIGEST_RE.test(value.output_sha256)) return null;
+    if (typeof value.status !== 'string' || typeof value.reason !== 'string' ||
+        !Object.prototype.hasOwnProperty.call(CALCULATOR_STATUS, value.status) ||
+        !Object.prototype.hasOwnProperty.call(CALCULATOR_REASON, value.reason)) return null;
+    if (!boundedIntegerString(value.expected)) return null;
+    if (value.observed !== null && !boundedIntegerString(value.observed)) return null;
+    if (value.status === 'passed') {
+      if (value.reason !== 'matches' || value.observed === null ||
+          value.observed !== value.expected) return null;
+    } else if (value.status === 'failed') {
+      if (value.reason !== 'mismatch' || value.observed === null ||
+          value.observed === value.expected) return null;
+    } else if (value.reason !== 'answer_not_integer' || value.observed !== null) {
+      return null;
+    }
+    return value;
+  }
+
+  function normalizeVerification(value) {
+    if (!exactKeys(value, ['task_id', 'request_id', 'thread_id', 'execution_state',
+        'receipt', 'reason'])) return null;
+    if (!nonEmptyString(value.task_id) || !nonEmptyString(value.thread_id)) return null;
+    if (!nonEmptyString(value.request_id) || !REQUEST_ID_RE.test(value.request_id)) return null;
+    if (typeof value.execution_state !== 'string' || typeof value.reason !== 'string' ||
+        !Object.prototype.hasOwnProperty.call(TASK_STATES, value.execution_state) ||
+        !Object.prototype.hasOwnProperty.call(VERIFICATION_REASONS, value.reason)) return null;
+    if (value.reason === 'available') {
+      if (value.execution_state !== 'COMPLETED') return null;
+      var receipt = normalizeCalculatorReceipt(value.receipt);
+      if (!receipt) return null;
+      if (receipt.task_id !== value.task_id || receipt.request_id !== value.request_id ||
+          receipt.thread_id !== value.thread_id) return null;
+    } else {
+      if (value.receipt !== null) return null;
+      if (value.reason === 'not_completed' && value.execution_state === 'COMPLETED') return null;
+      if (value.reason === 'legacy_result' && value.execution_state !== 'COMPLETED') return null;
+    }
+    return value;
+  }
+
+  function verificationUrl(taskId) {
+    return ENDPOINTS.tasks + '/' + encodeURIComponent(taskId) + '/verification';
+  }
+
+  function calculatorReasonText(reason) {
+    if (reason === 'not_requested') {
+      return 'Not requested: this task is not an explicit integer-calculation verification request.';
+    }
+    if (reason === 'not_completed') {
+      return 'Not complete: this explicit calculation task has no receipt until execution completes.';
+    }
+    if (reason === 'legacy_result') {
+      return 'Legacy result: no stored calculation check exists for this completed opt-in task; it was not re-run or fabricated.';
+    }
+    return 'Calculation check unavailable.';
+  }
+
+  async function bindCalculatorVerification(envelope, task) {
+    var unavailable = 'Calculation check unavailable: the receipt is missing, malformed, or does not bind to this task and exact saved response bytes. No success is implied.';
+    if (!isObject(task) || !isObject(envelope) || !normalizeVerification(envelope)) {
+      return { bound: false, notice: unavailable };
+    }
+    if (envelope.task_id !== task.task_id || envelope.request_id !== task.request_id ||
+        envelope.thread_id !== task.thread_id || envelope.execution_state !== task.state) {
+      return { bound: false, notice: unavailable };
+    }
+    if (envelope.reason !== 'available') {
+      return { bound: true, receipt: null, envelope: envelope };
+    }
+    if (task.state !== 'COMPLETED' || task.uncertain !== false ||
+        typeof task.response !== 'string' || task.response.trim() === '') {
+      return { bound: false, notice: unavailable };
+    }
+    var criteria = await sha256Hex(envelope.receipt.expression);
+    var output = await sha256Hex(task.response);
+    if (!criteria || !output || envelope.receipt.criteria_sha256 !== criteria ||
+        envelope.receipt.output_sha256 !== output) {
+      return { bound: false, notice: unavailable };
+    }
+    return { bound: true, receipt: envelope.receipt, envelope: envelope };
   }
 
   /* ------------------------------------------------------------------ *
@@ -515,7 +766,22 @@
       cancelTask: doc.getElementById('pilot-cancel-task'),
       cancelNote: doc.getElementById('pilot-cancel-note'),
       tasksNote: doc.getElementById('pilot-tasks-note'),
-      taskList: doc.getElementById('pilot-task-list')
+      taskList: doc.getElementById('pilot-task-list'),
+      calculatorForm: doc.getElementById('pilot-calculator-form'),
+      calculatorExpression: doc.getElementById('pilot-calculator-expression'),
+      calculatorSubmit: doc.getElementById('pilot-calculator-submit'),
+      calculatorNote: doc.getElementById('pilot-calculator-note'),
+      verification: doc.getElementById('pilot-verification'),
+      verificationNote: doc.getElementById('pilot-verification-note'),
+      refreshVerification: doc.getElementById('pilot-refresh-verification'),
+      verificationState: doc.getElementById('pilot-verification-state'),
+      verificationVerdict: doc.getElementById('pilot-verification-verdict'),
+      verificationExpression: doc.getElementById('pilot-verification-expression'),
+      verificationExpected: doc.getElementById('pilot-verification-expected'),
+      verificationObserved: doc.getElementById('pilot-verification-observed'),
+      verificationMethod: doc.getElementById('pilot-verification-method'),
+      verificationBinding: doc.getElementById('pilot-verification-binding'),
+      verificationScope: doc.getElementById('pilot-verification-scope')
     };
     Object.keys(els).forEach(function (key) {
       if (!els[key]) throw new Error('Missing required pilot UI element: ' + key);
@@ -545,10 +811,14 @@
     var taskViewGeneration = 0;
     var taskReadGeneration = 0;
     var pendingSubmission = null;
+    var pendingCalculator = null;
     var pendingThread = null;
     var pendingWrite = null;
     var pollTimer = null;
     var pollState = null;
+    var verificationReadGeneration = 0;
+    var verificationTaskId = null;
+    var verificationTaskState = null;
 
     function now() {
       return typeof options.now === 'function' ? options.now() : Date.now();
@@ -615,6 +885,202 @@
       els.refreshTask.disabled = true;
       els.cancelTask.disabled = true;
       hideResult();
+      resetVerificationPanel();
+    }
+
+    function resetVerificationPanel(note) {
+      verificationTaskId = null;
+      verificationTaskState = null;
+      setText(els.verificationState, UNKNOWN);
+      setText(els.verificationVerdict, UNKNOWN);
+      els.verificationVerdict.className = 'verification-verdict';
+      setText(els.verificationExpression, UNKNOWN);
+      setText(els.verificationExpected, UNKNOWN);
+      setText(els.verificationObserved, UNKNOWN);
+      setText(els.verificationMethod, UNKNOWN);
+      setText(els.verificationBinding, 'No stored response binding.');
+      setText(els.verificationScope, CALCULATION_SCOPE);
+      setText(els.verificationNote,
+        note || 'No calculation check loaded. Select a task and use Refresh check.');
+    }
+
+    function renderVerification(envelope) {
+      verificationTaskId = envelope.task_id;
+      verificationTaskState = envelope.execution_state;
+      setText(els.verificationState, envelope.execution_state);
+      setText(els.verificationScope, CALCULATION_SCOPE);
+      if (envelope.reason !== 'available') {
+        var neutral = envelope.reason === 'not_requested' ? 'Not requested'
+          : envelope.reason === 'not_completed' ? 'Not complete' : 'Legacy result';
+        setText(els.verificationVerdict, neutral);
+        els.verificationVerdict.className = 'verification-verdict verification-verdict--neutral';
+        setText(els.verificationExpression, UNKNOWN);
+        setText(els.verificationExpected, UNKNOWN);
+        setText(els.verificationObserved, UNKNOWN);
+        setText(els.verificationMethod, UNKNOWN);
+        setText(els.verificationBinding, 'No stored receipt is bound to this task.');
+        setText(els.verificationNote, calculatorReasonText(envelope.reason));
+        return;
+      }
+      var receipt = envelope.receipt;
+      var label = receipt.status === 'passed' ? 'Passed'
+        : receipt.status === 'failed' ? 'Failed' : 'Unable to verify';
+      var tone = receipt.status === 'passed' ? 'verification-verdict--passed'
+        : receipt.status === 'failed' ? 'verification-verdict--failed'
+          : 'verification-verdict--unable';
+      setText(els.verificationVerdict, label);
+      els.verificationVerdict.className = 'verification-verdict ' + tone;
+      setText(els.verificationExpression, receipt.expression);
+      setText(els.verificationExpected, receipt.expected);
+      setText(els.verificationObserved, receipt.observed === null ? UNKNOWN : receipt.observed);
+      setText(els.verificationMethod, receipt.method);
+      setText(els.verificationBinding,
+        'Exact saved response bytes match output SHA-256 ' + receipt.output_sha256 + '.');
+      if (receipt.status === 'passed') {
+        setText(els.verificationNote,
+          'Passed: the exact saved final answer equals an independent bounded integer recomputation of the admitted expression. This narrow arithmetic check is not a general proof of model honesty, tool use, peer approval, or all facts.');
+      } else if (receipt.status === 'failed') {
+        setText(els.verificationNote,
+          'Failed: the exact saved final answer differs from the independent bounded integer recomputation of the admitted expression. No pass is claimed.');
+      } else {
+        setText(els.verificationNote,
+          'Unable to verify: the saved final answer was not a single bounded integer. No pass is claimed.');
+      }
+    }
+
+    async function refreshVerification() {
+      if (locked || !activeTask) return null;
+      var target = activeTask;
+      var taskId = target.task_id;
+      var threadAtStart = selectedThreadId;
+      var taskGen = taskGeneration;
+      var viewGen = taskViewGeneration;
+      var startEpoch = epoch;
+      var generation = ++verificationReadGeneration;
+      function stillCurrent() {
+        return live(startEpoch) && generation === verificationReadGeneration &&
+          selectedTaskId === taskId && selectedThreadId === threadAtStart &&
+          taskGeneration === taskGen && taskViewGeneration === viewGen &&
+          activeTask !== null && activeTask.task_id === taskId;
+      }
+      resetVerificationPanel('Reading calculation check from the server…');
+      var result = await apiFetch(verificationUrl(taskId));
+      if (result.locked || !stillCurrent()) return null;
+      if (result.networkError) {
+        resetVerificationPanel('Calculation check unavailable: the local pilot service could not be reached. No success is implied.');
+        return null;
+      }
+      if (!result.res.ok) {
+        resetVerificationPanel('Calculation check unavailable. ' + describeError(result));
+        return null;
+      }
+      var envelope = normalizeVerification(result.payload);
+      if (!envelope) {
+        resetVerificationPanel('Calculation check unavailable: the server response was malformed or did not match the exact verification contract. No success is implied.');
+        return null;
+      }
+      if (envelope.task_id !== target.task_id || envelope.request_id !== target.request_id ||
+          envelope.thread_id !== target.thread_id ||
+          envelope.execution_state !== target.state) {
+        resetVerificationPanel('Calculation check unavailable: the response did not match the selected task identity or execution state. No success is implied.');
+        return null;
+      }
+      var bound = await bindCalculatorVerification(envelope, target);
+      if (!stillCurrent()) return null;
+      if (!bound.bound) {
+        resetVerificationPanel(bound.notice);
+        return null;
+      }
+      renderVerification(bound.envelope);
+      return bound.envelope;
+    }
+
+    async function submitCalculator(raw) {
+      if (locked || writeBusy) return false;
+      if (selectedThreadId === null) {
+        setText(els.calculatorNote, 'Select or create a conversation first.');
+        return false;
+      }
+      if (!canRun()) {
+        setText(els.calculatorNote, readinessProblem());
+        return false;
+      }
+      var expression = typeof raw === 'string' ? raw : els.calculatorExpression.value;
+      if (!validateExpression(expression)) {
+        setText(els.calculatorNote,
+          'Enter a supported integer expression: 1–120 ASCII characters using digits, spaces or tabs, +, -, *, and parentheses; no leading zeros, division, decimals, exponentiation, names, or newlines; at most 64 tokens, 12 nesting levels, and magnitude 10^15.');
+        els.calculatorExpression.focus();
+        return false;
+      }
+      var threadId = selectedThreadId;
+      var submittedDraft = els.calculatorExpression.value;
+      var requestId = pendingCalculator &&
+        pendingCalculator.threadId === threadId &&
+        pendingCalculator.expression === expression
+        ? pendingCalculator.requestId : newRequestId();
+      pendingCalculator = {
+        requestId: requestId,
+        threadId: threadId,
+        expression: expression
+      };
+      var owner = beginWrite();
+      setText(els.calculatorNote, 'Submitting calculation ' + requestId + ' to the pilot…');
+      var generation = ++taskGeneration;
+      selectedTaskId = null;
+      stopPolling();
+      verificationReadGeneration += 1;
+      resetVerificationPanel('Calculation check not read for this task. Use Refresh check after completion.');
+      try {
+        var protectedWrite = await ensureCsrf();
+        if (!ownsWrite(owner) || generation !== taskGeneration) return false;
+        if (!protectedWrite) {
+          setText(els.calculatorNote, 'No CSRF session token is available; the calculation was not sent.');
+          return false;
+        }
+        var result = await apiFetch(ENDPOINTS.calculatorTasks, {
+          method: 'POST',
+          csrf: true,
+          body: { request_id: requestId, thread_id: threadId, expression: expression }
+        });
+        if (result.locked || !ownsWrite(owner) || generation !== taskGeneration) return false;
+        if (result.networkError) {
+          setText(els.calculatorNote,
+            'Calculation submission outcome unknown: the service could not be reached. The same request ID is retained; no automatic retry was made.');
+          return false;
+        }
+        if (!result.res.ok) {
+          if (result.res.status >= 500 || result.res.status === 429) {
+            setText(els.calculatorNote,
+              describeError(result) + ' The same request ID is retained; no automatic retry was made.');
+          } else {
+            pendingCalculator = null;
+            setText(els.calculatorNote, 'Calculation not admitted. ' + describeError(result));
+          }
+          return false;
+        }
+        var task = normalizeTask(result.payload);
+        if (!task || task.request_id !== requestId || task.thread_id !== threadId) {
+          setText(els.calculatorNote,
+            'Calculation submission response was malformed or did not match the request ID. The outcome is unknown; the same request ID is retained and no automatic retry was made.');
+          return false;
+        }
+        pendingCalculator = null;
+        var info = await applyTask(task);
+        if (info.stale || !ownsWrite(owner) || generation !== taskGeneration) return false;
+        task = activeTask;
+        if (ACTIVE_STATES[task.state] === true) startPolling(task.task_id);
+        if (selectedThreadId === threadId && els.calculatorExpression.value === submittedDraft) {
+          els.calculatorExpression.value = '';
+        }
+        updateSendState();
+        setText(els.calculatorNote,
+          'Calculation task admitted with state ' + task.state + '. Use Refresh check to read the stored calculation receipt.');
+        els.refreshVerification.focus();
+        announce('Calculation task admitted with state ' + task.state + '.');
+        return true;
+      } finally {
+        endWrite(owner);
+      }
     }
 
     function resetCapabilities() {
@@ -654,8 +1120,10 @@
       tasks = [];
       activeTask = null;
       pendingSubmission = null;
+      pendingCalculator = null;
       selectedTaskId = null;
       taskGeneration += 1;
+      verificationReadGeneration += 1;
       pendingThread = null;
       pendingWrite = null;
 
@@ -663,6 +1131,9 @@
       els.tokenInput.value = '';
       els.threadTitle.value = '';
       els.messageInput.value = '';
+      els.calculatorExpression.value = '';
+      setText(els.calculatorNote,
+        'Calculation requests are separate from ordinary messages and are never retried automatically.');
       clearNode(els.threadList);
       clearNode(els.messages);
       clearNode(els.taskList);
@@ -680,15 +1151,20 @@
 
     function updateSendState() {
       var hasText = els.messageInput.value.trim() !== '';
+      var hasExpression = els.calculatorExpression.value.trim() !== '';
       els.createThread.disabled = locked || writeBusy;
       els.refreshTask.disabled = locked || !activeTask;
+      els.refreshVerification.disabled = locked || !activeTask;
       Array.from(els.taskList.children).forEach(function (row) {
         if (row.firstChild) row.firstChild.disabled = locked || writeBusy;
       });
       els.cancelTask.disabled = locked || writeBusy || !activeTask ||
         !ACTIVE_STATES[activeTask.state] || activeTask.cancel_requested;
       els.sendTask.disabled = locked || writeBusy || !selectedThreadId || !canRun() || !hasText;
+      els.calculatorSubmit.disabled = locked || writeBusy || !selectedThreadId ||
+        !canRun() || !hasExpression;
       els.messageInput.setAttribute('aria-busy', writeBusy ? 'true' : 'false');
+      els.calculatorExpression.setAttribute('aria-busy', writeBusy ? 'true' : 'false');
       els.workspace.setAttribute('aria-busy', (writeBusy || (pollState !== null)) ? 'true' : 'false');
     }
 
@@ -1075,6 +1551,10 @@
       var startEpoch = epoch;
       var generation = taskGeneration;
       var viewGeneration = ++taskViewGeneration;
+      if (verificationTaskId !== task.task_id || verificationTaskState !== task.state) {
+        verificationReadGeneration += 1;
+        resetVerificationPanel('Calculation check not read for this task. Use Refresh check.');
+      }
       selectedTaskId = task.task_id;
       task = upsertTask(task);
       activeTask = task;
@@ -1196,6 +1676,8 @@
       if (locked || !nonEmptyString(threadId)) return false;
       var startEpoch = epoch;
       var generation = messageGeneration + 1;
+      verificationReadGeneration += 1;
+      resetVerificationPanel('Calculation check cleared because the selected conversation changed. Select a task and use Refresh check.');
       selectedThreadId = threadId;
       var title = threadTitleFor(threadId);
       setText(els.threadHeading, title || 'Conversation');
@@ -1374,6 +1856,7 @@
       var startEpoch = epoch;
       var generation = ++taskGeneration;
       stopPolling();
+      verificationReadGeneration += 1;
       selectedTaskId = taskId;
       activeTask = null;
       resetTaskPanel();
@@ -1619,15 +2102,27 @@
       });
       els.taskForm.addEventListener('submit', function (event) {
         event.preventDefault();
+        verificationReadGeneration += 1;
+        resetVerificationPanel('Calculation check not read for this task. Use Refresh check.');
         track(submitTask(els.messageInput.value));
       });
       els.messageInput.addEventListener('keydown', function (event) {
         if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
           event.preventDefault();
+          verificationReadGeneration += 1;
+          resetVerificationPanel('Calculation check not read for this task. Use Refresh check.');
           track(submitTask(els.messageInput.value));
         }
       });
       els.messageInput.addEventListener('input', updateSendState);
+      els.calculatorForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        track(submitCalculator(els.calculatorExpression.value));
+      });
+      els.calculatorExpression.addEventListener('input', updateSendState);
+      els.refreshVerification.addEventListener('click', function () {
+        track(refreshVerification());
+      });
       els.cancelTask.addEventListener('click', function () {
         track(cancelTask());
       });
@@ -1665,6 +2160,8 @@
       refreshMessages: refreshMessages,
       createThread: createThread,
       submitTask: submitTask,
+      submitCalculator: submitCalculator,
+      refreshVerification: refreshVerification,
       refreshTask: refreshTask,
       selectTask: selectTask,
       cancelTask: cancelTask,
@@ -1720,6 +2217,10 @@
     bindAssessment: bindAssessment,
     validAssessment: validAssessment,
     normalizeTask: normalizeTask,
+    validateExpression: validateExpression,
+    normalizeCalculatorReceipt: normalizeCalculatorReceipt,
+    normalizeVerification: normalizeVerification,
+    bindCalculatorVerification: bindCalculatorVerification,
     createController: createController
   };
 })();

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import time
 from collections.abc import Coroutine
@@ -12,6 +13,12 @@ from typing import Any, Literal, TypeVar, cast
 from uuid import uuid4
 
 from agency.admission.budget import OwnerBudgetAdapter
+from agency.admission.calculator_verification import (
+    admitted_expression,
+    make_receipt,
+    validate_receipt,
+)
+from agency.admission.coding_store import CodingEvidence, model_snapshot
 from agency.admission.models import (
     AdmissionRecord,
     MessageView,
@@ -31,9 +38,17 @@ from agency.admission.models import (
 from agency.admission.policy import OwnerToolPolicy
 from agency.admission.spending import SpendingError, SpendingLedger
 from agency.admission.store import OwnerPilotStore
-from agency.agents.assessment import ExecutionAssessment, bound_assessment
+from agency.agents.assessment import ExecutionAssessment, bound_assessment, output_digest
+from agency.agents.factory_coding import (
+    NativeCodingDenied,
+    NativeCodingExecutor,
+    NativeCodingHooks,
+    NativeCodingRequest,
+    NativeCodingUncertain,
+)
 from agency.butler.service import ButlerService
 from agency.butler.threads import ThreadStore
+from agency.factory.coding_models import CodingBinding, FactoryCodingRequest
 from agency.kernel.audit import AuditEntry, BetaAuditLog
 from agency.llm.adapter import LLMAdapter
 from agency.llm.config import LLMConfig
@@ -59,6 +74,7 @@ class OwnerPilotService:
         owner_id: str,
         workspace_id: str = "",
         spending: SpendingLedger | None = None,
+        coding: NativeCodingExecutor | None = None,
     ) -> None:
         if (
             type(butler) is not ButlerService
@@ -88,6 +104,28 @@ class OwnerPilotService:
             raise PilotError("invalid_request") from None
         if spending is not None and type(spending) is not SpendingLedger:
             raise PilotError("invalid_request")
+        if coding is not None:
+            if type(coding) is not NativeCodingExecutor:
+                raise PilotError("invalid_request")
+            try:
+                profile = coding.profile
+                profile.__post_init__()
+                facts = {k: getattr(self._dispatch, k) for k in (
+                    "provider", "model", "base_url", "max_tokens", "temperature", "timeout"
+                )}
+                if (not workspace_id or (owner_id, workspace_id) !=
+                        (profile.owner_id, profile.workspace_id)
+                        or (profile.provider, profile.model) !=
+                        (self._dispatch.provider, self._dispatch.model)
+                        or json.loads(profile.dispatch_json) != facts
+                        or not profile.provider_config_id.strip()):
+                    raise ValueError
+            except (ValueError, TypeError, AttributeError):
+                raise PilotError("invalid_request") from None
+        self._coding = coding
+        self._coding_profile = coding.profile if coding is not None else None
+        self._coding_sha = coding.profile.sha256 if coding is not None else None
+        self._coding_uncertain: asyncio.Task[None] | None = None
         self._spending = spending
         self._butler, self._store, self._budget, self._audit = butler, store, budget, audit
         self._owner_id, self._workspace_id = owner_id, workspace_id
@@ -166,6 +204,13 @@ class OwnerPilotService:
             self._ready = True
 
     async def _close_owned(self) -> None:
+        # A cancelled waiter is not a stopped host thread/model/hook. Keep this
+        # creating loop and all owned stores alive until actual settlement.
+        if self._coding is not None:
+            while not await self._coding.stop(drain_timeout_s=0.05):
+                await asyncio.sleep(0.01)
+        if self._coding_uncertain is not None:
+            await asyncio.gather(self._coding_uncertain, return_exceptions=True)
         self._ready = False
         self._closed = True
         error: Exception | None = None
@@ -294,6 +339,73 @@ class OwnerPilotService:
         await self._scope(principal)
         return self._view(await self._store.get(principal, task_id))
 
+    async def get_verification(self, principal: OwnerPrincipal, task_id: str) -> dict[str, Any]:
+        # Unlike _scope, this path never provisions a workspace or writes rows.
+        self._owner(principal)
+        row = await self._store.verification_record(principal, task_id, self._workspace_id)
+        self._owner(principal)
+        try:
+            expression = admitted_expression(row.input_json, row.input_digest, row.thread_id or "")
+            receipt = None
+            if row.result_json is not None:
+                if (
+                    type(row.result_json) is not str
+                    or len(row.result_json) > 524288
+                    or hashlib.sha256(row.result_json.encode("utf-8")).hexdigest()
+                    != row.result_digest
+                ):
+                    raise ValueError("result digest")
+                result = json.loads(row.result_json)
+                if (
+                    type(result) is not dict
+                    or set(result)
+                    not in (
+                        {"task_id", "response", "assessment"},
+                        {"task_id", "response", "assessment", "verification"},
+                    )
+                    or result["task_id"] != row.task_id
+                ):
+                    raise ValueError("result identity")
+                if type(result["response"]) is not str or not result["response"].strip():
+                    raise ValueError("result response")
+                if result["assessment"] is not None:
+                    report = ExecutionAssessment.model_validate(result["assessment"])
+                    if (
+                        report.task_id != row.task_id
+                        or report.execution_status != "completed"
+                        or report.output_sha256 != output_digest(result["response"])
+                    ):
+                        raise ValueError("assessment binding")
+                if "verification" in result:
+                    validate_receipt(
+                        result["verification"],
+                        task_id=row.task_id or "",
+                        request_id=row.request_id,
+                        thread_id=row.thread_id or "",
+                        expression=expression,
+                        response=result["response"],
+                    )
+                    # Return the historical object, not a replacement checker issuance.
+                    receipt = result["verification"]
+            elif row.result_digest is not None or row.state == "COMPLETED":
+                raise ValueError("missing result")
+            if expression is None:
+                reason = "not_requested"
+            elif row.state != "COMPLETED":
+                reason, receipt = "not_completed", None
+            else:
+                reason = "available" if receipt is not None else "legacy_result"
+        except (ValueError, UnicodeError, RecursionError):
+            raise PilotError("store") from None
+        return {
+            "task_id": row.task_id,
+            "request_id": row.request_id,
+            "thread_id": row.thread_id,
+            "execution_state": row.state,
+            "receipt": receipt,
+            "reason": reason,
+        }
+
     async def cancel(
         self, principal: OwnerPrincipal, task_id: str, request_id: str
     ) -> OwnerTaskView:
@@ -319,6 +431,96 @@ class OwnerPilotService:
                 replace(await self._store.get(principal, task_id), replayed=row.replayed)
             )
 
+    async def submit_coding(
+        self, principal: OwnerPrincipal, payload: FactoryCodingRequest
+    ) -> OwnerTaskView:
+        if type(principal) is not OwnerPrincipal:
+            raise PilotError("invalid_request")
+        principal.__post_init__()
+        self._owner(principal)
+        snapshot = model_snapshot(FactoryCodingRequest, payload)
+        principal = OwnerPrincipal(principal.owner_id, principal.transport, principal.subject_id)
+        return await self._retain(self._submit_coding(principal, snapshot))
+
+    async def _submit_coding(self, principal, payload):
+        from dataclasses import replace
+
+        async with self._gate:
+            self._owner(principal)
+            try:
+                existing = await self._store.get_request(principal, payload.request_id)
+            except PilotError as exc:
+                if exc.code != "not_found":
+                    raise
+            else:
+                if existing.operation != "turn" or existing.task_id is None:
+                    raise PilotError("conflict")
+                saved = await self._store.get_coding_record(
+                    principal, existing.task_id or "", self._workspace_id
+                )
+                if saved is None or saved.request != payload:
+                    raise PilotError("conflict")
+                return self._view(replace(saved.admission, replayed=True))
+            if self._coding is None or self._stopping:
+                raise PilotError("disabled")
+            if self._execution is not None and not self._execution.done():
+                raise PilotError("conflict")
+            if await self._uncertainty(principal):
+                raise PilotError("uncertainty", uncertain=True)
+            profile = self._coding_profile
+            assert profile is not None and self._coding_sha is not None
+            if (self._coding.profile is not profile or profile.sha256 != self._coding_sha
+                    or self._coding._claimed or self._coding._latched or self._coding._stopping):
+                raise PilotError("disabled")
+            binding = CodingBinding(
+                **{k: getattr(profile, k) for k in (
+                    "owner_id", "workspace_id", "profile_id", "blueprint_id",
+                    "blueprint_version", "runtime_agent_id", "base_commit",
+                    "checker_id", "checker_version", "checker_sha256", "criteria_sha256",
+                )},
+                profile_sha256=self._coding_sha, task_id=uuid4().hex,
+                request_id=payload.request_id, thread_id=payload.thread_id,
+            )
+            try:
+                self._coding._affinity()
+                self._coding._live(binding)
+            except NativeCodingDenied:
+                raise PilotError("disabled") from None
+            try:
+                row = await self._store.admit_coding(
+                    principal, payload, binding, profile_snapshot=profile.snapshot()
+                )
+            except PilotError as exc:
+                if exc.uncertain:
+                    self._blocked = True
+                raise
+            if not row.replayed:
+                self._active_task_id = row.task_id
+                self._coding_uncertain = None
+                self._execution = asyncio.create_task(self._execute(principal, row))
+            return self._view(row)
+
+    async def get_coding_receipt(self, principal: OwnerPrincipal, task_id: str) -> dict:
+        self._owner(principal)
+        principal = OwnerPrincipal(principal.owner_id, principal.transport, principal.subject_id)
+        row = await self._store.verification_record(principal, task_id, self._workspace_id)
+        saved = await self._store.get_coding_record(principal, task_id, self._workspace_id)
+        self._owner(principal)
+        receipt = None
+        if saved is None:
+            reason = "not_requested"
+        elif row.state != "COMPLETED":
+            reason = "not_completed"
+        elif saved.evidence_phase != "published" or saved.evidence is None:
+            raise PilotError("store")
+        else:
+            reason = "available"
+            receipt = saved.evidence.receipt.model_dump(mode="json")
+        return {
+            "task_id": row.task_id, "request_id": row.request_id, "thread_id": row.thread_id,
+            "execution_state": row.state, "receipt": receipt, "reason": reason,
+        }
+
     async def submit(self, principal: OwnerPrincipal, payload: OwnerTaskRequest) -> OwnerTaskView:
         self._owner(principal)
         if type(payload) is not OwnerTaskRequest:
@@ -339,7 +541,13 @@ class OwnerPilotService:
                 if exc.code != "not_found":
                     raise
             else:
-                if existing.operation != "turn" or json.loads(existing.input_json) != {
+                if existing.operation != "turn":
+                    raise PilotError("conflict")
+                if await self._store.get_coding_record(
+                    principal, existing.task_id or "", self._workspace_id
+                ) is not None:
+                    raise PilotError("conflict")
+                if json.loads(existing.input_json) != {
                     "thread_id": values["thread_id"],
                     "message": values["message"],
                 }:
@@ -369,6 +577,18 @@ class OwnerPilotService:
             async with asyncio.timeout(max(0.0, row.created_at + 120.0 - time.time())):
                 await self._perform(principal, row)
         except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001 -- retain real outcome
+            if isinstance(exc, NativeCodingUncertain):
+                self._blocked = True
+            # Native gives its retained uncertainty callback one turn before
+            # surfacing cancellation. Observe that exact ACK, not a racing root
+            # transition, and never wait here for actual Git/model drain.
+            native = self._coding
+            if (native is not None and native._binding is not None
+                    and native._binding.task_id == row.task_id
+                    and native._uncertain_task is not None):
+                await asyncio.gather(native._uncertain_task, return_exceptions=True)
+            if self._coding_uncertain is not None:
+                await asyncio.gather(self._coding_uncertain, return_exceptions=True)
             try:
                 # Always inspect durable audit even for forbidden/denied errors.
                 try:
@@ -381,7 +601,7 @@ class OwnerPilotService:
                     uncertain = (
                         pending
                         or current.result_json is not None
-                        or isinstance(exc, (MeteredError, asyncio.CancelledError))
+                        or isinstance(exc, (MeteredError, asyncio.CancelledError, NativeCodingUncertain))
                         or isinstance(exc, PilotError)
                         and exc.uncertain
                     )
@@ -422,8 +642,105 @@ class OwnerPilotService:
                 self._budget.revoke(self._lease)
         return None
 
+    async def _perform_coding(self, principal, saved):
+        from types import SimpleNamespace
+
+        row, binding = saved.admission, saved.binding
+        executor = self._coding
+        if executor is None:
+            raise PilotError("disabled")
+        if await self._uncertainty(principal):
+            raise PilotError("uncertainty", uncertain=True)
+        lease = await self._budget.reserve_request(principal, row.request_id, row.task_id)
+        self._lease = lease
+        await self._budget.mark_running(lease)
+        grant = OwnerExecutionGrant(lease, self._budget, allowed_tools=frozenset(),
+                                    max_tool_calls=1, max_model_calls=1)
+        config = self._dispatch
+        assert self._coding_profile is not None
+        model = MeteredModel(
+            LLMAdapter(provider=config.provider, model=config.model, api_key=config.api_key,
+                       base_url=config.base_url, max_tokens=config.max_tokens,
+                       temperature=config.temperature, timeout=config.timeout),
+            OwnerMeteredBinding(grant, config.provider, config.model,
+                                self._coding_profile.provider_config_id),
+            self._budget, self._audit, timeout_s=config.timeout, spending=self._spending,
+        )
+
+        async def checkpoint(current_binding, phase, *, finalized=False):
+            current = await self._store.get_coding_record(
+                principal, row.task_id, self._workspace_id
+            )
+            if (current is None or current.binding != binding or current.request != saved.request
+                    or current_binding != binding):
+                raise PilotError("conflict")
+            live = current.admission
+            if (self._stopping or live.cancel_requested or live.state != "RUNNING"
+                    or time.time() >= lease.deadline_at
+                    or not finalized and not self._budget.owns(lease)):
+                raise PilotError("uncertainty", uncertain=True)
+
+        async def record_intent(current_binding, edits, plan_sha256, branch):
+            await checkpoint(current_binding, "mutation")
+            await self._store.record_coding_intent(
+                row.sequence, binding=binding, edits=edits, plan_sha256=plan_sha256, branch=branch
+            )
+
+        async def uncertain(current_binding, phase, reason):
+            self._blocked = True
+            if current_binding != binding:
+                raise PilotError("conflict", uncertain=True)
+            if self._coding_uncertain is None:
+                self._coding_uncertain = asyncio.create_task(self._store.mark_coding_uncertain(
+                    row.sequence, binding=binding, phase=phase, reason=reason
+                ))
+            await asyncio.shield(self._coding_uncertain)
+
+        async def publish(outcome):
+            await checkpoint(outcome.binding, "publication")
+            evidence = CodingEvidence(
+                edits=outcome.edits, forge_report=outcome.forge_report,
+                artifact_text=outcome.artifact_text, patch=outcome.patch, receipt=outcome.receipt,
+            )
+            await self._store.stage_coding_result(row.sequence, binding=binding, evidence=evidence)
+            passed = (evidence.receipt.objective_status == "passed"
+                      and evidence.forge_report.gate == "PASS")
+            entry = AuditEntry(agent="owner-gateway", task="owner-pilot",
+                               action="owner.gateway_result",
+                               result="completed" if passed else "failed",
+                               evidence={"phase": "coding_result",
+                                         "objective_status": evidence.receipt.objective_status})
+            if await self._audit.append_beta(entry) != entry.entry_id:
+                raise PilotError("audit", uncertain=True)
+            if await self._uncertainty(principal):
+                raise PilotError("uncertainty", uncertain=True)
+            await self._budget.finish_request(lease, success=passed)
+            await checkpoint(binding, "publication", finalized=True)
+            if await self._uncertainty(principal):
+                raise PilotError("uncertainty", uncertain=True)
+            if passed:
+                await self._store.commit_coding_turn(row.sequence, binding=binding)
+            else:
+                await self._store.transition(row.sequence, expected="RUNNING", state="FAILED",
+                                             phase="failed", error_code="disabled")
+
+        hooks = SimpleNamespace(checkpoint=checkpoint, record_intent=record_intent,
+                                publish=publish, uncertain=uncertain)
+        await self._butler.handle_owner_coding(
+            NativeCodingRequest(saved.request, binding), grant=grant, model=model,
+            executor=executor, hooks=cast(NativeCodingHooks, hooks),
+        )
+
     async def _perform(self, principal: OwnerPrincipal, row: AdmissionRecord) -> None:
         assert row.task_id is not None and row.thread_id is not None
+        coding = await self._store.get_coding_record(principal, row.task_id, self._workspace_id)
+        if coding is not None:
+            await self._perform_coding(principal, coding)
+            return
+        try:
+            expression = admitted_expression(row.input_json, row.input_digest, row.thread_id)
+        except (ValueError, UnicodeError, RecursionError):
+            raise PilotError("store") from None
         if self._stopping or await self._uncertainty(principal):
             raise PilotError("uncertainty", uncertain=True)
         lease = await self._budget.reserve_request(principal, row.request_id, row.task_id)
@@ -432,7 +749,12 @@ class OwnerPilotService:
         if await self._uncertainty(principal):
             raise PilotError("uncertainty", uncertain=True)
         grant = OwnerExecutionGrant(
-            lease, self._budget, max_model_calls=self._budget.limits.model_calls_per_request
+            lease,
+            self._budget,
+            max_model_calls=self._budget.limits.model_calls_per_request,
+            allowed_tools=frozenset({"calculator"})
+            if expression is not None
+            else frozenset({"calculator", "utc_time", "web_search"}),
         )
         config = self._dispatch
         inner = LLMAdapter(
@@ -465,12 +787,24 @@ class OwnerPilotService:
         )
         if reply.task_id != row.task_id or reply.status != "completed" or report is None:
             raise PilotError("conflict")
+        verification = (
+            None
+            if expression is None
+            else make_receipt(
+                task_id=row.task_id,
+                request_id=row.request_id,
+                thread_id=row.thread_id,
+                expression=expression,
+                response=reply.text,
+            ).model_dump(mode="json")
+        )
         await self._store.stage_result(
             row.sequence,
             {
                 "task_id": row.task_id,
                 "response": reply.text,
                 "assessment": report.model_dump(mode="json"),
+                **({} if verification is None else {"verification": verification}),
             },
         )
         entry = AuditEntry(
@@ -487,4 +821,9 @@ class OwnerPilotService:
         await self._budget.finish_request(lease, success=True)
         if await self._uncertainty(principal):
             raise PilotError("uncertainty", uncertain=True)
-        await self._store.commit_turn(row.sequence, text=reply.text, assessment=report)
+        if verification is None:
+            await self._store.commit_turn(row.sequence, text=reply.text, assessment=report)
+        else:
+            await self._store.commit_turn(
+                row.sequence, text=reply.text, assessment=report, verification=verification
+            )
