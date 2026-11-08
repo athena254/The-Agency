@@ -1,4 +1,5 @@
 """Controlled retained boundaries, not deliberately hung real Git subprocesses."""
+
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +16,9 @@ from tests.test_factory_coding_service import make_service, payload, settled
 pytestmark = pytest.mark.asyncio
 
 
-async def test_native_uncertain_without_report_is_unknown_and_locally_blocks(coding_case, monkeypatch):
+async def test_native_uncertain_without_report_is_unknown_and_locally_blocks(
+    coding_case, monkeypatch
+):
     c = coding_case
     c.service = service = make_service(c)
     await service.start()
@@ -35,7 +38,9 @@ async def test_native_uncertain_without_report_is_unknown_and_locally_blocks(cod
     assert error.value.code == "uncertainty"
 
 
-async def test_cancel_observes_exact_retained_uncertainty_ack_before_fallback(coding_case, monkeypatch):
+async def test_cancel_observes_exact_retained_uncertainty_ack_before_fallback(
+    coding_case, monkeypatch
+):
     c = coding_case
     c.service = service = make_service(c)
     await service.start()
@@ -55,7 +60,9 @@ async def test_cancel_observes_exact_retained_uncertainty_ack_before_fallback(co
         await ack_release.wait()
         return await original(*a, **kw)
 
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: client(transport=httpx.MockTransport(held_http), **kw))
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda **kw: client(transport=httpx.MockTransport(held_http), **kw)
+    )
     monkeypatch.setattr(service._store, "mark_coding_uncertain", held_ack)
     cancelling = None
     try:
@@ -64,7 +71,9 @@ async def test_cancel_observes_exact_retained_uncertainty_ack_before_fallback(co
         cancelling = asyncio.create_task(service.cancel(c.owner, view.task_id, "cancel"))
         await asyncio.wait_for(ack_entered.wait(), 3)
         await asyncio.sleep(0.03)
-        assert not service._execution.done(), "must not race generic root transition ahead of retained hook"
+        assert not service._execution.done(), (
+            "must not race generic root transition ahead of retained hook"
+        )
         assert (await service._store.get(c.owner, view.task_id)).state == "RUNNING"
         ack_release.set()
         cancelled = await asyncio.wait_for(cancelling, 3)
@@ -81,7 +90,9 @@ async def test_cancel_observes_exact_retained_uncertainty_ack_before_fallback(co
 
 
 @pytest.mark.parametrize("boundary", ["model", "host", "publish"])
-async def test_stop_waits_actual_retained_work_before_owned_closure(coding_case, monkeypatch, boundary):
+async def test_stop_waits_actual_retained_work_before_owned_closure(
+    coding_case, monkeypatch, boundary
+):
     import agency.agents.factory_coding as native
 
     c = coding_case
@@ -115,18 +126,28 @@ async def test_stop_waits_actual_retained_work_before_owned_closure(coding_case,
         stop_results.append(result)
         return result
 
-    for obj, label in [(service._audit, "audit"), (service._budget, "budget"), (service._store, "store")]:
+    for obj, label in [
+        (service._audit, "audit"),
+        (service._budget, "budget"),
+        (service._store, "store"),
+    ]:
         close = obj.close
 
         async def observed(close=close, label=label):
-            assert c.executor._drained(), "resource closed before actual native/model/hook settlement"
+            assert c.executor._drained(), (
+                "resource closed before actual native/model/hook settlement"
+            )
             close_events.append(label)
             await close()
 
         monkeypatch.setattr(obj, "close", observed)
     monkeypatch.setattr(c.executor, "stop", observe_stop)
     if boundary == "model":
-        monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: client(transport=httpx.MockTransport(held_http), **kw))
+        monkeypatch.setattr(
+            httpx,
+            "AsyncClient",
+            lambda **kw: client(transport=httpx.MockTransport(held_http), **kw),
+        )
     elif boundary == "host":
         monkeypatch.setattr(native.AgencyCodingAgent, "run_task", held_host)
     else:
@@ -209,9 +230,14 @@ async def test_typed_metered_errors_remain_distinct(coding_case, monkeypatch, ki
     c = coding_case
     c.service = service = make_service(c)
     await service.start()
+
     async def failure(*a, **kw):
-        raise (MeteredDenied("controlled before provider") if kind == "denied"
-               else MeteredError("controlled unknown provider boundary"))
+        raise (
+            MeteredDenied("controlled before provider")
+            if kind == "denied"
+            else MeteredError("controlled unknown provider boundary")
+        )
+
     monkeypatch.setattr(MeteredModel, "generate", failure)
     view = await service.submit_coding(c.owner, payload(c))
     row = await settled(c, view)
@@ -222,16 +248,22 @@ async def test_typed_metered_errors_remain_distinct(coding_case, monkeypatch, ki
 
 
 @pytest.mark.parametrize("coding_case", [2.0], indirect=True)
-async def test_native_deadline_returns_uncertainty_but_retains_model_until_stop(coding_case, monkeypatch):
+async def test_native_deadline_returns_uncertainty_but_retains_model_until_stop(
+    coding_case, monkeypatch
+):
     c = coding_case
     c.service = service = make_service(c)
     await service.start()
     entered, release = asyncio.Event(), asyncio.Event()
+
     async def held(request):
         entered.set()
         await release.wait()
         return httpx.Response(200, json={"choices": [{"message": {"content": c.response}}]})
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: c.http_client(transport=httpx.MockTransport(held), **kw))
+
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda **kw: c.http_client(transport=httpx.MockTransport(held), **kw)
+    )
     stopping = None
     try:
         view = await service.submit_coding(c.owner, payload(c))
@@ -252,20 +284,25 @@ async def test_native_deadline_returns_uncertainty_but_retains_model_until_stop(
 
 
 @pytest.mark.parametrize("lost_after_commit", [False, True])
-async def test_uncertainty_ack_failure_never_retried_or_reported_acknowledged(coding_case, monkeypatch, lost_after_commit):
+async def test_uncertainty_ack_failure_never_retried_or_reported_acknowledged(
+    coding_case, monkeypatch, lost_after_commit
+):
     c = coding_case
     c.service = service = make_service(c)
     await service.start()
     original = service._store.mark_coding_uncertain
     calls = []
+
     async def failed_ack(*a, **kw):
         calls.append(kw)
         if lost_after_commit:
             await original(*a, **kw)
         raise PilotError("store", uncertain=True)
+
     # Hold real native ownership by fencing at a hook, not inventing a report.
     async def failed_intent(*a, **kw):
         raise PilotError("store", uncertain=True)
+
     monkeypatch.setattr(service._store, "mark_coding_uncertain", failed_ack)
     monkeypatch.setattr(service._store, "record_coding_intent", failed_intent)
     view = await service.submit_coding(c.owner, payload(c))
@@ -276,7 +313,9 @@ async def test_uncertainty_ack_failure_never_retried_or_reported_acknowledged(co
     assert (await service.get_coding_receipt(c.owner, view.task_id))["receipt"] is None
 
 
-async def test_stop_at_actual_coding_sql_commit_fence_rolls_back_transcript(coding_case, monkeypatch):
+async def test_stop_at_actual_coding_sql_commit_fence_rolls_back_transcript(
+    coding_case, monkeypatch
+):
     import sqlite3
 
     c = coding_case
@@ -284,6 +323,7 @@ async def test_stop_at_actual_coding_sql_commit_fence_rolls_back_transcript(codi
     await service.start()
     entered, release = threading.Event(), threading.Event()
     original_event = service._store._event
+
     def before_commit(conn, sequence, phase, code):
         original_event(conn, sequence, phase, code)
         if phase == "committed":
@@ -291,6 +331,7 @@ async def test_stop_at_actual_coding_sql_commit_fence_rolls_back_transcript(codi
             # existing publication gate and COMMIT. No fabricated store ACK.
             entered.set()
             assert release.wait(10), "owned SQL fixture hold must be released"
+
     monkeypatch.setattr(service._store, "_event", before_commit)
     stopping = None
     try:
@@ -305,9 +346,13 @@ async def test_stop_at_actual_coding_sql_commit_fence_rolls_back_transcript(codi
         release.set()
         await asyncio.wait_for(stopping, 5)
         with sqlite3.connect(c.root / "owner.sqlite") as conn:
-            assert conn.execute("SELECT state FROM pilot_requests WHERE task_id=?", (view.task_id,)).fetchone() == ("UNCERTAIN",)
+            assert conn.execute(
+                "SELECT state FROM pilot_requests WHERE task_id=?", (view.task_id,)
+            ).fetchone() == ("UNCERTAIN",)
             assert conn.execute("SELECT count(*) FROM thread_messages").fetchone() == (0,)
-            side = conn.execute("SELECT evidence_json,evidence_phase FROM pilot_coding_bindings").fetchone()
+            side = conn.execute(
+                "SELECT evidence_json,evidence_phase FROM pilot_coding_bindings"
+            ).fetchone()
             assert side[0] is not None and side[1] == "uncertain"
         assert c.executor.native_report is not None and c.executor._drained()
     finally:

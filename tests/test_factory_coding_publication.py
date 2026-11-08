@@ -63,7 +63,7 @@ async def test_successful_publication_original_task_and_idempotent_replay(tmp_pa
 
 @pytest.mark.asyncio
 async def test_failed_objective_cannot_be_completed(tmp_path):
-    store, payload, binding, record, evidence = await ready(tmp_path, status="failed")
+    store, _payload, binding, record, evidence = await ready(tmp_path, status="failed")
     try:
         await store.stage_coding_result(record.sequence, binding=binding, evidence=evidence)
         before = rows(store)
@@ -80,7 +80,7 @@ async def test_failed_objective_cannot_be_completed(tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("already_staged", [False, True])
 async def test_uncertainty_preserves_evidence_and_is_idempotent(tmp_path, already_staged):
-    store, payload, binding, record, evidence = await ready(tmp_path)
+    store, _payload, binding, record, evidence = await ready(tmp_path)
     try:
         await store.reserve_attempt(record.sequence, kind="model", limit=1)
         if already_staged:
@@ -116,7 +116,7 @@ async def test_uncertainty_preserves_evidence_and_is_idempotent(tmp_path, alread
 
 @pytest.mark.asyncio
 async def test_lost_publication_ack_cannot_downgrade_completed(tmp_path, monkeypatch):
-    store, payload, binding, record, evidence = await ready(tmp_path)
+    store, _payload, binding, record, evidence = await ready(tmp_path)
     try:
         await store.stage_coding_result(record.sequence, binding=binding, evidence=evidence)
         original = store._transaction
@@ -274,7 +274,7 @@ async def test_restart_recovery_preserves_private_copies_without_retry(tmp_path,
 async def test_completed_read_rebinds_original_transcript(tmp_path):
     import sqlite3
 
-    store, payload, binding, record, evidence = await ready(tmp_path)
+    store, _payload, binding, record, evidence = await ready(tmp_path)
     try:
         await store.stage_coding_result(record.sequence, binding=binding, evidence=evidence)
         await store.commit_coding_turn(record.sequence, binding=binding)
@@ -316,7 +316,7 @@ async def test_completed_read_rebinds_original_transcript(tmp_path):
 async def test_corrupt_staged_evidence_fails_closed(tmp_path, kind):
     import sqlite3
 
-    store, payload, binding, record, evidence = await ready(tmp_path)
+    store, _payload, binding, record, evidence = await ready(tmp_path)
     try:
         await store.stage_coding_result(record.sequence, binding=binding, evidence=evidence)
         with sqlite3.connect(store._db_path) as conn:
@@ -383,7 +383,7 @@ async def test_corrupt_staged_evidence_fails_closed(tmp_path, kind):
 async def test_stage_snapshots_caller_evidence_before_await(tmp_path):
     import asyncio
 
-    store, payload, binding, record, evidence = await ready(tmp_path)
+    store, _payload, binding, record, evidence = await ready(tmp_path)
     expected = evidence.model_dump(mode="json")
     await store._gate.acquire()
     task = asyncio.create_task(
@@ -408,7 +408,7 @@ async def test_stage_snapshots_caller_evidence_before_await(tmp_path):
 async def test_sql_failure_rolls_back_root_and_sidecar(tmp_path, seam):
     import sqlite3
 
-    store, payload, binding, record, evidence = await ready(tmp_path)
+    store, _payload, binding, record, evidence = await ready(tmp_path)
     try:
         if seam != "stage":
             await store.stage_coding_result(record.sequence, binding=binding, evidence=evidence)
@@ -478,7 +478,7 @@ async def test_complete_large_evidence_uses_journal_ceiling_not_pure_hash_limit(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("verdict", ["unable", "native_failed"])
 async def test_rejected_evidence_remains_private_on_failed_transition(tmp_path, verdict):
-    store, payload, binding, record, evidence = await ready(tmp_path)
+    store, _payload, binding, record, evidence = await ready(tmp_path)
     try:
         if verdict == "unable":
             receipt = evidence.receipt.model_copy(
@@ -524,7 +524,7 @@ async def test_rejected_evidence_remains_private_on_failed_transition(tmp_path, 
     ],
 )
 async def test_uncertainty_accepts_only_frozen_phase_reason_enums(tmp_path, phase, reason):
-    store, payload, binding, record, evidence = await ready(tmp_path)
+    store, _payload, binding, record, _evidence = await ready(tmp_path)
     try:
         before = rows(store)
         with pytest.raises(PilotError) as error:
@@ -575,7 +575,7 @@ async def test_original_long_or_calculator_looking_task_never_selects_calculator
     ["missing", "false_flag", "constructed_report", "changed_binding", "missing_intent"],
 )
 async def test_unsolicited_or_malformed_copied_evidence_never_stages(tmp_path, corruption):
-    store, payload, binding, record, evidence = await ready(tmp_path)
+    store, _payload, binding, record, evidence = await ready(tmp_path)
     try:
         if corruption == "missing":
             evidence = evidence.model_copy(update={"receipt": None})
@@ -630,7 +630,7 @@ async def ready(tmp_path, *, status="passed"):
 
 @pytest.mark.asyncio
 async def test_atomic_copied_evidence_stage_conceals_private_result(tmp_path):
-    store, payload, binding, record, evidence = await ready(tmp_path)
+    store, _payload, binding, record, evidence = await ready(tmp_path)
     try:
         await store.stage_coding_result(record.sequence, binding=binding, evidence=evidence)
         saved = await store.get_coding_record(OWNER, binding.task_id)

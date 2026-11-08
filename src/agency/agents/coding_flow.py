@@ -9,21 +9,24 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
-from typing import Any
+from collections.abc import Coroutine
+from typing import Any, cast
 
 from agency.agents.coding_planner import plan_edits
 
 __all__ = ["run_described_task"]
 
 
-def _call_run_task(agent: Any, branch: str, edits: list[dict[str, Any]], kwargs: dict[str, Any]) -> Any:
+def _call_run_task(
+    agent: Any, branch: str, edits: list[dict[str, Any]], kwargs: dict[str, Any]
+) -> Any:
     raw = agent.run_task(branch, edits, **kwargs)
     if asyncio.iscoroutine(raw) or isinstance(raw, (asyncio.Future,)):
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    raw = pool.submit(asyncio.run, raw).result()
+                    raw = pool.submit(asyncio.run, cast("Coroutine[Any, Any, Any]", raw)).result()
             else:
                 raw = loop.run_until_complete(raw)
         except RuntimeError:

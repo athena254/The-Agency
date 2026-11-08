@@ -7,10 +7,9 @@ resulting runtime record.
 
 from __future__ import annotations
 
-from typing import Any
-
 from agency.agents import coding_identity
-from agency.agents.registry import AgentRecord, AgentRegistry as RuntimeAgentRegistry
+from agency.agents.registry import AgentRecord
+from agency.agents.registry import AgentRegistry as RuntimeAgentRegistry
 from agency.kernel.registry import AgentRegistry as KernelAgentRegistry
 
 # Captured so we can tell whether either module-level binding was patched.
@@ -32,15 +31,9 @@ def bootstrap_coding_agent(
     bootstrap_binding = globals().get("register_coding_agent")
     identity_binding = coding_identity.register_coding_agent
 
-    if (
-        callable(bootstrap_binding)
-        and bootstrap_binding is not _ORIGINAL_REGISTER
-    ):
+    if callable(bootstrap_binding) and bootstrap_binding is not _ORIGINAL_REGISTER:
         register = bootstrap_binding
-    elif (
-        callable(identity_binding)
-        and identity_binding is not _ORIGINAL_REGISTER
-    ):
+    elif callable(identity_binding) and identity_binding is not _ORIGINAL_REGISTER:
         register = identity_binding
     else:
         register = identity_binding
@@ -54,6 +47,6 @@ def bootstrap_coding_agent(
 
 # Re-export for ``from agency.agents.coding_bootstrap import register_coding_agent``
 # style patching/imports.
-from agency.agents.coding_identity import register_coding_agent  # noqa: E402
+from agency.agents.coding_identity import register_coding_agent
 
 __all__ = ["bootstrap_coding_agent", "register_coding_agent"]

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from agency.agents.registry import AgentRegistry as RuntimeRegistry
 from agency.agents.coding_identity import register_coding_agent
-from agency.kernel.identity import Capability, TrustLevel
+from agency.agents.registry import AgentRegistry as RuntimeRegistry
 from agency.kernel.policies import ActionClass
 from agency.kernel.registry import AgentRegistry as KernelRegistry
 

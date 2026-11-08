@@ -22,7 +22,7 @@ def test_plan_edits_parses_json_list():
 
 def test_plan_edits_handles_code_fence():
     def fake_llm(prompt, context):
-        return "```json\n[{\"path\": \"a.py\", \"old\": \"a\", \"new\": \"b\"}]\n```"
+        return '```json\n[{"path": "a.py", "old": "a", "new": "b"}]\n```'
 
     result = plan_edits(fake_llm, "edit a")
     assert result == [{"path": "a.py", "old": "a", "new": "b"}]

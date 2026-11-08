@@ -190,27 +190,26 @@ def canonical_sha256(value: object) -> str:
         nodes += 1
         if nodes > 2048 or depth > 16:
             raise ValueError("invalid coding JSON")
-        kind = type(item)
-        if kind is str:
+        if type(item) is str:
             if len(item) > 65536:
                 raise ValueError("invalid coding JSON")
             string_bytes += len(item.encode("utf-8"))
             if string_bytes > 65536:
                 raise ValueError("invalid coding JSON")
-        elif item is None or kind is bool:
+        elif item is None or type(item) is bool:
             return
-        elif kind is int:
+        elif type(item) is int:
             if item.bit_length() > 262144:
                 raise ValueError("invalid coding JSON")
-        elif kind is float:
+        elif type(item) is float:
             if not math.isfinite(item):
                 raise ValueError("invalid coding JSON")
-        elif kind is list:
+        elif type(item) is list:
             if len(item) > 2048:
                 raise ValueError("invalid coding JSON")
             for child in item:
                 check(child, depth + 1)
-        elif kind is dict:
+        elif type(item) is dict:
             if len(item) > 2048:
                 raise ValueError("invalid coding JSON")
             for key, child in item.items():

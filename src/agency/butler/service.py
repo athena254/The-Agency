@@ -416,8 +416,13 @@ class ButlerService:
         return response
 
     async def handle_owner_coding(
-        self, request: NativeCodingRequest, *, grant: OwnerExecutionGrant,
-        model: MeteredModel, executor: NativeCodingExecutor, hooks: NativeCodingHooks,
+        self,
+        request: NativeCodingRequest,
+        *,
+        grant: OwnerExecutionGrant,
+        model: MeteredModel,
+        executor: NativeCodingExecutor,
+        hooks: NativeCodingHooks,
     ) -> NativeCodingOutcome:
         """Forward only the complete admitted native sidecar; no legacy context/tools."""
         from pathlib import Path
@@ -426,9 +431,13 @@ class ButlerService:
         from agency.agents.factory_coding import NativeCodingExecutor, NativeCodingRequest
         from agency.butler.threads import ThreadStore
 
-        if (type(grant) is not OwnerExecutionGrant or type(request) is not NativeCodingRequest
-                or type(executor) is not NativeCodingExecutor
-                or type(self._threads) is not ThreadStore or self._owns_threads):
+        if (
+            type(grant) is not OwnerExecutionGrant
+            or type(request) is not NativeCodingRequest
+            or type(executor) is not NativeCodingExecutor
+            or type(self._threads) is not ThreadStore
+            or self._owns_threads
+        ):
             raise PilotError("forbidden")
         grant.__post_init__()
         lease = grant.lease
@@ -438,10 +447,14 @@ class ButlerService:
             lease.principal, lease.task_id, request.binding.workspace_id
         )
         grant.__post_init__()
-        if (saved is None or saved.request != request.request or saved.binding != request.binding
-                or saved.admission.state != "RUNNING"
-                or saved.admission.request_id != lease.request_id
-                or saved.binding.owner_id != lease.principal.owner_id):
+        if (
+            saved is None
+            or saved.request != request.request
+            or saved.binding != request.binding
+            or saved.admission.state != "RUNNING"
+            or saved.admission.request_id != lease.request_id
+            or saved.binding.owner_id != lease.principal.owner_id
+        ):
             raise PilotError("forbidden")
         try:
             self._threads.get_thread(lease.principal.owner_id, saved.binding.thread_id)

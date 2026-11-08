@@ -216,8 +216,9 @@ class MeteredModel:
             assert self._snapshot is not None
             try:
                 # One token per UTF-8 byte plus a conservative envelope allowance.
-                self._spending.reserve(call_id, len(prompt.encode("utf-8")) + 1024,
-                                       self._snapshot.max_tokens)
+                self._spending.reserve(
+                    call_id, len(prompt.encode("utf-8")) + 1024, self._snapshot.max_tokens
+                )
             except SpendingError:
                 raise MeteredDenied("metered: spending unavailable") from None
         intent = self._entry(call_id, "pending", "intent")
@@ -239,8 +240,11 @@ class MeteredModel:
         ):
             raise MeteredDenied("metered: provider binding denied")
         try:
-            dispatch = (self._dispatch(prompt, context, call_id=call_id)
-                        if self._spending is not None else self._dispatch(prompt, context))
+            dispatch = (
+                self._dispatch(prompt, context, call_id=call_id)
+                if self._spending is not None
+                else self._dispatch(prompt, context)
+            )
             raw = await asyncio.wait_for(dispatch, timeout=self._timeout_s)
         except MeteredDenied as exc:
             if self._owner_grant is not None:
@@ -337,16 +341,22 @@ class MeteredModel:
             raise MeteredDenied("metered: owner binding denied")
 
     async def _dispatch(
-        self, prompt: str, context: dict[str, Any] | None, *, call_id: str | None = None,
+        self,
+        prompt: str,
+        context: dict[str, Any] | None,
+        *,
+        call_id: str | None = None,
     ) -> str:
         await self._check_owner(context)
         if self._snapshot is not None:
             if self._spending is not None:
                 if call_id is None:
                     raise MeteredDenied("metered: spending unavailable")
+                ledger = self._spending
                 return await self._inner.generate_bound(
-                    prompt, self._snapshot,
-                    usage_sink=lambda usage: self._spending.settle(call_id, usage),
+                    prompt,
+                    self._snapshot,
+                    usage_sink=lambda usage: ledger.settle(call_id, usage),
                 )
             return await self._inner.generate_bound(prompt, self._snapshot)
         return await self._inner.generate(prompt, {})

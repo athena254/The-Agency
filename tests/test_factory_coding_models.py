@@ -1,8 +1,9 @@
 """Strict contracts for the one trusted coding fixture (no native execution)."""
 
 import pytest
-from agency.factory.coding_models import FactoryCodingRequest
 from pydantic import ValidationError
+
+from agency.factory.coding_models import FactoryCodingRequest
 
 
 def binding_data():

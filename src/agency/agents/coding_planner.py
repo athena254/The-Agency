@@ -11,8 +11,8 @@ import asyncio
 import concurrent.futures
 import json
 import re
-from collections.abc import Awaitable
-from typing import Any
+from collections.abc import Awaitable, Coroutine
+from typing import Any, cast
 
 from agency.agents.executor import LLMCallable
 
@@ -36,19 +36,20 @@ Task: {task}
 def _invoke(llm_callable: LLMCallable, prompt: str) -> Any:
     raw = llm_callable(prompt, {})
     if asyncio.iscoroutine(raw) or isinstance(raw, Awaitable):
+        coroutine = cast("Coroutine[Any, Any, Any]", raw)
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    raw = pool.submit(asyncio.run, raw).result()
+                    raw = pool.submit(asyncio.run, coroutine).result()
             else:
-                raw = loop.run_until_complete(raw)
+                raw = loop.run_until_complete(coroutine)
         except RuntimeError:
-            raw = asyncio.run(raw)
+            raw = asyncio.run(coroutine)
     return raw
 
 
-def _parse_edits(raw: Any) -> list[dict]:
+def _parse_edits(raw: Any) -> list[dict[str, Any]]:
     text = str(raw).strip() if raw is not None else ""
     fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
     if fenced:
@@ -65,14 +66,22 @@ def _parse_edits(raw: Any) -> list[dict]:
                 data = None
     if not isinstance(data, list):
         return []
-    result: list[dict] = []
+    result: list[dict[str, Any]] = []
     for item in data:
-        if isinstance(item, dict) and isinstance(item.get("path"), str) and isinstance(item.get("old"), str) and item.get("old") != "" and isinstance(item.get("new"), str):
+        if (
+            isinstance(item, dict)
+            and isinstance(item.get("path"), str)
+            and isinstance(item.get("old"), str)
+            and item.get("old") != ""
+            and isinstance(item.get("new"), str)
+        ):
             result.append(item)
     return result
 
 
-def plan_edits(llm_callable: LLMCallable, task: str, file_context: dict[str, str] | None = None) -> list[dict]:
+def plan_edits(
+    llm_callable: LLMCallable, task: str, file_context: dict[str, str] | None = None
+) -> list[dict[str, Any]]:
     """Ask ``llm_callable`` for a JSON list of ``{path, old, new}`` edits.
 
     ``file_context`` maps relative paths to their current contents so the LLM

@@ -233,7 +233,10 @@ class LLMAdapter:
         )
 
     async def generate_bound(
-        self, prompt: str, snapshot: LLMDispatchSnapshot, *,
+        self,
+        prompt: str,
+        snapshot: LLMDispatchSnapshot,
+        *,
         usage_sink: Callable[[object], None] | None = None,
     ) -> str:
         """Dispatch exactly one owner call using pre-await snapshot-local values."""

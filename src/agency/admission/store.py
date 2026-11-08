@@ -15,9 +15,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, TypeVar, cast
 
-from agency.admission.calculator_verification import admitted_expression, validate_receipt
 from agency.admission import coding_store
-from agency.factory.coding_models import CodingBinding, CodingEdit, FactoryCodingRequest
+from agency.admission.calculator_verification import admitted_expression, validate_receipt
 from agency.admission.models import (
     AdmissionRecord,
     MessageView,
@@ -29,10 +28,12 @@ from agency.admission.models import (
 )
 from agency.agents.assessment import ExecutionAssessment, output_digest
 from agency.butler.threads import ThreadStore
+from agency.factory.coding_models import CodingBinding, CodingEdit, FactoryCodingRequest
 from agency.workflows.recovery import RecoverableLock
 
 _T = TypeVar("_T")
-_SCHEMA = """
+_SCHEMA = (
+    """
 CREATE TABLE IF NOT EXISTS pilot_subjects (
  quota_subject_id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id TEXT UNIQUE NOT NULL,
  workspace_id TEXT UNIQUE NOT NULL REFERENCES workspaces(id));
@@ -51,7 +52,9 @@ CREATE TABLE IF NOT EXISTS pilot_events (
  event_id INTEGER PRIMARY KEY AUTOINCREMENT, sequence INTEGER NOT NULL REFERENCES pilot_requests(sequence),
  phase TEXT NOT NULL, code TEXT NOT NULL, created_at REAL NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_pilot_owner_tasks ON pilot_requests(owner_id, sequence);
-""" + coding_store.CODING_SCHEMA
+"""
+    + coding_store.CODING_SCHEMA
+)
 
 
 def _iso(moment: float) -> str:
@@ -398,8 +401,12 @@ class OwnerPilotStore:
         return await self._run(work)
 
     async def admit_coding(
-        self, principal: OwnerPrincipal, payload: FactoryCodingRequest, binding: CodingBinding,
-        *, profile_snapshot: dict,
+        self,
+        principal: OwnerPrincipal,
+        payload: FactoryCodingRequest,
+        binding: CodingBinding,
+        *,
+        profile_snapshot: dict[str, Any],
     ) -> AdmissionRecord:
         _principal(principal)
         snapshot = coding_store.admission_snapshot(payload, binding, profile_snapshot)
@@ -411,26 +418,40 @@ class OwnerPilotStore:
         return record
 
     async def get_coding_record(
-        self, principal: OwnerPrincipal, task_id: str, workspace_id: str = '',
+        self,
+        principal: OwnerPrincipal,
+        task_id: str,
+        workspace_id: str = "",
     ) -> coding_store.CodingRecord | None:
         _principal(principal)
         _id(task_id)
         if type(workspace_id) is not str:
-            raise PilotError('invalid_request')
+            raise PilotError("invalid_request")
         return await self._run(
             lambda conn: coding_store.read_record(self, conn, principal, task_id, workspace_id)
         )
 
     async def record_coding_intent(
-        self, sequence: int, *, binding: CodingBinding, edits: tuple[CodingEdit, ...],
-        plan_sha256: str, branch: str,
+        self,
+        sequence: int,
+        *,
+        binding: CodingBinding,
+        edits: tuple[CodingEdit, ...],
+        plan_sha256: str,
+        branch: str,
     ) -> None:
         binding = coding_store.model_snapshot(CodingBinding, binding)
         snapshot = coding_store.intent_snapshot(binding, edits, plan_sha256, branch)
-        await self._run(lambda conn: coding_store.record_intent(self, conn, sequence, binding, snapshot))
+        await self._run(
+            lambda conn: coding_store.record_intent(self, conn, sequence, binding, snapshot)
+        )
 
     async def stage_coding_result(
-        self, sequence: int, *, binding: CodingBinding, evidence: coding_store.CodingEvidence,
+        self,
+        sequence: int,
+        *,
+        binding: CodingBinding,
+        evidence: coding_store.CodingEvidence,
     ) -> None:
         binding = coding_store.model_snapshot(CodingBinding, binding)
         evidence = coding_store.evidence_snapshot(evidence, binding)
@@ -438,16 +459,25 @@ class OwnerPilotStore:
 
     async def commit_coding_turn(self, sequence: int, *, binding: CodingBinding) -> None:
         binding = coding_store.model_snapshot(CodingBinding, binding)
-        await self._run(lambda conn: coding_store.commit(self, conn, sequence, binding), publication=True)
+        await self._run(
+            lambda conn: coding_store.commit(self, conn, sequence, binding), publication=True
+        )
         self._blocked_sequences.add(sequence)
         self._fresh_turns.discard(sequence)
 
     async def mark_coding_uncertain(
-        self, sequence: int, *, binding: CodingBinding, phase: str, reason: str,
+        self,
+        sequence: int,
+        *,
+        binding: CodingBinding,
+        phase: str,
+        reason: str,
     ) -> None:
         binding = coding_store.model_snapshot(CodingBinding, binding)
         coding_store.validate_uncertainty(phase, reason)
-        await self._run(lambda conn: coding_store.uncertain(self, conn, sequence, binding, phase, reason))
+        await self._run(
+            lambda conn: coding_store.uncertain(self, conn, sequence, binding, phase, reason)
+        )
         self._blocked_sequences.add(sequence)
         self._fresh_turns.discard(sequence)
 
@@ -721,7 +751,7 @@ class OwnerPilotStore:
             row = self._turn(conn, sequence)
             self._live(row)
             if coding_store.is_coding(conn, sequence):
-                raise PilotError('conflict')
+                raise PilotError("conflict")
             try:
                 assessment = (
                     None
@@ -765,7 +795,7 @@ class OwnerPilotStore:
             row = self._turn(conn, sequence)
             self._live(row)
             if coding_store.is_coding(conn, sequence):
-                raise PilotError('conflict')
+                raise PilotError("conflict")
             result, digest = _canonical(
                 self._result(row, text, assessment, verification), maximum=524288
             )

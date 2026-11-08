@@ -9,11 +9,12 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -28,6 +29,20 @@ from agency.factory.coding_models import (
 )
 from agency.factory.coding_verification import validate_coding_receipt
 from agency.forge.coding_agent import CodingAgentReport
+
+if TYPE_CHECKING:
+    from agency.admission.store import OwnerPilotStore
+
+_ModelT = TypeVar("_ModelT", bound=BaseModel)
+_AdmissionSnapshot = tuple[
+    FactoryCodingRequest,
+    CodingBinding,
+    tuple[str, str],
+    tuple[str, str],
+    tuple[str, str],
+    tuple[str, str],
+]
+_IntentSnapshot = tuple[tuple[CodingEdit, ...], tuple[str, str], str]
 
 CODING_SCHEMA = """
 CREATE TABLE IF NOT EXISTS pilot_coding_bindings (
@@ -91,32 +106,31 @@ def encode(value: object, *, maximum: int = 65536) -> tuple[str, str]:
         nodes = 0
         string_bytes = 0
 
-        def check(item, depth):
+        def check(item: object, depth: int) -> None:
             nonlocal nodes, string_bytes
             nodes += 1
             if nodes > 8192 or depth > 16:
                 raise ValueError("invalid coding journal")
-            kind = type(item)
-            if kind is str:
+            if type(item) is str:
                 if len(item) > maximum:
                     raise ValueError("invalid coding journal")
                 string_bytes += len(item.encode("utf-8"))
                 if string_bytes > maximum:
                     raise ValueError("invalid coding journal")
-            elif item is None or kind is bool:
+            elif item is None or type(item) is bool:
                 return
-            elif kind is int:
+            elif type(item) is int:
                 if item.bit_length() > 262144:
                     raise ValueError("invalid coding journal")
-            elif kind is float:
+            elif type(item) is float:
                 if not math.isfinite(item):
                     raise ValueError("invalid coding journal")
-            elif kind is list:
+            elif type(item) is list:
                 if len(item) > 8192:
                     raise ValueError("invalid coding journal")
                 for child in item:
                     check(child, depth + 1)
-            elif kind is dict:
+            elif type(item) is dict:
                 if len(item) > 8192:
                     raise ValueError("invalid coding journal")
                 for key, child in item.items():
@@ -137,8 +151,8 @@ def encode(value: object, *, maximum: int = 65536) -> tuple[str, str]:
     return text, hashlib.sha256(data).hexdigest()
 
 
-def _unique(pairs):
-    result = {}
+def _unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
             raise ValueError("duplicate coding key")
@@ -146,7 +160,7 @@ def _unique(pairs):
     return result
 
 
-def decode(text: object, digest: object, *, maximum: int = 65536):
+def decode(text: object, digest: object, *, maximum: int = 65536) -> Any:
     if type(text) is not str or type(digest) is not str or len(text) > maximum:
         raise ValueError("invalid coding snapshot")
     value = json.loads(text, object_pairs_hook=_unique)
@@ -155,7 +169,7 @@ def decode(text: object, digest: object, *, maximum: int = 65536):
     return value
 
 
-def model_snapshot(model, value):
+def model_snapshot(model: type[_ModelT], value: object) -> _ModelT:
     try:
         if type(value) is not model:
             raise ValueError("invalid coding model")
@@ -167,7 +181,7 @@ def model_snapshot(model, value):
         raise PilotError("invalid_request") from None
 
 
-def admission_snapshot(payload, binding, profile):
+def admission_snapshot(payload: object, binding: object, profile: object) -> _AdmissionSnapshot:
     try:
         payload = model_snapshot(FactoryCodingRequest, payload)
         binding = model_snapshot(CodingBinding, binding)
@@ -192,14 +206,16 @@ def admission_snapshot(payload, binding, profile):
         raise PilotError("invalid_request") from None
 
 
-def is_coding(conn, sequence):
+def is_coding(conn: sqlite3.Connection, sequence: int) -> bool:
     return (
         conn.execute("SELECT 1 FROM pilot_coding_bindings WHERE sequence=?", (sequence,)).fetchone()
         is not None
     )
 
 
-def _load(store, conn, row):
+def _load(
+    store: OwnerPilotStore, conn: sqlite3.Connection, row: sqlite3.Row
+) -> CodingRecord | None:
     side = conn.execute(
         "SELECT * FROM pilot_coding_bindings WHERE sequence=?", (row["sequence"],)
     ).fetchone()
@@ -243,13 +259,13 @@ def _load(store, conn, row):
             or row["resource_id"] != row["task_id"]
         ):
             raise ValueError
-        edits = ()
+        edits: tuple[CodingEdit, ...] = ()
         if side["plan_json"] is not None:
             plan = decode(side["plan_json"], side["plan_sha256"])
             if type(plan) is not list or len(plan) != 1:
                 raise ValueError
             edits = (CodingEdit.model_validate(plan[0]),)
-            _, encoded, branch = intent_snapshot(
+            _, encoded, _branch = intent_snapshot(
                 binding, edits, side["plan_sha256"], side["branch"]
             )
             if encoded[0] != side["plan_json"]:
@@ -321,7 +337,12 @@ def _load(store, conn, row):
         raise PilotError("store") from None
 
 
-def admit(store, conn, principal, snapshot):
+def admit(
+    store: OwnerPilotStore,
+    conn: sqlite3.Connection,
+    principal: OwnerPrincipal,
+    snapshot: _AdmissionSnapshot,
+) -> AdmissionRecord:
     payload, binding, request_doc, binding_doc, profile_doc, reference = snapshot
     thread = store._thread(conn, principal, payload.thread_id)
     if binding.owner_id != principal.owner_id or binding.workspace_id != thread["workspace_id"]:
@@ -361,10 +382,16 @@ def admit(store, conn, principal, snapshot):
         "INSERT INTO pilot_coding_bindings(sequence,schema_version,request_json,request_digest,binding_json,binding_digest,profile_json,profile_digest,evidence_phase) VALUES (?,'factory-coding-store.v1',?,?,?,?,?,?,'admitted')",
         (cursor.lastrowid, *request_doc, *binding_doc, *profile_doc),
     )
-    return store._record(store._turn(conn, cursor.lastrowid))
+    return store._record(store._turn(conn, cast(int, cursor.lastrowid)))
 
 
-def read_record(store, conn, principal, task_id, workspace_id):
+def read_record(
+    store: OwnerPilotStore,
+    conn: sqlite3.Connection,
+    principal: OwnerPrincipal,
+    task_id: str,
+    workspace_id: str,
+) -> CodingRecord | None:
     row = conn.execute(
         "SELECT * FROM pilot_requests WHERE owner_id=? AND task_id=? AND operation='turn'",
         (principal.owner_id, task_id),
@@ -384,7 +411,9 @@ def read_record(store, conn, principal, task_id, workspace_id):
     return record
 
 
-def intent_snapshot(binding, edits, digest, branch):
+def intent_snapshot(
+    binding: CodingBinding, edits: object, digest: object, branch: object
+) -> _IntentSnapshot:
     try:
         if type(edits) is not tuple or len(edits) != 1:
             raise ValueError
@@ -408,7 +437,9 @@ def intent_snapshot(binding, edits, digest, branch):
         raise PilotError("invalid_request") from None
 
 
-def bound_record(store, conn, sequence, binding):
+def bound_record(
+    store: OwnerPilotStore, conn: sqlite3.Connection, sequence: int, binding: CodingBinding
+) -> tuple[sqlite3.Row, CodingRecord]:
     row = store._turn(conn, sequence)
     record = _load(store, conn, row)
     if record is None or record.binding != binding:
@@ -416,7 +447,13 @@ def bound_record(store, conn, sequence, binding):
     return row, record
 
 
-def record_intent(store, conn, sequence, binding, snapshot):
+def record_intent(
+    store: OwnerPilotStore,
+    conn: sqlite3.Connection,
+    sequence: int,
+    binding: CodingBinding,
+    snapshot: _IntentSnapshot,
+) -> None:
     row, saved = bound_record(store, conn, sequence, binding)
     store._live(row)
     edits, plan, branch = snapshot
@@ -435,7 +472,7 @@ def record_intent(store, conn, sequence, binding, snapshot):
     )
 
 
-def _evidence_from_document(value, binding):
+def _evidence_from_document(value: object, binding: CodingBinding) -> CodingEvidence:
     text, _ = encode(value, maximum=524288)
     evidence = CodingEvidence.model_validate_json(text, strict=True)
     if encode(evidence.model_dump(mode="json"), maximum=524288)[0] != text:
@@ -451,7 +488,7 @@ def _evidence_from_document(value, binding):
     return evidence
 
 
-def evidence_snapshot(evidence, binding):
+def evidence_snapshot(evidence: object, binding: CodingBinding) -> CodingEvidence:
     try:
         if type(evidence) is not CodingEvidence:
             raise ValueError
@@ -478,7 +515,13 @@ def coding_response(evidence: CodingEvidence) -> str:
     )
 
 
-def stage(store, conn, sequence, binding, evidence):
+def stage(
+    store: OwnerPilotStore,
+    conn: sqlite3.Connection,
+    sequence: int,
+    binding: CodingBinding,
+    evidence: object,
+) -> None:
     row, saved = bound_record(store, conn, sequence, binding)
     store._live(row)
     evidence = evidence_snapshot(evidence, saved.binding)
@@ -501,7 +544,9 @@ def stage(store, conn, sequence, binding, evidence):
     store._event(conn, sequence, "staged", "staged")
 
 
-def commit(store, conn, sequence, binding):
+def commit(
+    store: OwnerPilotStore, conn: sqlite3.Connection, sequence: int, binding: CodingBinding
+) -> None:
     row, saved = bound_record(store, conn, sequence, binding)
     if row["state"] == "COMPLETED" and saved.evidence_phase == "published":
         return
@@ -542,7 +587,7 @@ def commit(store, conn, sequence, binding):
     store._event(conn, sequence, "committed", "completed")
 
 
-def validate_uncertainty(phase, reason):
+def validate_uncertainty(phase: object, reason: object) -> None:
     if (
         type(phase) is not str
         or phase not in NATIVE_PHASES
@@ -552,7 +597,14 @@ def validate_uncertainty(phase, reason):
         raise PilotError("invalid_request")
 
 
-def uncertain(store, conn, sequence, binding, phase, reason):
+def uncertain(
+    store: OwnerPilotStore,
+    conn: sqlite3.Connection,
+    sequence: int,
+    binding: CodingBinding,
+    phase: str,
+    reason: str,
+) -> None:
     row, saved = bound_record(store, conn, sequence, binding)
     side = conn.execute(
         "SELECT uncertain_phase,uncertain_reason FROM pilot_coding_bindings WHERE sequence=?",

@@ -58,12 +58,20 @@ def test_run_task_protected_does_not_create_worktree(tmp_path: Path):
     repo = _git_repo(tmp_path)
     agent = AgencyCodingAgent(workspace=repo)
     before = subprocess.run(
-        ["git", "worktree", "list", "--porcelain"], cwd=repo, capture_output=True, text=True
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
     ).stdout
     with pytest.raises(ValueError):
         agent.run_task("feat/protected", [{"path": "migrations/0001.py", "old": "a", "new": "b"}])
     after = subprocess.run(
-        ["git", "worktree", "list", "--porcelain"], cwd=repo, capture_output=True, text=True
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
     ).stdout
     assert before == after
 
@@ -81,7 +89,9 @@ def test_arun_task_protected_raises(tmp_path: Path):
     agent = AgencyCodingAgent(workspace=repo)
     with pytest.raises(ValueError):
         asyncio.run(
-            agent.arun_task("feat/async-protected", [{"path": ".env", "old": "SECRET=1", "new": "SECRET=2"}])
+            agent.arun_task(
+                "feat/async-protected", [{"path": ".env", "old": "SECRET=1", "new": "SECRET=2"}]
+            )
         )
 
 

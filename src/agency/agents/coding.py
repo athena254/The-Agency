@@ -19,6 +19,7 @@ from typing import Any
 from agency.forge import CodingAgentReport, CodingAgentStore, run_coding_agent
 from agency.forge.coding_agent import _normalize_edit, _resolve_edits
 from agency.forge.protected_paths import is_protected
+
 # Repository root = parents[3] of this file (src/agency/agents/coding.py).
 DEFAULT_WORKSPACE = Path(__file__).resolve().parents[3]
 
@@ -98,4 +99,4 @@ class AgencyCodingAgent:
         return self.run_task(branch, edits, **kwargs)
 
 
-__all__ = ["AgencyCodingAgent", "DEFAULT_WORKSPACE", "read_skill"]
+__all__ = ["DEFAULT_WORKSPACE", "AgencyCodingAgent", "read_skill"]

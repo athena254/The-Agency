@@ -14,6 +14,7 @@ import json
 import os
 import stat
 from pathlib import Path
+from typing import Literal, cast
 
 from agency.factory.coding_models import (
     CodingBinding,
@@ -25,6 +26,18 @@ from agency.factory.coding_models import (
     literal_patch,
 )
 from agency.forge.coding_agent import CodingAgentReport
+
+_ObjectiveStatus = Literal["passed", "failed", "unable_to_verify"]
+_ReceiptReason = Literal[
+    "matched",
+    "criterion_mismatch",
+    "inventory_mismatch",
+    "artifact_unavailable",
+    "unsafe_representation",
+    "forge_failed",
+    "binding_mismatch",
+]
+_ArtifactFailure = Literal["unsafe_representation", "inventory_mismatch", "artifact_unavailable"]
 
 
 def criteria_document() -> dict[str, object]:
@@ -60,7 +73,15 @@ def _digest_text(text: str | None) -> str | None:
     return None if text is None else hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _receipt(binding, edits, report, text, patch, status, reason) -> CodingReceipt:
+def _receipt(
+    binding: CodingBinding,
+    edits: tuple[CodingEdit, ...],
+    report: CodingAgentReport,
+    text: str | None,
+    patch: str | None,
+    status: _ObjectiveStatus,
+    reason: _ReceiptReason,
+) -> CodingReceipt:
     return CodingReceipt(
         binding=binding,
         plan_sha256=canonical_sha256([edit.model_dump(mode="json") for edit in edits]),
@@ -94,7 +115,12 @@ def _root_key(value: str | Path) -> str:
     return os.path.normcase(str(_root_path(value)))
 
 
-def _inputs(binding, edits, report, patch):
+def _inputs(
+    binding: CodingBinding,
+    edits: tuple[CodingEdit, ...],
+    report: CodingAgentReport,
+    patch: str | None,
+) -> tuple[CodingBinding, tuple[CodingEdit, ...], CodingAgentReport, str]:
     """Validate copied native types and plan relationships, without any IO."""
     try:
         if type(binding) is not CodingBinding or type(report) is not CodingAgentReport:
@@ -169,7 +195,7 @@ def _is_link(info: os.stat_result) -> bool:
     )
 
 
-def _inventory(root: Path) -> str | None:
+def _inventory(root: Path) -> _ArtifactFailure | None:
     """Bounded flat inventory, rejecting ancestor redirects before following paths."""
     for directory in (*reversed(root.parents), root):
         info = os.lstat(directory)
@@ -192,7 +218,7 @@ def _inventory(root: Path) -> str | None:
     return None
 
 
-def _read_artifact(root: Path) -> tuple[str | None, str | None]:
+def _read_artifact(root: Path) -> tuple[str | None, _ArtifactFailure | None]:
     """Read at most 8192 bytes; pre/post handle metadata checks enforce the cap.
 
     Handle identity and post-read metadata checks detect ordinary concurrent file
@@ -262,29 +288,29 @@ def verify_literal_artifact(
     root = _root_path(artifact_root)
     text, reason = _read_artifact(root)
     if reason is not None:
-        return _receipt(
-            binding,
-            edits,
-            forge_report,
-            None,
-            patch,
-            "failed" if reason == "inventory_mismatch" else "unable_to_verify",
-            reason,
+        status: _ObjectiveStatus = (
+            "failed" if reason == "inventory_mismatch" else "unable_to_verify"
         )
+        return _receipt(binding, edits, forge_report, None, patch, status, reason)
     if root.resolve() != _root_path(forge_report.worktree_path).resolve():
         raise ValueError("invalid coding evidence")
-    _bind_artifact(text, planned_text, patch, forge_report)
+    # _read_artifact yields a str text exactly when reason is None.
+    artifact_text = cast("str", text)
+    _bind_artifact(artifact_text, planned_text, patch, forge_report)
     if not _forge_passed(forge_report):
-        return _receipt(binding, edits, forge_report, text, patch, "failed", "forge_failed")
-    passed = _matches_literal(text)
+        return _receipt(
+            binding, edits, forge_report, artifact_text, patch, "failed", "forge_failed"
+        )
+    passed = _matches_literal(artifact_text)
+    outcome: _ReceiptReason = "matched" if passed else "criterion_mismatch"
     return _receipt(
         binding,
         edits,
         forge_report,
-        text,
+        artifact_text,
         patch,
         "passed" if passed else "failed",
-        "matched" if passed else "criterion_mismatch",
+        outcome,
     )
 
 

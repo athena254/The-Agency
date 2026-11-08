@@ -761,11 +761,11 @@ async def test_real_report_lease_loss_is_uncertain_and_latched(
     assert executor._latched is True
     assert executor.uncertainty_acknowledged is (ack == "acknowledged")
     assert record.status is (AgentStatus.IDLE if ack == "acknowledged" else AgentStatus.DRAINING)
-    assert record.current_task_id == (None if ack == "acknowledged" else n["request"].binding.task_id)
+    assert record.current_task_id == (
+        None if ack == "acknowledged" else n["request"].binding.task_id
+    )
     with pytest.raises(NativeCodingDenied, match="executor unavailable"):
-        await executor.execute(
-            n["request"], grant=n["grant"], model=n["model"], hooks=n["hooks"]
-        )
+        await executor.execute(n["request"], grant=n["grant"], model=n["model"], hooks=n["hooks"])
     assert await executor.stop(drain_timeout_s=0.01) is True
     assert attempts == [("verification", "identity_changed")]
     assert dispatches == [

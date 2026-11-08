@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import json
 import time
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, TypeVar, cast
@@ -18,7 +18,8 @@ from agency.admission.calculator_verification import (
     make_receipt,
     validate_receipt,
 )
-from agency.admission.coding_store import CodingEvidence, model_snapshot
+from agency.admission.coding_store import CodingEvidence, CodingRecord
+from agency.admission.coding_store import model_snapshot as _model_snapshot
 from agency.admission.models import (
     AdmissionRecord,
     MessageView,
@@ -43,12 +44,13 @@ from agency.agents.factory_coding import (
     NativeCodingDenied,
     NativeCodingExecutor,
     NativeCodingHooks,
+    NativeCodingOutcome,
     NativeCodingRequest,
     NativeCodingUncertain,
 )
 from agency.butler.service import ButlerService
 from agency.butler.threads import ThreadStore
-from agency.factory.coding_models import CodingBinding, FactoryCodingRequest
+from agency.factory.coding_models import CodingBinding, CodingEdit, FactoryCodingRequest
 from agency.kernel.audit import AuditEntry, BetaAuditLog
 from agency.llm.adapter import LLMAdapter
 from agency.llm.config import LLMConfig
@@ -60,6 +62,7 @@ from agency.tools.registry import ToolRegistry
 
 _T = TypeVar("_T")
 _State = Literal["ADMITTED", "RUNNING", "COMPLETED", "FAILED", "DENIED", "CANCELLED", "UNCERTAIN"]
+_snapshot_model = cast(Callable[[type[_T], object], _T], _model_snapshot)
 
 
 class OwnerPilotService:
@@ -110,15 +113,25 @@ class OwnerPilotService:
             try:
                 profile = coding.profile
                 profile.__post_init__()
-                facts = {k: getattr(self._dispatch, k) for k in (
-                    "provider", "model", "base_url", "max_tokens", "temperature", "timeout"
-                )}
-                if (not workspace_id or (owner_id, workspace_id) !=
-                        (profile.owner_id, profile.workspace_id)
-                        or (profile.provider, profile.model) !=
-                        (self._dispatch.provider, self._dispatch.model)
-                        or json.loads(profile.dispatch_json) != facts
-                        or not profile.provider_config_id.strip()):
+                facts = {
+                    k: getattr(self._dispatch, k)
+                    for k in (
+                        "provider",
+                        "model",
+                        "base_url",
+                        "max_tokens",
+                        "temperature",
+                        "timeout",
+                    )
+                }
+                if (
+                    not workspace_id
+                    or (owner_id, workspace_id) != (profile.owner_id, profile.workspace_id)
+                    or (profile.provider, profile.model)
+                    != (self._dispatch.provider, self._dispatch.model)
+                    or json.loads(profile.dispatch_json) != facts
+                    or not profile.provider_config_id.strip()
+                ):
                     raise ValueError
             except (ValueError, TypeError, AttributeError):
                 raise PilotError("invalid_request") from None
@@ -291,9 +304,15 @@ class OwnerPilotService:
             except SpendingError:
                 raise PilotError("store", uncertain=True) from None
         return {
-            "enabled": False, "currency": "USD", "limit_usd": None,
-            "reserved_usd": "0", "reported_cost_usd": "0", "prompt_tokens": 0,
-            "completion_tokens": 0, "unresolved_calls": 0, "pricing_source": None,
+            "enabled": False,
+            "currency": "USD",
+            "limit_usd": None,
+            "reserved_usd": "0",
+            "reported_cost_usd": "0",
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "unresolved_calls": 0,
+            "pricing_source": None,
         }
 
     async def capabilities(self, principal: OwnerPrincipal) -> PilotCapabilities:
@@ -438,11 +457,13 @@ class OwnerPilotService:
             raise PilotError("invalid_request")
         principal.__post_init__()
         self._owner(principal)
-        snapshot = model_snapshot(FactoryCodingRequest, payload)
+        snapshot = _snapshot_model(FactoryCodingRequest, payload)
         principal = OwnerPrincipal(principal.owner_id, principal.transport, principal.subject_id)
         return await self._retain(self._submit_coding(principal, snapshot))
 
-    async def _submit_coding(self, principal, payload):
+    async def _submit_coding(
+        self, principal: OwnerPrincipal, payload: FactoryCodingRequest
+    ) -> OwnerTaskView:
         from dataclasses import replace
 
         async with self._gate:
@@ -469,17 +490,35 @@ class OwnerPilotService:
                 raise PilotError("uncertainty", uncertain=True)
             profile = self._coding_profile
             assert profile is not None and self._coding_sha is not None
-            if (self._coding.profile is not profile or profile.sha256 != self._coding_sha
-                    or self._coding._claimed or self._coding._latched or self._coding._stopping):
+            if (
+                self._coding.profile is not profile
+                or profile.sha256 != self._coding_sha
+                or self._coding._claimed
+                or self._coding._latched
+                or self._coding._stopping
+            ):
                 raise PilotError("disabled")
             binding = CodingBinding(
-                **{k: getattr(profile, k) for k in (
-                    "owner_id", "workspace_id", "profile_id", "blueprint_id",
-                    "blueprint_version", "runtime_agent_id", "base_commit",
-                    "checker_id", "checker_version", "checker_sha256", "criteria_sha256",
-                )},
-                profile_sha256=self._coding_sha, task_id=uuid4().hex,
-                request_id=payload.request_id, thread_id=payload.thread_id,
+                **{
+                    k: getattr(profile, k)
+                    for k in (
+                        "owner_id",
+                        "workspace_id",
+                        "profile_id",
+                        "blueprint_id",
+                        "blueprint_version",
+                        "runtime_agent_id",
+                        "base_commit",
+                        "checker_id",
+                        "checker_version",
+                        "checker_sha256",
+                        "criteria_sha256",
+                    )
+                },
+                profile_sha256=self._coding_sha,
+                task_id=uuid4().hex,
+                request_id=payload.request_id,
+                thread_id=payload.thread_id,
             )
             try:
                 self._coding._affinity()
@@ -500,7 +539,7 @@ class OwnerPilotService:
                 self._execution = asyncio.create_task(self._execute(principal, row))
             return self._view(row)
 
-    async def get_coding_receipt(self, principal: OwnerPrincipal, task_id: str) -> dict:
+    async def get_coding_receipt(self, principal: OwnerPrincipal, task_id: str) -> dict[str, Any]:
         self._owner(principal)
         principal = OwnerPrincipal(principal.owner_id, principal.transport, principal.subject_id)
         row = await self._store.verification_record(principal, task_id, self._workspace_id)
@@ -517,8 +556,12 @@ class OwnerPilotService:
             reason = "available"
             receipt = saved.evidence.receipt.model_dump(mode="json")
         return {
-            "task_id": row.task_id, "request_id": row.request_id, "thread_id": row.thread_id,
-            "execution_state": row.state, "receipt": receipt, "reason": reason,
+            "task_id": row.task_id,
+            "request_id": row.request_id,
+            "thread_id": row.thread_id,
+            "execution_state": row.state,
+            "receipt": receipt,
+            "reason": reason,
         }
 
     async def submit(self, principal: OwnerPrincipal, payload: OwnerTaskRequest) -> OwnerTaskView:
@@ -543,9 +586,12 @@ class OwnerPilotService:
             else:
                 if existing.operation != "turn":
                     raise PilotError("conflict")
-                if await self._store.get_coding_record(
-                    principal, existing.task_id or "", self._workspace_id
-                ) is not None:
+                if (
+                    await self._store.get_coding_record(
+                        principal, existing.task_id or "", self._workspace_id
+                    )
+                    is not None
+                ):
                     raise PilotError("conflict")
                 if json.loads(existing.input_json) != {
                     "thread_id": values["thread_id"],
@@ -583,9 +629,12 @@ class OwnerPilotService:
             # surfacing cancellation. Observe that exact ACK, not a racing root
             # transition, and never wait here for actual Git/model drain.
             native = self._coding
-            if (native is not None and native._binding is not None
-                    and native._binding.task_id == row.task_id
-                    and native._uncertain_task is not None):
+            if (
+                native is not None
+                and native._binding is not None
+                and native._binding.task_id == row.task_id
+                and native._uncertain_task is not None
+            ):
                 await asyncio.gather(native._uncertain_task, return_exceptions=True)
             if self._coding_uncertain is not None:
                 await asyncio.gather(self._coding_uncertain, return_exceptions=True)
@@ -601,7 +650,9 @@ class OwnerPilotService:
                     uncertain = (
                         pending
                         or current.result_json is not None
-                        or isinstance(exc, (MeteredError, asyncio.CancelledError, NativeCodingUncertain))
+                        or isinstance(
+                            exc, (MeteredError, asyncio.CancelledError, NativeCodingUncertain)
+                        )
                         or isinstance(exc, PilotError)
                         and exc.uncertain
                     )
@@ -642,74 +693,128 @@ class OwnerPilotService:
                 self._budget.revoke(self._lease)
         return None
 
-    async def _perform_coding(self, principal, saved):
+    async def _perform_coding(self, principal: OwnerPrincipal, saved: CodingRecord) -> None:
         from types import SimpleNamespace
 
         row, binding = saved.admission, saved.binding
+        task_id = cast(str, row.task_id)
         executor = self._coding
         if executor is None:
             raise PilotError("disabled")
         if await self._uncertainty(principal):
             raise PilotError("uncertainty", uncertain=True)
-        lease = await self._budget.reserve_request(principal, row.request_id, row.task_id)
+        lease = await self._budget.reserve_request(principal, row.request_id, task_id)
         self._lease = lease
         await self._budget.mark_running(lease)
-        grant = OwnerExecutionGrant(lease, self._budget, allowed_tools=frozenset(),
-                                    max_tool_calls=1, max_model_calls=1)
+        grant = OwnerExecutionGrant(
+            lease, self._budget, allowed_tools=frozenset(), max_tool_calls=1, max_model_calls=1
+        )
         config = self._dispatch
         assert self._coding_profile is not None
         model = MeteredModel(
-            LLMAdapter(provider=config.provider, model=config.model, api_key=config.api_key,
-                       base_url=config.base_url, max_tokens=config.max_tokens,
-                       temperature=config.temperature, timeout=config.timeout),
-            OwnerMeteredBinding(grant, config.provider, config.model,
-                                self._coding_profile.provider_config_id),
-            self._budget, self._audit, timeout_s=config.timeout, spending=self._spending,
+            LLMAdapter(
+                provider=config.provider,
+                model=config.model,
+                api_key=config.api_key,
+                base_url=config.base_url,
+                max_tokens=config.max_tokens,
+                temperature=config.temperature,
+                timeout=config.timeout,
+            ),
+            OwnerMeteredBinding(
+                grant, config.provider, config.model, self._coding_profile.provider_config_id
+            ),
+            self._budget,
+            self._audit,
+            timeout_s=config.timeout,
+            spending=self._spending,
         )
 
-        async def checkpoint(current_binding, phase, *, finalized=False):
-            current = await self._store.get_coding_record(
-                principal, row.task_id, self._workspace_id
-            )
-            if (current is None or current.binding != binding or current.request != saved.request
-                    or current_binding != binding):
+        async def checkpoint(
+            current_binding: CodingBinding,
+            phase: Literal["planning", "mutation", "publication"],
+            *,
+            finalized: bool = False,
+        ) -> None:
+            current = await self._store.get_coding_record(principal, task_id, self._workspace_id)
+            if (
+                current is None
+                or current.binding != binding
+                or current.request != saved.request
+                or current_binding != binding
+            ):
                 raise PilotError("conflict")
             live = current.admission
-            if (self._stopping or live.cancel_requested or live.state != "RUNNING"
-                    or time.time() >= lease.deadline_at
-                    or not finalized and not self._budget.owns(lease)):
+            if (
+                self._stopping
+                or live.cancel_requested
+                or live.state != "RUNNING"
+                or time.time() >= lease.deadline_at
+                or not finalized
+                and not self._budget.owns(lease)
+            ):
                 raise PilotError("uncertainty", uncertain=True)
 
-        async def record_intent(current_binding, edits, plan_sha256, branch):
+        async def record_intent(
+            current_binding: CodingBinding,
+            edits: tuple[CodingEdit, ...],
+            plan_sha256: str,
+            branch: str,
+        ) -> None:
             await checkpoint(current_binding, "mutation")
             await self._store.record_coding_intent(
                 row.sequence, binding=binding, edits=edits, plan_sha256=plan_sha256, branch=branch
             )
 
-        async def uncertain(current_binding, phase, reason):
+        async def uncertain(
+            current_binding: CodingBinding,
+            phase: Literal["preflight", "planning", "mutation", "verification", "publication"],
+            reason: Literal[
+                "cancelled",
+                "deadline",
+                "stopping",
+                "identity_changed",
+                "model_unknown",
+                "native_unknown",
+                "evidence_invalid",
+                "hook_unknown",
+            ],
+        ) -> None:
             self._blocked = True
             if current_binding != binding:
                 raise PilotError("conflict", uncertain=True)
             if self._coding_uncertain is None:
-                self._coding_uncertain = asyncio.create_task(self._store.mark_coding_uncertain(
-                    row.sequence, binding=binding, phase=phase, reason=reason
-                ))
+                self._coding_uncertain = asyncio.create_task(
+                    self._store.mark_coding_uncertain(
+                        row.sequence, binding=binding, phase=phase, reason=reason
+                    )
+                )
             await asyncio.shield(self._coding_uncertain)
 
-        async def publish(outcome):
+        async def publish(outcome: NativeCodingOutcome) -> None:
             await checkpoint(outcome.binding, "publication")
             evidence = CodingEvidence(
-                edits=outcome.edits, forge_report=outcome.forge_report,
-                artifact_text=outcome.artifact_text, patch=outcome.patch, receipt=outcome.receipt,
+                edits=outcome.edits,
+                forge_report=outcome.forge_report,
+                artifact_text=outcome.artifact_text,
+                patch=outcome.patch,
+                receipt=outcome.receipt,
             )
             await self._store.stage_coding_result(row.sequence, binding=binding, evidence=evidence)
-            passed = (evidence.receipt.objective_status == "passed"
-                      and evidence.forge_report.gate == "PASS")
-            entry = AuditEntry(agent="owner-gateway", task="owner-pilot",
-                               action="owner.gateway_result",
-                               result="completed" if passed else "failed",
-                               evidence={"phase": "coding_result",
-                                         "objective_status": evidence.receipt.objective_status})
+            passed = (
+                evidence.receipt.objective_status == "passed"
+                and evidence.forge_report.gate == "PASS"
+            )
+            entry = AuditEntry(
+                agent="owner-gateway",
+                task="owner-pilot",
+                action="owner.gateway_result",
+                result="completed" if passed else "failed",
+                evidence={
+                    "phase": "coding_result",
+                    "objective_status": evidence.receipt.objective_status,
+                },
+            )
             if await self._audit.append_beta(entry) != entry.entry_id:
                 raise PilotError("audit", uncertain=True)
             if await self._uncertainty(principal):
@@ -721,14 +826,23 @@ class OwnerPilotService:
             if passed:
                 await self._store.commit_coding_turn(row.sequence, binding=binding)
             else:
-                await self._store.transition(row.sequence, expected="RUNNING", state="FAILED",
-                                             phase="failed", error_code="disabled")
+                await self._store.transition(
+                    row.sequence,
+                    expected="RUNNING",
+                    state="FAILED",
+                    phase="failed",
+                    error_code="disabled",
+                )
 
-        hooks = SimpleNamespace(checkpoint=checkpoint, record_intent=record_intent,
-                                publish=publish, uncertain=uncertain)
+        hooks = SimpleNamespace(
+            checkpoint=checkpoint, record_intent=record_intent, publish=publish, uncertain=uncertain
+        )
         await self._butler.handle_owner_coding(
-            NativeCodingRequest(saved.request, binding), grant=grant, model=model,
-            executor=executor, hooks=cast(NativeCodingHooks, hooks),
+            NativeCodingRequest(saved.request, binding),
+            grant=grant,
+            model=model,
+            executor=executor,
+            hooks=cast(NativeCodingHooks, hooks),
         )
 
     async def _perform(self, principal: OwnerPrincipal, row: AdmissionRecord) -> None:

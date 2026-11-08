@@ -355,9 +355,7 @@ def test_journal_counts_aggregate_utf8_occurrences_before_serialization(monkeypa
     chunk = "雪" * 8192
     assert len(chunk) * 32 < maximum < len(chunk.encode("utf-8")) * 32
     value = (
-        {"caveats": [chunk] * 32}
-        if placement == "values"
-        else [{chunk: None} for _ in range(32)]
+        {"caveats": [chunk] * 32} if placement == "values" else [{chunk: None} for _ in range(32)]
     )
     serializations = []
     original = coding_store.json.dumps

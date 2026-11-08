@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from agency.llm.adapter import LLMAdapter
-from agency.llm.config import LLMConfig, ProviderKind, load_config, load_named_provider
+from agency.llm.config import ProviderKind, load_config, load_named_provider
 
 
 def test_inception_provider_kind_exists() -> None:

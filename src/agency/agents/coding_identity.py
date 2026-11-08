@@ -8,8 +8,6 @@ kernel (identity) and runtime (worker) registries.
 
 from __future__ import annotations
 
-from typing import Any
-
 from agency.agents.registry import AgentRegistry as RuntimeAgentRegistry
 from agency.kernel.identity import Agent, Capability
 from agency.kernel.policies import ActionClass

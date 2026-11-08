@@ -106,7 +106,9 @@ def test_successful_required_tests_can_pass(repo: Path, monkeypatch):
 
 @pytest.mark.parametrize("representation", ["construct", "copy", "dict"])
 @pytest.mark.parametrize("raw_exit", [False, "0", 0.0, True, "1", 1.0])
-def test_complete_malformed_exit_evidence_cannot_pass(repo: Path, monkeypatch, representation, raw_exit):
+def test_complete_malformed_exit_evidence_cannot_pass(
+    repo: Path, monkeypatch, representation, raw_exit
+):
     valid = _test_report(repo)
     fields = valid.model_dump()
     fields["returncode"] = raw_exit

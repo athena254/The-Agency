@@ -11,17 +11,19 @@ import stat
 import subprocess
 import threading
 import weakref
+from collections.abc import Callable
+from concurrent.futures import Future as ConcurrentFuture
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol, TypeVar, cast
 
 from agency.admission.models import OwnerExecutionGrant, OwnerMeteredBinding
 from agency.agents.coding import AgencyCodingAgent
 from agency.agents.coding_planner import plan_edits
 from agency.agents.prompts import issued_system_prompt
+from agency.agents.registry import AgentRecord, AgentStatus
 from agency.agents.registry import AgentRegistry as RuntimeRegistry
-from agency.agents.registry import AgentStatus
 from agency.factory.coding_models import (
     CodingBinding,
     CodingEdit,
@@ -40,8 +42,24 @@ from agency.factory.coding_verification import (
 )
 from agency.factory.service import AgentFactory
 from agency.forge.coding_agent import CodingAgentReport
+from agency.kernel.identity import Agent
 from agency.kernel.registry import AgentRegistry as KernelRegistry
 from agency.llm.metered import MeteredDenied, MeteredError, MeteredModel
+
+_Phase = Literal["preflight", "planning", "mutation", "verification", "publication"]
+_UncertainReason = Literal[
+    "cancelled",
+    "deadline",
+    "stopping",
+    "identity_changed",
+    "model_unknown",
+    "native_unknown",
+    "evidence_invalid",
+    "hook_unknown",
+]
+
+_T = TypeVar("_T")
+_FutureT = TypeVar("_FutureT", bound=asyncio.Future[Any])
 
 
 class NativeCodingDenied(Exception):
@@ -134,7 +152,7 @@ class NativeLiteralProfile:
             canonical_sha256(json.loads(text))
         _ = self.sha256
 
-    def snapshot(self) -> dict:
+    def snapshot(self) -> dict[str, Any]:
         """Defensive JSON-compatible nonsecret facts, with no live lookups."""
         value = asdict(self)
         for name in ("repo", "worktree_root", "evidence_root"):
@@ -201,7 +219,9 @@ def _regular_path(path: Path) -> None:
             raise NativeCodingDenied("redirected fixture")
 
 
-_REGISTRY_OWNERS = weakref.WeakKeyDictionary()
+_REGISTRY_OWNERS: weakref.WeakKeyDictionary[
+    KernelRegistry | RuntimeRegistry, weakref.ReferenceType[NativeCodingExecutor]
+] = weakref.WeakKeyDictionary()
 
 
 class NativeCodingExecutor:
@@ -226,29 +246,36 @@ class NativeCodingExecutor:
             owner = _REGISTRY_OWNERS.get(registry)
             if owner is not None and owner() is not None:
                 raise NativeCodingDenied("dedicated registries already owned")
-        self.profile = profile
-        self._factory = factory
-        self._kernels = kernel_registry
-        self._runtimes = runtime_registry
-        self._loop = asyncio.get_running_loop()
-        self._thread = threading.get_ident()
-        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="literal-factory")
-        self._identity = kernel_registry.get(profile.runtime_agent_id)
-        self._record = runtime_registry.get_agent(profile.runtime_agent_id)
-        self._claimed = None
-        self._latched = False
-        self._profile_sha = profile.sha256
-        self._operations = set()
-        self._native_futures = []
-        self._bridge_futures = []
-        self._stopping = False
-        self._job = None
-        self._binding = None
-        self._phase = "preflight"
-        self._uncertain_task = None
-        self.uncertainty_acknowledged = None
-        self.native_report = None
-        self._signal = self._loop.create_future()
+        self.profile: NativeLiteralProfile = profile
+        self._factory: AgentFactory = factory
+        self._kernels: KernelRegistry = kernel_registry
+        self._runtimes: RuntimeRegistry = runtime_registry
+        self._loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
+        self._thread: int = threading.get_ident()
+        self._pool: ThreadPoolExecutor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="literal-factory"
+        )
+        self._identity: Agent | None = kernel_registry.get(profile.runtime_agent_id)
+        self._record: AgentRecord | None = runtime_registry.get_agent(profile.runtime_agent_id)
+        self._claimed: object | None = None
+        self._latched: bool = False
+        self._profile_sha: str = profile.sha256
+        self._operations: set[asyncio.Future[Any]] = set()
+        self._native_futures: list[ConcurrentFuture[Any]] = []
+        self._bridge_futures: list[ConcurrentFuture[Any]] = []
+        self._stopping: bool = False
+        self._job: asyncio.Future[NativeCodingOutcome] | None = None
+        self._binding: CodingBinding | None = None
+        self._phase: _Phase = "preflight"
+        self._uncertain_task: asyncio.Future[Any] | None = None
+        self.uncertainty_acknowledged: bool | None = None
+        self.native_report: CodingAgentReport | None = None
+        self._signal: asyncio.Future[Any] = self._loop.create_future()
+        self._request: NativeCodingRequest
+        self._grant: OwnerExecutionGrant
+        self._model: MeteredModel
+        self._hooks: NativeCodingHooks
+        self._deadline: float
         if (
             factory._kernels is not kernel_registry
             or factory._runtimes is not runtime_registry
@@ -258,7 +285,12 @@ class NativeCodingExecutor:
         for registry in (kernel_registry, runtime_registry):
             _REGISTRY_OWNERS[registry] = weakref.ref(self)
 
-    def _entry(self, request, grant, model):
+    def _entry(
+        self,
+        request: NativeCodingRequest,
+        grant: OwnerExecutionGrant,
+        model: MeteredModel,
+    ) -> NativeCodingRequest:
         try:
             if (
                 type(request) is not NativeCodingRequest
@@ -315,7 +347,7 @@ class NativeCodingExecutor:
         except Exception:  # noqa: BLE001 -- fail closed at a trusted adapter/hook boundary
             raise NativeCodingDenied("request/profile/grant mismatch") from None
 
-    def _live(self, binding):
+    def _live(self, binding: CodingBinding) -> tuple[Agent, AgentRecord]:
         assert threading.get_ident() == self._thread
         assert asyncio.get_running_loop() is self._loop
         p = self.profile
@@ -377,7 +409,7 @@ class NativeCodingExecutor:
             raise NativeCodingDenied("identity changed")
         return agent, record
 
-    def _preflight(self, binding, *, collision=True):
+    def _preflight(self, binding: CodingBinding, *, collision: bool = True) -> None:
         p = self.profile
         _regular_path(p.repo / "m.py")
         _regular_path(p.repo / ".git")
@@ -418,14 +450,14 @@ class NativeCodingExecutor:
         ):
             raise NativeCodingDenied("branch collision")
 
-    def _affinity(self):
+    def _affinity(self) -> None:
         if threading.get_ident() != self._thread or asyncio.get_running_loop() is not self._loop:
             raise NativeCodingDenied("creating application loop required")
 
-    def _remember(self, future):
+    def _remember(self, future: _FutureT) -> _FutureT:
         self._operations.add(future)
 
-        def settled(done):
+        def settled(done: asyncio.Future[Any]) -> None:
             if not done.cancelled():
                 done.exception()
             self._release_if_settled()
@@ -433,15 +465,19 @@ class NativeCodingExecutor:
         future.add_done_callback(settled)
         return future
 
-    def _drained(self):
-        return all(
-            f.done() for f in (*self._operations, *self._native_futures, *self._bridge_futures)
+    def _drained(self) -> bool:
+        futures: tuple[asyncio.Future[Any] | ConcurrentFuture[Any], ...] = (
+            *self._operations,
+            *self._native_futures,
+            *self._bridge_futures,
         )
+        return all(f.done() for f in futures)
 
-    def _owns_claim(self):
+    def _owns_claim(self) -> bool:
         record = self._runtimes.get_agent(self.profile.runtime_agent_id)
         return (
             self._claimed is not None
+            and self._binding is not None
             and record is self._record
             and self._kernels.get(self.profile.runtime_agent_id) is self._identity
             and record is not None
@@ -451,7 +487,7 @@ class NativeCodingExecutor:
             and record.status in (AgentStatus.BUSY, AgentStatus.DRAINING)
         )
 
-    def _release_if_settled(self):
+    def _release_if_settled(self) -> None:
         if not self._drained():
             return
         if self._latched and self.uncertainty_acknowledged is not True:
@@ -470,11 +506,11 @@ class NativeCodingExecutor:
                 self._runtimes.update_agent_status(self.profile.runtime_agent_id, AgentStatus.IDLE)
         self._claimed = None
 
-    def _fence(self, reason):
+    def _fence(self, reason: _UncertainReason) -> None:
         self._latched = True
         if not self._signal.done():
             self._signal.set_result(reason)
-        if self._owns_claim():
+        if self._owns_claim() and self._binding is not None:
             self._runtimes.update_agent_status(
                 self.profile.runtime_agent_id,
                 AgentStatus.DRAINING,
@@ -483,10 +519,15 @@ class NativeCodingExecutor:
         if self._uncertain_task is None:
             phase = self._phase
 
-            async def acknowledge():
+            async def acknowledge() -> None:
                 self.uncertainty_acknowledged = False
                 try:
-                    result = await self._hooks.uncertain(self._binding, phase, reason)
+                    result = cast(
+                        "object",
+                        await self._hooks.uncertain(
+                            cast("CodingBinding", self._binding), phase, reason
+                        ),
+                    )
                     self.uncertainty_acknowledged = result is None
                 except BaseException:  # noqa: BLE001 -- cancellation must retain and fence unknown effects
                     # Local fencing survives failed/lost acknowledgement; never retry.
@@ -494,7 +535,7 @@ class NativeCodingExecutor:
 
             self._uncertain_task = self._remember(self._loop.create_task(acknowledge()))
 
-    def _guard(self, *, finalized: bool = False):
+    def _guard(self, *, finalized: bool = False) -> None:
         self._affinity()
         if self._loop.time() >= self._deadline:
             self._fence("deadline")
@@ -507,12 +548,12 @@ class NativeCodingExecutor:
                 raise NativeCodingDenied("identity changed")
         else:
             self._entry(self._request, self._grant, self._model)
-        self._live(self._binding)
+        self._live(cast("CodingBinding", self._binding))
 
-    async def _hook(self, name, *args):
+    async def _hook(self, name: str, *args: Any) -> None:
         self._guard()
 
-        async def call():
+        async def call() -> None:
             result = await getattr(self._hooks, name)(*args)
             if result is not None:
                 raise NativeCodingUncertain("hook acknowledgement invalid")
@@ -524,7 +565,7 @@ class NativeCodingExecutor:
             raise NativeCodingUncertain("hook acknowledgement unknown") from None
         self._guard(finalized=name == "publish")
 
-    async def _worker(self, fn, *args):
+    async def _worker(self, fn: Callable[..., _T], *args: Any) -> _T:
         self._guard()
         future = self._pool.submit(fn, *args)
         self._native_futures.append(future)
@@ -586,7 +627,13 @@ class NativeCodingExecutor:
         finally:
             self._release_if_settled()
 
-    async def _drive(self, request, grant, model, hooks):
+    async def _drive(
+        self,
+        request: NativeCodingRequest,
+        grant: OwnerExecutionGrant,
+        model: MeteredModel,
+        hooks: NativeCodingHooks,
+    ) -> NativeCodingOutcome:
         try:
             return await self._run(request, grant=grant, model=model, hooks=hooks)
         except MeteredError:
@@ -603,18 +650,26 @@ class NativeCodingExecutor:
             self._fence("evidence_invalid" if self._phase == "verification" else "native_unknown")
             raise NativeCodingUncertain("native/hook outcome unknown") from None
 
-    async def _run(self, request, *, grant, model, hooks):
+    async def _run(
+        self,
+        request: NativeCodingRequest,
+        *,
+        grant: OwnerExecutionGrant,
+        model: MeteredModel,
+        hooks: NativeCodingHooks,
+    ) -> NativeCodingOutcome:
         p, b = self.profile, request.binding
         agent, _record = self._live(b)
         await self._worker(self._preflight, b)
         self._phase = "planning"
         await self._hook("checkpoint", b, "planning")
-        raw, errors = [], []
+        raw: list[str] = []
+        errors: list[Exception] = []
         call_count = 0
 
-        async def invoke(prompt):
+        async def invoke(prompt: str) -> str:
             nonlocal call_count
-            self._remember(asyncio.current_task())
+            self._remember(cast(asyncio.Future[Any], asyncio.current_task()))
             try:
                 self._guard()
                 call_count += 1
@@ -631,7 +686,7 @@ class NativeCodingExecutor:
             raw.append(text)
             return text
 
-        def bridge(prompt, context):
+        def bridge(prompt: str, context: dict[str, Any]) -> Any:
             if context:
                 errors.append(NativeCodingDenied("planner context override"))
                 raise errors[-1]
@@ -647,8 +702,8 @@ class NativeCodingExecutor:
             if len(raw) != 1 or type(raw[0]) is not str or len(raw[0].encode("utf-8")) > 65536:
                 raise ValueError
 
-            def unique(pairs):
-                result = {}
+            def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+                result: dict[str, Any] = {}
                 for key, value in pairs:
                     if key in result:
                         raise ValueError
@@ -678,11 +733,11 @@ class NativeCodingExecutor:
         )
         self._guard()
 
-        async def dispatch_checkpoint():
-            self._remember(asyncio.current_task())
+        async def dispatch_checkpoint() -> None:
+            self._remember(cast(asyncio.Future[Any], asyncio.current_task()))
             await self._hook("checkpoint", b, "mutation")
 
-        def forge():
+        def forge() -> CodingAgentReport:
             self._preflight(b)
             # Read-only Git can stall too. Re-enter the owner loop after it
             # settles, so cancellation/claim drift cannot schedule Forge late.
@@ -703,7 +758,7 @@ class NativeCodingExecutor:
         self._phase = "verification"
         self._guard()
 
-        def verify():
+        def verify() -> NativeCodingOutcome:
             self._preflight(b, collision=False)
             root = Path(report.worktree_path)
             if (

@@ -1,4 +1,5 @@
 """SERVICE admission, synthetic HTTP transport, real native planner/Forge/checker."""
+
 from __future__ import annotations
 
 import asyncio
@@ -34,9 +35,11 @@ PLAN = [{"path": "m.py", "old": "x = 1\n", "new": "x = 2"}]
 
 
 def git(repo, *args):
-    return subprocess.run(
-        ["git", "-C", str(repo), *args], check=True, capture_output=True
-    ).stdout.decode().strip()
+    return (
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+        .stdout.decode()
+        .strip()
+    )
 
 
 def make_service(c, *, coding=True):
@@ -45,8 +48,13 @@ def make_service(c, *, coding=True):
     audit = BetaAuditLog(c.root / "audit.sqlite")
     butler = ButlerService(orchestrator=c.orch, thread_store=c.threads)
     return OwnerPilotService(
-        butler=butler, store=store, budget=budget, audit=audit,
-        provider_config=c.config, owner_id=c.owner.owner_id, workspace_id=c.workspace,
+        butler=butler,
+        store=store,
+        budget=budget,
+        audit=audit,
+        provider_config=c.config,
+        owner_id=c.owner.owner_id,
+        workspace_id=c.workspace,
         coding=c.executor if coding else None,
     )
 
@@ -57,21 +65,29 @@ async def coding_case(tmp_path, monkeypatch, request):
     repo.mkdir()
     (repo / "m.py").write_bytes(b"x = 1\n")
     git(repo, "init", "-q")
-    for key, value in [("user.name", "Synthetic Author"),
-                       ("user.email", "fixture@example.invalid"),
-                       ("core.autocrlf", "false"),
-                       ("core.hooksPath", str(tmp_path / "no-hooks"))]:
+    for key, value in [
+        ("user.name", "Synthetic Author"),
+        ("user.email", "fixture@example.invalid"),
+        ("core.autocrlf", "false"),
+        ("core.hooksPath", str(tmp_path / "no-hooks")),
+    ]:
         git(repo, "config", key, value)
     git(repo, "add", "m.py")
     git(repo, "commit", "-qm", "synthetic trusted fixture")
     kernels, runtimes = KernelRegistry(), RuntimeRegistry()
     factory = AgentFactory(
-        str(tmp_path / "factory.sqlite"), kernel_registry=kernels,
-        runtime_registry=runtimes, authorizer=lambda a, p: a == "synthetic-approver",
+        str(tmp_path / "factory.sqlite"),
+        kernel_registry=kernels,
+        runtime_registry=runtimes,
+        authorizer=lambda a, p: a == "synthetic-approver",
     )
     factory.create("fixture-coder", "1.0.0", "Fixture coder", creator="synthetic-author")
-    factory.approve("fixture-coder", "1.0.0", approver="synthetic-approver",
-                    evidence="synthetic fixture approval, not production")
+    factory.approve(
+        "fixture-coder",
+        "1.0.0",
+        approver="synthetic-approver",
+        evidence="synthetic fixture approval, not production",
+    )
     agent = factory.activate("fixture-coder", "1.0.0")
     owner = OwnerPrincipal("fixture-owner", "local", "fixture-subject")
     # Provision only an existing owner thread, never a pre-admitted/running request.
@@ -80,33 +96,66 @@ async def coding_case(tmp_path, monkeypatch, request):
     workspace = await setup.ensure_workspace(owner)
     _, thread = await setup.create_thread(owner, "thread", "Synthetic fixture")
     await setup.close()
-    config = LLMConfig(provider=ProviderKind.OPENAI, model="synthetic-model",
-                       api_key=SecretStr("SYNTHETIC-NOT-A-SECRET"),
-                       base_url="https://provider.invalid/v1", timeout=10.0)
+    config = LLMConfig(
+        provider=ProviderKind.OPENAI,
+        model="synthetic-model",
+        api_key=SecretStr("SYNTHETIC-NOT-A-SECRET"),
+        base_url="https://provider.invalid/v1",
+        timeout=10.0,
+    )
     dispatch = LLMAdapter(config=config).freeze_dispatch()
     profile = NativeLiteralProfile(
-        owner_id=owner.owner_id, workspace_id=workspace,
-        blueprint_id="fixture-coder", blueprint_version="1.0.0", runtime_agent_id=agent.id,
+        owner_id=owner.owner_id,
+        workspace_id=workspace,
+        blueprint_id="fixture-coder",
+        blueprint_version="1.0.0",
+        runtime_agent_id=agent.id,
         blueprint_json=json.dumps(factory.get("fixture-coder", "1.0.0").to_dict()),
         identity_json=json.dumps(agent.model_dump(mode="json")),
         events_json=json.dumps(factory.list_events("fixture-coder", "1.0.0")),
-        repo=repo, base_commit=git(repo, "rev-parse", "HEAD"),
+        repo=repo,
+        base_commit=git(repo, "rev-parse", "HEAD"),
         base_tree=git(repo, "rev-parse", "HEAD^{tree}"),
-        worktree_root=tmp_path / "trusted-worktrees", evidence_root=tmp_path / "evidence",
-        checker_sha256=checker_source_sha256(), criteria_sha256=canonical_sha256(criteria_document()),
-        provider=dispatch.provider, model=dispatch.model, provider_config_id="immutable-fixture-config",
-        dispatch_json=json.dumps({k: getattr(dispatch, k) for k in
-                                 ("provider", "model", "base_url", "max_tokens", "temperature", "timeout")}),
-        exclusive_registries=True, job_timeout_s=getattr(request, "param", 30.0),
+        worktree_root=tmp_path / "trusted-worktrees",
+        evidence_root=tmp_path / "evidence",
+        checker_sha256=checker_source_sha256(),
+        criteria_sha256=canonical_sha256(criteria_document()),
+        provider=dispatch.provider,
+        model=dispatch.model,
+        provider_config_id="immutable-fixture-config",
+        dispatch_json=json.dumps(
+            {
+                k: getattr(dispatch, k)
+                for k in ("provider", "model", "base_url", "max_tokens", "temperature", "timeout")
+            }
+        ),
+        exclusive_registries=True,
+        job_timeout_s=getattr(request, "param", 30.0),
     )
-    executor = NativeCodingExecutor(profile=profile, factory=factory,
-                                    kernel_registry=kernels, runtime_registry=runtimes)
+    executor = NativeCodingExecutor(
+        profile=profile, factory=factory, kernel_registry=kernels, runtime_registry=runtimes
+    )
     threads = ThreadStore(str(tmp_path / "owner.sqlite"))
-    orch = AgencyOrchestrator(llm=LLMAdapter(provider="echo", model="echo"), memory_db_path=":memory:")
-    c = SimpleNamespace(root=tmp_path, repo=repo, owner=owner, workspace=workspace,
-                        thread=thread, config=config, executor=executor, threads=threads,
-                        orch=orch, factory=factory, agent=agent, runtimes=runtimes,
-                        calls=[], response=json.dumps(PLAN), service=None)
+    orch = AgencyOrchestrator(
+        llm=LLMAdapter(provider="echo", model="echo"), memory_db_path=":memory:"
+    )
+    c = SimpleNamespace(
+        root=tmp_path,
+        repo=repo,
+        owner=owner,
+        workspace=workspace,
+        thread=thread,
+        config=config,
+        executor=executor,
+        threads=threads,
+        orch=orch,
+        factory=factory,
+        agent=agent,
+        runtimes=runtimes,
+        calls=[],
+        response=json.dumps(PLAN),
+        service=None,
+    )
     client = httpx.AsyncClient
     c.http_client = client
 
@@ -114,8 +163,9 @@ async def coding_case(tmp_path, monkeypatch, request):
         c.calls.append(json.loads(request.content))
         return httpx.Response(200, json={"choices": [{"message": {"content": c.response}}]})
 
-    monkeypatch.setattr(httpx, "AsyncClient",
-                        lambda **kw: client(transport=httpx.MockTransport(handle), **kw))
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda **kw: client(transport=httpx.MockTransport(handle), **kw)
+    )
     try:
         yield c
     finally:
@@ -127,8 +177,13 @@ async def coding_case(tmp_path, monkeypatch, request):
 
 
 def payload(c, request_id="coding", **kw):
-    return FactoryCodingRequest(request_id=request_id, thread_id=c.thread.id,
-                                profile_id="literal-assignment-v1", task="Set x to integer 2", **kw)
+    return FactoryCodingRequest(
+        request_id=request_id,
+        thread_id=c.thread.id,
+        profile_id="literal-assignment-v1",
+        task="Set x to integer 2",
+        **kw,
+    )
 
 
 async def settled(c, view):
@@ -145,12 +200,15 @@ async def test_service_admits_real_native_success_and_replays_history(coding_cas
     c = coding_case
     counts = []
     planner, forge = native.plan_edits, native.AgencyCodingAgent.run_task
+
     def planning(*a, **kw):
         counts.append("planner")
         return planner(*a, **kw)
+
     def writing(*a, **kw):
         counts.append("forge")
         return forge(*a, **kw)
+
     monkeypatch.setattr(native, "plan_edits", planning)
     monkeypatch.setattr(native.AgencyCodingAgent, "run_task", writing)
     service = c.service = make_service(c)
@@ -179,12 +237,23 @@ async def test_service_admits_real_native_success_and_replays_history(coding_cas
     with sqlite3.connect(c.root / "quota.sqlite") as conn:
         assert conn.execute("SELECT state FROM requests").fetchall() == [("COMPLETED",)]
     with sqlite3.connect(c.root / "audit.sqlite") as conn:
-        assert conn.execute("SELECT result FROM audit_entries WHERE action='owner.gateway_result'").fetchall() == [("completed",)]
+        assert conn.execute(
+            "SELECT result FROM audit_entries WHERE action='owner.gateway_result'"
+        ).fetchall() == [("completed",)]
     assert not service._butler._started and not c.orch._started
-    print("SERVICE_NATIVE_PROOF " + json.dumps({"receipt": receipt,
-          "report": saved.evidence.forge_report.model_dump(mode="json"),
-          "original_hex": (c.repo / "m.py").read_bytes().hex(),
-          "artifact_hex": Path(saved.evidence.forge_report.worktree_path, "m.py").read_bytes().hex()}))
+    print(
+        "SERVICE_NATIVE_PROOF "
+        + json.dumps(
+            {
+                "receipt": receipt,
+                "report": saved.evidence.forge_report.model_dump(mode="json"),
+                "original_hex": (c.repo / "m.py").read_bytes().hex(),
+                "artifact_hex": Path(saved.evidence.forge_report.worktree_path, "m.py")
+                .read_bytes()
+                .hex(),
+            }
+        )
+    )
     await service.stop()
     c.service = service = make_service(c, coding=False)
     await service.start()
@@ -193,6 +262,7 @@ async def test_service_admits_real_native_success_and_replays_history(coding_cas
         raise AssertionError("historical replay must not allocate/provision/check live files")
 
     import agency.admission.service as module
+
     monkeypatch.setattr(module, "uuid4", forbidden)
     monkeypatch.setattr(service._store, "ensure_workspace", forbidden)
     monkeypatch.setattr(c.executor, "execute", forbidden)
@@ -204,7 +274,9 @@ async def test_service_admits_real_native_success_and_replays_history(coding_cas
 
 
 @pytest.mark.parametrize("objective", ["failed", "unable_to_verify"])
-async def test_known_objective_failure_is_private_and_failed_quota(coding_case, monkeypatch, objective):
+async def test_known_objective_failure_is_private_and_failed_quota(
+    coding_case, monkeypatch, objective
+):
     import sqlite3
 
     import agency.factory.coding_verification as checker
@@ -224,12 +296,18 @@ async def test_known_objective_failure_is_private_and_failed_quota(coding_case, 
     assert saved.evidence is None  # Approved read boundary conceals private stage.
     assert saved.evidence_phase == "staged"
     with sqlite3.connect(c.root / "owner.sqlite") as conn:
-        evidence = json.loads(conn.execute(
-            "SELECT evidence_json FROM pilot_coding_bindings WHERE sequence=?", (row.sequence,)
-        ).fetchone()[0])
+        evidence = json.loads(
+            conn.execute(
+                "SELECT evidence_json FROM pilot_coding_bindings WHERE sequence=?", (row.sequence,)
+            ).fetchone()[0]
+        )
         assert evidence["receipt"]["objective_status"] == objective
-        assert conn.execute("SELECT result_json FROM pilot_requests WHERE sequence=?",
-                            (row.sequence,)).fetchone()[0] is not None
+        assert (
+            conn.execute(
+                "SELECT result_json FROM pilot_requests WHERE sequence=?", (row.sequence,)
+            ).fetchone()[0]
+            is not None
+        )
     assert (await service.get_coding_receipt(c.owner, row.task_id))["receipt"] is None
     assert await service._store.list_messages(c.owner, c.thread.id) == []
     with sqlite3.connect(c.root / "quota.sqlite") as conn:
@@ -238,13 +316,23 @@ async def test_known_objective_failure_is_private_and_failed_quota(coding_case, 
     assert c.executor.uncertainty_acknowledged is None
 
 
-@pytest.mark.parametrize("fact", ["provider", "model", "base_url", "max_tokens", "temperature", "timeout"])
-async def test_constructor_rejects_each_dispatch_mismatch_without_taking_ownership(coding_case, fact):
+@pytest.mark.parametrize(
+    "fact", ["provider", "model", "base_url", "max_tokens", "temperature", "timeout"]
+)
+async def test_constructor_rejects_each_dispatch_mismatch_without_taking_ownership(
+    coding_case, fact
+):
     from agency.admission.models import PilotError
 
     c = coding_case
-    values = {"provider": ProviderKind.ECHO, "model": "different", "base_url": "https://other.invalid",
-              "max_tokens": 123, "temperature": 0.125, "timeout": 7.0}
+    values = {
+        "provider": ProviderKind.ECHO,
+        "model": "different",
+        "base_url": "https://other.invalid",
+        "max_tokens": 123,
+        "temperature": 0.125,
+        "timeout": 7.0,
+    }
     c.config = c.config.model_copy(update={fact: values[fact]})
     with pytest.raises(PilotError) as error:
         make_service(c)
@@ -284,23 +372,29 @@ async def test_cross_kind_copied_reference_cannot_replay_as_ordinary(coding_case
     row = await settled(c, view)
     marker = json.loads(row.input_json)["message"]
     with pytest.raises(PilotError) as error:
-        await service.submit(c.owner, OwnerTaskRequest(request_id=row.request_id,
-                             thread_id=row.thread_id, message=marker))
+        await service.submit(
+            c.owner,
+            OwnerTaskRequest(request_id=row.request_id, thread_id=row.thread_id, message=marker),
+        )
     assert error.value.code == "conflict"
     assert len(c.calls) == 1
 
 
 @pytest.mark.parametrize("boundary", ["stage", "audit", "quota", "commit"])
-async def test_lost_finalization_ack_is_unknown_never_retried_or_downgraded(coding_case, monkeypatch, boundary):
+async def test_lost_finalization_ack_is_unknown_never_retried_or_downgraded(
+    coding_case, monkeypatch, boundary
+):
     from agency.admission.models import PilotError
 
     c = coding_case
     c.service = service = make_service(c)
     await service.start()
-    obj, name = {"stage": (service._store, "stage_coding_result"),
-                 "audit": (service._audit, "append_beta"),
-                 "quota": (service._budget, "finish_request"),
-                 "commit": (service._store, "commit_coding_turn")}[boundary]
+    obj, name = {
+        "stage": (service._store, "stage_coding_result"),
+        "audit": (service._audit, "append_beta"),
+        "quota": (service._budget, "finish_request"),
+        "commit": (service._store, "commit_coding_turn"),
+    }[boundary]
     original = getattr(obj, name)
     calls = []
 
@@ -321,7 +415,9 @@ async def test_lost_finalization_ack_is_unknown_never_retried_or_downgraded(codi
     assert replay.replayed and replay.state == row.state
     receipt = await service.get_coding_receipt(c.owner, row.task_id)
     assert (receipt["receipt"] is not None) == (boundary == "commit")
-    assert len(await service._store.list_messages(c.owner, c.thread.id)) == (2 if boundary == "commit" else 0)
+    assert len(await service._store.list_messages(c.owner, c.thread.id)) == (
+        2 if boundary == "commit" else 0
+    )
 
 
 async def test_ambiguous_admission_ack_latches_without_dispatch_or_retry(coding_case, monkeypatch):
@@ -369,8 +465,10 @@ async def test_disabled_lookup_precedence_and_no_provisioning(coding_case, monke
     c = coding_case
     c.service = service = make_service(c, coding=False)
     await service.start()
+
     def forbidden(*a, **kw):
         raise AssertionError("coding read/admission must never provision")
+
     monkeypatch.setattr(service._store, "ensure_workspace", forbidden)
     with pytest.raises(PilotError) as error:
         await service.submit_coding(c.owner, payload(c))
@@ -443,18 +541,26 @@ async def test_mutated_input_refused_before_any_dispatch(coding_case, invalid):
     assert await service._store.list_tasks(c.owner) == [] and c.calls == []
 
 
-async def test_ordinary_marker_never_promotes_and_cross_kind_coding_conflicts(coding_case, monkeypatch):
+async def test_ordinary_marker_never_promotes_and_cross_kind_coding_conflicts(
+    coding_case, monkeypatch
+):
     from agency.admission.models import OwnerTaskRequest, PilotError
 
     c = coding_case
     c.service = service = make_service(c)
     await service.start()
     c.response = '{"final":"ordinary only"}'
+
     async def forbidden(*a, **kw):
         raise AssertionError("text cannot select native")
+
     monkeypatch.setattr(c.executor, "execute", forbidden)
-    view = await service.submit(c.owner, OwnerTaskRequest(request_id="coding", thread_id=c.thread.id,
-                                                        message="factory-coding.v1:" + "a" * 64))
+    view = await service.submit(
+        c.owner,
+        OwnerTaskRequest(
+            request_id="coding", thread_id=c.thread.id, message="factory-coding.v1:" + "a" * 64
+        ),
+    )
     row = await settled(c, view)
     assert row.state == "COMPLETED"
     assert (await service.get_coding_receipt(c.owner, row.task_id))["reason"] == "not_requested"
@@ -474,8 +580,10 @@ async def test_corrupt_completed_evidence_is_sanitized_without_checker_io(coding
     await service.start()
     view = await service.submit_coding(c.owner, payload(c))
     await settled(c, view)
+
     def forbidden(*a, **kw):
         raise AssertionError("historical evidence never reruns checker")
+
     monkeypatch.setattr(checker, "checker_source_sha256", forbidden)
     monkeypatch.setattr(checker, "verify_literal_artifact", forbidden)
     with sqlite3.connect(c.root / "owner.sqlite") as conn:
@@ -504,14 +612,18 @@ async def test_butler_refuses_different_thread_store_before_native(coding_case, 
     c.service = service = make_service(c)
     await service.start()
     # Caller-owned but different database: same owner/thread spelling is not authority.
-    with (sqlite3.connect(c.root / "owner.sqlite") as source,
-          sqlite3.connect(c.root / "alien.sqlite") as target):
+    with (
+        sqlite3.connect(c.root / "owner.sqlite") as source,
+        sqlite3.connect(c.root / "alien.sqlite") as target,
+    ):
         source.backup(target)
     alien = ThreadStore(str(c.root / "alien.sqlite"))
     native_calls = []
+
     async def never(*a, **kw):
         native_calls.append("execute")
         raise AssertionError("mismatched ThreadStore reached native")
+
     monkeypatch.setattr(c.executor, "execute", never)
     monkeypatch.setattr(service._butler, "_threads", alien)
     try:

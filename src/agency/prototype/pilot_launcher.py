@@ -394,14 +394,25 @@ async def serve(settings: Settings) -> None:
             audit=audit,
             provider_config=settings.provider_config,
             owner_id=settings.config.owner_id,
-            spending=(SpendingLedger(
-                settings.data_dir / "spend.db", settings.config.spending,
-                identity=json.dumps({
-                    "owner": settings.config.owner_id, "subject": settings.config.subject_id,
-                    "provider": settings.config.provider, "model": settings.config.model,
-                    "base_url": settings.config.base_url,
-                }, sort_keys=True, separators=(",", ":")),
-            ) if settings.config.spending is not None else None),
+            spending=(
+                SpendingLedger(
+                    settings.data_dir / "spend.db",
+                    settings.config.spending,
+                    identity=json.dumps(
+                        {
+                            "owner": settings.config.owner_id,
+                            "subject": settings.config.subject_id,
+                            "provider": settings.config.provider,
+                            "model": settings.config.model,
+                            "base_url": settings.config.base_url,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                )
+                if settings.config.spending is not None
+                else None
+            ),
         )
         stack.push_async_callback(pilot.stop)
         authenticator = OwnerAuthenticator(

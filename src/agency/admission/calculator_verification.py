@@ -17,6 +17,8 @@ _SUFFIX = "\nReturn only the base-10 integer result, without prose or markup."
 _Id = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$", max_length=128)]
 _Hash = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$", max_length=64)]
 _Number = Annotated[str, Field(max_length=17)]
+_ReceiptStatus = Literal["passed", "failed", "unable_to_verify"]
+_ReceiptReason = Literal["matches", "mismatch", "answer_not_integer"]
 
 
 def _bounded(value: int) -> int:
@@ -138,8 +140,8 @@ class CalculatorReceipt(BaseModel):
     expression: Annotated[str, Field(min_length=1, max_length=120)]
     criteria_sha256: _Hash
     output_sha256: _Hash
-    status: Literal["passed", "failed", "unable_to_verify"]
-    reason: Literal["matches", "mismatch", "answer_not_integer"]
+    status: _ReceiptStatus
+    reason: _ReceiptReason
     expected: _Number
     observed: _Number | None
 
@@ -174,6 +176,8 @@ def make_receipt(
 ) -> CalculatorReceipt:
     expected = str(evaluate_expression(expression))
     observed = _observed(response)
+    status: _ReceiptStatus
+    reason: _ReceiptReason
     status, reason = (
         ("unable_to_verify", "answer_not_integer")
         if observed is None

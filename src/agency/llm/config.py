@@ -31,7 +31,6 @@ class ProviderKind(str, Enum):
     POLLINATIONS = "pollinations"
     INCEPTION = "inception"
     INCEPTION_LABS = "inceptionlabs"
-    INCEPTIONLABS = "inceptionlabs"
     MERCURY = "mercury"
     MERCURY3 = "mercury3"
     MERCURY_3 = "mercury-3"
@@ -79,7 +78,6 @@ _DEFAULT_MODELS: dict[ProviderKind, str] = {
     ProviderKind.POLLINATIONS: "openai-fast",
     ProviderKind.INCEPTION: "mercury-3",
     ProviderKind.INCEPTION_LABS: "mercury-3",
-    ProviderKind.INCEPTIONLABS: "mercury-3",
     ProviderKind.MERCURY: "mercury-3",
     ProviderKind.MERCURY3: "mercury-3",
     ProviderKind.MERCURY_3: "mercury-3",
@@ -212,7 +210,6 @@ def load_config(
     elif kind in (
         ProviderKind.INCEPTION,
         ProviderKind.INCEPTION_LABS,
-        ProviderKind.INCEPTIONLABS,
         ProviderKind.MERCURY,
         ProviderKind.MERCURY3,
         ProviderKind.MERCURY_3,

@@ -47,14 +47,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from agency import __version__
+from agency.agents.coding_bootstrap import bootstrap_coding_agent
+from agency.agents.registry import AgentRegistry as RuntimeAgentRegistry
 from agency.api.routers import agents as agents_router
 from agency.api.routers import bridges as bridges_router
 from agency.api.routers import evidence as evidence_router
 from agency.api.routers import governance as governance_router
 from agency.api.routers import memory as memory_router
 from agency.api.routers import tasks as tasks_router
-from agency.agents.coding_bootstrap import bootstrap_coding_agent
-from agency.agents.registry import AgentRegistry as RuntimeAgentRegistry
 from agency.bridges.coordinator import ExternalCoordinator
 from agency.evidence.store.store import EvidenceStore
 from agency.kernel.registry import AgentRegistry
