@@ -56,6 +56,13 @@ class LLMConfig(BaseModel):
     max_tokens: int = Field(default=1024, gt=0, description="Max completion tokens.")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature.")
     timeout: float = Field(default=60.0, gt=0, description="Per-request timeout in seconds.")
+    proxy: str | None = Field(
+        default=None,
+        description=(
+            "Explicit HTTP(S) proxy for provider calls (e.g. http://127.0.0.1:3128). "
+            "Required in proxied deployments because owner dispatch pins trust_env=False."
+        ),
+    )
 
     def redacted(self) -> dict[str, Any]:
         """Return config as a dict with the API key masked."""
@@ -246,6 +253,7 @@ def load_config(
         max_tokens=max_tokens,
         temperature=temperature,
         timeout=timeout,
+        proxy=_get(env, "AGENCY_LLM_PROXY", "LLM_PROXY") or None,
     )
     logger.debug("llm_config_loaded", **config.redacted())
     return config

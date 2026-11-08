@@ -43,6 +43,7 @@ class _Config(BaseModel):
     temperature: float = 0.2
     timeout: float = 45.0
     spending: SpendingConfig | None = None
+    proxy: str | None = None
 
 
 @dataclass(frozen=True)
@@ -243,6 +244,7 @@ def validate(
             max_tokens=config.max_tokens,
             temperature=config.temperature,
             timeout=config.timeout,
+            proxy=config.proxy,
         )
     except (ValueError, TypeError, OSError, LauncherError, PilotError):
         raise LauncherError("invalid_configuration") from None

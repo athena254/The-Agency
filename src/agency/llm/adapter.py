@@ -61,9 +61,10 @@ class LLMDispatchSnapshot:
     max_tokens: int
     temperature: float
     timeout: float
+    proxy: str = field(default="")
 
     def __post_init__(self) -> None:
-        for name in ("provider", "model", "base_url", "api_key"):
+        for name in ("provider", "model", "base_url", "api_key", "proxy"):
             if type(getattr(self, name)) is not str:
                 raise TypeError("Owner dispatch requires exact text fields")
         if self.provider not in ("openai", "echo"):
@@ -152,6 +153,7 @@ class LLMAdapter:
         temperature: float = 0.7,
         timeout: float = 60.0,
         config: Any = None,
+        proxy: str | None = None,
     ) -> None:
         # Owner provenance is separate from legacy environment/default resolution.
         # Preserve the old constructor and generate path, but never admit values
@@ -193,6 +195,7 @@ class LLMAdapter:
             self._max_tokens = config.max_tokens
             self._temperature = config.temperature
             self._timeout = config.timeout
+            self._proxy = config.proxy or ""
         else:
             self._provider = provider or os.environ.get("AGENCY_LLM_PROVIDER", "")
             self._model = model or os.environ.get("AGENCY_LLM_MODEL", "")
@@ -201,6 +204,7 @@ class LLMAdapter:
             self._max_tokens = max_tokens
             self._temperature = temperature
             self._timeout = timeout
+            self._proxy = proxy or os.environ.get("AGENCY_LLM_PROXY", "")
 
             # Auto-detect provider if not set
             if not self._provider:
@@ -230,6 +234,7 @@ class LLMAdapter:
             max_tokens=self._max_tokens,
             temperature=self._temperature,
             timeout=self._timeout,
+            proxy=self._proxy,
         )
 
     async def generate_bound(
@@ -271,7 +276,10 @@ class LLMAdapter:
             "temperature": temperature,
         }
         async with httpx.AsyncClient(
-            timeout=timeout, trust_env=False, follow_redirects=False
+            timeout=timeout,
+            trust_env=False,
+            follow_redirects=False,
+            proxy=self._proxy or None,
         ) as client:
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
