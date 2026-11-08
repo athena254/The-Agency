@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -188,7 +189,11 @@ class AgencyOrchestrator:
         resolved_skill_db = (
             skill_db_path
             if skill_db_path is not None
-            else (self._config.get("skill_db_path") or "data/skills.db")
+            else (
+                self._config.get("skill_db_path")
+                or os.environ.get("AGENCY_SKILL_DB_PATH")
+                or "data/skills.db"
+            )
         )
         self._skill_registry: SkillRegistry | None = None
         self._self_improvement: SelfImprovementLoop | None = None

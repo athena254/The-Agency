@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -29,6 +30,38 @@ from agency.security.red.planner import RedTeamPlanner
 from agency.security.sandbox.config import SandboxConfig
 from agency.security.sandbox.manager import ExecutionResult as SandboxExecutionResult
 from agency.security.sandbox.manager import Sandbox, SandboxManager
+
+# ------------------------------------------------------------------ #
+# Hermetic environment — keep the developer's local .env and runtime
+# databases out of the test suite. Tests must pass from a clean clone
+# with no .env and an empty data/ directory.
+# ------------------------------------------------------------------ #
+
+_TEST_ENV_OVERRIDES = {
+    "AGENCY_BETA_MODE": "0",
+    "AGENCY_LLM_PROVIDER": "echo",
+    "AGENCY_LLM_MODEL": "echo",
+    "AGENCY_LLM_BASE_URL": "",
+    "AGENCY_LLM_API_KEY": "",
+    "AGENCY_LOG_LEVEL": "WARNING",
+    "TELEGRAM_BOT_TOKEN": "",
+    "TELEGRAM_ALLOWED_USER_IDS": "",
+    "TELEGRAM_POLL_DB_PATH": "",
+    "TELEGRAM_BETA_BUDGET_DB_PATH": "",
+    "REMEX_PROFILE_DB_PATH": "",
+}
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Pin Agency/Telegram settings to test values and isolate all DB paths."""
+    for key, value in _TEST_ENV_OVERRIDES.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("AGENCY_MEMORY_DB_PATH", str(tmp_path / "memory.db"))
+    monkeypatch.setenv("AGENCY_EVIDENCE_DB_PATH", str(tmp_path / "evidence.db"))
+    monkeypatch.setenv("AGENCY_AUDIT_DB_PATH", str(tmp_path / "audit.db"))
+    monkeypatch.setenv("AGENCY_SKILL_DB_PATH", str(tmp_path / "skills.db"))
+
 
 # ------------------------------------------------------------------ #
 # Kernel

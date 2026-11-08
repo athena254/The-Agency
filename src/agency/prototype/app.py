@@ -486,6 +486,18 @@ def create_app(
     async def owner_pilot_shell() -> FileResponse:
         return FileResponse(STATIC_DIR / "pilot.html")
 
+    @application.get("/mission-control", include_in_schema=False)
+    @application.get("/mission-control/{path:path}", include_in_schema=False)
+    async def mission_control(path: str = "") -> FileResponse:
+        """Serve the Mission Control SPA (built from gui/ into static/mission-control)."""
+        index_file = STATIC_DIR / "mission-control" / "index.html"
+        if not index_file.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Mission Control is not built. Run `npm run build` in gui/.",
+            )
+        return FileResponse(index_file)
+
     @application.get("/", include_in_schema=False)
     async def index() -> FileResponse:
         index_file = STATIC_DIR / (
