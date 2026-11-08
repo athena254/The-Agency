@@ -6,7 +6,7 @@ import { useAuth } from '../stores/auth'
 import { Header } from './Memories'
 
 export function SettingsPage() {
-  const { ownerToken, setOwnerToken } = useAuth()
+  const { ownerToken, setOwnerToken, setAuthNotice } = useAuth()
   const [draft, setDraft] = useState(ownerToken ?? '')
   const [visible, setVisible] = useState(false)
 
@@ -48,7 +48,10 @@ export function SettingsPage() {
           <button
             type="button"
             className="mc-btn mc-btn-primary flex-none"
-            onClick={() => setOwnerToken(draft.trim() || null)}
+            onClick={() => {
+              setOwnerToken(draft.trim() || null)
+              setAuthNotice(null)
+            }}
           >
             Save
           </button>
@@ -59,6 +62,7 @@ export function SettingsPage() {
               onClick={() => {
                 setOwnerToken(null)
                 setDraft('')
+                setAuthNotice(null)
               }}
             >
               Clear

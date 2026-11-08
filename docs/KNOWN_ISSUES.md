@@ -1,55 +1,63 @@
 # Known qualification issues
 
-Updated October 18, 2026. These are tracked engineering findings, not waived warnings. GitHub #11 and `STATUS_AND_RESUME_20261018.md` are the active resume checkpoint; fresh evidence is `research-evidence/status-audit-20261018.json`. Earlier qualification files remain historical. Production/daily-driver gates remain open.
+Updated November 9, 2026. These are tracked engineering findings, not waived warnings. The active status reference is `CURRENT_STATE.md`; the approved policy inputs are `OWNER_DECISIONS_D01_D05.md`. Older qualification files remain historical. Production/daily-driver gates remain open.
 
-## Q-18 — Fresh admission-worker bootstrap failure (release blocker)
+## KI-01 — Windows-only harness errors from oversized test IDs (harness, not product)
 
-At `6b1d4c4`, corrected fail-fast diagnostics collected 1,870 tests and stopped after 14 passed/1 failed. `test_parent_rejects_real_split_claim_two_ran_mutant` expected the two-tools-before-release mutant verdict but got `bootstrap deadline expired; pids=[15472, 3980]`. This prevents a fresh green-suite claim. An earlier full run had an unattributed failure marker and was interrupted by the outer 420-second tool timeout without final JUnit; do not assume it is the same defect. An omitted-target diagnostic collected zero tests and is retained as harness error, not product evidence.
+At `cafd683`, the hermetic suite records 3453 passed, 3 skipped, 4 errors. All four errors are setup/teardown failures on two parameterized tests whose IDs are tens of thousands of characters long:
 
-State: OPEN. Preserve child/phase diagnostics and determine whether startup/resource/test harness or runtime behavior caused the deadline. Do not blindly lengthen deadlines, weaken assertions, suppress warnings or retry until green. Initial mypy also timed out at 180 seconds; a separately recorded repeat passed on 151 source files. Lint/format and 16 UI tests passed. Historical 1,870-test qualification is not the October 18 result.
+- `tests/test_factory_coding_models.py::test_canonical_rejects_non_json_or_unbounded_values` with the `"x" * 65537` parameter.
+- `tests/test_factory_coding_publication.py::test_original_long_or_calculator_looking_task_never_selects_calculator` with the `"雪" * 8000` parameter.
 
-## W-01 — SQLite worker threads after event-loop shutdown
+On Windows the pytest harness cannot set its per-test environment variable once the ID exceeds the OS environment-block limit; the same tests pass on Linux. State: OPEN (harness/test-ID limit). Do not shorten product strings to fix it; add explicit short parameter IDs or a harness-level workaround, then rerun on Linux and Windows. This is not a product failure and does not block the Python gate, but it must not be relabeled as a product defect.
+
+## KI-02 — SQLite worker threads after event-loop shutdown (carried from W-01)
 
 Observed: integrated offline runs emit `PytestUnhandledThreadExceptionWarning`, with aiosqlite completion attempting `call_soon_threadsafe` after its event loop closed. Reports appear around Butler context/thread integration and research/handler fixtures; the point where pytest notices a worker exception is not definitive ownership evidence.
 
-State: PARTIALLY REPAIRED, broad follow-up OPEN. Later service/webhook/Lattice lease and consumer-lifecycle slices repaired defined ownership/startup/cleanup boundaries; historical October 16 qualification passed with resource/thread/unraisable warnings treated as errors. This does not prove every store-internal publication/rollback boundary is covered or historical timeouts causally fixed. Fresh October 18 full qualification is blocked by Q-18. Do not label old warnings benign or suppress them.
+State: PARTIALLY REPAIRED, broad follow-up OPEN. Later service/webhook/Lattice lease and consumer-lifecycle slices repaired defined ownership/startup/cleanup boundaries. This does not prove every store-internal publication/rollback boundary is covered. Do not label old warnings benign or suppress them.
 
-Closure: isolate each allocating fixture/service; inject pending DB work and cancellation, verify startup-failure/stop/teardown closes every owned connection and awaits work before the loop exits. Preserve shared-store ownership. Add deterministic focused regressions; run the full suite with thread warnings promoted to errors after baseline diagnosis. No broad global warning filter.
+Closure: isolate each allocating fixture/service; inject pending DB work and cancellation; verify startup-failure/stop/teardown closes every owned connection and awaits work before the loop exits. Preserve shared-store ownership. Add deterministic focused regressions; run the full suite with thread warnings promoted to errors after baseline diagnosis. No broad global warning filter.
 
-## W-02 — Deprecated FastAPI shutdown registration
+## KI-03 — Deprecated Starlette TestClient transport (carried from W-03)
 
-Observed: `src/agency/telegram/server.py` uses `on_event("shutdown")`; FastAPI emits a lifespan migration warning.
-
-State: IMPLEMENTED in the accepted repair ancestry (`87fc288`), with lifespan/startup rollback/owned handler cleanup tests. The observation above describes the old baseline, not current source. No beta webhook enablement or fresh release approval follows from this repair.
-
-## W-03 — Test client dependency transition
-
-Observed: installed Starlette warns about httpx-based TestClient and suggests httpx2. This is an environment/dependency compatibility finding, not proof that blindly changing the application HTTP client is safe.
+Observed: installed Starlette warns that the `httpx`-based `TestClient` is deprecated and suggests `httpx2`; the collection run emits `StarletteDeprecationWarning` and an anyio `BlockingPortal` alias deprecation.
 
 State: OPEN. Pin and reproduce supported dependency matrices from a clean install, review upstream support and transitive requirements, then migrate only the necessary test transport with contract tests. Do not globally mute deprecations or edit lockfiles without verifying both supported Python versions/platforms.
 
-## W-04 — Pytest TestStatus collection warning
-
-Observed: imported `TestStatus` enum in `src/agency/security/red/executor.py` is considered a test class by pytest but has a constructor, producing a collection warning.
-
-State: IMPLEMENTED in accepted repair ancestry (`20603c6`), preserving intended security cases. The observation above describes the old baseline. This closure does not waive Q-18 or current CI/release gates.
-
-## W-05 — Recovery subprocess test stability/diagnostics
+## KI-04 — Recovery subprocess stability/diagnostics (carried from W-05)
 
 Observed: the free worker reported one transient child-spawn-related recovery failure in repeated local runs and subsequent focused passes. The initial worker used discarded child stderr, so it did not retain enough failure diagnostics to establish root cause. Current real-kill/lock/resume tests are meaningful, but a successful run is not proof of flake elimination.
 
 State: OPEN, qualification debt. Preserve child stderr/exit codes in failed test diagnostics, detect premature child exit instead of waiting only on marker timeouts, stress repeated runs under bounded load on Windows/Ubuntu and diagnose the actual failing condition. Do not merely increase deadlines or retry until green.
 
-## Late assessment follow-ups
+## KI-05 — Mission Control wiring and telemetry gaps
 
-Read `LATE_REVIEW_DISPOSITION.md` as an assessment of its recorded older source revision. A1 has since repaired routed recall propagation; A2 repaired externally observable execution/check truthfulness, not independent verification; A3.1 repaired required gateway audit acknowledgement, not durable task admission/recovery. Actual specialist/DAG dispatch, independent checker/approval/publication, legacy memory-tool resource isolation/privacy, end-to-end provider budgets/audit, task durability and authenticated capability publication remain unfinished. Use `AUTONOMY_READINESS_20261016.md` and GitHub #11 rather than reclassifying already repaired slices as unimplemented.
+Observed: `gui/` is a React 18 + TypeScript + Vite + Tailwind console served at `/mission-control`. Its API client calls `/api/health`, `/api/agents`, `/api/session` and `/api/chat` without the owner bearer; only the `pilotRequest` helper attaches the in-memory bearer (for `/api/pilot/*`). In pilot-configured mode the prototype app requires owner authentication for `/api/health` and `/api/agents`, so the Dashboard/Agents/Settings health panels fail there; the console is fully usable only against the non-pilot prototype surface, or after its bearer wiring is extended. The `gui/` tree has no test suite. Dashboard task/memory/evidence counts are placeholder zeros and the Activity feed contains static entries (including a model-path claim), so they are not live telemetry.
 
-## Closed integration regressions in this pass
+State: PARTIAL. The console is a real built UI with honest locked states for P2 surfaces, but it is not a tested, fully wired operations console. Add GUI tests, attach the bearer to the prototype-surface reads or document the non-pilot requirement, and replace placeholder/static telemetry with live data or honest empty states.
 
-- Scripted/duck-typed models and MeteredModel subclasses could skip strict-driver metering and return an unaudited final answer. Four regressions reproduced the bypass; `28c9d09` enforces an exact concrete request-bound model. Existing audit/provider/policy failure assertions now use real temporary metering rather than granting test doubles a production exception.
-- Completed recoverable runs returned data before checking actor/input binding. Fixed with binding checks before every completed return plus regression coverage.
-- Provider adapter drift was checked only before awaits. Fixed by rechecking the bound provider/model immediately before dispatch; mutation-during-reservation regression proved RED then GREEN.
-- Unknown cancellation/exception/empty replies wrote terminal audit outcomes, clearing the pending gate across restart. Fixed using nonterminal durable uncertainty evidence; retries remain blocked after audit reopen.
-- New eager handler -> Butler import caused fresh ToolDriver/MeteredModel imports and spawned admission-test workers to fail, despite in-process test imports passing. Fixed with deferred command imports; fresh-interpreter tests cover supported entrypoints.
+## KI-06 — Owner pilot qualification boundaries
+
+Observed: the owner pilot service/API/UI and persistent workspace are implemented and unit/integration tested offline, but no live admitted provider conversation, real-browser session or deployment qualification is recorded in this tree. The coding factory core (`OwnerPilotService.submit_coding`/`get_coding_receipt`) is not exposed over `/api/pilot/*`; Telegram owner authentication is not wired; the spending ledger is disabled unless explicitly configured; calculator verification covers only the exact marker-message fixture.
+
+State: PARTIAL/OPEN. These are scope boundaries, not defects, but they must not be described as completed daily-driver qualification. Live provider, real-browser, restart/crash and coding-surface qualification remain separate gates.
+
+## KI-07 — Peer authority absent (core blocker)
+
+Observed: the Lattice is a single-process SQLite/in-memory prototype with process-local proposal state, best-effort mirroring, a `user` override and no membership epoch. `/v1/*` business routes are closed with HTTP 503 except `GET /v1/health`. Signed peer-envelope primitives and a historical four-process CometBFT loopback lab exist, but no Agency task grants, affected-consumer input, human attestation, membership changes or actuator enforcement are implemented.
+
+State: OPEN (core production blocker). The owner decisions D-01–D-05 are approved and the migration path is specified in `SPEC_KNOWN_PEER_PROTOCOL.md` §18 and `SPEC_PEER_LATTICE_GOVERNANCE.md`, but no peer application implementation exists. Do not describe the Lattice, the pilot or the CometBFT lab as decentralized authority.
+
+## Closed repairs in this pass / carried from earlier
+
+- Q-18 admission-worker bootstrap deadline: resolved by the hermetic suite; `test_parent_rejects_real_split_claim_two_ran_mutant` now passes in the full run. The October 18 failure evidence remains historical.
+- W-02 deprecated FastAPI `on_event("shutdown")`: fixed (`87fc288`); no `on_event` remains in `src/`.
+- W-04 pytest `TestStatus` collection warning: fixed (`20603c6`); collection no longer emits it.
+- Scripted/duck-typed models and `MeteredModel` subclasses could skip strict-driver metering; `28c9d09` enforces an exact concrete request-bound model.
+- Completed recoverable runs returned data before checking actor/input binding; fixed with binding checks before every completed return plus regression coverage.
+- Provider adapter drift was checked only before awaits; fixed by rechecking the bound provider/model immediately before dispatch.
+- Unknown cancellation/exception/empty replies wrote terminal audit outcomes; fixed using nonterminal durable uncertainty evidence.
+- Eager handler -> Butler import caused fresh ToolDriver/MeteredModel imports and spawned admission-test workers to fail; fixed with deferred command imports.
 
 These fixes do not close P1 end-to-end metering/identity/audit or P2 peer application authority in the production plan.

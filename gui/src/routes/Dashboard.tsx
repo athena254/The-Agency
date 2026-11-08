@@ -12,6 +12,8 @@ import {
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api, type AgentDescriptor, type HealthResponse } from '../api/client'
+import { CapabilitiesPanel, SpendingPanel } from './PilotOverview'
+import { PilotGate } from './PilotShared'
 
 interface DashboardStats {
   agents: number
@@ -145,6 +147,20 @@ export function DashboardPage() {
             />
           </ul>
         </div>
+      </section>
+
+      {/* Owner pilot */}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-text-1">Owner pilot</h2>
+          <span className="mc-label">owner-scoped · loopback · in-memory token</span>
+        </div>
+        <PilotGate>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <CapabilitiesPanel />
+            <SpendingPanel />
+          </div>
+        </PilotGate>
       </section>
 
       {/* Agents preview */}

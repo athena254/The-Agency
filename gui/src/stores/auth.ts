@@ -1,14 +1,31 @@
 import { create } from 'zustand'
 
+export class PilotError extends Error {
+  status: number
+  body: string
+
+  constructor(status: number, body: string) {
+    super(`${status}: ${body.slice(0, 200)}`)
+    this.name = 'PilotError'
+    this.status = status
+    this.body = body
+  }
+}
+
 interface AuthState {
   /** Owner bearer token for the /api/pilot surface. Kept in memory only. */
   ownerToken: string | null
+  /** Last owner-auth failure notice. Never contains the token itself. */
+  authNotice: string | null
   setOwnerToken: (token: string | null) => void
+  setAuthNotice: (notice: string | null) => void
 }
 
 export const useAuth = create<AuthState>((set) => ({
   ownerToken: null,
+  authNotice: null,
   setOwnerToken: (token) => set({ ownerToken: token }),
+  setAuthNotice: (notice) => set({ authNotice: notice }),
 }))
 
 /**
@@ -36,6 +53,6 @@ export async function pilotRequest<T>(
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
   })
   const text = await res.text()
-  if (!res.ok) throw new Error(`${res.status}: ${text.slice(0, 200)}`)
+  if (!res.ok) throw new PilotError(res.status, text)
   return (text ? JSON.parse(text) : undefined) as T
 }
