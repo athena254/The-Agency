@@ -235,3 +235,77 @@ export function submitCalculatorTask(
     csrf,
   })
 }
+
+export interface CodingBinding {
+  schema_version: string
+  owner_id: string
+  workspace_id: string
+  request_id: string
+  task_id: string
+  thread_id: string
+  profile_id: string
+  profile_sha256: string
+  blueprint_id: string
+  blueprint_version: string
+  runtime_agent_id: string
+  base_commit: string
+  checker_id: string
+  checker_version: string
+  checker_sha256: string
+  criteria_sha256: string
+}
+
+export interface CodingReceipt {
+  schema_version: string
+  binding: CodingBinding
+  plan_sha256: string
+  forge_report_id: string
+  forge_report_sha256: string
+  artifact_sha256: string | null
+  patch_sha256: string | null
+  objective_status: 'passed' | 'failed' | 'unable_to_verify'
+  reason: string
+  release_authorized: boolean
+  tests_run: boolean
+}
+
+export interface CodingReceiptView {
+  task_id: string
+  request_id: string
+  thread_id: string
+  execution_state: string
+  receipt: CodingReceipt | null
+  reason: string
+}
+
+export interface CodingStatus {
+  available: boolean
+  reason: string
+  profile_id: string | null
+}
+
+export interface CodingTaskInput {
+  request_id: string
+  thread_id: string
+  profile_id: 'literal-assignment-v1'
+  task: string
+}
+
+export function fetchCodingStatus(csrf: string | null): Promise<CodingStatus> {
+  return pilotRequest<CodingStatus>('/api/pilot/coding-status', { csrf })
+}
+
+export function submitCodingTask(
+  csrf: string | null,
+  input: CodingTaskInput,
+): Promise<OwnerTaskView> {
+  return pilotRequest<OwnerTaskView>('/api/pilot/coding-tasks', {
+    method: 'POST',
+    body: input,
+    csrf,
+  })
+}
+
+export function fetchCodingReceipt(csrf: string | null, taskId: string): Promise<CodingReceiptView> {
+  return pilotRequest<CodingReceiptView>(`/api/pilot/coding-tasks/${taskId}`, { csrf })
+}

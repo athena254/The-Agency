@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import re
 import secrets
+import shutil
 import stat
 import subprocess
 import sys
@@ -19,7 +21,7 @@ from typing import Any, Literal, Never, cast
 # Must precede EVERY transitive Agency import, including the LLM adapter.
 os.environ["PYTHON_DOTENV_DISABLED"] = "1"
 
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
 
 from agency.admission.models import OwnerPrincipal, PilotError
 from agency.admission.spending import SpendingConfig, SpendingLedger
@@ -29,6 +31,31 @@ from agency.llm.config import LLMConfig, ProviderKind
 
 class LauncherError(Exception):
     """Fixed public failure code; never carries configuration/exception text."""
+
+
+class _CodingConfig(BaseModel):
+    """Optional trusted literal-assignment fixture repository."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    repo: str
+    job_timeout_s: float = 60.0
+
+    @field_validator("repo")
+    @classmethod
+    def _nonempty_repo(cls, value: str) -> str:
+        if type(value) is not str or not value.strip():
+            raise ValueError("invalid coding repository")
+        return value
+
+    @field_validator("job_timeout_s", mode="before")
+    @classmethod
+    def _bounded_timeout(cls, value: object) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError("invalid coding timeout")
+        number = float(value)
+        if not math.isfinite(number) or not 0 < number <= 120:
+            raise ValueError("invalid coding timeout")
+        return number
 
 
 class _Config(BaseModel):
@@ -44,6 +71,7 @@ class _Config(BaseModel):
     timeout: float = 45.0
     spending: SpendingConfig | None = None
     proxy: str | None = None
+    coding: _CodingConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -211,6 +239,203 @@ def _read_token(path: Path) -> SecretStr:
     return SecretStr(token)
 
 
+_CODING_BASELINE = b"x = 1\n"
+_CODING_BLUEPRINT_ID = "owner-literal-coder"
+_CODING_BLUEPRINT_VERSION = "1.0.0"
+_CODING_APPROVER = "owner-pilot-local-approver"
+_CODING_PROVIDER_CONFIG_ID = "owner-pilot-literal-v1"
+
+
+def _git(repo: Path, *args: str) -> bytes:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise LauncherError("invalid_configuration") from None
+    if result.returncode != 0:
+        raise LauncherError("invalid_configuration")
+    return result.stdout
+
+
+def _coding_path(repo: str, data_dir: Path) -> Path:
+    path = Path(repo)
+    if (
+        not path.is_absolute()
+        or ".." in path.parts
+        or not path.name
+        or str(path).startswith(("\\\\", "//"))
+    ):
+        raise LauncherError("invalid_configuration")
+    forbidden = (Path(__file__).resolve().parents[3], Path.home() / "theagency")
+    if path.is_relative_to(data_dir) or any(path.is_relative_to(root) for root in forbidden):
+        raise LauncherError("invalid_configuration")
+    return path
+
+
+def _coding_repo_facts(repo: Path) -> tuple[str, str]:
+    """Read-only validation of the fixed literal-assignment fixture repository."""
+    try:
+        _plain(repo, directory=True)
+        _plain(repo.parent, directory=True)
+        if (
+            not (repo / ".git").is_dir()
+            or {child.name for child in repo.iterdir()} != {".git", "m.py"}
+            or (repo / "m.py").read_bytes() != _CODING_BASELINE
+        ):
+            raise LauncherError("invalid_configuration")
+        if _git(repo, "rev-parse", "--show-toplevel").decode().strip() != str(repo).replace(
+            "\\", "/"
+        ):
+            raise LauncherError("invalid_configuration")
+        commit = _git(repo, "rev-parse", "HEAD").decode().strip()
+        tree = _git(repo, "rev-parse", "HEAD^{tree}").decode().strip()
+        if (
+            re.fullmatch(r"[0-9a-f]{40}", commit) is None
+            or re.fullmatch(r"[0-9a-f]{40}", tree) is None
+            or _git(repo, "ls-tree", "-r", "--name-only", "HEAD") != b"m.py\n"
+            or _git(repo, "status", "--porcelain", "--untracked-files=all") != b""
+        ):
+            raise LauncherError("invalid_configuration")
+    except (OSError, UnicodeError, LauncherError):
+        raise LauncherError("invalid_configuration") from None
+    return commit, tree
+
+
+def _provision_coding_repo(repo: Path) -> None:
+    """Create the fixed fixture repository exactly once, with no user hooks."""
+    try:
+        (repo / "m.py").write_bytes(_CODING_BASELINE)
+        _git(repo, "init", "-q")
+        for key, value in (
+            ("user.name", "Owner Pilot"),
+            ("user.email", "owner-pilot@local.invalid"),
+            ("core.autocrlf", "false"),
+            ("core.hooksPath", str(repo.parent / "owner-pilot-no-hooks")),
+        ):
+            _git(repo, "config", key, value)
+        _git(repo, "add", "m.py")
+        _git(repo, "commit", "-qm", "owner pilot literal fixture baseline")
+    except (OSError, LauncherError):
+        raise LauncherError("invalid_configuration") from None
+
+
+def _reset_coding_worktrees(repo: Path) -> None:
+    worktree_root = repo.parent / (repo.name + "-worktrees")
+    try:
+        if worktree_root.exists():
+            if not worktree_root.is_dir():
+                raise LauncherError("invalid_configuration")
+            for child in worktree_root.iterdir():
+                if not (child.is_dir() and (child / ".git").exists()):
+                    raise LauncherError("invalid_configuration")
+            shutil.rmtree(worktree_root)
+        _git(repo, "worktree", "prune")
+    except (OSError, LauncherError):
+        raise LauncherError("invalid_configuration") from None
+
+
+def _ensure_coding_repo(repo: Path) -> None:
+    if repo.exists():
+        _coding_repo_facts(repo)
+    else:
+        try:
+            repo.mkdir(parents=False, exist_ok=False)
+        except OSError:
+            raise LauncherError("invalid_configuration") from None
+        _provision_coding_repo(repo)
+        _coding_repo_facts(repo)
+    _reset_coding_worktrees(repo)
+
+
+async def _stop_coding(executor: Any) -> None:
+    try:
+        await executor.stop(drain_timeout_s=0.0)
+    except Exception:  # noqa: BLE001, S110 -- cleanup must drain the remaining owned resources
+        pass
+
+
+def _coding_executor(
+    settings: Settings, workspace: str, repo: Path, job_timeout_s: float
+) -> tuple[Any, Any]:
+    """Build the fixed native executor and its dedicated in-memory factory."""
+    from agency.agents.factory_coding import NativeCodingExecutor, NativeLiteralProfile
+    from agency.agents.registry import AgentRegistry as RuntimeRegistry
+    from agency.factory.coding_models import canonical_sha256
+    from agency.factory.coding_verification import checker_source_sha256, criteria_document
+    from agency.factory.service import AgentFactory
+    from agency.kernel.registry import AgentRegistry as KernelRegistry
+    from agency.llm.adapter import LLMAdapter
+
+    commit, tree = _coding_repo_facts(repo)
+    dispatch = LLMAdapter(config=settings.provider_config.model_copy(deep=True)).freeze_dispatch()
+    kernels, runtimes = KernelRegistry(), RuntimeRegistry()
+    approver = _CODING_APPROVER
+    if approver == settings.config.owner_id:
+        approver += "-local"
+    factory = AgentFactory(
+        ":memory:",
+        authorizer=lambda actor, _permission: actor == approver,
+        kernel_registry=kernels,
+        runtime_registry=runtimes,
+    )
+    factory.create(
+        _CODING_BLUEPRINT_ID,
+        _CODING_BLUEPRINT_VERSION,
+        "Owner literal coding fixture",
+        creator=settings.config.owner_id,
+    )
+    factory.approve(
+        _CODING_BLUEPRINT_ID,
+        _CODING_BLUEPRINT_VERSION,
+        approver=approver,
+        evidence=(
+            "Local owner-pilot literal-assignment fixture approval; "
+            "not production governance or release authority."
+        ),
+    )
+    agent = factory.activate(_CODING_BLUEPRINT_ID, _CODING_BLUEPRINT_VERSION)
+    profile = NativeLiteralProfile(
+        owner_id=settings.config.owner_id,
+        workspace_id=workspace,
+        blueprint_id=_CODING_BLUEPRINT_ID,
+        blueprint_version=_CODING_BLUEPRINT_VERSION,
+        runtime_agent_id=agent.id,
+        blueprint_json=json.dumps(
+            factory.get(_CODING_BLUEPRINT_ID, _CODING_BLUEPRINT_VERSION).to_dict()
+        ),
+        identity_json=json.dumps(agent.model_dump(mode="json")),
+        events_json=json.dumps(
+            factory.list_events(_CODING_BLUEPRINT_ID, _CODING_BLUEPRINT_VERSION)
+        ),
+        repo=repo,
+        base_commit=commit,
+        base_tree=tree,
+        worktree_root=repo.parent / (repo.name + "-worktrees"),
+        evidence_root=repo.parent / (repo.name + "-evidence"),
+        checker_sha256=checker_source_sha256(),
+        criteria_sha256=canonical_sha256(criteria_document()),
+        provider=dispatch.provider,
+        model=dispatch.model,
+        provider_config_id=_CODING_PROVIDER_CONFIG_ID,
+        dispatch_json=json.dumps(
+            {
+                key: getattr(dispatch, key)
+                for key in ("provider", "model", "base_url", "max_tokens", "temperature", "timeout")
+            }
+        ),
+        job_timeout_s=job_timeout_s,
+        exclusive_registries=True,
+    )
+    executor = NativeCodingExecutor(
+        profile=profile, factory=factory, kernel_registry=kernels, runtime_registry=runtimes
+    )
+    return executor, factory
+
+
 def validate(
     config_path: Path, data_dir: Path, *, port: int = 8766, check: bool = False
 ) -> Settings:
@@ -226,6 +451,12 @@ def validate(
         config = _Config.model_validate_json(raw)
         if config.spending is None and any(data_dir.glob("spend.db*")):
             raise LauncherError("spending_history_requires_configuration")
+        if config.coding is not None:
+            repo = _coding_path(config.coding.repo, data_dir)
+            if repo.exists():
+                _coding_repo_facts(repo)
+            else:
+                _plain(repo.parent, directory=True)
         OwnerPrincipal(config.owner_id, "local", config.subject_id)
         LLMDispatchSnapshot(
             provider=config.provider,
@@ -389,6 +620,20 @@ async def serve(settings: Settings) -> None:
             thread_store=threads,
         )
         stack.push_async_callback(butler._audit.close)
+        coding: Any = None
+        coding_factory: Any = None
+        workspace_id = ""
+        if settings.config.coding is not None:
+            repo = _coding_path(settings.config.coding.repo, settings.data_dir)
+            _ensure_coding_repo(repo)
+            workspace_id = await store.ensure_workspace(
+                OwnerPrincipal(settings.config.owner_id, "local", settings.config.subject_id)
+            )
+            coding, coding_factory = _coding_executor(
+                settings, workspace_id, repo, settings.config.coding.job_timeout_s
+            )
+            stack.callback(coding_factory.close)
+            stack.push_async_callback(_stop_coding, coding)
         pilot = OwnerPilotService(
             butler=butler,
             store=store,
@@ -396,6 +641,7 @@ async def serve(settings: Settings) -> None:
             audit=audit,
             provider_config=settings.provider_config,
             owner_id=settings.config.owner_id,
+            workspace_id=workspace_id,
             spending=(
                 SpendingLedger(
                     settings.data_dir / "spend.db",
@@ -415,6 +661,7 @@ async def serve(settings: Settings) -> None:
                 if settings.config.spending is not None
                 else None
             ),
+            coding=coding,
         )
         stack.push_async_callback(pilot.stop)
         authenticator = OwnerAuthenticator(

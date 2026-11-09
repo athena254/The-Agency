@@ -4,6 +4,7 @@ import { DashboardPage } from './routes/Dashboard'
 import { IdePage } from './routes/Ide'
 import { AgentsPage } from './routes/Agents'
 import { TasksPage } from './routes/Tasks'
+import { CodingPage } from './routes/Coding'
 import { ThreadsPage } from './routes/Threads'
 import { MemoriesPage } from './routes/Memories'
 import { EvidencePage } from './routes/Evidence'
@@ -48,6 +49,14 @@ export default function App() {
               element={
                 <PageShell title="Tasks" subtitle="Owner pilot tasks">
                   <TasksPage />
+                </PageShell>
+              }
+            />
+            <Route
+              path="/coding"
+              element={
+                <PageShell title="Coding" subtitle="Bounded factory coding task">
+                  <CodingPage />
                 </PageShell>
               }
             />

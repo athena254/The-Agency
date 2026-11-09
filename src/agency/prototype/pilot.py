@@ -18,6 +18,7 @@ from agency.admission.models import (
     PilotError,
 )
 from agency.admission.service import OwnerPilotService
+from agency.factory.coding_models import FactoryCodingRequest
 from agency.prototype.owner_guard import guard_owner_request
 
 router = APIRouter(prefix="/api/pilot", tags=["owner-pilot"])
@@ -145,6 +146,39 @@ async def submit_calculator(request: Request) -> JSONResponse:
     return JSONResponse(
         status_code=200 if view.replayed else 202, content=view.model_dump(mode="json")
     )
+
+
+@router.get("/coding-status")
+async def coding_status(request: Request) -> JSONResponse:
+    """Report the real coding-executor state without widening the frozen capabilities schema."""
+    pilot, _principal, _ = await _boundary(request)
+    coding = getattr(pilot, "_coding", None)
+    return JSONResponse(
+        content={
+            "available": coding is not None,
+            "reason": "configured" if coding is not None else "not_configured",
+            "profile_id": getattr(getattr(coding, "profile", None), "profile_id", None),
+        }
+    )
+
+
+@router.post("/coding-tasks")
+async def submit_coding(request: Request) -> JSONResponse:
+    pilot, principal, body = await _boundary(request, write=True)
+    try:
+        payload = FactoryCodingRequest.model_validate(body)
+    except ValidationError:
+        raise PilotError("invalid_request") from None
+    view = await pilot.submit_coding(principal, payload)
+    return JSONResponse(
+        status_code=200 if view.replayed else 202, content=view.model_dump(mode="json")
+    )
+
+
+@router.get("/coding-tasks/{task_id}")
+async def coding_receipt(request: Request, task_id: str) -> JSONResponse:
+    pilot, principal, _ = await _boundary(request)
+    return JSONResponse(content=await pilot.get_coding_receipt(principal, task_id))
 
 
 @router.get("/tasks/{task_id}/verification")
