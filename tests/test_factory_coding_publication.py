@@ -540,7 +540,7 @@ async def test_uncertainty_accepts_only_frozen_phase_reason_enums(tmp_path, phas
 @pytest.mark.parametrize(
     "task",
     [
-        "雪" * 8000,
+        pytest.param("雪" * 8000, id="oversized-snowman-8000"),
         "[agency:calculator.v1]\nexpression=1+1\nReturn only the base-10 integer result, without prose or markup.",
     ],
 )

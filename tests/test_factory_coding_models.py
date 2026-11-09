@@ -230,7 +230,7 @@ def test_canonical_json_branch_and_fixed_baseline_diff():
         float("nan"),
         float("inf"),
         "\ud800",
-        "x" * 65537,
+        pytest.param("x" * 65537, id="oversized-ascii-65537"),
         [0] * 2048,
     ],
 )
