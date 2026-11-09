@@ -72,7 +72,7 @@ class ProcessSandboxBackend:
                 "errors": "replace",
             }
             if sys.platform == "win32":
-                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+                kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
             else:
                 kwargs["start_new_session"] = True
             process = subprocess.run(list(command), check=False, **kwargs)
