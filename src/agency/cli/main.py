@@ -63,12 +63,18 @@ risk_app = typer.Typer(help="Inspect risk assessments.", no_args_is_help=True)
 
 forge_app = typer.Typer(help="Run governed coding-agent tasks.", no_args_is_help=True)
 
+bridge_app = typer.Typer(help="Inspect and execute external bridges.", no_args_is_help=True)
+
+governance_app = typer.Typer(help="Governance proposals and votes.", no_args_is_help=True)
+
 app.add_typer(agent_app, name="agent")
 app.add_typer(task_app, name="task")
 app.add_typer(memory_app, name="memory")
 app.add_typer(evidence_app, name="evidence")
 app.add_typer(risk_app, name="risk")
 app.add_typer(forge_app, name="forge")
+app.add_typer(bridge_app, name="bridge")
+app.add_typer(governance_app, name="governance")
 
 DEFAULT_SERVER_URL = os.environ.get("AGENCY_SERVER_URL", "http://127.0.0.1:8000")
 PID_FILE = Path(os.environ.get("AGENCY_PID_FILE", str(Path.home() / ".theagency" / "agency.pid")))
@@ -354,6 +360,77 @@ def agent_propose(
     )
 
 
+@agent_app.command("get")
+def agent_get(
+    agent_id: str = typer.Argument(..., help="Agent id."),
+    server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+) -> None:
+    """Fetch one agent by id."""
+    base = _server_url(server_url)
+    with _client(base) as client:
+        payload = _handle_response(client.get(f"/v1/agents/{agent_id}"))
+    if output_json:
+        _print_json(payload)
+        return
+    agent = payload if isinstance(payload, dict) else {}
+    table = _table(f"Agent — {agent_id}", ["Field", "Value"])
+    for key in ("id", "name", "domain", "trust_level", "revoked"):
+        table.add_row(key, str(agent.get(key, "-")))
+    caps = agent.get("capabilities", [])
+    cap_names = ", ".join(c.get("name", "?") if isinstance(c, dict) else str(c) for c in caps)
+    table.add_row("capabilities", cap_names)
+    console.print(table)
+
+
+@agent_app.command("revoke")
+def agent_revoke(
+    agent_id: str = typer.Argument(..., help="Agent id to revoke."),
+    server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+) -> None:
+    """Revoke an agent identity (record retained for audit)."""
+    base = _server_url(server_url)
+    with _client(base) as client:
+        payload = _handle_response(client.delete(f"/v1/agents/{agent_id}"))
+    if output_json:
+        _print_json(payload)
+        return
+    console.print(f"[green]Revoked agent[/green] [bold]{agent_id}[/bold]")
+
+
+@agent_app.command("capabilities")
+def agent_capabilities(
+    agent_id: str = typer.Argument(..., help="Agent id."),
+    capability: Annotated[
+        list[str] | None, typer.Option("--capability", "-c", help="Capability (repeatable).")
+    ] = None,
+    mode: str = typer.Option("merge", "--mode", help="merge or replace."),
+    server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+) -> None:
+    """Merge or replace an agent's capability set."""
+    if not capability:
+        _fail("at least one --capability is required")
+        return
+    if mode not in ("merge", "replace"):
+        _fail("--mode must be 'merge' or 'replace'")
+        return
+    base = _server_url(server_url)
+    with _client(base) as client:
+        payload = _handle_response(
+            client.patch(
+                f"/v1/agents/{agent_id}/capabilities",
+                json={"capabilities": capability, "mode": mode},
+            )
+        )
+    if output_json:
+        _print_json(payload)
+        return
+    console.print(f"[green]Updated capabilities[/green] for agent [bold]{agent_id}[/bold]")
+    console.print(f"[dim]mode: {mode} | capabilities: {', '.join(capability)}[/dim]")
+
+
 # --------------------------------------------------------------------------- #
 # Tasks: agency task create / list
 # --------------------------------------------------------------------------- #
@@ -430,6 +507,52 @@ def task_list(
         )
     console.print(table)
     console.print(f"[dim]{len(tasks or [])} task(s)[/dim]")
+
+
+@task_app.command("get")
+def task_get(
+    task_id: str = typer.Argument(..., help="Task id."),
+    server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+) -> None:
+    """Fetch a single task by id."""
+    base = _server_url(server_url)
+    with _client(base) as client:
+        payload = _handle_response(client.get(f"/v1/tasks/{task_id}"))
+    if output_json:
+        _print_json(payload)
+        return
+    task = payload if isinstance(payload, dict) else {}
+    table = _table(f"Task — {task_id}", ["Field", "Value"])
+    for key in ("task_id", "title", "status", "priority", "created_by"):
+        table.add_row(key, str(task.get(key, "-")))
+    table.add_row("input", str(task.get("input", "-"))[:120])
+    console.print(table)
+
+
+@task_app.command("status")
+def task_status(
+    task_id: str = typer.Argument(..., help="Task id."),
+    status_value: str = typer.Argument(
+        ..., help="New lifecycle state (e.g. queued, running, done, failed)."
+    ),
+    error: str | None = typer.Option(None, "--error", help="Optional error message."),
+    server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+) -> None:
+    """Transition a task into a new lifecycle state."""
+    base = _server_url(server_url)
+    with _client(base) as client:
+        payload = _handle_response(
+            client.patch(
+                f"/v1/tasks/{task_id}/status",
+                json={"status": status_value, "error": error},
+            )
+        )
+    if output_json:
+        _print_json(payload)
+        return
+    console.print(f"[green]Task[/green] [bold]{task_id}[/bold] -> [cyan]{status_value}[/cyan]")
 
 
 # --------------------------------------------------------------------------- #
@@ -513,6 +636,52 @@ def evidence_list(
     console.print(f"[dim]{len(findings or [])} finding(s)[/dim]")
 
 
+@evidence_app.command("get")
+def evidence_get(
+    finding_id: str = typer.Argument(..., help="Finding id."),
+    server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+) -> None:
+    """Fetch one finding by id."""
+    base = _server_url(server_url)
+    with _client(base) as client:
+        payload = _handle_response(client.get(f"/v1/evidence/{finding_id}"))
+    if output_json:
+        _print_json(payload)
+        return
+    finding = payload if isinstance(payload, dict) else {}
+    table = _table(f"Finding — {finding_id}", ["Field", "Value"])
+    for key in ("id", "target", "severity", "confidence", "verification_status"):
+        table.add_row(key, str(finding.get(key, "-")))
+    console.print(table)
+
+
+@evidence_app.command("trail")
+def evidence_trail(
+    finding_id: str = typer.Argument(..., help="Finding id."),
+    server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+) -> None:
+    """Show the append-only evidence trail for a finding, oldest first."""
+    base = _server_url(server_url)
+    with _client(base) as client:
+        payload = _handle_response(client.get(f"/v1/evidence/{finding_id}/trail"))
+    if output_json:
+        _print_json(payload)
+        return
+    entries = payload if isinstance(payload, list) else []
+    table = _table(f"Evidence trail — {finding_id}", ["Timestamp", "Actor", "Action", "Detail"])
+    for item in entries:
+        table.add_row(
+            str(item.get("created_at", "-")),
+            str(item.get("actor", "-")),
+            str(item.get("action", "-")),
+            str(item.get("detail", "-"))[:100],
+        )
+    console.print(table)
+    console.print(f"[dim]{len(entries)} entr(y|ies)[/dim]")
+
+
 # --------------------------------------------------------------------------- #
 # Risk: agency risk report
 # --------------------------------------------------------------------------- #
@@ -550,6 +719,148 @@ def risk_report(
         console.print(f"[bold]Category:[/bold] {payload['category']}")
 
 
+# --------------------------------------------------------------------------- #
+# Bridges: agency bridge list / execute / health
+# --------------------------------------------------------------------------- #
+
+
+@bridge_app.command("list")
+def bridge_list(
+    server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+) -> None:
+    """List registered bridges with capabilities and circuit state."""
+    base = _server_url(server_url)
+    with _client(base) as client:
+        payload = _handle_response(client.get("/v1/bridges"))
+    if output_json:
+        _print_json(payload)
+        return
+    bridges = payload if isinstance(payload, list) else []
+    table = _table("Bridges", ["Name", "Circuit", "Capabilities"])
+    for item in bridges:
+        caps = item.get("capabilities", {})
+        cap_summary = (
+            ", ".join(f"{k}:{v}" for k, v in caps.items()) if isinstance(caps, dict) else str(caps)
+        )
+        table.add_row(
+            str(item.get("name", "-")),
+            str(item.get("circuit", "-")),
+            cap_summary,
+        )
+    console.print(table)
+    console.print(f"[dim]{len(bridges)} bridge(s)[/dim]")
+
+
+@bridge_app.command("execute")
+def bridge_execute(
+    name: str = typer.Argument(..., help="Bridge name from `bridge list`."),
+    task: str = typer.Argument(..., help="Natural-language instruction for the bridge."),
+    server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+) -> None:
+    """Execute a task via the named bridge behind its circuit breaker."""
+    base = _server_url(server_url)
+    with _client(base) as client:
+        payload = _handle_response(client.post(f"/v1/bridges/{name}/execute", json={"task": task}))
+    if output_json:
+        _print_json(payload)
+        return
+    console.print(
+        f"[green]Bridge[/green] [bold]{name}[/bold] -> [cyan]{payload.get('status', '-')}[/cyan]"
+    )
+    output = str(payload.get("output", ""))
+    if output:
+        console.print(Panel(output, title="Output", expand=False))
+    if payload.get("error"):
+        console.print(f"[red]Error:[/red] {payload['error']}")
+
+
+@bridge_app.command("health")
+def bridge_health(
+    name: str = typer.Argument(..., help="Bridge name from `bridge list`."),
+    server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+) -> None:
+    """Liveness probe for a single bridge."""
+    base = _server_url(server_url)
+    with _client(base) as client:
+        payload = _handle_response(client.get(f"/v1/bridges/{name}/health"))
+    if output_json:
+        _print_json(payload)
+        return
+    healthy = bool(payload.get("healthy", False)) if isinstance(payload, dict) else False
+    style = "green" if healthy else "red"
+    console.print(f"Bridge [bold]{name}[/bold] healthy: [{style}]{healthy}[/{style}]")
+
+
+# --------------------------------------------------------------------------- #
+# Governance: agency governance proposals / vote
+# --------------------------------------------------------------------------- #
+
+
+@governance_app.command("proposals")
+def governance_proposals(
+    server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+) -> None:
+    """List all open governance proposals."""
+    base = _server_url(server_url)
+    with _client(base) as client:
+        payload = _handle_response(client.get("/v1/governance/proposals"))
+    if output_json:
+        _print_json(payload)
+        return
+    proposals = payload.get("proposals", []) if isinstance(payload, dict) else []
+    table = _table(
+        "Governance Proposals", ["ID", "Type", "Proposer", "Status", "Quorum", "Votes", "Expires"]
+    )
+    for item in proposals:
+        table.add_row(
+            str(item.get("proposal_id", "-")),
+            str(item.get("proposal_type", "-")),
+            str(item.get("proposer_id", "-")),
+            str(item.get("status", "-")),
+            str(item.get("quorum_required", "-")),
+            str(item.get("vote_count", "-")),
+            str(item.get("expires_at", "-")),
+        )
+    console.print(table)
+    console.print(f"[dim]{len(proposals)} proposal(s)[/dim]")
+
+
+@governance_app.command("vote")
+def governance_vote(
+    proposal_id: str = typer.Argument(..., help="Proposal id."),
+    decision: str = typer.Argument(..., help="approve, deny, or abstain."),
+    evidence: Annotated[
+        list[str] | None, typer.Option("--evidence", "-e", help="Evidence reference (repeatable).")
+    ] = None,
+    server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+) -> None:
+    """Cast the authenticated owner's vote on an open proposal."""
+    if decision not in ("approve", "deny", "abstain"):
+        _fail("decision must be 'approve', 'deny', or 'abstain'")
+        return
+    base = _server_url(server_url)
+    with _client(base) as client:
+        payload = _handle_response(
+            client.post(
+                "/v1/governance/vote",
+                json={"proposal_id": proposal_id, "decision": decision, "evidence": evidence or []},
+            )
+        )
+    if output_json:
+        _print_json(payload)
+        return
+    console.print(
+        f"[green]Vote cast[/green] on proposal [bold]{proposal_id}[/bold] -> [cyan]{decision}[/cyan]"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Forge: governed coding-agent runs
 # --------------------------------------------------------------------------- #
 # Forge: governed coding-agent runs
 # --------------------------------------------------------------------------- #
