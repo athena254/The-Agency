@@ -45,6 +45,7 @@ def test_freeze_is_independent_immutable_and_secret_safe() -> None:
         "max_tokens",
         "temperature",
         "timeout",
+        "proxy",
     ]
     assert snapshot.provider == "openai"
     assert snapshot.model == "synthetic/model:exact"
@@ -61,6 +62,38 @@ def test_freeze_is_independent_immutable_and_secret_safe() -> None:
     adapter._api_key = "mutated"
     assert snapshot.model == "synthetic/model:exact"
     assert snapshot.api_key == "SYNTHETIC_OWNER_KEY"
+
+
+def test_dispatch_proxy_flows_from_config_and_constructor() -> None:
+    """Owner dispatch must carry the explicit proxy into the frozen snapshot.
+
+    Proxied deployments need it because generate_bound pins trust_env=False and
+    would otherwise try to reach the provider directly.
+    """
+    config = LLMConfig(
+        provider=ProviderKind.OPENAI,
+        model="synthetic/model:exact",
+        api_key=SecretStr("SYNTHETIC_OWNER_KEY"),
+        base_url="https://provider.invalid/v1",
+        max_tokens=123,
+        temperature=0.25,
+        timeout=12.0,
+        proxy="http://127.0.0.1:3128",
+    )
+    assert LLMAdapter(config=config).freeze_dispatch().proxy == "http://127.0.0.1:3128"
+    assert owner_adapter().freeze_dispatch().proxy == ""
+
+    constructor = LLMAdapter(
+        provider="openai",
+        model="synthetic/model:exact",
+        api_key="SYNTHETIC_OWNER_KEY",
+        base_url="https://provider.invalid/v1",
+        max_tokens=123,
+        temperature=0.25,
+        timeout=12.0,
+        proxy="http://127.0.0.1:3128",
+    )
+    assert constructor.freeze_dispatch().proxy == "http://127.0.0.1:3128"
 
 
 @pytest.mark.parametrize(
@@ -367,7 +400,9 @@ async def test_bound_dispatch_uses_frozen_values_at_actual_http_leaf_across_entr
         if not task.done():
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)
-    assert http_leaf.options == [{"timeout": 12.0, "trust_env": False, "follow_redirects": False}]
+    assert http_leaf.options == [
+        {"timeout": 12.0, "trust_env": False, "follow_redirects": False, "proxy": None}
+    ]
     assert len(http_leaf.requests) == 1
     request = http_leaf.requests[0]
     assert request.method == "POST"

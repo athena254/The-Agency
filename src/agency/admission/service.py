@@ -720,6 +720,7 @@ class OwnerPilotService:
                 max_tokens=config.max_tokens,
                 temperature=config.temperature,
                 timeout=config.timeout,
+                proxy=config.proxy,
             ),
             OwnerMeteredBinding(
                 grant, config.provider, config.model, self._coding_profile.provider_config_id
@@ -879,6 +880,7 @@ class OwnerPilotService:
             max_tokens=config.max_tokens,
             temperature=config.temperature,
             timeout=config.timeout,
+            proxy=config.proxy,
         )
         model = MeteredModel(
             inner,

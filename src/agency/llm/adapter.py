@@ -195,7 +195,7 @@ class LLMAdapter:
             self._max_tokens = config.max_tokens
             self._temperature = config.temperature
             self._timeout = config.timeout
-            self._proxy = config.proxy or ""
+            self._proxy = getattr(config, "proxy", None) or ""
         else:
             self._provider = provider or os.environ.get("AGENCY_LLM_PROVIDER", "")
             self._model = model or os.environ.get("AGENCY_LLM_MODEL", "")
