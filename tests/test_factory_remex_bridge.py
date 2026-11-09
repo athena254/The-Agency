@@ -1,4 +1,5 @@
 """Explicit coding commands over the owner API; synthetic transport only."""
+
 from __future__ import annotations
 
 import importlib.util
@@ -8,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
 from agency.factory.coding_models import CodingBinding, CodingReceipt
 
 spec = importlib.util.spec_from_file_location(
@@ -15,38 +17,62 @@ spec = importlib.util.spec_from_file_location(
 )
 bridge = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bridge)
-pytestmark = pytest.mark.skip(reason="pending coding pilot wiring; preserved from resi/coding-rollout")
+pytestmark = pytest.mark.skip(
+    reason="pending coding pilot wiring; preserved from resi/coding-rollout"
+)
 
 
 def update(uid=100, text="/code Set x to integer 2", owner=5981285472):
-    return {"update_id": uid, "message": {"from": {"id": owner},
-            "chat": {"id": owner, "type": "private"}, "text": text}}
+    return {
+        "update_id": uid,
+        "message": {"from": {"id": owner}, "chat": {"id": owner, "type": "private"}, "text": text},
+    }
 
 
 def receipt_envelope():
     binding = CodingBinding(
-        owner_id="fixture-owner", workspace_id="fixture-workspace", request_id="tg-remex-code-100",
-        task_id="task-1", thread_id="thread-1", profile_id="literal-assignment-v1",
-        profile_sha256="0" * 64, blueprint_id="fixture-coder", blueprint_version="1.0.0",
-        runtime_agent_id="fixture-agent", base_commit="0" * 40,
-        checker_sha256="0" * 64, criteria_sha256="0" * 64,
+        owner_id="fixture-owner",
+        workspace_id="fixture-workspace",
+        request_id="tg-remex-code-100",
+        task_id="task-1",
+        thread_id="thread-1",
+        profile_id="literal-assignment-v1",
+        profile_sha256="0" * 64,
+        blueprint_id="fixture-coder",
+        blueprint_version="1.0.0",
+        runtime_agent_id="fixture-agent",
+        base_commit="0" * 40,
+        checker_sha256="0" * 64,
+        criteria_sha256="0" * 64,
     )
     receipt = CodingReceipt(
-        binding=binding, plan_sha256="0" * 64, forge_report_id="fixture-report",
-        forge_report_sha256="0" * 64, artifact_sha256="0" * 64, patch_sha256="0" * 64,
-        objective_status="passed", reason="matched",
+        binding=binding,
+        plan_sha256="0" * 64,
+        forge_report_id="fixture-report",
+        forge_report_sha256="0" * 64,
+        artifact_sha256="0" * 64,
+        patch_sha256="0" * 64,
+        objective_status="passed",
+        reason="matched",
     )
-    return {"task_id": "task-1", "request_id": binding.request_id, "thread_id": "thread-1",
-            "execution_state": "COMPLETED", "receipt": receipt.model_dump(mode="json"),
-            "reason": "available"}
+    return {
+        "task_id": "task-1",
+        "request_id": binding.request_id,
+        "thread_id": "thread-1",
+        "execution_state": "COMPLETED",
+        "receipt": receipt.model_dump(mode="json"),
+        "reason": "available",
+    }
 
 
 @pytest.fixture
 def case(tmp_path):
     b = bridge.Bridge.__new__(bridge.Bridge)
     b.db = sqlite3.connect(tmp_path / "bridge.db")
-    b.db.executescript("CREATE TABLE kv(k TEXT PRIMARY KEY,v TEXT NOT NULL);"
-                      "CREATE TABLE turns(id INTEGER PRIMARY KEY,payload TEXT NOT NULL);")
+    b.db.executescript(
+        "CREATE TABLE kv(k TEXT PRIMARY KEY,v TEXT NOT NULL);"
+        "CREATE TABLE turns(id INTEGER PRIMARY KEY,payload TEXT NOT NULL);"
+    )
     c = SimpleNamespace(b=b, calls=[], messages=[], envelope=receipt_envelope())
 
     class Sink:
@@ -75,8 +101,12 @@ def case(tmp_path):
 async def test_explicit_code_uses_native_endpoint_and_bound_saved_receipt(case):
     c = case
     await c.b.handle(update())
-    expected = {"request_id": "tg-remex-code-100", "thread_id": "thread-1",
-                "profile_id": "literal-assignment-v1", "task": "Set x to integer 2"}
+    expected = {
+        "request_id": "tg-remex-code-100",
+        "thread_id": "thread-1",
+        "profile_id": "literal-assignment-v1",
+        "task": "Set x to integer 2",
+    }
     assert ("POST", "/api/pilot/coding-tasks", expected) in c.calls
     assert ("GET", "/api/pilot/tasks/task-1/coding-receipt", None) in c.calls
     assert c.b.get("task:100") == "task-1"
@@ -87,8 +117,19 @@ async def test_explicit_code_uses_native_endpoint_and_bound_saved_receipt(case):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("field", ["task_id", "request_id", "thread_id", "execution_state", "reason",
-                                  "binding.task_id", "binding.request_id", "binding.thread_id"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "task_id",
+        "request_id",
+        "thread_id",
+        "execution_state",
+        "reason",
+        "binding.task_id",
+        "binding.request_id",
+        "binding.thread_id",
+    ],
+)
 async def test_foreign_or_inconsistent_receipt_is_not_reported_as_passed(case, field):
     if field.startswith("binding."):
         case.envelope["receipt"]["binding"][field.split(".")[1]] = "foreign"
@@ -114,7 +155,9 @@ async def test_invalid_code_task_has_no_admission_or_thread_side_effects(case, b
 async def test_code_preserves_exact_task_text_after_command_separator(case):
     body = "  Set x to integer 2\n  "
     await case.b.handle(update(text="/code\n" + body))
-    posted = next(payload for method, path, payload in case.calls if path == "/api/pilot/coding-tasks")
+    posted = next(
+        payload for method, path, payload in case.calls if path == "/api/pilot/coding-tasks"
+    )
     assert posted["task"] == body
 
 
@@ -142,9 +185,13 @@ async def test_coding_replay_uses_saved_kind_body_thread_and_get_only(case):
     before = case.b.db.execute("SELECT payload FROM turns WHERE id=100").fetchone()[0]
     case.b.put("thread", "other-thread")
     case.calls.clear()
-    await case.b.handle(update(text="An ordinary edited delivery must not replace saved coding work"))
-    assert case.calls == [("GET", "/api/pilot/tasks/task-1", None),
-                          ("GET", "/api/pilot/tasks/task-1/coding-receipt", None)]
+    await case.b.handle(
+        update(text="An ordinary edited delivery must not replace saved coding work")
+    )
+    assert case.calls == [
+        ("GET", "/api/pilot/tasks/task-1", None),
+        ("GET", "/api/pilot/tasks/task-1/coding-receipt", None),
+    ]
     assert case.b.db.execute("SELECT payload FROM turns WHERE id=100").fetchone()[0] == before
 
 
@@ -190,9 +237,17 @@ async def test_missing_receipt_retains_known_task_and_warns_once(case):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("field,value", [("objective_status", ["passed"]),
-    ("objective_status", "constructor"), ("tests_run", 0), ("release_authorized", 0),
-    ("release_authorized", True), ("binding", None)])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("objective_status", ["passed"]),
+        ("objective_status", "constructor"),
+        ("tests_run", 0),
+        ("release_authorized", 0),
+        ("release_authorized", True),
+        ("binding", None),
+    ],
+)
 async def test_malformed_receipt_never_claims_passed(case, field, value):
     case.envelope["receipt"][field] = value
     assert await case.b.process_update(update()) is False
@@ -218,7 +273,7 @@ async def test_noncompleted_coding_does_not_read_or_invent_a_receipt(case, state
 
 @pytest.mark.asyncio
 async def test_ordinary_markers_do_not_select_coding(case):
-    await case.b.handle(update(text='profile_id=literal-assignment-v1 /code Set x to integer 2'))
+    await case.b.handle(update(text="profile_id=literal-assignment-v1 /code Set x to integer 2"))
     assert any(path == "/api/pilot/tasks" for _, path, _ in case.calls)
     assert not any(path == "/api/pilot/coding-tasks" for _, path, _ in case.calls)
 
@@ -232,15 +287,22 @@ async def test_foreign_code_sender_is_ignored(case):
 @pytest.mark.asyncio
 async def test_full_8000_character_coding_task_is_allowed(case):
     await case.b.handle(update(text="/code " + "x" * 8000))
-    assert next(value for _, path, value in case.calls if path == "/api/pilot/coding-tasks")["task"] == "x" * 8000
+    assert (
+        next(value for _, path, value in case.calls if path == "/api/pilot/coding-tasks")["task"]
+        == "x" * 8000
+    )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("known", [False, True])
 @pytest.mark.parametrize("text", ["/status", "/new Changed", "/code", "/help", ""])
 async def test_saved_coding_turn_precedes_all_current_text_dispatch(case, known, text):
-    payload = {"request_id": "tg-remex-code-100", "thread_id": "thread-1",
-               "profile_id": "literal-assignment-v1", "task": "Set x to integer 2"}
+    payload = {
+        "request_id": "tg-remex-code-100",
+        "thread_id": "thread-1",
+        "profile_id": "literal-assignment-v1",
+        "task": "Set x to integer 2",
+    }
     encoded = json.dumps(payload)
     case.b.db.execute("INSERT INTO turns VALUES (?,?)", (100, encoded))
     case.b.db.commit()
@@ -248,8 +310,11 @@ async def test_saved_coding_turn_precedes_all_current_text_dispatch(case, known,
     if known:
         case.b.put("task:100", "task-1")
     assert await case.b.process_update(update(text=text)) is True
-    expected = [("GET", "/api/pilot/tasks/task-1", None)] if known else [
-        ("POST", "/api/pilot/coding-tasks", payload)]
+    expected = (
+        [("GET", "/api/pilot/tasks/task-1", None)]
+        if known
+        else [("POST", "/api/pilot/coding-tasks", payload)]
+    )
     assert case.calls == expected + [("GET", "/api/pilot/tasks/task-1/coding-receipt", None)]
     assert case.b.get("thread") == "other-thread"
     assert case.b.db.execute("SELECT payload FROM turns WHERE id=100").fetchone()[0] == encoded
