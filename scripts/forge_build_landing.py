@@ -20,21 +20,56 @@ from agency.forge.smoke import smoke_app
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-PROMPT = """Write a complete single-file landing page (full HTML with inline <style>, dark modern theme, no external assets, no JS frameworks) introducing The Agency: governed multi-agent execution system, decentralised signed quorum (3-of-4), hash-chained proof trace, autonomous Forge factory that builds tools/apps itself, roadmap, community. Return ONLY the HTML code, starting with <!DOCTYPE html>."""
+PROMPT = """Write a very short HTML landing page (under 350 words) for The Agency: hero, 3 bullets (signed 3-of-4 quorum, hash-chain proof, Forge factory), footer. Dark theme, one <style>. Return ONLY raw HTML from <!DOCTYPE html> to </html>."""
 
 out_root = Path(__file__).resolve().parents[1] / "agency-landing"
 proof = ProofBundle()
 
-# 1. Agency LLM generates the HTML
+# 1. Agency LLM generates the HTML (debug-repair loop)
 from agency.llm.adapter import LLMAdapter
 
 adapter = LLMAdapter(provider=os.environ.get("AGENCY_LLM_PROVIDER", "inception"), model=os.environ.get("AGENCY_LLM_MODEL", "mercury-3"))
-html = asyncio.run(adapter.generate(PROMPT))
-proof.append("agency_llm", "generate_html", {"length": len(html)})
-print(f"Agency LLM wrote {len(html)} bytes of HTML")
 
-if "<html" not in html.lower():
-    raise SystemExit("agency did not return HTML; fail-closed")
+
+def _strip_fences(text: str) -> str:
+    t = text.strip()
+    if t.startswith("```"):
+        t = t.split("\n", 1)[1] if "\n" in t else ""
+        if t.rstrip().endswith("```"):
+            t = t.rstrip()[:-3]
+    elif t.rstrip().endswith("```"):
+        t = t.rstrip()[:-3]
+    return t.strip()
+
+
+def _agency_generate(adapter: LLMAdapter, proof: ProofBundle) -> str:
+    """Agency debug loop: request, strip fences, repair truncation, retry."""
+    prompt = PROMPT
+    for attempt in range(1, 4):
+        try:
+            raw = asyncio.run(adapter.generate(prompt))
+        except Exception as exc:
+            proof.append("agency_llm", "generate_error", {"attempt": attempt, "error": str(exc)[:120]})
+            print(f"Agency LLM attempt {attempt} failed: {exc}; retrying shorter...")
+            prompt = "Write a complete HTML landing page for The Agency (dark theme, hero + 3 features + roadmap). Return ONLY raw HTML from <!DOCTYPE html> to </html>, compact CSS, under 800 words."
+            continue
+        html = _strip_fences(raw)
+        proof.append("agency_llm", "generate_html", {"attempt": attempt, "length": len(html)})
+        print(f"Agency LLM attempt {attempt}: wrote {len(html)} bytes")
+        if "<html" not in html.lower():
+            prompt = PROMPT + "\n\nRETRY: return only raw HTML, start with <!DOCTYPE html>, end with </html>."
+            continue
+        if "</html>" not in html.lower():
+            print(f"  truncated (missing </html>), retrying full compact...")
+            prompt = PROMPT
+            continue
+        if "</html>" in html.lower():
+            return html
+        prompt = PROMPT
+    return html
+
+
+html = _agency_generate(adapter, proof)
 
 # 2. Forge generates (writes files) + proves (inspect/scan/test/review)
 spec = {"files": {"index.html": html, "README.md": "# The Agency Landing\n\nBuilt by the Agency via Forge.\n", "pyproject.toml": "[project]\nname='agency-landing'\nversion='0.1.0'\n"}}
