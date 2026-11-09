@@ -10,7 +10,9 @@ import pytest
 
 from agency.admission.models import PilotError
 from agency.agents.factory_coding import NativeCodingUncertain
-from tests.test_factory_coding_service import coding_case as coding_case  # noqa: PLC0414 -- pytest fixture export
+from tests.test_factory_coding_service import (
+    coding_case as coding_case,  # noqa: PLC0414 -- pytest fixture export
+)
 from tests.test_factory_coding_service import make_service, payload, settled
 
 pytestmark = pytest.mark.asyncio
