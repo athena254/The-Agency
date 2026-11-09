@@ -360,7 +360,7 @@ def test_nonregular_allowed_names_are_rejected(tmp_path, entry):
 
 @pytest.mark.parametrize("entry", ["root", "m.py", ".git"])
 def test_actual_windows_junctions_are_rejected_without_following(tmp_path, entry):
-    import _winapi
+    _winapi = pytest.importorskip("_winapi")
 
     args = prepared(tmp_path)
     outside = tmp_path / "outside"

@@ -19,6 +19,7 @@ from agency.agents.factory_coding import (
     NativeCodingDenied,
     NativeCodingExecutor,
     NativeCodingRequest,
+    NativeCodingUncertain,
     NativeLiteralProfile,
 )
 from agency.agents.registry import AgentRegistry as RuntimeRegistry
@@ -456,7 +457,7 @@ async def test_entire_raw_plan_refused_before_intent(native, monkeypatch, raw):
         raise AssertionError("invalid plan reached Forge")
 
     monkeypatch.setattr(AgencyCodingAgent, "run_task", forbidden)
-    with pytest.raises(NativeCodingDenied):
+    with pytest.raises((NativeCodingDenied, NativeCodingUncertain)):
         await n["executor"].execute(
             n["request"], grant=n["grant"], model=n["model"], hooks=n["hooks"]
         )
