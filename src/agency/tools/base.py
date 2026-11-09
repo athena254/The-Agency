@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from agency.admission.models import OwnerExecutionGrant
+    from agency.memory.sms.scope import PrincipalMemoryScope
 
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -82,6 +83,7 @@ class ToolContext:
     agent_id: str
     task_id: str
     memory_store: Any = None
+    memory_scope: PrincipalMemoryScope | None = None
     sandbox_manager: Any = None
     lattice: Any = None
     audit: Any = None

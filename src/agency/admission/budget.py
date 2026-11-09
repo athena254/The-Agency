@@ -14,7 +14,13 @@ from collections.abc import Awaitable
 from dataclasses import dataclass, field, replace
 from typing import Any, TypeVar
 
-from agency.admission.models import AdmissionRecord, OwnerPrincipal, PilotError, RequestLease
+from agency.admission.models import (
+    OWNER_TOOL_NAMES,
+    AdmissionRecord,
+    OwnerPrincipal,
+    PilotError,
+    RequestLease,
+)
 from agency.admission.store import OwnerPilotStore
 from agency.telegram.budget_store import (
     BetaBudgetStore,
@@ -260,7 +266,7 @@ class OwnerBudgetAdapter:
                 raise
 
     async def reserve_tool_call(self, lease: RequestLease, tool: str, *, limit: int = 4) -> bool:
-        if type(tool) is not str or tool not in {"calculator", "utc_time", "web_search"}:
+        if type(tool) is not str or tool not in OWNER_TOOL_NAMES:
             return False
         async with self._gate:
             try:

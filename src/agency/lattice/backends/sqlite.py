@@ -29,6 +29,7 @@ from typing import Any, TypeVar
 
 import aiosqlite
 
+from agency.lattice.audit_chain import GENESIS_HASH, compute_event_hash
 from agency.lattice.models import (
     ConsensusProposal,
     EdgeType,
@@ -83,7 +84,9 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
         target_id TEXT NOT NULL,
         payload TEXT NOT NULL,
         prior_state TEXT,
-        timestamp TEXT NOT NULL
+        timestamp TEXT NOT NULL,
+        prev_hash TEXT NOT NULL DEFAULT '',
+        event_hash TEXT NOT NULL DEFAULT ''
     )""",
     """CREATE TABLE IF NOT EXISTS proposals (
         id TEXT PRIMARY KEY,
@@ -91,6 +94,7 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
         proposal_type TEXT NOT NULL,
         payload TEXT NOT NULL,
         quorum REAL NOT NULL,
+        eligible_voters TEXT NOT NULL DEFAULT '[]',
         status TEXT NOT NULL DEFAULT 'open',
         created_at TEXT NOT NULL,
         expires_at TEXT NOT NULL
@@ -276,12 +280,25 @@ class SQLiteLattice:
         await db.commit()
         self._db = db
 
+    async def _ensure_column_locked(self, table: str, column: str, decl: str) -> None:
+        """Add ``column`` to ``table`` when missing (lightweight migration)."""
+        assert self._db is not None
+        cursor = await self._db.execute(f"PRAGMA table_info({table})")
+        cols = {row["name"] for row in await cursor.fetchall()}
+        if column not in cols:
+            await self._db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
     async def _migrate_locked(self) -> None:
         """Run schema statements (caller must hold ``self._lock``)."""
 
         assert self._db is not None
         for statement in _SCHEMA_STATEMENTS:
             await self._db.execute(statement)
+        await self._ensure_column_locked("events", "prev_hash", "TEXT NOT NULL DEFAULT ''")
+        await self._ensure_column_locked("events", "event_hash", "TEXT NOT NULL DEFAULT ''")
+        await self._ensure_column_locked(
+            "proposals", "eligible_voters", "TEXT NOT NULL DEFAULT '[]'"
+        )
         await self._db.execute(
             "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (?, ?)",
             (SCHEMA_VERSION, _now_iso()),
@@ -307,10 +324,24 @@ class SQLiteLattice:
 
         db = self._require_db()
         event_id = _new_id()
+        ts = _now_iso()
+        cursor = await db.execute("SELECT event_hash FROM events ORDER BY rowid DESC LIMIT 1")
+        last = await cursor.fetchone()
+        prev_hash = str(last["event_hash"]) if last and last["event_hash"] else GENESIS_HASH
+        draft = {
+            "event_id": event_id,
+            "event_type": event_type,
+            "actor": actor,
+            "target_id": target_id,
+            "payload": dict(payload or {}),
+            "prior_state": dict(prior_state) if prior_state is not None else None,
+            "timestamp": ts,
+        }
+        event_hash = compute_event_hash(prev_hash, draft)
         await db.execute(
             """INSERT INTO events (id, event_type, actor, target_id, payload,
-                                   prior_state, timestamp)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                                   prior_state, timestamp, prev_hash, event_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 event_id,
                 event_type,
@@ -318,7 +349,9 @@ class SQLiteLattice:
                 target_id,
                 json.dumps(payload or {}),
                 json.dumps(prior_state) if prior_state is not None else None,
-                _now_iso(),
+                ts,
+                prev_hash,
+                event_hash,
             ),
         )
         return event_id
@@ -355,6 +388,8 @@ class SQLiteLattice:
             target_id=row["target_id"],
             payload=json.loads(row["payload"] or "{}"),
             prior_state=json.loads(row["prior_state"]) if row["prior_state"] else None,
+            prev_hash=str(row["prev_hash"] or ""),
+            event_hash=str(row["event_hash"] or ""),
         )
 
     # -- 4.1 node operations ------------------------------------------ #
@@ -785,6 +820,7 @@ class SQLiteLattice:
         payload: dict[str, Any],
         quorum: float = 0.5,
         ttl_seconds: int = 3600,
+        eligible_voters: list[str] | None = None,
     ) -> str:
         """Open a governance proposal; returns its ID."""
 
@@ -796,14 +832,16 @@ class SQLiteLattice:
                 expires_at = now.fromtimestamp(now.timestamp() + ttl_seconds, tz=UTC).isoformat()
                 await db.execute(
                     """INSERT INTO proposals (id, proposer_id, proposal_type, payload,
-                                              quorum, status, created_at, expires_at)
-                       VALUES (?, ?, ?, ?, ?, 'open', ?, ?)""",
+                                              quorum, eligible_voters, status, created_at,
+                                              expires_at)
+                       VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?)""",
                     (
                         proposal_id,
                         proposer_id,
                         proposal_type,
                         json.dumps(dict(payload)),
                         float(quorum),
+                        json.dumps(list(eligible_voters or [])),
                         now.isoformat(),
                         expires_at,
                     ),
@@ -821,7 +859,7 @@ class SQLiteLattice:
             raise RuntimeError(f"submit_proposal failed: {exc}") from exc
 
     async def vote_weight(self, voter_id: str) -> float:
-        """Voting power: Butler/User always 1.0, agents use reputation score."""
+        """Voting power: plain weight 1.0 for butler/user, reputation otherwise."""
 
         if voter_id in ("butler", "user"):
             return 1.0
@@ -928,12 +966,14 @@ class SQLiteLattice:
                 )
                 for r in await vote_cursor.fetchall()
             ]
+            eligible_raw = row["eligible_voters"] or "[]"
             return ConsensusProposal(
                 proposal_id=row["id"],
                 proposer_id=row["proposer_id"],
                 proposal_type=row["proposal_type"],
                 quorum_required=float(row["quorum"]),
                 votes=votes,
+                eligible_voters=list(json.loads(eligible_raw) or []),
                 status=row["status"],
                 expires_at=_parse_ts(row["expires_at"]),
             )
@@ -983,10 +1023,28 @@ class SQLiteLattice:
                         approve += float(vote_row["weight"])
                     elif vote_row["decision"] == "deny":
                         deny += float(vote_row["weight"])
-                counted = approve + deny
-                if counted <= 0:
-                    return False
-                if approve / counted >= quorum:
+                eligible_raw = row["eligible_voters"] or "[]"
+                eligible = list(json.loads(eligible_raw) or [])
+                denom: float
+                if eligible:
+                    denom = 0.0
+                    for voter_id in eligible:
+                        if voter_id.strip().lower() in ("butler", "user"):
+                            denom += 1.0
+                        else:
+                            rep_cursor = await db.execute(
+                                "SELECT score FROM reputations WHERE agent_id = ?",
+                                (voter_id,),
+                            )
+                            rep_row = await rep_cursor.fetchone()
+                            denom += float(rep_row["score"]) if rep_row else 0.5
+                    if denom <= 0 or (approve <= 0 and deny <= 0):
+                        return False
+                else:
+                    denom = approve + deny
+                    if denom <= 0:
+                        return False
+                if approve / denom >= quorum:
                     await db.execute(
                         "UPDATE proposals SET status = 'passed' WHERE id = ?",
                         (proposal_id,),
@@ -999,7 +1057,7 @@ class SQLiteLattice:
                     )
                     await db.commit()
                     return True
-                if deny / counted >= quorum:
+                if deny / denom >= quorum:
                     await db.execute(
                         "UPDATE proposals SET status = 'denied' WHERE id = ?",
                         (proposal_id,),

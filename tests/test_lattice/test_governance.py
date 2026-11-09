@@ -246,7 +246,28 @@ async def test_vote_weight_trusted_and_agent(reputation: ReputationEngine) -> No
     assert await reputation.vote_weight("agent-9") == pytest.approx(1.0)
 
 
+async def test_user_vote_does_not_override_eligible_set(governance: GovernanceEngine) -> None:
+    """User vote is plain weight, not an instant override (D-03)."""
+    proposal_id = await governance.submit_proposal(
+        "butler",
+        "replace_agent",
+        {},
+        quorum=0.66,
+        eligible_voters=["user", "a1", "a2", "a3"],
+    )
+    result = await governance.cast_vote("user", proposal_id, "approve")
+    # user weight 1.0 / eligible weight (1.0 + 0.5*3=2.5) = 0.4 < 0.66
+    assert result["status"] == "open"
+    assert result["quorum_reached"] is False
+    # Additional approvals that reach the eligible threshold pass.
+    await governance.cast_vote("a1", proposal_id, "approve")
+    result = await governance.cast_vote("a2", proposal_id, "approve")
+    # (1.0+0.5+0.5)/2.5 = 0.8 >= 0.66
+    assert result["status"] == "passed"
+
+
 async def test_human_override_passes_immediately(governance: GovernanceEngine) -> None:
+    """Legacy (no eligible set): single user approve meets ratio quorum."""
     proposal_id = await governance.submit_proposal("butler", "replace_agent", {}, quorum=0.99)
     result = await governance.cast_vote("user", proposal_id, "approve")
     assert result == {"status": "passed", "quorum_reached": True}

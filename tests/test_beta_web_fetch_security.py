@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import socket
 from collections.abc import Callable
 
+import httpcore
 import httpx
 import pytest
+from httpcore import AsyncMockBackend, AsyncNetworkBackend
 
 from agency.tools.base import ToolContext, ToolResult
-from agency.tools.builtin.web import WebFetchTool
+from agency.tools.builtin.web import PinnedAddressTransport, WebFetchTool
 
 ARTICLE_HTML = "<html><body><h1>Hello</h1><p>Public content here.</p></body></html>"
 
@@ -212,3 +215,146 @@ async def test_dns_rebind_flapping_second_hop_denied() -> None:
     assert result.ok is False
     # Second request must never be sent after private rebind detected.
     assert seen == ["https://example.com/start"]
+
+
+# ---------------------------------------------------------------------- #
+# B-05 connection-address pinning
+# ---------------------------------------------------------------------- #
+
+
+def _response(status: int, body: str = "", **headers: str) -> bytes:
+    crlf = chr(13) + chr(10)
+    lines = [f"HTTP/1.1 {status} Synthetic", f"Content-Length: {len(body.encode('utf-8'))}"]
+    lines.extend(f"{key}: {value}" for key, value in headers.items())
+    head = crlf.join(lines) + crlf + crlf
+    return head.encode("utf-8") + body.encode("utf-8")
+
+
+class _RecordingBackend(AsyncNetworkBackend):
+    """Record the address httpcore connects to and replay canned responses."""
+
+    def __init__(self, responses: list[bytes]) -> None:
+        self._responses = list(responses)
+        self.calls: list[tuple[str, int]] = []
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: object = None,
+    ) -> object:
+        self.calls.append((host, port))
+        buffer = self._responses.pop(0) if self._responses else b""
+        backend = AsyncMockBackend([buffer])
+        return await backend.connect_tcp(
+            host,
+            port,
+            timeout=timeout,
+            local_address=local_address,
+            socket_options=socket_options,  # type: ignore[arg-type]
+        )
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: object = None,
+    ) -> object:
+        raise httpcore.UnsupportedProtocol("unix sockets are not supported")
+
+    async def sleep(self, delay: float) -> None:
+        await asyncio.sleep(delay)
+
+
+def _pinned_tool(
+    backend: _RecordingBackend,
+    resolver: Callable[[str], list[str]] = _public_resolver,
+) -> WebFetchTool:
+    return WebFetchTool(dns_resolver=resolver, network_backend=backend)
+
+
+async def test_pinned_transport_connects_to_validated_address() -> None:
+    backend = _RecordingBackend([_response(200, ARTICLE_HTML)])
+    result = await _pinned_tool(backend).run({"url": "https://example.com/article"}, _ctx())
+    assert result.ok is True
+    assert backend.calls == [("93.184.216.34", 443)]
+
+
+async def test_redirect_to_private_address_never_connects() -> None:
+    backend = _RecordingBackend([_response(302, "", Location="https://127.0.0.1/evil")])
+    result = await _pinned_tool(backend).run({"url": "https://example.com/start"}, _ctx())
+    assert result.ok is False
+    assert "blocked" in (result.error or "")
+    assert backend.calls == [("93.184.216.34", 443)]
+
+
+async def test_dns_rebind_between_validation_and_connect_is_pinned() -> None:
+    """The connection uses the validated address; DNS is not re-resolved."""
+    calls: list[str] = []
+
+    def flapping(host: str) -> list[str]:
+        calls.append(host)
+        return ["93.184.216.34"] if len(calls) == 1 else ["127.0.0.1"]
+
+    backend = _RecordingBackend([_response(200, ARTICLE_HTML)])
+    result = await _pinned_tool(backend, flapping).run(
+        {"url": "https://example.com/article"}, _ctx()
+    )
+    assert result.ok is True
+    assert len(calls) == 1
+    assert backend.calls == [("93.184.216.34", 443)]
+    assert all("127.0.0.1" not in host for host, _ in backend.calls)
+
+
+async def test_each_redirect_hop_is_pinned_separately() -> None:
+    def resolver(host: str) -> list[str]:
+        return {
+            "example.com": ["93.184.216.34"],
+            "other.example": ["93.184.216.99"],
+        }[host]
+
+    backend = _RecordingBackend(
+        [
+            _response(302, "", Location="https://other.example/next"),
+            _response(200, ARTICLE_HTML),
+        ]
+    )
+    result = await _pinned_tool(backend, resolver).run({"url": "https://example.com/start"}, _ctx())
+    assert result.ok is True
+    assert backend.calls == [("93.184.216.34", 443), ("93.184.216.99", 443)]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://example.com/article",
+        "ftp://example.com/file",
+        "file:///etc/passwd",
+        "gopher://example.com/",
+    ],
+)
+async def test_blocked_schemes_never_connect(url: str) -> None:
+    backend = _RecordingBackend([_response(200, ARTICLE_HTML)])
+    result = await _pinned_tool(backend).run({"url": url}, _ctx())
+    assert result.ok is False
+    assert backend.calls == []
+
+
+async def test_pinned_transport_refuses_non_global_address() -> None:
+    recorder = _RecordingBackend([_response(200, ARTICLE_HTML)])
+    transport = PinnedAddressTransport("127.0.0.1", backend=recorder)
+    async with httpx.AsyncClient(transport=transport, timeout=5.0) as client:
+        with pytest.raises(httpx.ConnectError):
+            await client.get("https://example.com/")
+    assert recorder.calls == []
+
+
+async def test_private_resolved_address_never_connects() -> None:
+    backend = _RecordingBackend([_response(200, ARTICLE_HTML)])
+    result = await _pinned_tool(backend, _private_resolver).run(
+        {"url": "https://evil.example.com/"}, _ctx()
+    )
+    assert result.ok is False
+    assert backend.calls == []

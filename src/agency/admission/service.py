@@ -55,9 +55,12 @@ from agency.kernel.audit import AuditEntry, BetaAuditLog
 from agency.llm.adapter import LLMAdapter
 from agency.llm.config import LLMConfig
 from agency.llm.metered import MeteredDenied, MeteredError, MeteredModel
+from agency.memory.sms.scope import PrincipalMemoryScope, PrincipalScope
+from agency.memory.sms.store import MemoryStore
 from agency.tools.builtin.calculator import CalculatorTool
+from agency.tools.builtin.memory import MemoryQueryTool, MemoryWriteTool
 from agency.tools.builtin.utc_time import UtcTimeTool
-from agency.tools.builtin.web import WebSearchTool
+from agency.tools.builtin.web import WebFetchTool, WebSearchTool
 from agency.tools.registry import ToolRegistry
 
 _T = TypeVar("_T")
@@ -78,6 +81,9 @@ class OwnerPilotService:
         workspace_id: str = "",
         spending: SpendingLedger | None = None,
         coding: NativeCodingExecutor | None = None,
+        memory_db_path: str | None = None,
+        enable_memory_tools: bool = False,
+        enable_web_fetch: bool = False,
     ) -> None:
         if (
             type(butler) is not ButlerService
@@ -135,6 +141,19 @@ class OwnerPilotService:
                     raise ValueError
             except (ValueError, TypeError, AttributeError):
                 raise PilotError("invalid_request") from None
+        if type(enable_memory_tools) is not bool or type(enable_web_fetch) is not bool:
+            raise PilotError("invalid_request")
+        if type(memory_db_path) is not str and memory_db_path is not None:
+            raise PilotError("invalid_request")
+        if enable_memory_tools and (memory_db_path is None or not memory_db_path.strip()):
+            raise PilotError("invalid_request")
+        if memory_db_path is not None and not enable_memory_tools:
+            raise PilotError("invalid_request")
+        self._enable_memory_tools = enable_memory_tools
+        self._enable_web_fetch = enable_web_fetch
+        self._memory_store = (
+            MemoryStore(memory_db_path) if enable_memory_tools and memory_db_path else None
+        )
         self._coding = coding
         self._coding_profile = coding.profile if coding is not None else None
         self._coding_sha = coding.profile.sha256 if coding is not None else None
@@ -200,6 +219,8 @@ class OwnerPilotService:
             phase = "store"
             try:
                 await self._store.initialize()
+                if self._memory_store is not None:
+                    await self._memory_store.initialize()
                 await self._budget.initialize()
                 phase = "audit"
                 await self._audit.initialize()
@@ -227,7 +248,10 @@ class OwnerPilotService:
         self._ready = False
         self._closed = True
         error: Exception | None = None
-        for close in (self._audit.close, self._budget.close, self._store.close):
+        closers: list[Any] = [self._audit.close, self._budget.close, self._store.close]
+        if self._memory_store is not None:
+            closers.append(self._memory_store.close)
+        for close in closers:
             try:
                 await close()
             except Exception as exc:  # noqa: BLE001 -- finish all owned cleanup
@@ -319,16 +343,40 @@ class OwnerPilotService:
         await self._scope(principal)
         from dataclasses import asdict
 
+        tools = ["calculator", "utc_time", "web_search"]
+        disabled = ["shell", "files", "web_fetch", "memory", "governance", "bridges", "agents"]
+        if self._enable_web_fetch:
+            tools.append("web_fetch")
+            disabled.remove("web_fetch")
+        if self._enable_memory_tools:
+            tools.extend(["memory_query", "memory_write"])
+            disabled.remove("memory")
         return PilotCapabilities(
             enabled=True,
             ready=True,
             mode="single_owner_pilot",
-            tools=["calculator", "utc_time", "web_search"],
-            disabled=["shell", "files", "web_fetch", "memory", "governance", "bridges", "agents"],
+            tools=tools,
+            disabled=disabled,
             limits=PilotLimits(**asdict(self._budget.limits), tool_calls_per_request=4),
             provider_ready=True,
             uncertainty_blocked=await self._uncertainty(principal),
         )
+
+    async def tool_status(self, principal: OwnerPrincipal) -> dict[str, Any]:
+        """Honest per-tool availability and the reason a guard is off."""
+        self._owner(principal)
+        return {
+            "memory_tools": {
+                "enabled": self._enable_memory_tools,
+                "guard": "R-04",
+                "reason": "configured" if self._enable_memory_tools else "opt_in_disabled",
+            },
+            "web_fetch": {
+                "enabled": self._enable_web_fetch,
+                "guard": "B-05",
+                "reason": "configured" if self._enable_web_fetch else "opt_in_disabled",
+            },
+        }
 
     async def list_tasks(
         self, principal: OwnerPrincipal, *, limit: int = 50
@@ -863,13 +911,21 @@ class OwnerPilotService:
         await self._budget.mark_running(lease)
         if await self._uncertainty(principal):
             raise PilotError("uncertainty", uncertain=True)
+        allowed_tools = (
+            frozenset({"calculator"})
+            if expression is not None
+            else frozenset({"calculator", "utc_time", "web_search"})
+        )
+        if expression is None:
+            if self._enable_web_fetch:
+                allowed_tools = allowed_tools | {"web_fetch"}
+            if self._enable_memory_tools:
+                allowed_tools = allowed_tools | {"memory_query", "memory_write"}
         grant = OwnerExecutionGrant(
             lease,
             self._budget,
             max_model_calls=self._budget.limits.model_calls_per_request,
-            allowed_tools=frozenset({"calculator"})
-            if expression is not None
-            else frozenset({"calculator", "utc_time", "web_search"}),
+            allowed_tools=allowed_tools,
         )
         config = self._dispatch
         inner = LLMAdapter(
@@ -890,10 +946,29 @@ class OwnerPilotService:
             timeout_s=config.timeout,
             spending=self._spending,
         )
-        registry = ToolRegistry(owner_policy=OwnerToolPolicy(), audit=self._audit)
+        memory_scope = None
+        if self._enable_memory_tools:
+            if self._memory_store is None:
+                raise PilotError("disabled")
+            principal_scope = PrincipalScope(
+                owner_id=principal.owner_id,
+                transport=principal.transport,
+                subject_id=principal.subject_id,
+            )
+            memory_scope = PrincipalMemoryScope(self._memory_store, principal_scope)
+        registry = ToolRegistry(
+            owner_policy=OwnerToolPolicy(),
+            audit=self._audit,
+            owner_memory_scope=memory_scope,
+        )
         registry.register(CalculatorTool())
         registry.register(UtcTimeTool())
         registry.register(WebSearchTool())
+        if self._enable_web_fetch:
+            registry.register(WebFetchTool())
+        if self._enable_memory_tools:
+            registry.register(MemoryQueryTool(scoped=True))
+            registry.register(MemoryWriteTool(scoped=True))
         payload = json.loads(row.input_json)
         reply = await self._butler.handle_owner_message(
             payload["message"], row.thread_id, grant=grant, model=model, registry=registry

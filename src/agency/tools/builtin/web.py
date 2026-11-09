@@ -14,8 +14,11 @@ from collections.abc import Callable
 from html.parser import HTMLParser
 from typing import Any
 
+import httpcore
 import httpx
 import structlog
+from httpcore import AsyncNetworkBackend
+from httpcore._backends.auto import AutoBackend
 
 from agency.tools.base import ToolContext, ToolResult, ToolRisk, ToolSpec
 
@@ -38,6 +41,7 @@ _MAX_FETCH_REDIRECTS = 3
 
 _FETCH_DNS_TIMEOUT = 5.0  # seconds
 _MAX_FETCH_CONCURRENT = 10
+_MAX_FETCH_URL_CHARS = 2048
 
 _BLOCKED_SUFFIXES = (
     ".localhost",
@@ -60,14 +64,96 @@ def _default_resolve(host: str) -> list[str]:
     return [str(info[4][0]) for info in infos]
 
 
+class _PinningNetworkBackend(AsyncNetworkBackend):
+    """Connect only to a pre-validated address for every TLS origin host.
+
+    ``httpcore`` asks the backend for ``connect_tcp(host, port)`` and then
+    applies TLS with ``server_hostname=host`` and sends the original HTTP
+    ``Host`` header. Overriding the connect address therefore pins the TCP
+    connection to the address that was DNS-validated for this hop, while
+    preserving hostname verification and the served vhost.
+    """
+
+    def __init__(self, address: str, backend: AsyncNetworkBackend) -> None:
+        self._address = address
+        self._backend = backend
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> Any:
+        try:
+            pinned = ipaddress.ip_address(self._address)
+        except ValueError as exc:
+            raise httpcore.ConnectError("pinned address is not an IP") from exc
+        if not pinned.is_global:
+            raise httpcore.ConnectError("pinned address is not global")
+        return await self._backend.connect_tcp(
+            self._address,
+            port,
+            timeout=timeout,
+            local_address=local_address,
+            socket_options=socket_options,
+        )
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Any = None,
+    ) -> Any:
+        raise httpcore.UnsupportedProtocol("unix sockets are not supported by web_fetch")
+
+    async def sleep(self, delay: float) -> None:
+        await asyncio.sleep(delay)
+
+
+class PinnedAddressTransport(httpx.AsyncHTTPTransport):
+    """An httpx transport whose connections are pinned to one validated IP.
+
+    Used by :class:`WebFetchTool` for every hop. The address is resolved and
+    validated once by the tool, then handed to this transport; the TCP
+    connection never re-resolves the hostname, so a DNS rebinding between
+    validation and connect cannot redirect the request to a private address.
+    """
+
+    def __init__(
+        self,
+        address: str,
+        *,
+        backend: AsyncNetworkBackend | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        pool = self._pool
+        self._pool = httpcore.AsyncConnectionPool(
+            ssl_context=pool._ssl_context,
+            max_connections=pool._max_connections,
+            max_keepalive_connections=pool._max_keepalive_connections,
+            keepalive_expiry=pool._keepalive_expiry,
+            http1=pool._http1,
+            http2=pool._http2,
+            retries=pool._retries,
+            local_address=pool._local_address,
+            uds=pool._uds,
+            socket_options=pool._socket_options,
+            network_backend=_PinningNetworkBackend(address, backend or AutoBackend()),
+        )
+
+
 async def _validate_fetch_url_async(
     url: str, resolver: _DnsResolver, semaphore: asyncio.Semaphore | None = None
-) -> str:
+) -> tuple[str, str]:
     """Bound worker occupancy as well as caller latency; never enable beta fetch.
 
     Timed-out threads cannot be stopped, so their semaphore slots stay held
     until the resolver actually finishes. Subsequent callers time out closed.
-    This only fixes event-loop blocking, not DNS rebinding / connection pinning.
+    Returns the validated URL and the validated connection address used for
+    pinning.
     """
     if semaphore is None:
         try:
@@ -95,7 +181,7 @@ async def _validate_fetch_url_async(
             semaphore.release()
         else:
 
-            def release_when_done(completed: asyncio.Task[str]) -> None:
+            def release_when_done(completed: asyncio.Task[tuple[str, str]]) -> None:
                 try:
                     completed.result()  # consume an error after timeout/cancellation
                 except BaseException:  # noqa: BLE001 — cleanup includes cancellation
@@ -199,14 +285,21 @@ def _hostname_block_reason(host: str) -> str | None:
     return None
 
 
-def _validate_fetch_url(url: str, resolver: _DnsResolver) -> str:
-    """Validate one fetch hop; preflight only, not connection pinning."""
+def _validate_fetch_url(url: str, resolver: _DnsResolver) -> tuple[str, str]:
+    """Validate one fetch hop and return ``(url, pinned_address)``.
+
+    This is the single resolution point for a hop: the returned address is
+    what :class:`PinnedAddressTransport` connects to, so no second lookup can
+    rebind the request.
+    """
     for ch in url:
         if ord(ch) <= 31 or ord(ch) == 127:
             raise ValueError("control character in url blocked")
     cleaned = url.strip()
     if not cleaned:
         raise ValueError("missing required param: 'url'")
+    if len(cleaned) > _MAX_FETCH_URL_CHARS:
+        raise ValueError("url too long")
     if any(ch.isspace() for ch in cleaned):
         raise ValueError("whitespace in url blocked")
     try:
@@ -245,7 +338,7 @@ def _validate_fetch_url(url: str, resolver: _DnsResolver) -> str:
             raise ValueError("unparsable resolved address blocked") from exc
         if not ip.is_global:
             raise ValueError("resolved address blocked (not global)")
-    return cleaned
+    return cleaned, addresses[0].split("%")[0]
 
 
 def _decode_ddg_url(href: str) -> str:
@@ -415,21 +508,26 @@ class WebSearchTool:
 class WebFetchTool:
     """Fetch an HTTPS URL and return extracted text (capped).
 
-    SSRF hardening is best-effort preflight only: structural HTTPS validation,
-    IP-literal/localhost/internal-suffix rejection, per-hop DNS checks, manual
-    redirect validation (max 3 hops, no automatic follows). DNS preflight does
-    NOT pin the address used by httpx (TOCTOU/rebind residual), so
-    ``web_fetch`` must remain beta-disabled until a proxy/egress rule or HTTPS
-    domain allowlist plus host-network review exists.
+    SSRF hardening is connection-address pinning (B-05), not DNS preflight
+    alone. Each hop is structurally validated (HTTPS, no userinfo,
+    IP-literal/localhost/internal-suffix rejection), resolved exactly once and
+    validated to be globally routable, and the resulting address is handed to
+    :class:`PinnedAddressTransport`. httpx then connects to that literal
+    address while TLS SNI and the HTTP ``Host`` header still use the validated
+    hostname. Redirects are never auto-followed; each hop repeats the same
+    resolve-then-pin sequence with a three-hop cap. A DNS rebinding between
+    validation and connect cannot move the connection to a private address.
     """
 
     def __init__(
         self,
         transport: httpx.AsyncBaseTransport | None = None,
         dns_resolver: _DnsResolver | None = None,
+        network_backend: AsyncNetworkBackend | None = None,
     ) -> None:
         self._transport = transport
         self._resolver: _DnsResolver = dns_resolver or _default_resolve
+        self._network_backend = network_backend
         self._semaphore: asyncio.Semaphore = asyncio.Semaphore(_MAX_FETCH_CONCURRENT)
         self.spec = ToolSpec(
             name="web_fetch",
@@ -441,6 +539,7 @@ class WebFetchTool:
                 "type": "object",
                 "properties": {"url": {"type": "string"}},
                 "required": ["url"],
+                "additionalProperties": False,
             },
             risk=ToolRisk.READ_ONLY,
         )
@@ -451,80 +550,75 @@ class WebFetchTool:
         url = args.get("url")
         if not isinstance(url, str) or not url.strip():
             return ToolResult(tool="web_fetch", ok=False, error="missing required param: 'url'")
-        try:
-            current_url = await _validate_fetch_url_async(
-                url.strip(), self._resolver, self._semaphore
-            )
-        except ValueError as exc:
-            return ToolResult(
-                tool="web_fetch",
-                ok=False,
-                error=f"blocked: {exc}",
-                duration_ms=int((time.perf_counter() - start) * 1000),
-            )
-        try:
-            async with httpx.AsyncClient(
-                transport=self._transport,
-                timeout=15.0,
-                follow_redirects=False,
-                headers={"User-Agent": _DESKTOP_UA},
-            ) as client:
-                hops = 0
-                while True:
-                    async with client.stream("GET", current_url) as response:
-                        status = response.status_code
-                        if status in _REDIRECT_STATUSES:
-                            location = response.headers.get("location")
-                            if not location:
-                                return ToolResult(
-                                    tool="web_fetch",
-                                    ok=False,
-                                    error=f"fetch failed with status {status} for {current_url}",
-                                    duration_ms=int((time.perf_counter() - start) * 1000),
-                                )
-                            if hops >= _MAX_FETCH_REDIRECTS:
-                                return ToolResult(
-                                    tool="web_fetch",
-                                    ok=False,
-                                    error="blocked: too many redirects",
-                                    duration_ms=int((time.perf_counter() - start) * 1000),
-                                )
-                            next_url = urllib.parse.urljoin(current_url, location)
-                            try:
-                                current_url = await _validate_fetch_url_async(
-                                    next_url, self._resolver, self._semaphore
-                                )
-                            except ValueError as exc:
-                                return ToolResult(
-                                    tool="web_fetch",
-                                    ok=False,
-                                    error=f"blocked redirect: {exc}",
-                                    duration_ms=int((time.perf_counter() - start) * 1000),
-                                )
-                            hops += 1
-                            continue
-                        final_url = str(response.url)
-                        if status < 200 or status >= 300:
+        current_url = url.strip()
+        hops = 0
+        while True:
+            try:
+                validated_url, address = await _validate_fetch_url_async(
+                    current_url, self._resolver, self._semaphore
+                )
+            except ValueError as exc:
+                return ToolResult(
+                    tool="web_fetch",
+                    ok=False,
+                    error=f"blocked: {exc}",
+                    duration_ms=int((time.perf_counter() - start) * 1000),
+                )
+            transport = self._transport
+            if transport is None:
+                transport = PinnedAddressTransport(address, backend=self._network_backend)
+            try:
+                async with (
+                    httpx.AsyncClient(
+                        transport=transport,
+                        timeout=15.0,
+                        follow_redirects=False,
+                        headers={"User-Agent": _DESKTOP_UA},
+                    ) as client,
+                    client.stream("GET", validated_url) as response,
+                ):
+                    status = response.status_code
+                    if status in _REDIRECT_STATUSES:
+                        location = response.headers.get("location")
+                        if not location:
                             return ToolResult(
                                 tool="web_fetch",
                                 ok=False,
-                                error=f"fetch failed with status {status} for {final_url}",
+                                error=(f"fetch failed with status {status} for {validated_url}"),
                                 duration_ms=int((time.perf_counter() - start) * 1000),
                             )
-                        body = bytearray()
-                        async for chunk in response.aiter_bytes(chunk_size=16384):
-                            body.extend(chunk)
-                            if len(body) >= _MAX_FETCH_BYTES:
-                                del body[_MAX_FETCH_BYTES:]
-                                break
-                        break
-        except httpx.HTTPError as exc:
-            return ToolResult(
-                tool="web_fetch",
-                ok=False,
-                error=f"fetch request failed: {exc}",
-                duration_ms=int((time.perf_counter() - start) * 1000),
-            )
+                        if hops >= _MAX_FETCH_REDIRECTS:
+                            return ToolResult(
+                                tool="web_fetch",
+                                ok=False,
+                                error="blocked: too many redirects",
+                                duration_ms=int((time.perf_counter() - start) * 1000),
+                            )
+                        current_url = urllib.parse.urljoin(validated_url, location)
+                        hops += 1
+                        continue
+                    final_url = str(response.url)
+                    if status < 200 or status >= 300:
+                        return ToolResult(
+                            tool="web_fetch",
+                            ok=False,
+                            error=f"fetch failed with status {status} for {final_url}",
+                            duration_ms=int((time.perf_counter() - start) * 1000),
+                        )
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes(chunk_size=16384):
+                        body.extend(chunk)
+                        if len(body) >= _MAX_FETCH_BYTES:
+                            del body[_MAX_FETCH_BYTES:]
+                            break
+                    break
+            except httpx.HTTPError as exc:
+                return ToolResult(
+                    tool="web_fetch",
+                    ok=False,
+                    error=f"fetch request failed: {exc}",
+                    duration_ms=int((time.perf_counter() - start) * 1000),
+                )
         bytes_read = len(body)
         try:
             html = bytes(body).decode("utf-8", errors="replace")

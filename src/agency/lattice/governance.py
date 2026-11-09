@@ -64,6 +64,7 @@ class GovernanceEngine:
         payload: dict[str, Any],
         quorum: float = 0.66,
         ttl_seconds: int = 3600,
+        eligible_voters: list[str] | None = None,
     ) -> str:
         """Submit a governance proposal and return its proposal ID."""
         if not proposer_id:
@@ -84,6 +85,7 @@ class GovernanceEngine:
             proposal_type=proposal_type,
             quorum_required=float(quorum),
             votes=[],
+            eligible_voters=list(eligible_voters or []),
             status="open",
             expires_at=ensure_utc(now + timedelta(seconds=ttl_seconds)),
         )
@@ -102,10 +104,10 @@ class GovernanceEngine:
     ) -> dict[str, Any]:
         """Cast a vote; auto-resolves the proposal when quorum is reached.
 
-        Returns ``{'status': ..., 'quorum_reached': bool}``. A human
-        (``user``) approval resolves the proposal immediately. Voting on
-        an expired proposal marks it expired; voting on an already
-        resolved proposal raises ``ValueError``.
+        Returns ``{'status': ..., 'quorum_reached': bool}``. No voter
+        (including ``user``) resolves immediately; resolution is by
+        quorum only. Voting on an expired proposal marks it expired;
+        voting on an already resolved proposal raises ``ValueError``.
         """
         if not voter_id:
             raise ValueError("voter_id must not be empty.")
@@ -141,13 +143,8 @@ class GovernanceEngine:
                 )
             )
             proposal.votes = votes
-            # Human override: a user ballot resolves immediately.
-            if voter_id.strip().lower() == "user" and decision in ("approve", "deny"):
-                outcome = "passed" if decision == "approve" else "denied"
-                self._mark_locked(proposal, outcome)
-                resolved = True
-            else:
-                resolved = self._apply_quorum_locked(proposal)
+            # No voter (including "user") resolves immediately: quorum only.
+            resolved = await self._apply_quorum_locked(proposal)
             status = proposal.status
         await self._mirror_vote(proposal_id, voter_id, decision, weight, list(evidence or []))
         if status != "open":
@@ -167,9 +164,7 @@ class GovernanceEngine:
                 return proposal.status
             if self._is_expired_locked(proposal):
                 self._mark_locked(proposal, "expired")
-            elif self._approve_ratio_locked(proposal) is not None and self._meets_quorum_locked(
-                proposal
-            ):
+            elif await self._meets_quorum_locked(proposal):
                 self._mark_locked(proposal, "passed")
             else:
                 self._mark_locked(proposal, "denied")
@@ -180,9 +175,10 @@ class GovernanceEngine:
     async def check_quorum(self, proposal_id: str) -> bool:
         """Return True when approve-quorum is reached (auto-resolves).
 
-        Quorum = weighted approve / (weighted approve + weighted deny);
-        abstentions are excluded. An expired proposal is marked expired
-        and returns False.
+        Eligible-set: approve_weight / total_eligible_weight >= quorum
+        (abstain excluded from numerator; denominator is eligible weight,
+        not cast votes). Legacy fallback (no eligible set): approve /
+        (approve + deny). Expired proposals are marked expired.
         """
         async with self._lock:
             proposal = self._require_locked(proposal_id)
@@ -193,7 +189,7 @@ class GovernanceEngine:
                 expired = True
             else:
                 expired = False
-                reached = self._meets_quorum_locked(proposal)
+                reached = await self._meets_quorum_locked(proposal)
                 if reached:
                     self._mark_locked(proposal, "passed")
             status = proposal.status
@@ -245,15 +241,36 @@ class GovernanceEngine:
             return None
         return approve / total
 
-    def _meets_quorum_locked(self, proposal: ConsensusProposal) -> bool:
+    async def _total_eligible_weight_locked(self, proposal: ConsensusProposal) -> float | None:
+        """Total live weight of the eligible set; None when unset (legacy)."""
+        if not proposal.eligible_voters:
+            return None
+        total = 0.0
+        for voter_id in proposal.eligible_voters:
+            try:
+                total += float(await self.reputation.vote_weight(voter_id))
+            except Exception:  # noqa: BLE001
+                total += 0.5
+        return total
+
+    async def _meets_quorum_locked(self, proposal: ConsensusProposal) -> bool:
+        approve, _deny = self._tally_locked(proposal)
+        eligible_total = await self._total_eligible_weight_locked(proposal)
+        if eligible_total is not None:
+            # Eligible-set quorum: approve / eligible >= quorum.
+            # Abstain excluded from numerator; denominator is eligible
+            # weight (not cast votes), so participation is implicit.
+            if eligible_total <= 0.0 or approve <= 0.0:
+                return False
+            return approve / eligible_total >= proposal.quorum_required
         ratio = self._approve_ratio_locked(proposal)
         if ratio is None:
             return False
         return ratio >= proposal.quorum_required
 
-    def _apply_quorum_locked(self, proposal: ConsensusProposal) -> bool:
+    async def _apply_quorum_locked(self, proposal: ConsensusProposal) -> bool:
         """Resolve on approve-quorum; return True when resolved to passed."""
-        if self._meets_quorum_locked(proposal):
+        if await self._meets_quorum_locked(proposal):
             self._mark_locked(proposal, "passed")
             return True
         return False
@@ -272,6 +289,7 @@ class GovernanceEngine:
                     "proposer_id": proposal.proposer_id,
                     "proposal_type": proposal.proposal_type,
                     "quorum_required": proposal.quorum_required,
+                    "eligible_voters": list(proposal.eligible_voters),
                     "status": proposal.status,
                     "expires_at": proposal.expires_at.isoformat(),
                     "payload": payload,

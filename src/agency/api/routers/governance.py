@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 from typing import Any, Literal
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from agency.api.authority import require_peer_authority
 from agency.lattice.api import Lattice
+from agency.peers.authority import AuthorityError, PeerAuthority
 
 log = structlog.get_logger(__name__)
 
@@ -17,6 +21,11 @@ log = structlog.get_logger(__name__)
 router = APIRouter(
     prefix="/v1/governance", tags=["governance"], dependencies=[Depends(require_peer_authority)]
 )
+
+# Signed ballots are authorized by their Ed25519 signature, not by a token,
+# so this router carries no require_peer_authority dependency. Without a
+# configured PeerAuthority it still fails closed (503).
+ballot_router = APIRouter(prefix="/v1/governance", tags=["governance"])
 
 
 class ProposeAgentRequest(BaseModel):
@@ -32,13 +41,22 @@ class ProposeAgentRequest(BaseModel):
 
 
 class VoteRequest(BaseModel):
-    """The authenticated owner votes as user; HTTP callers cannot name a voter."""
+    """Legacy unsigned vote body. Kept so old clients get a clear 400."""
 
     model_config = ConfigDict(extra="forbid")
 
     proposal_id: str = Field(min_length=1)
     decision: Literal["approve", "deny", "abstain"] = "abstain"
     evidence: list[str] = Field(default_factory=list)
+
+
+class BallotRequest(BaseModel):
+    """A signed peer ballot as wire bytes: hex or base64 of canonical_json."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    wire_hex: str | None = Field(default=None, min_length=2)
+    wire_base64: str | None = Field(default=None, min_length=2)
 
 
 @router.get("/proposals")
@@ -89,17 +107,73 @@ async def propose_agent(payload: ProposeAgentRequest, request: Request) -> dict[
     }
 
 
-@router.post("/vote")
-async def vote(request: Request, body: VoteRequest) -> dict[str, Any]:
-    """Cast the authenticated owner's vote on an open proposal."""
-    lattice = _get_lattice(request)
-    result = await lattice.cast_vote(
-        voter_id="user",
-        proposal_id=body.proposal_id,
-        decision=body.decision,
-        evidence=body.evidence,
+@ballot_router.post("/vote", deprecated=True)
+async def vote(request: Request) -> JSONResponse:
+    """Legacy unsigned vote (``voter_id=user``). Fail closed, no override.
+
+    Unsigned votes are never written; clients must submit a signed ballot
+    to POST /v1/governance/ballot instead.
+    """
+    log.warning("legacy_unsigned_vote_rejected", path=request.url.path)
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={
+            "detail": "Unsigned votes are rejected. Submit a signed ballot to "
+            "/v1/governance/ballot."
+        },
+        headers={"Deprecation": "true", "Link": '</v1/governance/ballot>; rel="successor-version"'},
     )
-    return result
+
+
+@ballot_router.post("/ballot")
+async def ballot(payload: BallotRequest, request: Request) -> dict[str, Any]:
+    """Verify a signed peer ballot via PeerAuthority and return tally/decide."""
+    authority = _get_authority(request)
+    wire = _decode_wire(payload)
+    try:
+        msg = authority.submit_ballot(wire)
+    except AuthorityError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    proposal_id = str(msg.payload["proposal_id"])
+    outcome = authority.decide(proposal_id)
+    return {
+        "proposal_id": proposal_id,
+        "voter_peer_id": msg.sender_peer_id,
+        "decision": str(msg.payload["decision"]),
+        "ballot_seq": int(msg.payload["ballot_seq"]),
+        "tally": authority.tally(proposal_id),
+        "quorum_required": authority.quorum_required(),
+        "quorum_met": outcome == "passed",
+        "outcome": outcome,
+    }
+
+
+def _decode_wire(payload: BallotRequest) -> bytes:
+    if (payload.wire_hex is None) == (payload.wire_base64 is None):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide exactly one of wire_hex or wire_base64.",
+        )
+    try:
+        if payload.wire_hex is not None:
+            return bytes.fromhex(payload.wire_hex)
+        assert payload.wire_base64 is not None
+        return base64.b64decode(payload.wire_base64, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid ballot encoding."
+        ) from exc
+
+
+def _get_authority(request: Request) -> PeerAuthority:
+    """Get the PeerAuthority instance from app state (per-test injectable)."""
+    authority = getattr(request.app.state, "peer_authority", None)
+    if not isinstance(authority, PeerAuthority):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Peer authority not initialized",
+        )
+    return authority
 
 
 def _get_lattice(request: Request) -> Lattice:

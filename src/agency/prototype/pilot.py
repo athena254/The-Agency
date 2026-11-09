@@ -72,6 +72,13 @@ async def capabilities(request: Request) -> PilotCapabilities:
     return await pilot.capabilities(principal)
 
 
+@router.get("/tool-status")
+async def tool_status(request: Request) -> JSONResponse:
+    """Report opt-in guard availability and why a disabled tool is off."""
+    pilot, principal, _ = await _boundary(request)
+    return JSONResponse(content=await pilot.tool_status(principal))
+
+
 @router.get("/spending")
 async def spending(request: Request) -> JSONResponse:
     pilot, principal, _ = await _boundary(request)

@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from agency.api.routers.governance import router
+from agency.api.routers.governance import ballot_router, router
 from agency.lattice.api import Lattice
 from agency.lattice.models import LatticeConfig
 
@@ -23,19 +23,22 @@ async def test_governance_vote_requires_configured_token_and_verified_owner(
         app = FastAPI()
         app.state.lattice = lattice
         app.include_router(router)
+        app.include_router(ballot_router)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             url = "/v1/governance/vote"
             forged = {"proposal_id": proposal_id, "voter_id": "butler", "decision": "approve"}
-            assert (await client.post(url, json=forged)).status_code == 503
+            # Legacy unsigned vote (voter_id=user) is rejected fail-closed.
+            assert (await client.post(url, json=forged)).status_code == 400
             monkeypatch.setenv("AGENCY_GOVERNANCE_TOKEN", "local-test-token")
-            assert (await client.post(url, json=forged)).status_code == 503
+            assert (await client.post(url, json=forged)).status_code == 400
             headers = {"X-Agency-Governance-Token": "local-test-token"}
-            assert (await client.post(url, json=forged, headers=headers)).status_code == 503
+            assert (await client.post(url, json=forged, headers=headers)).status_code == 400
             assert (await lattice.get_proposal_status(proposal_id)).votes == []
             response = await client.post(
                 url, json={"proposal_id": proposal_id, "decision": "approve"}, headers=headers
             )
-            assert response.status_code == 503
+            assert response.status_code == 400
+            assert response.headers.get("deprecation") == "true"
             votes = (await lattice.get_proposal_status(proposal_id)).votes
             assert votes == []
     finally:

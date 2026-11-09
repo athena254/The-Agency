@@ -29,6 +29,10 @@ _ERRORS = {
     "uncertainty": (503, "Owner execution outcome uncertain."),
 }
 
+OWNER_TOOL_NAMES = frozenset(
+    {"calculator", "utc_time", "web_search", "memory_query", "memory_write", "web_fetch"}
+)
+
 
 class PilotError(Exception):
     def __init__(self, code: str, status_code: int = 503, uncertain: bool = False) -> None:
@@ -113,7 +117,7 @@ class OwnerExecutionGrant:
         if (
             type(self.allowed_tools) is not frozenset
             or any(type(tool) is not str for tool in self.allowed_tools)
-            or not self.allowed_tools <= {"calculator", "utc_time", "web_search"}
+            or not self.allowed_tools <= OWNER_TOOL_NAMES
         ):
             raise PilotError("invalid_request")
         if (

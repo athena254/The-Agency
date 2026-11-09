@@ -170,6 +170,7 @@ class LatticeBackend(Protocol):
         payload: dict[str, Any],
         quorum: float = 0.5,
         ttl_seconds: int = 3600,
+        eligible_voters: list[str] | None = None,
     ) -> str:
         """Open a governance proposal; returns its ID."""
         ...

@@ -66,6 +66,8 @@ class LatticeEvent:
     target_id: str
     payload: dict[str, Any] = field(default_factory=dict)
     prior_state: dict[str, Any] | None = None
+    prev_hash: str = ""
+    event_hash: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "timestamp", ensure_utc(self.timestamp))
@@ -101,6 +103,8 @@ class LatticeEvent:
             prior_state=(
                 dict(data["prior_state"]) if data.get("prior_state") is not None else None
             ),
+            prev_hash=str(data.get("prev_hash") or ""),
+            event_hash=str(data.get("event_hash") or ""),
         )
 
 
@@ -209,6 +213,7 @@ class ConsensusProposal:
     proposal_type: str
     quorum_required: float = 0.5
     votes: list[Vote] = field(default_factory=list)
+    eligible_voters: list[str] = field(default_factory=list)
     status: str = "open"
     expires_at: datetime = field(
         default_factory=lambda: utc_now().replace(tzinfo=UTC),
@@ -236,6 +241,7 @@ class ConsensusProposal:
             "proposal_type": self.proposal_type,
             "quorum_required": self.quorum_required,
             "votes": [v.to_dict() for v in self.votes],
+            "eligible_voters": list(self.eligible_voters),
             "status": self.status,
             "expires_at": self.expires_at.isoformat(),
         }
@@ -252,6 +258,7 @@ class ConsensusProposal:
             proposal_type=data["proposal_type"],
             quorum_required=float(data.get("quorum_required", 0.5)),
             votes=[Vote.from_dict(v) for v in (data.get("votes") or [])],
+            eligible_voters=list(data.get("eligible_voters") or []),
             status=data.get("status", "open"),
             expires_at=ensure_utc(expires_at),
         )

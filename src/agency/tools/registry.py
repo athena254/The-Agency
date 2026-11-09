@@ -167,6 +167,7 @@ class ToolRegistry:
         beta_policy: ToolPolicy | None = None,
         *,
         owner_policy: OwnerToolPolicy | None = None,
+        owner_memory_scope: Any | None = None,
     ) -> None:
         from agency.admission.policy import OwnerToolPolicy
 
@@ -179,6 +180,7 @@ class ToolRegistry:
         self._audit = audit
         self._default_timeout_s = default_timeout_s
         self._owner_policy = owner_policy
+        self._owner_memory_scope = owner_memory_scope
         self._beta_policy = beta_policy
         self._beta_suspended = False
         self._log = structlog.get_logger(__name__)
@@ -236,6 +238,7 @@ class ToolRegistry:
         owner_binding = self._owner_binding(ctx) if owner else None
         if owner_binding is not None:
             await self._check_owner(ctx, owner_binding)
+            self._bind_memory_scope(ctx)
         elif ctx.owner_grant is not None:
             raise PilotError("forbidden")
         tool = self._tools.get(name)
@@ -415,6 +418,28 @@ class ToolRegistry:
             return result
         await self._audit_call(ctx, name, result)
         return result
+
+    def _bind_memory_scope(self, ctx: ToolContext) -> None:
+        """Attach the registry's principal-bound scope to this owner call.
+
+        The scope is constructed per admitted request from the authenticated
+        owner principal; it is only attached when the live grant's principal
+        matches, so a copied or foreign grant cannot borrow another owner's
+        memory scope.
+        """
+        from agency.admission.models import PilotError
+
+        scope = self._owner_memory_scope
+        if scope is None or ctx.memory_scope is not None:
+            return
+        grant = ctx.owner_grant
+        if grant is None or not scope.principal.matches(
+            owner_id=grant.lease.principal.owner_id,
+            transport=grant.lease.principal.transport,
+            subject_id=grant.lease.principal.subject_id,
+        ):
+            raise PilotError("forbidden")
+        ctx.memory_scope = scope
 
     @staticmethod
     def _owner_facts(grant: OwnerExecutionGrant) -> tuple[Any, ...]:

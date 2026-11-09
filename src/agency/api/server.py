@@ -237,7 +237,10 @@ def create_app() -> FastAPI:
         root = request.scope.get("root_path", "")
         if root and path.startswith(root + "/"):
             path = path[len(root) :]
-        if request.method != "GET" or path != "/v1/health":
+        # Signed ballots carry their own authority (Ed25519 envelope verified
+        # by PeerAuthority); they must reach the router to be verified.
+        is_ballot = path == "/v1/governance/ballot"
+        if (request.method != "GET" or path != "/v1/health") and not is_ballot:
             return JSONResponse(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 content={"detail": "Peer authorization is unavailable."},
@@ -250,6 +253,7 @@ def create_app() -> FastAPI:
     application.include_router(evidence_router.router, prefix="/v1/evidence")
     application.include_router(bridges_router.router, prefix="/v1/bridges")
     application.include_router(governance_router.router)
+    application.include_router(governance_router.ballot_router)
 
     @application.get(
         "/v1/health", response_model=HealthResponse, tags=["ops"], summary="Health check"

@@ -22,6 +22,7 @@ from typing import Any, cast
 
 import structlog
 
+from agency.lattice.audit_chain import GENESIS_HASH, compute_event_hash
 from agency.lattice.backends.base import Embedder, LatticeBackend
 from agency.lattice.config import get_config
 from agency.lattice.models import (
@@ -118,14 +119,29 @@ class InMemoryLatticeBackend:
         payload: dict[str, Any] | None = None,
         prior_state: dict[str, Any] | None = None,
     ) -> LatticeEvent:
+        prev_hash = self._events[-1].event_hash if self._events else GENESIS_HASH
+        ts = utc_now()
+        event_id = _new_id("evt-")
+        draft = {
+            "event_id": event_id,
+            "event_type": event_type,
+            "actor": actor,
+            "target_id": target_id,
+            "payload": dict(payload or {}),
+            "prior_state": dict(prior_state) if prior_state is not None else None,
+            "timestamp": ts.isoformat(),
+        }
+        event_hash = compute_event_hash(prev_hash, draft)
         event = LatticeEvent(
-            event_id=_new_id("evt-"),
-            timestamp=utc_now(),
+            event_id=event_id,
+            timestamp=ts,
             event_type=event_type,
             actor=actor,
             target_id=target_id,
             payload=dict(payload or {}),
             prior_state=dict(prior_state) if prior_state is not None else None,
+            prev_hash=prev_hash,
+            event_hash=event_hash,
         )
         self._events.append(event)
         return event
@@ -435,6 +451,7 @@ class InMemoryLatticeBackend:
         payload: dict[str, Any],
         quorum: float = 0.5,
         ttl_seconds: int = 3600,
+        eligible_voters: list[str] | None = None,
     ) -> str:
         """Open a governance proposal; returns its ID."""
 
@@ -445,6 +462,7 @@ class InMemoryLatticeBackend:
             proposal_type=proposal_type,
             quorum_required=quorum,
             votes=[],
+            eligible_voters=list(eligible_voters or []),
             status="open",
             expires_at=utc_now() + timedelta(seconds=ttl_seconds),
         )
@@ -469,17 +487,32 @@ class InMemoryLatticeBackend:
         proposal = self._proposals.get(proposal_id)
         if proposal is None:
             raise KeyError(f"Unknown proposal: {proposal_id}")
+        weight = self._vote_weight(voter_id)
+        proposal.votes = [v for v in proposal.votes if v.voter_id != voter_id]
         proposal.votes.append(
             Vote(
                 voter_id=voter_id,
                 proposal_id=proposal_id,
                 decision=decision,
                 evidence=list(evidence or []),
+                weight=weight,
             )
         )
         self._record("vote_cast", voter_id, proposal_id, {"decision": decision})
         await self.check_quorum(proposal_id)
         return True
+
+    def _vote_weight(self, voter_id: str) -> float:
+        """Plain weight: 1.0 for butler/user, reputation score otherwise."""
+        if voter_id.strip().lower() in ("butler", "user"):
+            return 1.0
+        rep = self._reputations.get(voter_id)
+        return float(rep.score) if rep is not None else 0.5
+
+    def _total_eligible_weight(self, proposal: ConsensusProposal) -> float | None:
+        if not proposal.eligible_voters:
+            return None
+        return sum(self._vote_weight(v) for v in proposal.eligible_voters)
 
     async def get_proposal_status(self, proposal_id: str) -> ConsensusProposal:
         """Current proposal state (raises ``KeyError`` when unknown)."""
@@ -553,6 +586,20 @@ class InMemoryLatticeBackend:
             self._record("proposal_expired", "system", proposal_id, {})
             return False
         counted = [v for v in proposal.votes if v.decision in ("approve", "deny")]
+        eligible_total = self._total_eligible_weight(proposal)
+        if eligible_total is not None:
+            approve_weight = sum(v.weight for v in counted if v.decision == "approve")
+            deny_weight = sum(v.weight for v in counted if v.decision == "deny")
+            if eligible_total <= 0 or (approve_weight <= 0 and deny_weight <= 0):
+                return False
+            if approve_weight / eligible_total >= proposal.quorum_required:
+                proposal.status = "passed"
+                self._record("proposal_passed", "system", proposal_id, {})
+                return True
+            if deny_weight / eligible_total >= proposal.quorum_required:
+                proposal.status = "denied"
+                self._record("proposal_denied", "system", proposal_id, {})
+            return False
         total_weight = sum(v.weight for v in counted)
         if total_weight <= 0:
             return False
@@ -661,11 +708,13 @@ class GovernanceEngine:
         payload: dict[str, Any],
         quorum: float = 0.5,
         ttl_seconds: int = 3600,
+        eligible_voters: list[str] | None = None,
     ) -> str:
         """Open a governance proposal; returns its ID."""
 
+        kwargs: dict[str, Any] = {"eligible_voters": eligible_voters} if eligible_voters else {}
         return await self._backend.submit_proposal(
-            proposer_id, proposal_type, payload, quorum, ttl_seconds
+            proposer_id, proposal_type, payload, quorum, ttl_seconds, **kwargs
         )
 
     async def cast_vote(
@@ -728,10 +777,13 @@ class _ManagedGovernance:
         payload: dict[str, Any],
         quorum: float | None = None,
         ttl_seconds: int = 3600,
+        eligible_voters: list[str] | None = None,
     ) -> str:
         self._owner._check_managed_loop()
         # Preserve the selected engine's own default (local and fallback differ).
-        kwargs = {} if quorum is None else {"quorum": quorum}
+        kwargs: dict[str, Any] = {} if quorum is None else {"quorum": quorum}
+        if eligible_voters:
+            kwargs["eligible_voters"] = eligible_voters
         return cast(
             str,
             await self._engine.submit_proposal(
@@ -1111,14 +1163,16 @@ class Lattice:
         quorum: float | None = None,
         ttl_seconds: int = 3600,
         ttl: int | None = None,
+        eligible_voters: list[str] | None = None,
     ) -> str:
         """Open a governance proposal; returns its ID."""
         self._check_managed_loop()
 
         effective_quorum = quorum if quorum is not None else self.config.default_quorum
         effective_ttl = ttl if ttl is not None else ttl_seconds
+        kwargs: dict[str, Any] = {"eligible_voters": eligible_voters} if eligible_voters else {}
         return await self.backend.submit_proposal(
-            proposer_id, proposal_type, payload, effective_quorum, effective_ttl
+            proposer_id, proposal_type, payload, effective_quorum, effective_ttl, **kwargs
         )
 
     async def cast_vote(

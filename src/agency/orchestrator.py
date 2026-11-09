@@ -507,6 +507,64 @@ class AgencyOrchestrator:
         self._log.info("task_submitted", task_id=task.task_id, title=title)
         return task
 
+    async def submit_autonomous_task(
+        self,
+        task: str,
+        *,
+        required_tools: list[str] | None = None,
+        available_tools: set[str] | None = None,
+        budget: int = 10,
+    ) -> Any:
+        """Plan+assign/spawn via ``run_autonomous``; mirror spawns + lattice. KISS."""
+        from agency.autonomy.engine import run_autonomous
+
+        tools = (
+            set(available_tools)
+            if available_tools is not None
+            else (
+                {s.name for s in self._tool_registry.list_specs()}
+                if self._tool_registry is not None
+                else set()
+            )
+        )
+        result = run_autonomous(
+            task,
+            self._runtime_registry,
+            self._planner,
+            tools,
+            required_tools=required_tools,
+            budget=budget,
+        )
+        # Mirror runtime spawns into identity registry + lattice.
+        for spawn in result.spawns:
+            agent_id = spawn.get("agent_id")
+            if not isinstance(agent_id, str) or self._identity_registry.get(agent_id):
+                continue
+            record = self._runtime_registry.get_agent(agent_id)
+            if record is None:
+                continue
+            with suppress(ValueError):
+                self._identity_registry.register(record.agent)
+            if self._lattice is not None:
+                try:
+                    await self._lattice.register_agent(
+                        agent_id=agent_id,
+                        agent_type=record.agent.domain,
+                        capabilities=[c.name for c in record.agent.capabilities],
+                    )
+                except Exception:  # noqa: BLE001 — optional lattice mirror.
+                    self._log.warning("lattice.spawn_register_failed", agent_id=agent_id)
+        agent_id = next(
+            (a["agent_id"] for a in result.assignments if a.get("agent_id") is not None),
+            result.spawns[0].get("agent_id") if result.spawns else None,
+        )
+        await self.submit_task(
+            title=task[:80] or "autonomous",
+            description=task,
+            agent_id=agent_id if isinstance(agent_id, str) else None,
+        )
+        return result
+
     async def get_task(self, task_id: str) -> Task:
         """Get task by ID."""
         task = await self._task_manager.get_task(task_id)

@@ -72,6 +72,8 @@ class _Config(BaseModel):
     spending: SpendingConfig | None = None
     proxy: str | None = None
     coding: _CodingConfig | None = None
+    memory_tools: bool = False
+    web_fetch: bool = False
 
 
 @dataclass(frozen=True)
@@ -85,7 +87,7 @@ class Settings:
 
 _RUNTIME_NAMES = frozenset({"owner.token", "pilot.db.recover.lock"}) | frozenset(
     name + suffix
-    for name in ("pilot.db", "quota.db", "audit.db", "spend.db")
+    for name in ("pilot.db", "quota.db", "audit.db", "spend.db", "memory.db")
     for suffix in ("", "-wal", "-shm", "-journal")
 )
 _ACL_READ = r"""
@@ -666,6 +668,11 @@ async def serve(settings: Settings) -> None:
                 else None
             ),
             coding=coding,
+            memory_db_path=(
+                str(settings.data_dir / "memory.db") if settings.config.memory_tools else None
+            ),
+            enable_memory_tools=settings.config.memory_tools,
+            enable_web_fetch=settings.config.web_fetch,
         )
         stack.push_async_callback(pilot.stop)
         authenticator = OwnerAuthenticator(

@@ -1,8 +1,8 @@
 """Agent reputation scoring (Lattice Brief 3 / SPEC_LATTICE.md section 7.2).
 
 Reputation blends task outcomes (60%) with peer ratings (40%) over a
-rolling window. Butler and the human user always vote at weight 1.0;
-all other agents vote at their reputation score.
+rolling window. Butler and the human user vote at weight 1.0 (plain
+weight, no override); all other agents vote at their reputation score.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from agency.lattice.models import Reputation, utc_now
 #: Number of peer ratings kept per agent (SPEC_LATTICE.md section 8).
 REPUTATION_WINDOW = 20
 
-#: Voters that always carry full weight regardless of reputation.
+#: Voters that carry full weight as plain weight (no instant resolve).
 TRUSTED_VOTERS: frozenset[str] = frozenset({"butler", "user"})
 
 log = structlog.get_logger(__name__)
@@ -112,7 +112,7 @@ class ReputationEngine:
         return 0.6 * success_rate + 0.4 * peer_avg
 
     async def vote_weight(self, voter_id: str) -> float:
-        """Return vote weight: 1.0 for butler/user, reputation otherwise."""
+        """Return vote weight: 1.0 for butler/user (plain weight), reputation otherwise."""
         if not voter_id:
             raise ValueError("voter_id must not be empty.")
         if voter_id.strip().lower() in TRUSTED_VOTERS:
