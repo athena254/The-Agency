@@ -92,7 +92,9 @@ async def test_admitted_owner_grant_reaches_one_exact_metered_http_dispatch(
             "write": 10.0,
             "pool": 10.0,
         }
-        assert options == [{"timeout": 10.0, "trust_env": False, "follow_redirects": False}]
+        assert options == [
+            {"timeout": 10.0, "trust_env": False, "follow_redirects": False, "proxy": None}
+        ]
 
         current = await store.get(owner, admitted.task_id)
         assert current.state == "RUNNING"
