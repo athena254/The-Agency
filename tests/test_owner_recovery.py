@@ -13,7 +13,11 @@ from pydantic import SecretStr
 
 from agency.admission.models import OwnerTaskRequest, PilotError
 from agency.kernel.audit import AuditEntry, BetaAuditLog
-from tests.test_owner_service import concrete, make_service, terminal  # noqa: F401 -- pytest fixture
+from tests.test_owner_service import (  # noqa: F401 -- pytest fixture
+    concrete,
+    make_service,
+    terminal,
+)
 
 KEY = SecretStr("SYNTHETIC_OWNER_TOKEN_" + "x" * 43)
 
