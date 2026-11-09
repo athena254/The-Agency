@@ -4,7 +4,7 @@ Updated November 9, 2026. These are tracked engineering findings, not waived war
 
 ## KI-01 — Windows-only harness errors from oversized test IDs (harness, not product)
 
-At `cafd683`, the hermetic suite records 3453 passed, 3 skipped, 4 errors. All four errors are setup/teardown failures on two parameterized tests whose IDs are tens of thousands of characters long:
+At `c0a1de9`, the hermetic suite records 3513 passed, 3 skipped, 4 errors. All four errors are setup/teardown failures on two parameterized tests whose IDs are tens of thousands of characters long:
 
 - `tests/test_factory_coding_models.py::test_canonical_rejects_non_json_or_unbounded_values` with the `"x" * 65537` parameter.
 - `tests/test_factory_coding_publication.py::test_original_long_or_calculator_looking_task_never_selects_calculator` with the `"雪" * 8000` parameter.

@@ -19,7 +19,7 @@
   verified in this docs pass.
 - **The October 18 status ledger described a blocked suite and 16 Node UI tests.**
   Superseded: the suite is now hermetic (`tests/conftest.py` pins settings and
-  isolates every runtime database) and records 3453 passed, 3 skipped, 4
+  isolates every runtime database) and records 3513 passed, 3 skipped, 4
   Windows-only harness errors; 79 Node UI tests pass. See `CURRENT_STATE.md`.
 - **The owner pilot service/API/UI, persistent task workspace and Mission Control
   console were absent from the earlier ledger.** They now exist as bounded local
@@ -38,7 +38,7 @@
 | Persistent task workspace | Implemented (local) | owner-scoped SQLite threads/messages/tasks; replay, cancel, UNCERTAIN recovery; no auto-resume |
 | Mission Control console | Implemented (local) | `gui/` React 18 + TS + Vite + Tailwind; built to `static/mission-control`; served at `/mission-control`; honest locked states for P2 surfaces |
 | Pilot workspace UI | Implemented (local) | dependency-free `static/pilot.html|pilot.js|pilot.css` at `/pilot` |
-| Hermetic test suite | Implemented | `tests/conftest.py` isolates env and DBs; 3453 passed, 3 skipped, 4 Windows-only harness errors |
+| Hermetic test suite | Implemented | `tests/conftest.py` isolates env and DBs; 3513 passed, 3 skipped, 4 Windows-only harness errors |
 | Secrets management | Partial | `src/agency/memory/sms/secrets.py`, `src/agency/config/keys.py` |
 | Retrieval / memory | Partial | `src/agency/memory/sms/store.py`, `retrieval.py`, `lifecycle.py`, `cpr.py` |
 | Agent lifecycle scaffolding | Partial | `src/agency/kernel/registry.py`, `agents/registry.py`, `agents/loop.py`, `agents/executor.py` |
@@ -52,7 +52,8 @@
 | Lattice + governance + reputation | Partial (single-process prototype) | `src/agency/lattice/`; process-local state, best-effort mirroring, `user` override; not peer consensus |
 | API server + CLI | Partial | `src/agency/api/server.py` (`/v1` closed except health), `src/agency/cli/main.py`; prototype `/api` and `/api/pilot` surfaces are separate |
 | CI / CD workflows | Exists, outcome unverified at this SHA | `.github/workflows/ci.yml`, `cd.yml`; no exact-SHA run is certified in this docs pass |
-| Coding agent / Forge | Partial | `agents/coding.py` operator over Forge with protected-path guardrail; owner factory coding core is service-level and not HTTP-exposed; merge/release remain planned |
+| Coding agent / Forge | Partial | `agents/coding.py` operator over Forge with protected-path guardrail; owner factory coding exposed over the pilot API (`/api/pilot/coding-tasks`) and console coding page, gated on an opt-in fixture repo; merge/release remain planned |
+| Peer protocol slice A | Implemented (contracts only) | `src/agency/peers/`: identities, canonical serialization, envelope binding, membership/epoch types, redaction, durable hash-chained log; no transport, executor, actuator or consensus |
 | Prototype factories (dark/ghost) | Prototypes only | Standalone; not an integrated Forge |
 
 ### New partial foundations and remaining planned systems
