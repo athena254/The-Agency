@@ -1,9 +1,11 @@
 """Known-peer protocol contracts: identity, envelopes, membership, log.
 
-This package is the P2 slice-A protocol checkpoint. It supplies types and pure
-functions only — no transport, no executor, no actuator, no consensus engine,
-and no authority. A verified message here is well-formed signed input, not
-admission, not a ballot of record, and not permission to act.
+This package is the P2 protocol checkpoint. It supplies types and pure
+functions plus a local durable log and two read-only adapters over it — no
+transport, no executor, no actuator, no consensus engine, and no authority. A
+verified message here is well-formed signed input, not admission, not a ballot
+of record, and not permission to act. A mirrored legacy artifact is an
+observation, not a proposal or a ballot.
 
 Approved policy inputs (D-01 – D-05) are reflected as type-level bounds: four
 validator peers, one Byzantine fault, a 3/4 application quorum, genesis
@@ -13,6 +15,7 @@ implemented as decisions here.
 
 from __future__ import annotations
 
+from agency.peers.adapter import MESSAGE_KIND_RECORD_KIND, PeerLogAdapter, PeerLogAdapterError
 from agency.peers.canonical import (
     MAX_MEMBERS,
     SchemaError,
@@ -65,6 +68,15 @@ from agency.peers.membership import (
     membership_from_payload,
     quorum_approvals_required,
 )
+from agency.peers.mirror import (
+    MIRROR_ARTIFACT_TYPES,
+    MIRROR_AUTHORITY,
+    MIRROR_MEMBERSHIP_EPOCH,
+    MIRROR_RECORD_KIND,
+    MIRROR_SOURCE,
+    LegacyMirror,
+    MirrorError,
+)
 from agency.peers.redaction import (
     redact_mapping,
     redact_structure,
@@ -75,16 +87,26 @@ from agency.peers.redaction import (
 
 __all__ = [
     "MAX_MEMBERS",
+    "MESSAGE_KIND_RECORD_KIND",
+    "MIRROR_ARTIFACT_TYPES",
+    "MIRROR_AUTHORITY",
+    "MIRROR_MEMBERSHIP_EPOCH",
+    "MIRROR_RECORD_KIND",
+    "MIRROR_SOURCE",
     "ChainVerification",
     "ConsumerId",
     "EnvelopeBindingError",
+    "LegacyMirror",
     "LogIntegrityError",
     "LogRecord",
     "LogScan",
     "Member",
     "Membership",
+    "MirrorError",
     "PeerIdentity",
     "PeerLog",
+    "PeerLogAdapter",
+    "PeerLogAdapterError",
     "PeerMessage",
     "PeerPublicKey",
     "Removal",

@@ -78,6 +78,10 @@ RECORD_KINDS: Final = frozenset(
         "reconciliation",
         "executed_grant",
         "recovery",
+        # §18 step 3: read-only observations of legacy (unsigned, unverified)
+        # artifacts. A mirror record is never a protocol transition, carries no
+        # authority, and is written only by the mirror shim.
+        "mirror",
     }
 )
 
