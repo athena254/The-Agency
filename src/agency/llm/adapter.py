@@ -62,8 +62,14 @@ class LLMDispatchSnapshot:
     temperature: float
     timeout: float
     proxy: str = field(default="")
+    reasoning_effort: str | None = None
 
     def __post_init__(self) -> None:
+        if self.reasoning_effort is not None and (
+            type(self.reasoning_effort) is not str
+            or self.reasoning_effort not in ("instant", "low", "medium", "high")
+        ):
+            raise ValueError("Invalid owner dispatch reasoning effort")
         for name in ("provider", "model", "base_url", "api_key", "proxy"):
             if type(getattr(self, name)) is not str:
                 raise TypeError("Owner dispatch requires exact text fields")
@@ -154,6 +160,7 @@ class LLMAdapter:
         timeout: float = 60.0,
         config: Any = None,
         proxy: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         # Owner provenance is separate from legacy environment/default resolution.
         # Preserve the old constructor and generate path, but never admit values
@@ -196,6 +203,7 @@ class LLMAdapter:
             self._temperature = config.temperature
             self._timeout = config.timeout
             self._proxy = getattr(config, "proxy", None) or ""
+            self._reasoning_effort = getattr(config, "reasoning_effort", reasoning_effort)
         else:
             self._provider = provider or os.environ.get("AGENCY_LLM_PROVIDER", "")
             self._model = model or os.environ.get("AGENCY_LLM_MODEL", "")
@@ -205,6 +213,7 @@ class LLMAdapter:
             self._temperature = temperature
             self._timeout = timeout
             self._proxy = proxy or os.environ.get("AGENCY_LLM_PROXY", "")
+            self._reasoning_effort = reasoning_effort
 
             # Auto-detect provider if not set
             if not self._provider:
@@ -235,6 +244,7 @@ class LLMAdapter:
             temperature=self._temperature,
             timeout=self._timeout,
             proxy=self._proxy,
+            reasoning_effort=self._reasoning_effort,
         )
 
     async def generate_bound(
@@ -275,6 +285,11 @@ class LLMAdapter:
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
+        # Mercury can exhaust a bounded completion on reasoning without answer text.
+        # Explicit opt-in; other providers retain their unchanged request contract.
+        # https://docs.inceptionlabs.ai/capabilities/reasoning-efforts
+        if snapshot.reasoning_effort is not None:
+            payload["reasoning_effort"] = snapshot.reasoning_effort
         async with httpx.AsyncClient(
             timeout=timeout,
             trust_env=False,

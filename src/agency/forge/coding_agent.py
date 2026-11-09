@@ -335,7 +335,7 @@ def run_coding_agent(
 
             new_text = text.replace(old_str, new_str, 1)
             try:
-                candidate.write_text(new_text, encoding="utf-8")
+                candidate.write_bytes(new_text.encode("utf-8"))
             except OSError:
                 failure = "write_failed"
                 break

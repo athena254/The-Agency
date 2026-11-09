@@ -46,6 +46,7 @@ def test_freeze_is_independent_immutable_and_secret_safe() -> None:
         "temperature",
         "timeout",
         "proxy",
+        "reasoning_effort",
     ]
     assert snapshot.provider == "openai"
     assert snapshot.model == "synthetic/model:exact"
@@ -54,6 +55,7 @@ def test_freeze_is_independent_immutable_and_secret_safe() -> None:
     assert snapshot.max_tokens == 123
     assert snapshot.temperature == 0.25
     assert snapshot.timeout == 12.0
+    assert snapshot.reasoning_effort is None
     assert "SYNTHETIC_OWNER_KEY" not in repr(snapshot)
     attribute = "model"
     with pytest.raises(FrozenInstanceError):

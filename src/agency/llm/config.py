@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
@@ -56,6 +56,7 @@ class LLMConfig(BaseModel):
     max_tokens: int = Field(default=1024, gt=0, description="Max completion tokens.")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Sampling temperature.")
     timeout: float = Field(default=60.0, gt=0, description="Per-request timeout in seconds.")
+    reasoning_effort: Literal["instant", "low", "medium", "high"] | None = None
     proxy: str | None = Field(
         default=None,
         description=(

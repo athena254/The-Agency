@@ -71,6 +71,7 @@ class _Config(BaseModel):
     timeout: float = 45.0
     spending: SpendingConfig | None = None
     proxy: str | None = None
+    reasoning_effort: Literal["instant", "low", "medium", "high"] | None = None
     coding: _CodingConfig | None = None
     memory_tools: bool = False
     web_fetch: bool = False
@@ -472,6 +473,7 @@ def validate(
             max_tokens=config.max_tokens,
             temperature=config.temperature,
             timeout=config.timeout,
+            reasoning_effort=config.reasoning_effort,
         )
         provider = LLMConfig(
             provider=ProviderKind.OPENAI,
@@ -482,6 +484,7 @@ def validate(
             temperature=config.temperature,
             timeout=config.timeout,
             proxy=config.proxy,
+            reasoning_effort=config.reasoning_effort,
         )
     except (ValueError, TypeError, OSError, LauncherError, PilotError):
         raise LauncherError("invalid_configuration") from None

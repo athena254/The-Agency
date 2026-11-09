@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from agency.admission.models import OwnerExecutionGrant, OwnerMeteredBinding, PilotError
+from agency.admission.owner_recovery import OwnerRecovery
 from agency.admission.spending import SpendingError, SpendingLedger
 from agency.kernel.audit import AuditEntry, BetaAuditLog
 from agency.llm.adapter import LLMAdapter, _bounded_dispatch_text
@@ -81,6 +82,7 @@ class MeteredModel:
         timeout_s: float = 30.0,
         *,
         spending: SpendingLedger | None = None,
+        owner_recovery: OwnerRecovery | None = None,
     ) -> None:
         from agency.admission.budget import OwnerBudgetAdapter
 
@@ -116,6 +118,15 @@ class MeteredModel:
         ):
             raise TypeError("Spending requires an exact owner ledger/binding")
         self._spending = spending
+        if owner_recovery is not None:
+            if (
+                type(owner_recovery) is not OwnerRecovery
+                or type(binding) is not OwnerMeteredBinding
+                or spending is not None
+            ):
+                raise TypeError("Recovery requires an exact owner binding")
+            owner_recovery.validate_binding(binding.grant, audit)
+        self._owner_recovery = owner_recovery
         self._snapshot = (
             inner.freeze_dispatch() if isinstance(binding, OwnerMeteredBinding) else None
         )
@@ -223,7 +234,11 @@ class MeteredModel:
                 raise MeteredDenied("metered: spending unavailable") from None
         intent = self._entry(call_id, "pending", "intent")
         try:
-            claimed = await self._audit.claim_intent(intent)
+            claimed = (
+                await self._owner_recovery.claim_intent(binding.grant, self._audit, intent)
+                if self._owner_recovery is not None and type(binding) is OwnerMeteredBinding
+                else await self._audit.claim_intent(intent)
+            )
         except asyncio.CancelledError:
             if self._owner_grant is None:
                 raise
@@ -332,6 +347,10 @@ class MeteredModel:
         if self._owner_grant is None:
             return
         grant = self._validate_owner(context)
+        if self._owner_recovery is not None:
+            if type(self._owner_recovery) is not OwnerRecovery:
+                raise MeteredDenied("metered: owner binding denied")
+            self._owner_recovery.validate_binding(grant, self._audit)
         try:
             active = await grant.budget._active(grant.lease)
         except (Exception, asyncio.CancelledError):  # noqa: BLE001 -- fail closed at storage boundary

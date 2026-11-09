@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import structlog
 
+from agency.admission.owner_recovery import OwnerRecovery
 from agency.kernel.audit import AuditEntry, BetaAuditLog
 from agency.tools.base import (
     BetaToolPolicy,
@@ -168,6 +169,7 @@ class ToolRegistry:
         *,
         owner_policy: OwnerToolPolicy | None = None,
         owner_memory_scope: Any | None = None,
+        owner_recovery: OwnerRecovery | None = None,
     ) -> None:
         from agency.admission.policy import OwnerToolPolicy
 
@@ -181,6 +183,11 @@ class ToolRegistry:
         self._default_timeout_s = default_timeout_s
         self._owner_policy = owner_policy
         self._owner_memory_scope = owner_memory_scope
+        if owner_recovery is not None and (
+            type(owner_recovery) is not OwnerRecovery or owner_policy is None
+        ):
+            raise TypeError("Recovery requires an exact owner policy")
+        self._owner_recovery = owner_recovery
         self._beta_policy = beta_policy
         self._beta_suspended = False
         self._log = structlog.get_logger(__name__)
@@ -486,6 +493,10 @@ class ToolRegistry:
         ):
             raise PilotError("forbidden")
         assert isinstance(grant, OwnerExecutionGrant)
+        if self._owner_recovery is not None:
+            if type(self._owner_recovery) is not OwnerRecovery:
+                raise PilotError("forbidden")
+            self._owner_recovery.validate_binding(grant, audit)
         try:
             grant.__post_init__()
             if (
@@ -525,6 +536,11 @@ class ToolRegistry:
             evidence={"call_id": call_id, "tool": name, "phase": "intent"},
         )
         try:
+            if self._owner_recovery is not None:
+                assert self._owner_recovery._grant is not None
+                return await self._owner_recovery.claim_intent(
+                    self._owner_recovery._grant, audit, entry
+                )
             return await BetaAuditLog.claim_intent(audit, entry)
         except asyncio.CancelledError:
             if self._owner_policy is not None:

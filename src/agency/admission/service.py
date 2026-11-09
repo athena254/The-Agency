@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any, Literal, TypeVar, cast
 from uuid import uuid4
 
+from pydantic import SecretStr
+
 from agency.admission.budget import OwnerBudgetAdapter
 from agency.admission.calculator_verification import (
     admitted_expression,
@@ -36,6 +38,7 @@ from agency.admission.models import (
     RequestReceipt,
     ThreadView,
 )
+from agency.admission.owner_recovery import OwnerRecovery
 from agency.admission.policy import OwnerToolPolicy
 from agency.admission.spending import SpendingError, SpendingLedger
 from agency.admission.store import OwnerPilotStore
@@ -84,6 +87,7 @@ class OwnerPilotService:
         memory_db_path: str | None = None,
         enable_memory_tools: bool = False,
         enable_web_fetch: bool = False,
+        recovery_key: SecretStr | None = None,
     ) -> None:
         if (
             type(butler) is not ButlerService
@@ -159,6 +163,12 @@ class OwnerPilotService:
         self._coding_sha = coding.profile.sha256 if coding is not None else None
         self._coding_uncertain: asyncio.Task[None] | None = None
         self._spending = spending
+        if recovery_key is not None and (
+            type(recovery_key) is not SecretStr or spending is not None
+        ):
+            raise PilotError("invalid_request")
+        self._recovery_key = recovery_key
+        self._recovery: OwnerRecovery | None = None
         self._butler, self._store, self._budget, self._audit = butler, store, budget, audit
         self._owner_id, self._workspace_id = owner_id, workspace_id
         self._config_id = uuid4().hex
@@ -313,12 +323,35 @@ class OwnerPilotService:
         )
 
     async def _uncertainty(self, principal: OwnerPrincipal) -> bool:
+        if self._recovery_key is not None:
+            recovery = self._owner_recovery(principal)
+            assert recovery is not None
+            return await recovery.blocked() or self._blocked or self._stopping
         durable = await self._store.has_uncertainty(principal)
         try:
             pending = await self._audit.has_pending_calls()
         except Exception:  # noqa: BLE001 -- storage/child failures must fail closed
             raise PilotError("audit", uncertain=True) from None
         return durable or pending or self._blocked or self._stopping
+
+    def _owner_recovery(self, principal: OwnerPrincipal) -> OwnerRecovery | None:
+        if self._recovery_key is None:
+            return None
+        self._owner(principal)
+        if self._recovery is None:
+            self._recovery = OwnerRecovery(
+                store=self._store,
+                budget=self._budget,
+                audit=self._audit,
+                principal=principal,
+                key=self._recovery_key,
+                workspace_id=self._workspace_id,
+                spending=self._spending,
+            )
+        if self._recovery._principal != principal:
+            raise PilotError("forbidden")
+        self._recovery._validate()
+        return self._recovery
 
     async def spending(self, principal: OwnerPrincipal) -> dict[str, Any]:
         await self._scope(principal)
@@ -689,7 +722,11 @@ class OwnerPilotService:
             try:
                 # Always inspect durable audit even for forbidden/denied errors.
                 try:
-                    pending = await self._audit.has_pending_calls()
+                    pending = (
+                        await self._recovery.blocked()
+                        if self._recovery is not None
+                        else await self._audit.has_pending_calls()
+                    )
                 except Exception:  # noqa: BLE001 -- storage/child failures must fail closed
                     pending = True
                     self._blocked = True
@@ -928,6 +965,9 @@ class OwnerPilotService:
             allowed_tools=allowed_tools,
         )
         config = self._dispatch
+        recovery = self._owner_recovery(principal)
+        if recovery is not None:
+            recovery = recovery.for_grant(grant)
         inner = LLMAdapter(
             provider=config.provider,
             model=config.model,
@@ -937,6 +977,7 @@ class OwnerPilotService:
             temperature=config.temperature,
             timeout=config.timeout,
             proxy=config.proxy,
+            reasoning_effort=config.reasoning_effort,
         )
         model = MeteredModel(
             inner,
@@ -945,6 +986,7 @@ class OwnerPilotService:
             self._audit,
             timeout_s=config.timeout,
             spending=self._spending,
+            owner_recovery=recovery,
         )
         memory_scope = None
         if self._enable_memory_tools:
@@ -960,6 +1002,7 @@ class OwnerPilotService:
             owner_policy=OwnerToolPolicy(),
             audit=self._audit,
             owner_memory_scope=memory_scope,
+            owner_recovery=recovery,
         )
         registry.register(CalculatorTool())
         registry.register(UtcTimeTool())
