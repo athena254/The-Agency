@@ -68,3 +68,4 @@ data/memory.db-wal
 data/remex_profiles.db
 data/remex_profiles.db-wal
 data/remex_profiles.db-shm
+.tmp_gossip/
