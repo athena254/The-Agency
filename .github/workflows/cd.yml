@@ -5,23 +5,90 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      revision:
+        description: "Exact git revision (SHA) to certify and release"
+        required: true
+        type: string
 
 env:
   PYTHON_VERSION: "3.11"
-  UV_VERSION: "0.4.0"
+  UV_VERSION: "0.13.1"
+  # Use the interpreter actions/setup-python provides; never download one.
+  UV_PYTHON_PREFERENCE: "only-system"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# The revision that every release artifact is built from. On a tag push this is
+# the tagged commit; on a manual dispatch it is the SHA supplied by the operator.
 
 jobs:
+  gates:
+    name: Gate set at pinned revision (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.revision || github.sha }}
+          fetch-depth: 0
+      - name: Certify exact revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          pinned='${{ github.event.inputs.revision || github.sha }}'
+          actual="$(git rev-parse HEAD)"
+          echo "pinned=${pinned}"
+          echo "actual=${actual}"
+          [ "${actual}" = "${pinned}" ]
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install uv
+        run: pip install "uv==${{ env.UV_VERSION }}"
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
+      - name: Ruff lint
+        run: uv run --no-sync ruff check src/ tests/
+      - name: Ruff format check
+        run: uv run --no-sync ruff format --check src/ tests/
+      - name: Strict mypy
+        run: uv run --no-sync mypy src/
+      - name: Hermetic Python tests
+        env:
+          AGENCY_LLM_PROVIDER: echo
+          AGENCY_LLM_MODEL: echo
+          AGENCY_BETA_MODE: "0"
+          TELEGRAM_BOT_TOKEN: ""
+        run: uv run --no-sync pytest tests/ -q --tb=short
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Node UI tests
+        run: node --test tests/*.test.mjs
+
   build:
     name: Build Package
+    needs: gates
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
         with:
-          version: ${{ env.UV_VERSION }}
+          ref: ${{ github.event.inputs.revision || github.sha }}
+          fetch-depth: 0
       - name: Set up Python
-        run: uv python install ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install uv
+        run: pip install "uv==${{ env.UV_VERSION }}"
       - name: Build wheel and sdist
         run: uv build
       - name: Upload build artifacts
@@ -41,10 +108,11 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
         with:
-          version: ${{ env.UV_VERSION }}
+          ref: ${{ github.event.inputs.revision || github.sha }}
+          fetch-depth: 0
+      - name: Install uv
+        run: pip install "uv==${{ env.UV_VERSION }}"
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -55,15 +123,23 @@ jobs:
 
   docker:
     name: Build & Push Docker Image
-    needs: build
+    needs: gates
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.revision || github.sha }}
+          fetch-depth: 0
       - name: Build Docker image
-        run: docker build -t ghcr.io/${{ github.repository }}:${{ github.ref_name }} -t ghcr.io/${{ github.repository }}:latest .
+        run: |
+          docker build \
+            --label "org.opencontainers.image.revision=${{ github.event.inputs.revision || github.sha }}" \
+            -t ghcr.io/${{ github.repository }}:${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.revision || github.sha }} \
+            -t ghcr.io/${{ github.repository }}:latest \
+            .
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -72,5 +148,5 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Push Docker image
         run: |
-          docker push ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          docker push ghcr.io/${{ github.repository }}:${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.revision || github.sha }}
           docker push ghcr.io/${{ github.repository }}:latest

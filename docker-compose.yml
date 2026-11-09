@@ -1,43 +1,81 @@
-version: "3.9"
+# The Agency — single-host deployment.
+#
+# The runtime is the FastAPI/uvicorn API (src/agency/api/server.py). It stores
+# state in SQLite via aiosqlite (evidence/memory) and the Lattice SQLite store.
+# Redis and PostgreSQL are NOT used by the runtime and are deliberately absent.
+#
+# Secrets come from the environment. Docker Compose reads a local `.env` for
+# substitution; never commit real values.
 
 services:
   agency:
     build:
       context: .
       dockerfile: Dockerfile
+    image: theagency/api:latest
     ports:
-      - "8080:8080"
+      - "8000:8000"
     environment:
-      - AGENCY_LLM_PROVIDER=${AGENCY_LLM_PROVIDER:-openai}
-      - AGENCY_LLM_MODEL=${AGENCY_LLM_MODEL:-gpt-4o-mini}
-      - AGENCY_LLM_API_KEY=${AGENCY_LLM_API_KEY}
-      - AGENCY_TELEGRAM_BOT_TOKEN=${AGENCY_TELEGRAM_BOT_TOKEN}
-      - AGENCY_TELEGRAM_OWNER_ID=${AGENCY_TELEGRAM_OWNER_ID}
-      - AGENCY_REDIS_URL=redis://redis:6379/0
-    depends_on:
-      - redis
-      - db
-    restart: unless-stopped
+      AGENCY_LLM_PROVIDER: ${AGENCY_LLM_PROVIDER:-openai}
+      AGENCY_LLM_MODEL: ${AGENCY_LLM_MODEL:-gpt-4o-mini}
+      AGENCY_LLM_API_KEY: ${AGENCY_LLM_API_KEY:-}
+      AGENCY_LLM_BASE_URL: ${AGENCY_LLM_BASE_URL:-}
+      AGENCY_LOG_LEVEL: ${AGENCY_LOG_LEVEL:-INFO}
+      AGENCY_EVIDENCE_DB: /app/data/evidence.db
+      AGENCY_MEMORY_DB: /app/data/memory.db
+      LATTICE_SQLITE_PATH: /app/data/lattice.db
     volumes:
-      - ./data:/app/data
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
+      - agency_data:/app/data
+    tmpfs:
+      - /tmp
+    read_only: true
+    user: "10001:10001"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    cpus: 1.0
+    mem_limit: 512m
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
-  db:
-    image: postgres:16-alpine
+  # Optional Telegram ingress. Beta model/tool paths stay disabled
+  # (AGENCY_BETA_MODE=0); the bot serves private nonbeta commands only.
+  # The bot reads TELEGRAM_BOT_TOKEN, not AGENCY_TELEGRAM_BOT_TOKEN.
+  # Start with: docker compose --profile telegram up -d
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: theagency/api:latest
+    profiles: ["telegram"]
     environment:
-      POSTGRES_DB: theagency
-      POSTGRES_USER: agency
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
-    ports:
-      - "5432:5432"
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN to run the Telegram bot}
+      AGENCY_BETA_MODE: "0"
+      AGENCY_LLM_PROVIDER: ${AGENCY_LLM_PROVIDER:-openai}
+      AGENCY_LLM_MODEL: ${AGENCY_LLM_MODEL:-gpt-4o-mini}
+      AGENCY_LLM_API_KEY: ${AGENCY_LLM_API_KEY:-}
+      AGENCY_LLM_BASE_URL: ${AGENCY_LLM_BASE_URL:-}
+      TELEGRAM_POLL_DB_PATH: /app/data/telegram_poll.db
+      TELEGRAM_BETA_BUDGET_DB_PATH: /app/data/telegram_beta_budget.db
     volumes:
-      - db_data:/var/lib/postgresql/data
+      - agency_data:/app/data
+    tmpfs:
+      - /tmp
+    read_only: true
+    user: "10001:10001"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
+    command: ["python", "-m", "telegram_bot"]
 
 volumes:
-  db_data:
+  agency_data:

@@ -89,6 +89,9 @@ Broken historical
 instructions (`python -m theagency.gateways.launcher`, `pip install -e ".[all]"`,
 `docker-compose -f docker-compose.sandbox.yml`) have been removed; no replacement
 commands are invented for servers or services that are not defined here.
+The supported container artifacts (`Dockerfile`, `docker-compose.yml`, the
+GitHub workflows and the box deployment scripts) are documented in
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ```bash
 # Install (extras defined in pyproject.toml: dev, neo4j, qdrant, ollama, llm)
