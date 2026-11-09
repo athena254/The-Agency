@@ -67,19 +67,14 @@ def test_ranking_uses_document_kind_prior_at_equal_quality() -> None:
 
 
 def test_rank_documents_reports_total_beyond_the_limit() -> None:
-    rows = [
-        (f"id{index}", "message", "alpha", NEWEST - index, f"id{index}")
-        for index in range(5)
-    ]
+    rows = [(f"id{index}", "message", "alpha", NEWEST - index, f"id{index}") for index in range(5)]
     ranked, total = rank_documents(rows, ["alpha"], limit=2)
     assert total == 5
     assert len(ranked) == 2
 
 
 def test_limit_truncates_hits_and_marks_truncated() -> None:
-    entries = [
-        _entry(f"id{index}", "message", "alpha", NEWEST - index) for index in range(5)
-    ]
+    entries = [_entry(f"id{index}", "message", "alpha", NEWEST - index) for index in range(5)]
     response = search(_index(entries), OWNER, "alpha", now=NEWEST, limit=2)
     assert len(response.hits) == 2
     assert response.total == 5
@@ -101,7 +96,8 @@ def test_limit_is_bounded_and_validated() -> None:
 
 def test_default_limit_is_applied_when_omitted() -> None:
     entries = [
-        _entry(f"id{index:03d}", "message", "alpha", NEWEST - index) for index in range(DEFAULT_LIMIT + 5)
+        _entry(f"id{index:03d}", "message", "alpha", NEWEST - index)
+        for index in range(DEFAULT_LIMIT + 5)
     ]
     response = search(_index(entries), OWNER, "alpha", now=NEWEST)
     assert len(response.hits) == DEFAULT_LIMIT

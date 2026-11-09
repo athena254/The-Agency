@@ -71,9 +71,7 @@ def search(
     normalized = normalize_query(query)
     terms = effective_terms(query_terms(normalized))
     if not terms:
-        return SearchResponse(
-            hits=(), total=0, truncated=False, principal=owner, query=normalized
-        )
+        return SearchResponse(hits=(), total=0, truncated=False, principal=owner, query=normalized)
     moment = time.time() if now is None else float(now)
     if not math.isfinite(moment):
         raise PilotError("invalid_request")

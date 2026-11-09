@@ -165,9 +165,7 @@ class IndexBuilder:
             raise PilotError("store") from None
         finally:
             conn.close()
-        return SearchIndex(
-            entries=tuple(entries), built_at=time.time(), owner_id=owner
-        )
+        return SearchIndex(entries=tuple(entries), built_at=time.time(), owner_id=owner)
 
 
 def _task_text(input_json: object, result_json: object) -> str:
