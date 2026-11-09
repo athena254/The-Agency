@@ -9,6 +9,10 @@ surface than :mod:`agency.butler.server`:
 ``GET  /api/health``  ``{status, butler, agents}``.
 ``GET  /api/agents``  ``{agents: [{id, name, domain}]}``.
 ``GET  /api/session`` ``{csrf_token}`` for accepted local requests.
+``GET  /api/pilot/observe/*``
+                      Read-only local observability (agents, tasks, evidence,
+                      risk, memory, audit, owner, skills, tools) behind the same
+                      owner boundary. Never a write, never a ``/v1`` route.
 ``POST /api/chat``    ``{message}`` -> ``{response}`` via the isolated,
                       tool-free, memory-free, non-mirrored Butler path
                       (``502``/``504``/``503`` on failure).
@@ -47,6 +51,7 @@ from agency.admission.service import OwnerPilotService
 from agency.agents.assessment import ExecutionAssessment, bound_assessment
 from agency.butler.service import ButlerAuditError, ButlerService
 from agency.orchestrator import AgencyOrchestrator
+from agency.prototype.observe import router as observe_router
 from agency.prototype.owner_guard import guard_owner_bootstrap, guard_owner_request
 from agency.prototype.pilot import pilot_error_response
 from agency.prototype.pilot import router as pilot_router
@@ -316,6 +321,7 @@ def create_app(
     application.state.butler_started = False
     application.state.csrf_token = secrets.token_urlsafe(32)
     application.include_router(pilot_router)
+    application.include_router(observe_router)
 
     @application.exception_handler(PilotError)
     async def _pilot_error_handler(request: Request, exc: Exception) -> JSONResponse:

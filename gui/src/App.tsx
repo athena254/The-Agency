@@ -7,6 +7,7 @@ import { TasksPage } from './routes/Tasks'
 import { CodingPage } from './routes/Coding'
 import { ThreadsPage } from './routes/Threads'
 import { MemoriesPage } from './routes/Memories'
+import { ObservabilityPage } from './routes/Observability'
 import { EvidencePage } from './routes/Evidence'
 import { SkillsPage } from './routes/Skills'
 import { LatticePage } from './routes/Lattice'
@@ -25,6 +26,17 @@ export default function App() {
               element={
                 <PageShell title="Dashboard" subtitle="System overview">
                   <DashboardPage />
+                </PageShell>
+              }
+            />
+            <Route
+              path="/observability"
+              element={
+                <PageShell
+                  title="Observability"
+                  subtitle="Read-only local runtime state"
+                >
+                  <ObservabilityPage />
                 </PageShell>
               }
             />

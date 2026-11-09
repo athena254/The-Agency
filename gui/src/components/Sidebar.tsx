@@ -1,4 +1,5 @@
 import {
+  Activity,
   AppWindow,
   Bot,
   Brain,
@@ -25,6 +26,7 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: Gauge },
+  { to: '/observability', label: 'Observability', icon: Activity },
   { to: '/ide', label: 'IDE', icon: MessagesSquare },
   { to: '/agents', label: 'Agents', icon: Bot },
   { to: '/tasks', label: 'Tasks', icon: FolderKanban },
