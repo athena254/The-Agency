@@ -250,7 +250,7 @@ def _spawn(cmd_list: list[str], cwd: str) -> subprocess.Popen[str]:
         "errors": "replace",
     }
     if _is_windows():
-        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     else:
         kwargs["start_new_session"] = True
     return subprocess.Popen(cmd_list, **kwargs)

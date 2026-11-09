@@ -92,7 +92,11 @@ _ACL_READ = r"""
 $ErrorActionPreference = 'Stop'
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $records = @(foreach ($p in (ConvertFrom-Json $env:AGENCY_PILOT_ACL_PATHS)) {
-  $a = Get-Acl -LiteralPath $p
+  if (Test-Path -LiteralPath $p -PathType Container) {
+    $a = [System.IO.Directory]::GetAccessControl($p)
+  } else {
+    $a = [System.IO.File]::GetAccessControl($p)
+  }
   $rules = @($a.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object {
     @{sid=$_.IdentityReference.Value; allow=($_.AccessControlType -eq 'Allow'); rights=[int]$_.FileSystemRights; inheritance=[int]$_.InheritanceFlags; propagation=[int]$_.PropagationFlags}
   })

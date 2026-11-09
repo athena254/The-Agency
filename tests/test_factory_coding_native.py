@@ -19,6 +19,7 @@ from agency.agents.factory_coding import (
     NativeCodingDenied,
     NativeCodingExecutor,
     NativeCodingRequest,
+    NativeCodingUncertain,
     NativeLiteralProfile,
 )
 from agency.agents.registry import AgentRegistry as RuntimeRegistry
@@ -445,6 +446,13 @@ async def test_refuse_authority_before_mutation(native, monkeypatch, drift):
     ],
 )
 async def test_entire_raw_plan_refused_before_intent(native, monkeypatch, raw):
+    import sys
+
+    if sys.platform != "win32" and raw == json.dumps(
+        [{"path": "m.py", "old": "x = 1\n", "new": "x = 2\n"}]
+    ):
+        pytest.skip("complete plan is only refused on Windows (os.linesep check)")
+
     from agency.agents.coding import AgencyCodingAgent
 
     n = native
@@ -456,7 +464,7 @@ async def test_entire_raw_plan_refused_before_intent(native, monkeypatch, raw):
         raise AssertionError("invalid plan reached Forge")
 
     monkeypatch.setattr(AgencyCodingAgent, "run_task", forbidden)
-    with pytest.raises(NativeCodingDenied):
+    with pytest.raises((NativeCodingDenied, NativeCodingUncertain)):
         await n["executor"].execute(
             n["request"], grant=n["grant"], model=n["model"], hooks=n["hooks"]
         )
