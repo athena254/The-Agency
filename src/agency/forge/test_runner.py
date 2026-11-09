@@ -31,7 +31,47 @@ MAX_TEST_TIMEOUT_S = 300
 MAX_OUTPUT_BYTES = 64 * 1024
 MAX_REPO_BYTES = 50 * 1024 * 1024
 
-TestGate = Literal["PASS", "FAIL", "ERROR", "TIMEOUT"]
+TestGate = Literal["PASS", "FAIL", "ERROR", "TIMEOUT", "SKIP"]
+
+Language = Literal["python", "node", "go", "rust"]
+
+_MARKERS: tuple[tuple[str, Language], ...] = (
+    ("pyproject.toml", "python"),
+    ("package.json", "node"),
+    ("go.mod", "go"),
+    ("Cargo.toml", "rust"),
+)
+
+
+def detect_language(root: str | Path) -> Language:
+    """Return language from manifest file; default to python (legacy)."""
+    base = Path(root)
+    for marker, language in _MARKERS:
+        if (base / marker).is_file():
+            return language
+    return "python"
+
+
+def build_test_command(
+    language: str,
+    test_paths: list[str],
+    extra_args: list[str] | None = None,
+) -> list[str] | None:
+    """Return test command for language, or None if the tool is missing."""
+    args = list(extra_args or [])
+    if language == "node":
+        if shutil.which("npm") is None:
+            return None
+        return ["npm", "test", *args]
+    if language == "go":
+        if shutil.which("go") is None:
+            return None
+        return ["go", "test", "./...", *args]
+    if language == "rust":
+        if shutil.which("cargo") is None:
+            return None
+        return ["cargo", "test", *args]
+    return [sys.executable, "-m", "pytest", *test_paths, *args]
 
 
 class TestReport(BaseModel):
@@ -43,6 +83,7 @@ class TestReport(BaseModel):
     workdir: str
     command: tuple[str, ...]
     gate: TestGate
+    language: str = "python"
     returncode: int | None = None
     duration_s: float = Field(ge=0)
     stdout: str = ""
@@ -86,7 +127,22 @@ def run_tests(
 
     report_id = str(uuid4())
     created_at = datetime.now(UTC)
-    command = [sys.executable, "-m", "pytest", *test_paths, *(extra_args or [])]
+    language = detect_language(real_root)
+    built = build_test_command(language, list(test_paths), extra_args)
+    if built is None:
+        tool = {"node": "npm", "go": "go", "rust": "cargo"}.get(language, language)
+        return TestReport(
+            report_id=report_id,
+            created_at=created_at,
+            root=str(real_root),
+            workdir="<not-copied>",
+            command=(tool,),
+            gate="SKIP",
+            language=language,
+            duration_s=0.0,
+            note=f"{tool} not available; tests skipped",
+        )
+    command = built
 
     if _dir_size(real_root) > MAX_REPO_BYTES:
         return TestReport(
@@ -96,6 +152,7 @@ def run_tests(
             workdir="<not-copied>",
             command=tuple(command),
             gate="ERROR",
+            language=language,
             duration_s=0.0,
             note=f"repository exceeds size cap {MAX_REPO_BYTES} bytes",
         )
@@ -118,6 +175,7 @@ def run_tests(
             workdir=str(tmpdir),
             command=tuple(command),
             gate="ERROR",
+            language=language,
             duration_s=0.0,
             note=f"copy failed: {type(exc).__name__}",
         )
@@ -156,6 +214,12 @@ def run_tests(
         stderr = (raw_err or "")[:MAX_OUTPUT_BYTES] if isinstance(raw_err, str) else ""
         gate = "TIMEOUT"
         rc = None
+    except FileNotFoundError as exc:
+        duration = time.monotonic() - start
+        stdout = ""
+        stderr = str(exc)[:MAX_OUTPUT_BYTES]
+        gate = "SKIP"
+        rc = None
     except Exception as exc:  # noqa: BLE001
         duration = time.monotonic() - start
         stdout = ""
@@ -175,6 +239,7 @@ def run_tests(
         workdir=str(workdir),
         command=tuple(command),
         gate=gate,
+        language=language,
         returncode=rc,
         duration_s=round(duration, 3),
         stdout=stdout,

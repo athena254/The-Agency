@@ -263,7 +263,7 @@ def _one_round(
         try:
             tr = run_tests(root, test_paths, timeout_s=test_timeout_s)
             tests_ran = True
-            if tr.gate != "PASS":
+            if tr.gate not in ("PASS", "SKIP"):
                 tests_passed = False
                 findings.append(
                     ReviewFinding(

@@ -37,6 +37,7 @@ from agency.forge.external_agent import (
     ExternalAgentStore,
     run_external_agent,
 )
+from agency.forge.generate import GenerateReport, generate_app
 from agency.forge.holdout import (
     HoldoutReport,
     HoldoutScenario,
@@ -93,7 +94,9 @@ from agency.forge.security_scan import (
     SecurityReport,
     scan_changes,
 )
-from agency.forge.test_runner import TestReport, run_tests
+from agency.forge.ship import ShipReport, ship_branch
+from agency.forge.smoke import SmokeReport, smoke_app
+from agency.forge.test_runner import TestReport, build_test_command, detect_language, run_tests
 from agency.forge.tool_catalog import (
     CATALOG,
     ToolSpec,
@@ -133,6 +136,7 @@ __all__ = [
     "FileRecord",
     "ForgePipelineReport",
     "ForgePipelineStore",
+    "GenerateReport",
     "HoldoutReport",
     "HoldoutScenario",
     "HoldoutScenarioResult",
@@ -153,15 +157,20 @@ __all__ = [
     "SchedulerStore",
     "SecurityFinding",
     "SecurityReport",
+    "ShipReport",
+    "SmokeReport",
     "TestReport",
     "ToolSpec",
     "WorktreeError",
     "WorktreeInfo",
     "available_tools",
+    "build_test_command",
     "capture_evidence",
     "create_worktree",
+    "detect_language",
     "evaluate_merge",
     "forge_tool_params",
+    "generate_app",
     "generate_timer",
     "get_tool",
     "inspect_changes",
@@ -179,5 +188,7 @@ __all__ = [
     "run_review",
     "run_tests",
     "scan_changes",
+    "ship_branch",
     "slice_prd",
+    "smoke_app",
 ]

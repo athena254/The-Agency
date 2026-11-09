@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agency.forge.inspection import (
     MAX_FILE_BYTES,
+    MAX_FILES,
     InspectionReport,
     _rejects_for_name,
     _symlink_or_escape,
@@ -36,6 +37,8 @@ from agency.forge.worktree import WorktreeError, WorktreeInfo, create_worktree, 
 logger = structlog.get_logger(__name__)
 
 MAX_EDITS = 32
+MAX_CREATE_FILES = MAX_FILES
+CREATE_FILE_OPS = frozenset({"create_file", "write_file"})
 CodingAgentGate = Literal["PASS", "FAIL"]
 
 _BASE_CAVEATS = _PIPELINE_CAVEATS
@@ -127,14 +130,34 @@ class CodingAgentStore:
 # ---------------------------------------------------------------------------
 
 
-def _normalize_edit(item: object) -> tuple[str, str, str] | None:
-    """Return (path, old, new) or None if shape unrecognized."""
+def _normalize_op(item: object) -> tuple[str, str, str, str] | None:
+    """Return (op, path, old, new) or None if shape unrecognized.
+
+    ``op`` is ``patch`` (exact single-occurrence replacement, the legacy
+    default), ``create_file`` (must not already exist), or ``write_file``
+    (create parent dirs if needed; overwrite if present). For create/write
+    ops ``new`` holds the full file content and ``old`` is ``""``.
+    """
     if isinstance(item, (tuple, list)):
+        if len(item) >= 4 and str(item[0]) in {"patch", "create_file", "write_file"}:
+            return str(item[0]), str(item[1]), str(item[2]), str(item[3])
+        if len(item) >= 3 and str(item[0]) in CREATE_FILE_OPS:
+            return str(item[0]), str(item[1]), "", str(item[2])
         if len(item) >= 3:
-            return str(item[0]), str(item[1]), str(item[2])
+            return "patch", str(item[0]), str(item[1]), str(item[2])
         return None
     if isinstance(item, dict):
         path = item.get("path") or item.get("file") or item.get("target")
+        op = str(item.get("op") or item.get("operation") or item.get("type") or "patch")
+        if op in CREATE_FILE_OPS:
+            if path is None:
+                return None
+            for key in ("content", "new_string", "new", "text", "data"):
+                if item.get(key) is not None:
+                    return op, str(path), "", str(item[key])
+            return None
+        if op not in ("patch", "edit", "replace"):
+            return None
         old = (
             item.get("old_string")
             or item.get("old")
@@ -151,18 +174,62 @@ def _normalize_edit(item: object) -> tuple[str, str, str] | None:
         )
         if path is None or old is None or new is None:
             return None
-        return str(path), str(old), str(new)
-    # object with attributes
+        return "patch", str(path), str(old), str(new)
+    op_attr = getattr(item, "op", None) or getattr(item, "operation", None)
+    if op_attr is not None and str(op_attr) in CREATE_FILE_OPS:
+        path = getattr(item, "path", None)
+        content = getattr(item, "content", None)
+        if path is None or content is None:
+            return None
+        return str(op_attr), str(path), "", str(content)
     for p_attr, o_attr, n_attr in (
         ("path", "old_string", "new_string"),
         ("path", "old", "new"),
     ):
         if hasattr(item, p_attr) and hasattr(item, o_attr) and hasattr(item, n_attr):
             return (
+                "patch",
                 str(getattr(item, p_attr)),
                 str(getattr(item, o_attr)),
                 str(getattr(item, n_attr)),
             )
+    return None
+
+
+def _normalize_edit(item: object) -> tuple[str, str, str] | None:
+    """Return (path, old, new) or None if shape unrecognized. Compat shim."""
+    parsed = _normalize_op(item)
+    if parsed is None:
+        return None
+    _op, path, old, new = parsed
+    return path, old, new
+
+
+def _check_reparse_existing(worktree_path: Path, parts: list[str]) -> str | None:
+    probe = worktree_path
+    for part in parts:
+        probe = probe / part
+        try:
+            component_st = os.lstat(probe)
+        except FileNotFoundError:
+            return None
+        except OSError:
+            return "unreadable_path"
+        if getattr(component_st, "st_file_attributes", 0) & getattr(
+            stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0
+        ):
+            return "reparse_point_not_allowed"
+    return None
+
+
+def _ensure_parent_dirs(worktree_path: Path, parts: list[str]) -> str | None:
+    if len(parts) <= 1:
+        return None
+    parent = worktree_path.joinpath(*parts[:-1])
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return "write_failed"
     return None
 
 
@@ -227,12 +294,11 @@ def run_coding_agent(
     # can change. Invalid shapes/names retain the existing fail-report path;
     # validate traversal before the policy helper performs lexical normalization.
     for raw_edit in normalized_edits:
-        parsed = _normalize_edit(raw_edit)
-        if parsed is not None and _rejects_for_name(parsed[0]) is None and is_protected(parsed[0]):
-            raise ValueError(f"protected path: {parsed[0]}")
+        parsed = _normalize_op(raw_edit)
+        if parsed is not None and _rejects_for_name(parsed[1]) is None and is_protected(parsed[1]):
+            raise ValueError(f"protected path: {parsed[1]}")
 
-    if len(normalized_edits) > max_edits:
-        # Fail closed: still create a worktree? We'll create then report FAIL with no edits.
+    if len(normalized_edits) > max_edits or len(normalized_edits) > MAX_FILES:
         pass
 
     report_id = str(uuid4())
@@ -253,19 +319,21 @@ def run_coding_agent(
     edits_applied = 0
     failure: str | None = None
 
-    # Enforce max edits before applying.
+    # Enforce max edits / max files before applying.
     if len(normalized_edits) > max_edits:
         failure = f"edit_count_exceeds_limit:{max_edits}"
+    if failure is None and len(normalized_edits) > MAX_FILES:
+        failure = f"file_count_exceeds_limit:{MAX_FILES}"
 
     if failure is None:
         for raw_edit in normalized_edits:
             if failure is not None:
                 break
-            parsed = _normalize_edit(raw_edit)
+            parsed = _normalize_op(raw_edit)
             if parsed is None:
                 failure = "invalid_edit_shape"
                 break
-            raw_path, old_str, new_str = parsed
+            op, raw_path, old_str, new_str = parsed
 
             reason = _rejects_for_name(raw_path)
             if reason is not None:
@@ -283,21 +351,49 @@ def run_coding_agent(
                 failure = escape
                 break
 
-            try:
-                # Windows junctions can resolve inside the root and are not
-                # necessarily reported by islink(). Refuse every reparse
-                # component before reading/writing through a policy alias.
-                probe = worktree_path
-                for part in parts:
-                    probe = probe / part
-                    component_st = os.lstat(probe)
-                    if getattr(component_st, "st_file_attributes", 0) & getattr(
-                        stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0
-                    ):
-                        failure = "reparse_point_not_allowed"
-                        break
-                if failure is not None:
+            reparse = _check_reparse_existing(worktree_path, parts)
+            if reparse is not None:
+                failure = reparse
+                break
+
+            if op in CREATE_FILE_OPS:
+                payload = new_str.encode("utf-8")
+                if len(payload) > MAX_FILE_BYTES:
+                    failure = f"file_too_large:{len(payload)}"
                     break
+                exists = candidate.exists()
+                if op == "create_file" and exists:
+                    failure = "file_exists"
+                    break
+                if exists:
+                    try:
+                        st = os.lstat(candidate)
+                    except OSError:
+                        failure = "unreadable_path"
+                        break
+                    if not stat.S_ISREG(st.st_mode):
+                        failure = "nonregular_path"
+                        break
+                dir_failure = _ensure_parent_dirs(worktree_path, parts)
+                if dir_failure is not None:
+                    failure = dir_failure
+                    break
+                if _symlink_or_escape(worktree_path, candidate) is not None or (
+                    _check_reparse_existing(worktree_path, parts[:-1]) is not None
+                ):
+                    failure = "symlink_not_allowed"
+                    break
+                try:
+                    candidate.write_bytes(payload)
+                except OSError:
+                    failure = "write_failed"
+                    break
+                edits_applied += 1
+                if display not in applied_paths:
+                    applied_paths.append(display)
+                continue
+
+            try:
                 st = os.lstat(candidate)
             except FileNotFoundError:
                 failure = "missing_file"
@@ -334,6 +430,9 @@ def run_coding_agent(
                 break
 
             new_text = text.replace(old_str, new_str, 1)
+            if len(new_text.encode("utf-8")) > MAX_FILE_BYTES:
+                failure = f"file_too_large:{len(new_text.encode('utf-8'))}"
+                break
             try:
                 candidate.write_bytes(new_text.encode("utf-8"))
             except OSError:
@@ -442,6 +541,8 @@ code = run_coding_agent
 
 
 __all__ = [
+    "CREATE_FILE_OPS",
+    "MAX_CREATE_FILES",
     "MAX_EDITS",
     "CodingAgentGate",
     "CodingAgentReport",

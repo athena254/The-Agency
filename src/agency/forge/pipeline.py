@@ -16,6 +16,7 @@ import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
 from agency.forge.inspection import InspectionReport, inspect_changes
+from agency.forge.reviewer import ReviewReport, run_review
 from agency.forge.security_scan import SecurityReport, scan_changes
 from agency.forge.test_runner import TestReport, run_tests
 
@@ -40,6 +41,7 @@ class ForgePipelineReport(BaseModel):
     inspection: InspectionReport
     security: SecurityReport
     tests: TestReport | None = None
+    review: ReviewReport | None = None
     caveats: tuple[str, ...] = CAVEATS
     note: str = "Composed Forge pipeline verdict; does not authorize merge or deploy."
 
@@ -104,6 +106,7 @@ def run_pipeline(
     run_tests_flag: bool = False,
     test_paths: list[str] | None = None,
     test_timeout_s: int = 120,
+    run_review_flag: bool = True,
 ) -> ForgePipelineReport:
     real_root = Path(root)
     if not real_root.is_absolute():
@@ -116,18 +119,26 @@ def run_pipeline(
     if run_tests_flag:
         tests = run_tests(real_root, test_paths or [], timeout_s=test_timeout_s)
 
+    review: ReviewReport | None = None
+    if run_review_flag:
+        review = run_review(real_root, changed_paths)
+
     overall: PipelineGate = "PASS"
     if inspection.gate != "PASS":
         overall = "FAIL"
     if security.gate != "PASS":
         overall = "FAIL"
-    if tests is not None and tests.gate != "PASS":
+    if tests is not None and tests.gate not in ("PASS", "SKIP"):
+        overall = "FAIL"
+    if review is not None and review.gate != "PASS":
         overall = "FAIL"
 
     # Update caveats based on what actually ran.
     caveats = list(CAVEATS)
     if tests is not None:
         caveats = [c for c in caveats if c != "tests_not_run"]
+        if tests.gate == "SKIP":
+            caveats.append("tests_skipped")
     # security scan ran, so drop that caveat
     caveats = [c for c in caveats if c != "security_review_not_run"]
 
@@ -139,6 +150,7 @@ def run_pipeline(
         inspection=inspection,
         security=security,
         tests=tests,
+        review=review,
         caveats=tuple(caveats),
     )
     logger.info("forge.pipeline", root=str(real_root), gate=overall)
