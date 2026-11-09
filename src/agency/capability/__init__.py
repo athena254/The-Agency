@@ -5,6 +5,19 @@ from agency.capability.adapters import (
     SkillCapabilityAdapter,
     WorkflowCapabilityAdapter,
 )
+from agency.capability.attestation import (
+    AttestationError,
+    AttestationStore,
+    DependencyImpactReport,
+    inspect_impact,
+    requested_permissions,
+)
+from agency.capability.composition import (
+    AgentCompositionRequest,
+    CompositionDraft,
+    CompositionEngine,
+    CompositionError,
+)
 from agency.capability.contract import (
     CapabilityContract,
     CapabilityError,
@@ -23,6 +36,12 @@ from agency.capability.contract import (
     compute_content_digest,
     content_digest,
     verify_digest,
+)
+from agency.capability.evaluation import (
+    EvaluationResult,
+    EvaluationRun,
+    EvaluationRunner,
+    EvaluationSuite,
 )
 from agency.capability.index import (
     CapabilityIndex,
@@ -45,6 +64,9 @@ from agency.capability.resolver import (
 
 __all__ = [
     "AgentBlueprintCapabilityAdapter",
+    "AgentCompositionRequest",
+    "AttestationError",
+    "AttestationStore",
     "CapabilityAdapter",
     "CapabilityContract",
     "CapabilityError",
@@ -59,11 +81,19 @@ __all__ = [
     "CompatibilityChecker",
     "CompatibilityOutcome",
     "CompatibilityReport",
+    "CompositionDraft",
+    "CompositionEngine",
+    "CompositionError",
     "CorruptCapabilityError",
     "DependencyEdge",
+    "DependencyImpactReport",
     "DependencyRelation",
     "DigestMismatchError",
     "EdgeOutcome",
+    "EvaluationResult",
+    "EvaluationRun",
+    "EvaluationRunner",
+    "EvaluationSuite",
     "IndexBuildReport",
     "PromptCapabilityAdapter",
     "ProvenanceRef",
@@ -78,6 +108,8 @@ __all__ = [
     "compute_content_digest",
     "compute_graph_digest",
     "content_digest",
+    "inspect_impact",
+    "requested_permissions",
     "validate_graph",
     "verify_digest",
 ]
