@@ -1,3 +1,35 @@
+# Agent Factory and skills verification
+
+## Markdown imports: review-only
+
+The Markdown importer lives in `agency.factory.imports.MarkdownImportService`.
+`import_markdown(Path(...))` accepts a standalone `.md` file; a string argument
+is Markdown content, with optional `source_label`. GitHub repository imports
+accept HTTPS `github.com/{owner}/{repo}[.git]` and an explicit branch/tag ref.
+They enumerate only Markdown files plus GitHub's license metadata; tree,
+individual file, and total repository byte/count limits apply. GitHub refs are
+not a substitute for an immutable commit pin; callers should supply a commit
+SHA as `ref` for reproducible imports.
+
+Every imported body is inert and is registered as a `DRAFT` prompt in
+`PromptRegistry` with `import-quarantine:` provenance containing the source,
+path/ref, content digest, and observed SPDX license (or `UNKNOWN`). YAML
+frontmatter is parsed with `safe_load`; all fields remain metadata, not
+permissions or executable configuration. Code blocks and links are never run
+or followed. A missing repository license is reported as `UNKNOWN`, not
+assumed permissive.
+
+`find_similar` returns review suggestions only. `propose_merge` requires an
+explicit selection of 2-10 source IDs and creates a new immutable `DRAFT`
+prompt with `reviewed-import:` provenance. It does not alter sources, grant
+permissions, publish, approve, attach the draft to an agent, or activate an
+identity. Imported skills currently enter the PromptRegistry as inert skill
+instruction content; promotion into the executable skill registry and any
+agent/skill typed composition requires separate review and governance.
+
+Format/license research is recorded in
+`docs/research-evidence/markdown-agent-skill-import-research.md`.
+
 # Agent Factory and skills system — verification report
 
 **Checked:** November 10, 2026
