@@ -550,3 +550,61 @@ def test_unknown_blueprint_raises_keyerror(tmp_path) -> None:
             fac.activate("missing", "1.0.0")
     finally:
         fac.close()
+
+
+def test_explicit_recovery_rehydrates_active_identity_with_authorization(tmp_path) -> None:
+    db = str(tmp_path / "factory.db")
+    fac, _, _ = _factory(tmp_path)
+    _draft(fac)
+    fac.approve("analyst", "1.0.0", approver="approver", evidence="approval")
+    original = fac.activate("analyst", "1.0.0")
+    fac.close()
+
+    kernels, runtimes = KernelRegistry(), RuntimeRegistry()
+    recovered_factory = AgentFactory(
+        db,
+        authorizer=lambda actor, permission: actor == "recovery-operator"
+        and permission == "agent.recover",
+        is_skill_published=lambda _sid, _version: True,
+        is_workflow_published=lambda _wid, _version: True,
+        allowed_capabilities={"inspect", "summarize"},
+        kernel_registry=kernels,
+        runtime_registry=runtimes,
+    )
+    try:
+        with pytest.raises(PermissionError):
+            recovered_factory.recover_active(
+                "analyst", "1.0.0", actor="intruder", evidence="restart incident"
+            )
+        assert kernels.get(original.id) is None
+
+        recovered = recovered_factory.recover_active(
+            "analyst", "1.0.0", actor="recovery-operator", evidence="restart incident"
+        )
+        assert recovered.id == original.id
+        assert recovered.trust_level is TrustLevel.UNKNOWN
+        assert all(cap.max_level is ActionClass.L0_OBSERVATION for cap in recovered.capabilities)
+        assert kernels.get_required(original.id) is recovered
+        assert runtimes.get_agent(original.id) is not None
+        assert recovered_factory.get("analyst", "1.0.0").status is BlueprintStatus.ACTIVE
+        assert recovered_factory.list_events("analyst", "1.0.0")[-1]["to_status"] == "ACTIVE"
+        assert recovered_factory.list_events("analyst", "1.0.0")[-1]["actor"] == "recovery-operator"
+        assert recovered_factory.recover_active(
+            "analyst", "1.0.0", actor="recovery-operator", evidence="repeat recovery"
+        ).id == original.id
+    finally:
+        recovered_factory.close()
+
+
+def test_recovery_rejects_conflicting_identity_and_blank_evidence(tmp_path) -> None:
+    fac, kernels, runtimes = _factory(tmp_path)
+    try:
+        _draft(fac)
+        fac.approve("analyst", "1.0.0", approver="approver", evidence="approval")
+        original = fac.activate("analyst", "1.0.0")
+        with pytest.raises(ValueError, match="evidence"):
+            fac.recover_active("analyst", "1.0.0", actor="approver", evidence=" ")
+        assert kernels.get_required(original.id).revoked is False
+        assert runtimes.get_agent(original.id) is not None
+    finally:
+        fac.close()

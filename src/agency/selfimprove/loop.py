@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agency.selfimprove.distiller import TaskTrace, distill_skill
+from agency.selfimprove.distiller import TaskTrace, distill_skill, evolve_skill
 from agency.skills.registry import SkillRegistry, SkillSpec, SkillStatus
 
 
@@ -19,6 +19,10 @@ class SelfImprovementLoop:
     def distill(self, trace: TaskTrace) -> SkillSpec | None:
         """Attempt to distill one task trace into a DRAFT skill."""
         return distill_skill(trace, self._registry)
+
+    def evolve(self, skill_id: str, trace: TaskTrace) -> SkillSpec | None:
+        """Propose a DRAFT successor for a published skill using new evidence."""
+        return evolve_skill(skill_id, trace, self._registry)
 
     def relevant_skills(self, description: str, *, limit: int = 5) -> list[SkillSpec]:
         """Return published skills whose name/description overlap the query."""
