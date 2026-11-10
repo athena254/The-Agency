@@ -597,6 +597,8 @@ class AgentFactory:
                     "blueprint_id": bp.blueprint_id,
                     "blueprint_version": bp.version,
                     "factory": "agent-factory-v1",
+                    "skill_refs": [list(ref) for ref in bp.skill_refs],
+                    "workflow_refs": [list(ref) for ref in bp.workflow_refs],
                 }
                 if bp.prompt_refs:
                     if self._prompt_resolver is None:
@@ -676,6 +678,131 @@ class AgentFactory:
                         )
             raise
         assert agent is not None
+        return agent
+
+    def recover_active(
+        self, blueprint_id: str, version: str, *, actor: str, evidence: str
+    ) -> Agent:
+        """Explicitly rehydrate an ACTIVE identity after registry loss.
+
+        Recovery requires the trusted authorizer to approve ``agent.recover``
+        and records evidence. It never runs at startup and never changes the
+        ACTIVE blueprint state or grants permissions. Existing matching
+        registry entries are treated idempotently; mismatches fail closed.
+        """
+        if not _is_nonblank(actor):
+            raise ValueError("recovery actor must be nonblank.")
+        actor = actor.strip()
+        ev = _check_evidence(evidence, "recovery evidence")
+        if self._authorizer is None:
+            raise PermissionError("no authorizer configured (fail closed).")
+        try:
+            if self._authorizer(actor, "agent.recover") is not True:
+                raise PermissionError("recovery denied.")
+        except PermissionError:
+            raise
+        except Exception as exc:
+            raise PermissionError("recovery authorizer failed closed.") from exc
+
+        newly_registered = False
+        recovery_agent_id: str | None = None
+        try:
+            with self._conn:
+                self._conn.execute("BEGIN IMMEDIATE")
+                bp = self.get(blueprint_id, version)
+                if bp.status is not BlueprintStatus.ACTIVE or not bp.runtime_agent_id:
+                    raise ValueError("recovery requires an ACTIVE blueprint with a recorded runtime id.")
+                self.validate(bp.blueprint_id, bp.version)
+
+                expected_metadata: dict[str, Any] = {
+                    "blueprint_id": bp.blueprint_id,
+                    "blueprint_version": bp.version,
+                    "factory": "agent-factory-v1",
+                    "skill_refs": [list(ref) for ref in bp.skill_refs],
+                    "workflow_refs": [list(ref) for ref in bp.workflow_refs],
+                }
+                if bp.prompt_refs:
+                    if self._prompt_resolver is None:
+                        raise ValueError("prompt refs pinned but no prompt resolver configured.")
+                    params = self._resolve_prompt_params(bp)
+                    composed = compose_system_prompt(
+                        bp.prompt_refs,
+                        resolver=self._prompt_resolver,
+                        params=params,
+                        override=bp.prompt_override,
+                    )
+                    expected_metadata["system_prompt"] = composed.text
+                    expected_metadata["prompt_refs"] = [list(ref) for ref in composed.prompt_refs]
+                    expected_metadata["prompt_composed_sha256"] = composed.sha256
+                    if params:
+                        expected_metadata["prompt_params"] = params
+
+                existing = self._kernels.get(bp.runtime_agent_id)
+                runtime_record = self._runtimes.get_agent(bp.runtime_agent_id)
+                if existing is not None or runtime_record is not None:
+                    if (
+                        existing is None
+                        or runtime_record is None
+                        or existing.id != bp.runtime_agent_id
+                        or existing.name != bp.name
+                        or existing.domain != bp.domain
+                        or existing.trust_level is not TrustLevel.UNKNOWN
+                        or existing.revoked
+                        or {cap.name for cap in existing.capabilities} != set(bp.capabilities)
+                        or existing.metadata != expected_metadata
+                        or runtime_record.agent is not existing
+                    ):
+                        raise ValueError(
+                            "existing identity conflicts with ACTIVE blueprint; recovery refused."
+                        )
+                    agent = existing
+                else:
+                    agent = Agent(
+                        id=bp.runtime_agent_id,
+                        name=bp.name,
+                        domain=bp.domain,
+                        capabilities=[Capability(name=c) for c in bp.capabilities],
+                        trust_level=TrustLevel.UNKNOWN,
+                        metadata=expected_metadata,
+                    )
+                    if any(
+                        cap.max_level is not ActionClass.L0_OBSERVATION for cap in agent.capabilities
+                    ):
+                        raise ValueError("recovery only permits L0 capability claims.")
+                    self._kernels.register(agent)
+                    recovery_agent_id = agent.id
+                    newly_registered = True
+                    try:
+                        self._runtimes.register(agent)
+                    except Exception:
+                        self._kernels.revoke(agent.id)
+                        raise
+
+                now = _now_iso()
+                self._conn.execute(
+                    "INSERT INTO factory_events (blueprint_id, version, from_status,"
+                    " to_status, actor, evidence, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        bp.blueprint_id,
+                        bp.version,
+                        BlueprintStatus.ACTIVE.value,
+                        BlueprintStatus.ACTIVE.value,
+                        actor,
+                        ev,
+                        now,
+                    ),
+                )
+        except Exception:
+            if newly_registered and recovery_agent_id is not None:
+                self._runtimes.deregister(recovery_agent_id)
+                try:
+                    self._kernels.revoke(recovery_agent_id)
+                except KeyError:
+                    logger.warning(
+                        "factory.kernel_identity_absent_on_recovery_rollback",
+                        agent_id=recovery_agent_id,
+                    )
+            raise
         return agent
 
     def revoke(self, blueprint_id: str, version: str, *, evidence: str) -> Blueprint:

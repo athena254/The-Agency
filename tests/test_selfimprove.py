@@ -123,3 +123,29 @@ def test_relevant_skills_rejects_boolean_limit(tmp_path) -> None:
             SelfImprovementLoop(registry).relevant_skills("document search", limit=True)
     finally:
         registry.close()
+
+
+def test_evolve_creates_immutable_successor_draft_with_new_evidence(tmp_path) -> None:
+    registry = _registry(tmp_path)
+    try:
+        registry.register(_spec("document-search", "1.0.0"))
+        _publish(registry, "document-search", "1.0.0")
+
+        evolved = SelfImprovementLoop(registry).evolve(
+            "document-search",
+            TaskTrace(
+                task_id="task-42",
+                title="Search release documents",
+                description="Include archived release notes when searching.",
+                subtask_outputs=["Archive query returned the missing migration note."],
+            ),
+        )
+
+        assert evolved is not None
+        assert evolved.version == "1.0.1"
+        assert evolved.status is SkillStatus.DRAFT
+        assert "archived release notes" in evolved.description
+        assert evolved.implementation == "search.documents"
+        assert registry.get("document-search", "1.0.0").status is SkillStatus.PUBLISHED
+    finally:
+        registry.close()
