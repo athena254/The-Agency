@@ -322,6 +322,15 @@ class PromptRegistry:
         specs.sort(key=lambda spec: _version_key(spec.version))
         return specs
 
+    def list_specs(self) -> list[PromptSpec]:
+        """Return all prompt records in stable ID/version order."""
+        conn = self._conn_required()
+        rows = conn.execute(
+            "SELECT prompt_id, version, name, description, domain, kind, body,"
+            " provenance, status FROM prompts ORDER BY prompt_id, version"
+        ).fetchall()
+        return [self._row_to_spec(row) for row in rows]
+
     def is_published(self, prompt_id: str, version: str) -> bool:
         """Return whether the pinned prompt exists and is PUBLISHED."""
         try:
