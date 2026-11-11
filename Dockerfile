@@ -9,7 +9,7 @@
 #
 # uv is pinned so the image resolves exactly what uv.lock records.
 
-FROM python:3.11-slim
+FROM python:3.15-slim
 
 ARG UV_VERSION=0.13.1
 
