@@ -40,6 +40,18 @@ from rich.json import JSON
 from rich.panel import Panel
 from rich.table import Table
 
+from agency.autonomy.loop_driver import LoopConfig, LoopDriver
+from agency.autonomy.loop_gates import ForgeGateRunner
+from agency.autonomy.loop_queue import load_queue
+from agency.autonomy.loop_state import LoopBudgets, LoopStore
+from agency.autonomy.loop_workers import (
+    ClaudeCodeWorker,
+    CodexWorker,
+    CursorWorker,
+    ExternalWorker,
+    OpencodeWorker,
+    PiWorker,
+)
 from agency.forge.external_agent import run_external_agent
 from agency.forge.tool_catalog import get_tool, is_available, list_tools
 
@@ -63,6 +75,10 @@ risk_app = typer.Typer(help="Inspect risk assessments.", no_args_is_help=True)
 
 forge_app = typer.Typer(help="Run governed coding-agent tasks.", no_args_is_help=True)
 
+loop_app = typer.Typer(
+    help="Run the deterministic autonomous loop (Ralph-style).", no_args_is_help=True
+)
+
 bridge_app = typer.Typer(help="Inspect and execute external bridges.", no_args_is_help=True)
 
 governance_app = typer.Typer(help="Governance proposals and votes.", no_args_is_help=True)
@@ -73,6 +89,7 @@ app.add_typer(memory_app, name="memory")
 app.add_typer(evidence_app, name="evidence")
 app.add_typer(risk_app, name="risk")
 app.add_typer(forge_app, name="forge")
+app.add_typer(loop_app, name="loop")
 app.add_typer(bridge_app, name="bridge")
 app.add_typer(governance_app, name="governance")
 
@@ -973,9 +990,251 @@ def forge_tool(
         raise typer.Exit(1)
 
 
+# --------------------------------------------------------------------------- #
+# Loop: deterministic autonomous Ralph-style loop
+# --------------------------------------------------------------------------- #
+
+
+def _make_worker(name: str, model: str | None, timeout_s: int) -> ExternalWorker:
+    key = name.lower()
+    if key == "opencode":
+        return OpencodeWorker(model=model, timeout_s=timeout_s)
+    if key in {"claude", "claudecode", "claude-code"}:
+        return ClaudeCodeWorker(timeout_s=timeout_s)
+    if key == "codex":
+        return CodexWorker(timeout_s=timeout_s)
+    if key == "pi":
+        return PiWorker(timeout_s=timeout_s)
+    if key == "cursor":
+        return CursorWorker(timeout_s=timeout_s)
+    raise typer.BadParameter(f"unsupported worker: {name} (opencode|claudecode|codex|pi|cursor)")
+
+
+def _print_loop_result(result: Any, *, output_json: bool) -> None:
+    if output_json:
+        _print_json(result.model_dump(mode="json"))
+        return
+    style = (
+        "green"
+        if result.status == "COMPLETED"
+        else ("yellow" if result.status == "PAUSED" else "red")
+    )
+    console.print(f"Loop status: [{style}]{result.status}[/{style}]")
+    console.print(f"Iterations: {result.iterations}")
+    console.print(
+        f"Items: {result.items_done} done, {result.items_blocked} blocked, "
+        f"{result.items_pending} pending"
+    )
+    console.print(f"Cost: ${result.cost_usd:.4f}")
+    if result.detail:
+        console.print(f"Detail: {result.detail}")
+
+
+@loop_app.command("run")
+def loop_run(
+    goal_source: str = typer.Argument(
+        ..., help="GOAL.md/fix_plan.md dir, PRD file, or gh:owner/repo."
+    ),
+    repo: str = typer.Option("", "--repo", "-r", help="Git repo root (default: cwd)."),
+    worker: str = typer.Option(
+        "opencode", "--worker", "-w", help="opencode|claudecode|codex|pi|cursor."
+    ),
+    model: str | None = typer.Option(None, "--model", "-m", help="Model for the worker."),
+    session_id: str = typer.Option("agency-loop", "--session-id", help="Loop session id."),
+    db: str = typer.Option("loop.db", "--db", help="Loop state database path."),
+    max_hours: float | None = typer.Option(None, "--max-hours", help="Optional wall-clock cap."),
+    max_iterations: int | None = typer.Option(
+        None, "--max-iterations", help="Optional iteration cap."
+    ),
+    max_cost: float | None = typer.Option(None, "--max-cost", help="Optional cost cap (USD)."),
+    worker_timeout: int = typer.Option(
+        7200, "--worker-timeout", help="Per-iteration worker timeout (s)."
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Run gates but do not commit."),
+    run_tests: bool = typer.Option(True, "--run-tests/--no-run-tests"),
+    run_review: bool = typer.Option(True, "--run-review/--no-run-review"),
+    output_json: bool = typer.Option(False, "--json", help="Emit the loop result as JSON."),
+) -> None:
+    """Run the autonomous loop until the queue is done, a budget fires, or you stop it."""
+    if repo == "":
+        repo = "."
+    repo_path = Path(repo).resolve()
+    if not repo_path.is_dir():
+        _fail(f"repo not found: {repo_path}")
+        return
+    try:
+        items = load_queue(goal_source)
+    except (FileNotFoundError, ValueError) as exc:
+        _fail(str(exc))
+        return
+    if not items:
+        _fail(f"no work items found in: {goal_source}")
+        return
+    try:
+        worker_obj = _make_worker(worker, model, worker_timeout)
+    except typer.BadParameter as exc:
+        _fail(str(exc))
+        return
+
+    config = LoopConfig(
+        session_id=session_id,
+        goal=goal_source,
+        repo=str(repo_path),
+        worker=worker_obj.name,
+        budgets=LoopBudgets(
+            max_hours=max_hours,
+            max_iterations=max_iterations,
+            max_cost_usd=max_cost,
+        ),
+        dry_run=dry_run,
+    )
+    gate = ForgeGateRunner(run_tests=run_tests, run_review=run_review)
+    store = LoopStore(db)
+    driver = LoopDriver(config, store, worker_obj, gate, items)
+
+    def _on_sigint(signum: int, frame: Any) -> None:
+        console.print("\n[yellow]Stop requested; finishing current iteration...[/yellow]")
+        driver.request_stop()
+
+    previous = signal.signal(signal.SIGINT, _on_sigint)
+    try:
+        result = driver.run()
+    except Exception as exc:  # noqa: BLE001 - surface the failure, keep state
+        _fail(f"loop failed: {type(exc).__name__}: {exc}")
+        return
+    finally:
+        signal.signal(signal.SIGINT, previous)
+        store.close()
+    _print_loop_result(result, output_json=output_json)
+
+
+@loop_app.command("resume")
+def loop_resume(
+    session_id: str = typer.Option("agency-loop", "--session-id", help="Loop session id."),
+    repo: str = typer.Option("", "--repo", "-r", help="Git repo root (default: cwd)."),
+    worker: str = typer.Option(
+        "opencode", "--worker", "-w", help="opencode|claudecode|codex|pi|cursor."
+    ),
+    model: str | None = typer.Option(None, "--model", "-m"),
+    db: str = typer.Option("loop.db", "--db", help="Loop state database path."),
+    worker_timeout: int = typer.Option(7200, "--worker-timeout"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    run_tests: bool = typer.Option(True, "--run-tests/--no-run-tests"),
+    run_review: bool = typer.Option(True, "--run-review/--no-run-review"),
+    output_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Resume a paused loop session from its persisted state."""
+    if repo == "":
+        repo = "."
+    repo_path = Path(repo).resolve()
+    if not repo_path.is_dir():
+        _fail(f"repo not found: {repo_path}")
+        return
+    store = LoopStore(db)
+    try:
+        state = store.load(session_id)
+        if state is None:
+            _fail(f"no loop session: {session_id}")
+            return
+        try:
+            worker_obj = _make_worker(worker, model, worker_timeout)
+        except typer.BadParameter as exc:
+            _fail(str(exc))
+            return
+        config = LoopConfig(
+            session_id=session_id,
+            goal=state.goal,
+            repo=str(repo_path),
+            branch=state.branch or "agency-loop",
+            worker=worker_obj.name,
+            budgets=state.budgets,
+            dry_run=dry_run,
+        )
+        gate = ForgeGateRunner(run_tests=run_tests, run_review=run_review)
+        driver = LoopDriver(config, store, worker_obj, gate)
+
+        def _on_sigint(signum: int, frame: Any) -> None:
+            console.print("\n[yellow]Stop requested; finishing current iteration...[/yellow]")
+            driver.request_stop()
+
+        previous = signal.signal(signal.SIGINT, _on_sigint)
+        try:
+            result = driver.run()
+        except Exception as exc:  # noqa: BLE001
+            _fail(f"loop failed: {type(exc).__name__}: {exc}")
+            return
+        finally:
+            signal.signal(signal.SIGINT, previous)
+        _print_loop_result(result, output_json=output_json)
+    finally:
+        store.close()
+
+
+@loop_app.command("status")
+def loop_status(
+    session_id: str = typer.Option("agency-loop", "--session-id", help="Loop session id."),
+    db: str = typer.Option("loop.db", "--db", help="Loop state database path."),
+    output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+) -> None:
+    """Show the persisted state of a loop session."""
+    store = LoopStore(db)
+    try:
+        state = store.load(session_id)
+        if state is None:
+            _fail(f"no loop session: {session_id}")
+            return
+        if output_json:
+            _print_json(state.model_dump(mode="json"))
+            return
+        style = {"COMPLETED": "green", "PAUSED": "yellow", "RUNNING": "cyan"}.get(
+            state.status, "red"
+        )
+        console.print(f"Session: {state.session_id}")
+        console.print(f"Status: [{style}]{state.status}[/{style}]")
+        console.print(f"Goal: {state.goal}")
+        console.print(f"Worker: {state.worker}  Branch: {state.branch}")
+        console.print(f"Iterations: {state.iteration}  Cost: ${state.cost_usd:.4f}")
+        table = _table("Items", ["Id", "Status", "Attempts", "Title"])
+        for item in state.queue:
+            table.add_row(item.id, item.status, str(item.attempts), item.title)
+        console.print(table)
+        if state.detail:
+            console.print(f"Detail: {state.detail}")
+    finally:
+        store.close()
+
+
+@app.command("tui")
+def tui(
+    yolo: bool = typer.Option(False, "-yolo", "--yolo", help="Bypass human approvals (audited)."),
+    model: str | None = typer.Option(None, "--model", "-m", help="LLM model override."),
+    server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+) -> None:
+    """Launch the Agency TUI (Claude-Code-style terminal UI)."""
+    if yolo:
+        os.environ["AGENCY_YOLO"] = "1"
+    from agency.tui.agency_app import run_agency_tui
+
+    run_agency_tui(yolo=yolo, model=model, server_url=server_url)
+
+
 def main() -> None:
     """Console-script entry point (``agency = agency.cli:main``)."""
-    app()
+    argv = sys.argv[1:]
+    yolo = False
+    rest: list[str] = []
+    for arg in argv:
+        if arg in ("-yolo", "--yolo"):
+            yolo = True
+            os.environ["AGENCY_YOLO"] = "1"
+        else:
+            rest.append(arg)
+    if not rest and sys.stdin.isatty():
+        from agency.tui.agency_app import run_agency_tui
+
+        run_agency_tui(yolo=yolo)
+        return
+    app(args=rest if rest != argv else None)
 
 
 if __name__ == "__main__":
