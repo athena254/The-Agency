@@ -126,7 +126,9 @@ def test_cli_loop_run_loads_local_goal_without_repo(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_main, "ForgeGateRunner", lambda **kwargs: FakeGate())
 
     db = tmp_path / "loop.db"
-    result = CliRunner().invoke(app, ["loop", "run", str(repo), "--db", str(db)])
+    result = CliRunner().invoke(
+        app, ["loop", "run", str(repo), "--repo", str(repo), "--db", str(db)]
+    )
 
     assert result.exit_code == 0, result.output
     assert captured["source"] == str(repo)
