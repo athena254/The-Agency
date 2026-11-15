@@ -49,6 +49,12 @@ Observed: the Lattice is a single-process SQLite/in-memory prototype with proces
 
 State: OPEN (core production blocker). The owner decisions D-01–D-05 are approved and the migration path is specified in `SPEC_KNOWN_PEER_PROTOCOL.md` §18 and `SPEC_PEER_LATTICE_GOVERNANCE.md`, but no peer application implementation exists. Do not describe the Lattice, the pilot or the CometBFT lab as decentralized authority.
 
+## KI-08 — POSIX private-mode check failed owner-recovery tests (test harness, not product)
+
+Observed: on POSIX CI, `tests/test_owner_recovery_cli.py` created `pilot.db`, `quota.db` and `audit.db` under the default umask, so the launcher's private-mode check (`stat.S_IMODE(...) & 0o077`) rejected them even though the fixture directory itself was `0o700`. Windows uses ACLs and was unaffected.
+
+State: FIXED on this branch (`ddb4eed`, refined in the working tree). The test harness now mirrors the launcher's `umask 0o077` by chmod-ing every file it creates in the synthetic private directory to `0o600` on POSIX. No product code changed. Re-run the owner-recovery tests on Ubuntu and Windows to confirm; do not weaken the launcher's private-mode check.
+
 ## Closed repairs in this pass / carried from earlier
 
 - Q-18 admission-worker bootstrap deadline: resolved by the hermetic suite; `test_parent_rejects_real_split_claim_two_ran_mutant` now passes in the full run. The October 18 failure evidence remains historical.

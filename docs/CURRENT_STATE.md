@@ -4,7 +4,7 @@ Updated November 9, 2026. **Pre-production prototype; not daily-driver-qualified
 
 ## Repository and verification
 
-Canonical checkout: `C:/Users/PC/The-Agency`; local `main` at `c0a1de9`. The committed tree at that revision is the reference for this document. No push, release, deployment, beta enablement, daemon launch or real-resource authority is implied by this document alone.
+Canonical checkout: `C:/Users/PC/The-Agency`; local `main` at `c0a1de9`. The committed tree at that revision is the reference for this document. The gate numbers below are the recorded prior-checkpoint result and were not re-run for this documentation pass. No push, release, deployment, beta enablement, daemon launch or real-resource authority is implied by this document alone.
 
 Gates at this revision:
 
@@ -25,10 +25,10 @@ No live provider call, real browser session, deployment or OS-sandbox qualificat
 - Quotas: 5 requests/hour and 20/day, 40 model calls/hour and 160/day, 8 model attempts and 4 tool attempts per request; 120-second task deadline and at most 45-second provider timeout. These are attempt caps, not invoice amounts.
 - Calculator verification: exact `[agency:calculator.v1]` marker messages are evaluated by an independent bounded integer checker that emits a task/body-bound receipt. It is a checker for one fixture, not general truth or tool-use verification.
 - Optional spending ledger: exact-decimal USD reservations and settlements, separate from attempt quotas, disabled unless the launcher configuration supplies `spending`. It is an estimate, never a provider invoice.
-- HTTP surface (`src/agency/prototype/pilot.py`): `GET /api/pilot/capabilities`, `GET /api/pilot/spending`, `GET|POST /api/pilot/threads`, `GET /api/pilot/threads/{id}/messages`, `GET|POST /api/pilot/tasks`, `POST /api/pilot/calculator-tasks`, `GET /api/pilot/tasks/{id}`, `GET /api/pilot/tasks/{id}/verification` and `POST /api/pilot/tasks/{id}/cancel`. Every route requires a loopback peer and Host, an exact owner bearer and (for writes) CSRF; bodies are bounded to 32 KiB and errors use a fixed public catalog. Routes are registered in all modes but return 503 `disabled` when the app is not pilot-configured.
+- HTTP surface (`src/agency/prototype/pilot.py`): `GET /api/pilot/capabilities`, `GET /api/pilot/tool-status`, `GET /api/pilot/spending`, `GET|POST /api/pilot/threads`, `GET /api/pilot/threads/{id}/messages`, `GET|POST /api/pilot/tasks`, `POST /api/pilot/calculator-tasks`, `GET /api/pilot/coding-status`, `POST /api/pilot/coding-tasks`, `GET /api/pilot/coding-tasks/{task_id}`, `GET /api/pilot/tasks/{id}`, `GET /api/pilot/tasks/{id}/verification` and `POST /api/pilot/tasks/{id}/cancel`. Every route requires a loopback peer and Host, an exact owner bearer and (for writes) CSRF; bodies are bounded to 32 KiB and errors use a fixed public catalog. Routes are registered in all modes but return 503 `disabled` when the app is not pilot-configured.
 - Local UIs: the dependency-free pilot workspace at `GET /pilot` (`static/pilot.html|pilot.js|pilot.css`) and the React Mission Control console at `GET /mission-control` (below). The owner bearer is held in browser memory only.
 - Supported launcher: `python -m agency.prototype.pilot_launcher` creates `owner.token` in a protected data directory, verifies ACLs, binds loopback only, disables proxy-header trust, and never falls back to environment provider settings or echo. `--check` is read-only configuration validation, not provider verification.
-- Coding factory core (service-level, **not HTTP-exposed**): `admission/coding_store.py`, `factory/coding_models.py`, `factory/coding_verification.py` and `agents/factory_coding.py` admit one fixed `literal-assignment-v1` job (`m.py`, baseline `x = 1`, one bounded edit, one model call, 120-second job timeout), run the coding agent in an isolated git worktree, check the literal artifact against a pinned checker/criteria, and store a typed receipt. `OwnerPilotService.submit_coding`/`get_coding_receipt` exist, but no `/api/pilot/*` route exposes them. `release_authorized` and `tests_run` are fixed `False`; no merge or release is authorized.
+- Coding factory core (service-level; **HTTP-exposed over the pilot API**): `admission/coding_store.py`, `factory/coding_models.py`, `factory/coding_verification.py` and `agents/factory_coding.py` admit one fixed `literal-assignment-v1` job (`m.py`, baseline `x = 1`, one bounded edit, one model call, 120-second job timeout), run the coding agent in an isolated git worktree, check the literal artifact against a pinned checker/criteria, and store a typed receipt. `OwnerPilotService.submit_coding`/`get_coding_receipt` are reachable at `POST /api/pilot/coding-tasks`, `GET /api/pilot/coding-tasks/{task_id}` and `GET /api/pilot/coding-status`, gated on an opt-in configured fixture repository. `release_authorized` and `tests_run` are fixed `False`; no merge or release is authorized.
 - Telegram owner authentication exists (`OwnerAuthenticator.authenticate_telegram`) but is not wired to any ingress; the pilot is local HTTP only.
 
 Source: `src/agency/admission/`, `src/agency/prototype/{app,pilot,pilot_launcher,owner_guard}.py`, `src/agency/factory/coding_*.py`, `src/agency/agents/factory_coding.py`; tests: `test_owner_*.py`, `test_calculator_verification_*.py`, `test_factory_coding_*.py`, `test_pilot_launcher.py`, `pilot_ui.test.mjs`.
@@ -101,6 +101,16 @@ Source: `src/agency/workflows/`, `skills/registry.py`, `factory/`, `agents/promp
 
 Source: `src/agency/lattice/`, `src/agency/peer_envelope.py`, `src/agency/peers/`, `lab/comet_smoke.py`; `COMET_LAB_VERIFIED_STATUS.md`, `SPEC_SINGLE_HOST_LATTICE_MILESTONE.md`, `SPEC_KNOWN_PEER_PROTOCOL.md`, `SPEC_PEER_LATTICE_GOVERNANCE.md`.
 
+## Uncommitted branch work (not part of the recorded checkpoint)
+
+The working tree on `feat/dual-tui-agency-forge` adds three bounded surfaces. They are **new, uncommitted and not production-qualified**, are not covered by the gates recorded above, and do not change the production boundaries below.
+
+- `src/agency/tui/` adds a Textual dual TUI: `AgencyApp` (status/agents/tasks/evidence/memory over the local HTTP API) and `ForgeApp` (spec intake, inspection and a bounded pipeline), reached through `agency tui` and the new `forge` entry point. `src/agency/forge/cli.py` launches the Forge TUI and delegates `forge code|tools|tool` to the existing agency CLI. No TUI qualification is recorded.
+- `src/agency/autonomy/loop_*` adds a durable Ralph-style autonomous loop: `LoopStore` persists session state to SQLite, `LoopDriver` owns the while-loop with checkpoint/revert, bounded retries and optional budgets, `loop_queue` normalizes GOAL/plan, GitHub-issue and PRD sources, `loop_workers` runs operator-configured CLIs or deterministic edits, and `loop_gates` composes Forge inspection/security/tests/holdout plus an independent acceptance verifier. `agency loop run|resume|status` exposes it. A PASS gate is evidence only; the loop never authorizes release.
+- Tests for these surfaces exist (`tests/test_loop_*.py`, `tests/test_tui.py`) but were not run in this documentation pass; the gate numbers above remain the prior checkpoint's.
+
+Do not read these surfaces as completing P1/P2 peer authority, durable audit or release qualification.
+
 ## Approved owner decisions (policy inputs, not implementation)
 
 `OWNER_DECISIONS_D01_D05.md` records the owner-approved policy: 4 validator peers, tolerance of 1 Byzantine peer, 3/4 application quorum, CometBFT 0.38.26 version-pinned; genesis membership of those validators with signed membership proposals and epoch bumps; affected-set declaration plus signed attributable consumer input and explicit human attestation for override; signed task-scoped grants with nonce and expiry, finality proof at actuators and epoch-based revocation; local-only fixture/output resources, bounded numeric ceilings, the Inception `mercury-3` runtime route via the configured OpenAI-compatible endpoint, no confidential data, no paid fallback and 30-day evidence retention.
@@ -123,7 +133,7 @@ See `PRODUCTION_READINESS_PLAN.md` for dependencies, observable acceptance gates
 
 A1, A2 and A3.1 are implemented. The owner pilot (M1/M2/M3), persistent task workspace, local pilot UI and Mission Control console are implemented as bounded local surfaces. The owner factory coding core is exposed over the pilot HTTP API (`POST /api/pilot/coding-tasks`, `GET /api/pilot/coding-tasks/:id`, `GET /api/pilot/coding-status`) and the Mission Control coding page, gated on an opt-in configured fixture repository; without it the surface reports an honest locked state. No complete bounded-autonomy acceptance scenario is signed off, and no live provider, real browser or deployment qualification is recorded.
 
-The next work is to freeze the P1/P2 contracts against the approved D-01–D-05 decisions, then implement and independently review the peer application path. A4 peer authority, A5 task/recovery/outbox, A6 useful independent-checker task and A7 fault/adversarial/real-model qualification remain open.
+The next work is to freeze the P1/P2 contracts against the approved D-01–D-05 decisions, then implement and independently review the peer application path. A4 peer authority, A5 task/recovery/outbox, A6 useful independent-checker task and A7 fault/adversarial/real-model qualification remain open. The uncommitted branch work above is exploratory and does not change this production sequence.
 
 ## Verification and known limitations
 

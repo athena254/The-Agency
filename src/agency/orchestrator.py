@@ -1094,6 +1094,7 @@ class AgencyOrchestrator:
         Required permissions are checked by the trusted ``skill_authorizer``
         configured by the host; absent authorization denies permissioned skills.
         """
+
         def failed(error: str) -> SkillRunResult:
             return SkillRunResult(skill_id=skill_id, version=version, success=False, error=error)
 
