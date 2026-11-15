@@ -80,11 +80,10 @@ To certify an arbitrary revision, run `CD` via `workflow_dispatch` with the full
 * YAML parses for both workflows and the compose file.
 * The Node UI tests pass locally (`node --test tests/*.test.mjs`, 79 tests).
 * The health endpoint, module runner and env-var names above were read from the source.
-* The lockfile was refreshed for this branch (`uv lock`): `theagency` 0.2.1 with `textual>=0.86.0` and the `forge` script, and the unused `pytest-textual-snapshot` dev dependency dropped. `uv lock --check` exits 0. `uv export --frozen --extra dev` was not re-run in this pass.
+* The lockfile was refreshed for this branch (`uv lock`): `theagency` 0.2.1 with `textual>=0.86.0` and the `forge` script, and the unused `pytest-textual-snapshot` dev dependency dropped. `uv lock --check` and `uv export --frozen --extra dev` both exit 0.
 
 ## Not verified in this pass
 
 * `docker build` / `docker compose up` — Docker is not installed on this host.
 * The Simular box scripts and any live container start.
 * The GitHub workflows themselves (no runner available here); action versions were chosen from the versions already used in this repository.
-* `uv export --frozen --extra dev` was not re-run in this pass.
