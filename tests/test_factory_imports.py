@@ -75,7 +75,7 @@ def test_github_repository_import_fetches_only_markdown_and_license(monkeypatch,
             {"path": "agents/developer.md", "type": "blob", "size": 30},
             {"path": "scripts/install.sh", "type": "blob", "size": 20},
             {"path": "LICENSE", "type": "blob", "size": 10},
-        ]
+        ],
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -114,15 +114,20 @@ def test_github_import_rejects_non_github_and_traversal_paths(tmp_path) -> None:
 def test_similarity_reports_near_duplicates_without_merging(tmp_path) -> None:
     registry = PromptRegistry(str(tmp_path / "prompts.db"))
     service = MarkdownImportService(registry)
-    first = service.import_markdown("# Incident Analyst\n\nTriage the incident and preserve evidence.", source_label="one.md")
-    second = service.import_markdown("# Incident Analyst\n\nTriage incidents and preserve the evidence.", source_label="two.md")
+    first = service.import_markdown(
+        "# Incident Analyst\n\nTriage the incident and preserve evidence.", source_label="one.md"
+    )
+    second = service.import_markdown(
+        "# Incident Analyst\n\nTriage incidents and preserve the evidence.", source_label="two.md"
+    )
 
     matches = service.find_similar(second.candidate.prompt_id)
 
     assert any(match.candidate.prompt_id == first.candidate.prompt_id for match in matches)
-    assert registry.get(first.candidate.prompt_id, "0.0.0").body != registry.get(
-        second.candidate.prompt_id, "0.0.0"
-    ).body
+    assert (
+        registry.get(first.candidate.prompt_id, "0.0.0").body
+        != registry.get(second.candidate.prompt_id, "0.0.0").body
+    )
 
 
 def test_explicit_merge_creates_new_draft_and_preserves_sources(tmp_path) -> None:

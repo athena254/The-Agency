@@ -563,8 +563,9 @@ def test_explicit_recovery_rehydrates_active_identity_with_authorization(tmp_pat
     kernels, runtimes = KernelRegistry(), RuntimeRegistry()
     recovered_factory = AgentFactory(
         db,
-        authorizer=lambda actor, permission: actor == "recovery-operator"
-        and permission == "agent.recover",
+        authorizer=lambda actor, permission: (
+            actor == "recovery-operator" and permission == "agent.recover"
+        ),
         is_skill_published=lambda _sid, _version: True,
         is_workflow_published=lambda _wid, _version: True,
         allowed_capabilities={"inspect", "summarize"},
@@ -589,9 +590,12 @@ def test_explicit_recovery_rehydrates_active_identity_with_authorization(tmp_pat
         assert recovered_factory.get("analyst", "1.0.0").status is BlueprintStatus.ACTIVE
         assert recovered_factory.list_events("analyst", "1.0.0")[-1]["to_status"] == "ACTIVE"
         assert recovered_factory.list_events("analyst", "1.0.0")[-1]["actor"] == "recovery-operator"
-        assert recovered_factory.recover_active(
-            "analyst", "1.0.0", actor="recovery-operator", evidence="repeat recovery"
-        ).id == original.id
+        assert (
+            recovered_factory.recover_active(
+                "analyst", "1.0.0", actor="recovery-operator", evidence="repeat recovery"
+            ).id
+            == original.id
+        )
     finally:
         recovered_factory.close()
 

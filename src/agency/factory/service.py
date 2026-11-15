@@ -711,7 +711,9 @@ class AgentFactory:
                 self._conn.execute("BEGIN IMMEDIATE")
                 bp = self.get(blueprint_id, version)
                 if bp.status is not BlueprintStatus.ACTIVE or not bp.runtime_agent_id:
-                    raise ValueError("recovery requires an ACTIVE blueprint with a recorded runtime id.")
+                    raise ValueError(
+                        "recovery requires an ACTIVE blueprint with a recorded runtime id."
+                    )
                 self.validate(bp.blueprint_id, bp.version)
 
                 expected_metadata: dict[str, Any] = {
@@ -766,7 +768,8 @@ class AgentFactory:
                         metadata=expected_metadata,
                     )
                     if any(
-                        cap.max_level is not ActionClass.L0_OBSERVATION for cap in agent.capabilities
+                        cap.max_level is not ActionClass.L0_OBSERVATION
+                        for cap in agent.capabilities
                     ):
                         raise ValueError("recovery only permits L0 capability claims.")
                     self._kernels.register(agent)

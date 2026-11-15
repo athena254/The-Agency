@@ -145,8 +145,10 @@ class MarkdownImportService:
                 raise ImportError(f"cannot read Markdown source: {exc}") from exc
             if len(data) > MAX_MARKDOWN_BYTES:
                 raise ImportError("Markdown exceeds 64 KiB")
-            label = _safe_source(source_label) if source_label and urlparse(source_label).scheme else (
-                source_label or str(path.resolve())
+            label = (
+                _safe_source(source_label)
+                if source_label and urlparse(source_label).scheme
+                else (source_label or str(path.resolve()))
             )
             source_path = source_path_override or path.resolve().as_posix()
             original_bytes = data
@@ -158,7 +160,9 @@ class MarkdownImportService:
             data = content.encode("utf-8")
             if len(data) > MAX_MARKDOWN_BYTES:
                 raise ImportError("Markdown exceeds 64 KiB")
-            source_path = source_path_override or PurePosixPath(urlparse(label).path).name or "standalone.md"
+            source_path = (
+                source_path_override or PurePosixPath(urlparse(label).path).name or "standalone.md"
+            )
         try:
             text = data.decode("utf-8-sig")
         except UnicodeDecodeError as exc:
@@ -166,7 +170,11 @@ class MarkdownImportService:
         frontmatter, body = _split_frontmatter(text)
         source_kind = _classify(source_path, frontmatter)
         name_value = frontmatter.get("name")
-        name = name_value.strip() if isinstance(name_value, str) and name_value.strip() else Path(source_path).stem.replace("-", " ").title()
+        name = (
+            name_value.strip()
+            if isinstance(name_value, str) and name_value.strip()
+            else Path(source_path).stem.replace("-", " ").title()
+        )
         description = frontmatter.get("description", "")
         if not isinstance(description, str):
             description = ""
@@ -190,7 +198,9 @@ class MarkdownImportService:
             provenance=provenance,
             status=PromptStatus.DRAFT,
         )
-        return ImportedMarkdown(candidate, label, source_kind, source_path, digest, license_id, frontmatter)
+        return ImportedMarkdown(
+            candidate, label, source_kind, source_path, digest, license_id, frontmatter
+        )
 
     def _persist(self, imported: ImportedMarkdown) -> ImportedMarkdown:
         try:
@@ -207,10 +217,14 @@ class MarkdownImportService:
             imported.frontmatter,
         )
 
-    def import_markdown(self, source: str | Path, *, source_label: str | None = None) -> ImportedMarkdown:
+    def import_markdown(
+        self, source: str | Path, *, source_label: str | None = None
+    ) -> ImportedMarkdown:
         return self._persist(self._parse_markdown(source, source_label=source_label))
 
-    def import_github_repository(self, repository_url: str, *, ref: str = "main") -> list[ImportedMarkdown]:
+    def import_github_repository(
+        self, repository_url: str, *, ref: str = "main"
+    ) -> list[ImportedMarkdown]:
         _safe_source(repository_url)
         parsed = urlparse(repository_url)
         parts = [part for part in parsed.path.strip("/").removesuffix(".git").split("/") if part]
@@ -240,11 +254,14 @@ class MarkdownImportService:
             license_id = "UNKNOWN"
             if license_response.status_code == 200:
                 license_data = license_response.json()
-                license_obj = license_data.get("license") if isinstance(license_data, dict) else None
+                license_obj = (
+                    license_data.get("license") if isinstance(license_data, dict) else None
+                )
                 if isinstance(license_obj, dict):
                     license_id = str(license_obj.get("spdx_id") or "UNKNOWN")[:128]
             blobs = [
-                entry for entry in tree.get("tree", [])
+                entry
+                for entry in tree.get("tree", [])
                 if entry.get("type") == "blob"
                 and isinstance(entry.get("path"), str)
                 and entry["path"].casefold().endswith(".md")
@@ -320,7 +337,11 @@ class MarkdownImportService:
                 or not candidate.provenance.startswith("import-quarantine:")
             ):
                 continue
-            words = set(_WORD_RE.findall(f"{candidate.name} {candidate.description} {candidate.body}".casefold()))
+            words = set(
+                _WORD_RE.findall(
+                    f"{candidate.name} {candidate.description} {candidate.body}".casefold()
+                )
+            )
             union = target_words | words
             score = len(target_words & words) / len(union) if union else 1.0
             if score >= threshold:

@@ -36,6 +36,9 @@ from agency.tools.driver import ToolDriver
 from agency.tools.registry import ToolRegistry
 
 _LEGACY_TOOLS = ("memory_query", "memory_write", "sandbox_exec", "web_fetch", "web_search")
+# The orchestrator's open registry adds the governed skill tool on top of the
+# legacy builtins; the opt-in local tools remain excluded.
+_ORCHESTRATOR_TOOLS = _LEGACY_TOOLS + ("agency_skill",)
 _NEW_TOOLS = ("calculator", "utc_time")
 
 # Fixed error vocabulary: callers get a stable message, never their input.
@@ -390,7 +393,7 @@ async def test_orchestrator_legacy_open_registry_does_not_advertise_new_tools() 
     driver = orchestrator._tool_driver
     assert registry is not None and driver is not None
     names = {spec.name for spec in registry.list_specs()}
-    assert names == set(_LEGACY_TOOLS)
+    assert names == set(_ORCHESTRATOR_TOOLS)
     prompt = driver._build_prompt("test", "system", registry.list_specs(), [])
     for name in _NEW_TOOLS:
         assert name not in prompt

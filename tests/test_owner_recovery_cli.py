@@ -54,12 +54,14 @@ async def installation(path):
         await audit.close()
         await budget.close()
         await store.close()
-    # POSIX launcher requires 0o700/0o600 (Windows uses ACLs): chmod DBs
+    # POSIX launcher requires 0o700/0o600 (Windows uses ACLs): the real launcher
+    # creates runtime files under umask 0o077, so mirror that for every child.
     import sys as _sys
 
     if _sys.platform != "win32":
-        for name in ("pilot.db", "quota.db", "audit.db"):
-            (path / name).chmod(0o600)
+        for child in path.iterdir():
+            if child.is_file():
+                child.chmod(0o600)
     return config
 
 
