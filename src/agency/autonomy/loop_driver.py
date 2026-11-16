@@ -36,13 +36,21 @@ from agency.autonomy.loop_state import (
     LoopStore,
 )
 from agency.autonomy.proof import ProofBundle
-from agency.forge.worktree import WorktreeInfo, create_worktree, remove_worktree
+from agency.forge.worktree import (
+    WorktreeInfo,
+    create_worktree,
+    isolation_violations,
+    remove_worktree,
+    snapshot_changes,
+)
 
 logger = structlog.get_logger(__name__)
 
 MAX_ATTEMPTS_PER_ITEM = 10
 SAME_ERROR_LIMIT = 5
 NO_PROGRESS_LIMIT = 3
+
+ISOLATION_VIOLATION_DETAIL = "worker left its isolated worktree"
 
 WorkerGate = Literal["PASS", "FAIL"]
 GateGate = Literal["PASS", "FAIL"]
@@ -384,6 +392,12 @@ class LoopDriver:
         last_signature = ""
         feedback = ""
 
+        # Baseline of the original checkout before any worker runs. A worker
+        # that escapes its worktree edits this tree, and the worktree diff
+        # cannot see those edits; comparing against this baseline after each
+        # attempt exposes them.
+        before_changes = snapshot_changes(self.workspace.repo)
+
         while attempts < self.config.max_attempts_per_item:
             if self._stop.is_set() or self._budget_exhausted(start):
                 return
@@ -391,6 +405,27 @@ class LoopDriver:
             self._state = self._state.model_copy(update={"iteration": self._state.iteration + 1})
 
             worker_result = self.worker.run(item, self.workspace.path, feedback)
+            violations = isolation_violations(self.workspace.repo, before_changes)
+            if violations:
+                iso_detail = (
+                    f"{ISOLATION_VIOLATION_DETAIL}; original checkout changed: "
+                    + ", ".join(violations)
+                )
+                if worker_result.detail:
+                    iso_detail = f"{iso_detail}\n{worker_result.detail}"
+                logger.warning(
+                    "loop.isolation_violation",
+                    item_id=item.id,
+                    paths=list(violations),
+                )
+                self._emit(
+                    "isolation_violation",
+                    item_id=item.id,
+                    payload={"paths": list(violations)},
+                )
+                worker_result = worker_result.model_copy(
+                    update={"gate": "FAIL", "detail": iso_detail}
+                )
             self._state = self._state.model_copy(
                 update={"cost_usd": self._state.cost_usd + worker_result.cost_usd}
             )
@@ -409,6 +444,7 @@ class LoopDriver:
                     "worker_gate": worker_result.gate,
                     "gate": gate_result.gate,
                     "changed_paths": list(worker_result.changed_paths),
+                    "isolation_violations": list(violations),
                 },
             )
 

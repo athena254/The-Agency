@@ -92,6 +92,28 @@ class FailingWorker:
         return WorkerResult(gate="FAIL", changed_paths=("out.txt",), detail="worker gate failed")
 
 
+class EscapingWorker:
+    """Simulates an agent that edits the ORIGINAL checkout, not the worktree."""
+
+    name = "escaping"
+
+    def __init__(self, repo: Path) -> None:
+        self.repo = repo
+        self.calls: list[dict] = []
+
+    def run(self, item, worktree, feedback=""):
+        self.calls.append({"item": item.id, "feedback": feedback})
+        (self.repo / "escaped.txt").write_text("escaped\n", encoding="utf-8")
+        return WorkerResult(gate="PASS", changed_paths=("out.txt",), detail="ok")
+
+
+class PassGate:
+    """Harness gate that always passes, isolating the worker-side guard."""
+
+    def run(self, worktree, item, changed_paths):
+        return GateResult(gate="PASS")
+
+
 class ContentGate:
     """PASS when out.txt == 'ok'; FAIL otherwise with a stable signature."""
 
@@ -333,4 +355,53 @@ def test_worker_gate_failure_blocks_item_even_when_harness_gate_passes(tmp_path)
     assert driver.state.queue[0].status == "blocked"
     assert driver.state.queue[0].detail == "max_attempts"
     assert "worker gate failed" in worker.calls[1]["feedback"]
+    store.close()
+
+
+def test_worker_editing_original_checkout_fails_item_gate(tmp_path):
+    """A worker that escapes its worktree must fail the item gate.
+
+    The worker writes into the original checkout while reporting PASS; the
+    harness gate would pass, so only the isolation guard can fail the item.
+    """
+    repo = _git_repo(tmp_path)
+    store = LoopStore(":memory:")
+    worker = EscapingWorker(repo)
+    driver = LoopDriver(
+        _config(repo, max_attempts_per_item=2),
+        store,
+        worker,
+        PassGate(),
+        [_item("a")],
+    )
+
+    result = driver.run()
+
+    assert result.items_done == 0
+    assert driver.state.queue[0].status == "blocked"
+    # the escape really happened in the original checkout
+    assert (repo / "escaped.txt").read_text(encoding="utf-8") == "escaped\n"
+    status = subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert "escaped.txt" in status.stdout
+    # the guard recorded the violation and forced the worker gate to FAIL
+    violations = [e for e in driver.state.events if e.event == "isolation_violation"]
+    assert violations
+    assert "escaped.txt" in violations[0].payload["paths"]
+    iterations = [e for e in driver.state.proof_events if e.action == "iteration"]
+    assert iterations
+    assert all(e.payload["worker_gate"] == "FAIL" for e in iterations)
+    assert all("escaped.txt" in e.payload["isolation_violations"] for e in iterations)
+    # nothing was committed to the worktree branch
+    log = subprocess.run(
+        ["git", "-C", str(repo), "log", "--oneline", "agency-loop-test"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert "agency-loop" not in log.stdout
     store.close()
