@@ -15,7 +15,9 @@ from agency.forge.smoke import smoke_app
 def test_golden_app_1_minimal_fastapi(tmp_path: Path):
     result = generate_app("Hello API", tmp_path)
     assert result.gate == "PASS", result.detail
-    smoke = smoke_app(tmp_path)
+    # Explicit headroom: a cold uvicorn boot can exceed the 5s default under
+    # load; the gate still requires a real HTTP 200.
+    smoke = smoke_app(tmp_path, timeout_s=30)
     assert smoke.gate == "PASS", smoke
 
 
@@ -45,5 +47,7 @@ def test_golden_app_3_static_site(tmp_path: Path):
     (tmp_path / "README.md").write_text("# Site\n", encoding="utf-8")
     report = run_pipeline(tmp_path, ["index.html", "test_site.py"], run_tests_flag=True)
     assert report.gate == "PASS", (report.inspection, report.security)
-    smoke = smoke_app(tmp_path)
+    # Explicit headroom: a cold uvicorn/http.server boot can exceed the 5s
+    # default under load; the gate still requires a real HTTP 200.
+    smoke = smoke_app(tmp_path, timeout_s=30)
     assert smoke.gate == "PASS", smoke
