@@ -73,3 +73,6 @@ data/remex_profiles.db-shm
 # Quarantined external clones imported by scripts/import_external_agents_skills.py.
 # Each holds its own .git; committing them would add broken gitlinks with no URL.
 workspace/inbox/
+
+# Phased agent build prompts and logs
+.agent-prompts/
