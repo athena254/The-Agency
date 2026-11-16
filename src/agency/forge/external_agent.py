@@ -47,6 +47,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agency.forge.inspection import InspectionReport, inspect_changes
 from agency.forge.pipeline import CAVEATS as _PIPELINE_CAVEATS
+from agency.forge.reviewer import ReviewReport, run_review
 from agency.forge.security_scan import SecurityReport, scan_changes
 from agency.forge.test_runner import MAX_TEST_TIMEOUT_S, TestReport, run_tests
 from agency.forge.worktree import (
@@ -86,7 +87,7 @@ _IGNORED_CHANGED_PREFIXES: tuple[str, ...] = (
 
 ExternalAgentGate = Literal["PASS", "FAIL"]
 
-_BASE_CAVEATS = ("agent_output_unverified", *_PIPELINE_CAVEATS)
+_BASE_CAVEATS = ("agent_output_unverified", *_PIPELINE_CAVEATS, "review_not_run")
 
 
 class ExternalAgentReport(BaseModel):
@@ -111,6 +112,7 @@ class ExternalAgentReport(BaseModel):
     inspection: InspectionReport
     security: SecurityReport
     tests: TestReport | None = None
+    review: ReviewReport | None = None
     gate: ExternalAgentGate
     caveats: tuple[str, ...] = _BASE_CAVEATS
     note: str = "External coding agent run; Forge does not auto-merge or authorize release."
@@ -485,6 +487,8 @@ def run_external_agent(
     run_tests_flag: bool = False,
     test_paths: list[str] | None = None,
     test_timeout_s: int = DEFAULT_TEST_TIMEOUT_S,
+    run_review_flag: bool = True,
+    llm: Any = None,
     cleanup: bool = False,
     protected_paths: Iterable[str] | None = None,
 ) -> ExternalAgentReport:
@@ -573,6 +577,15 @@ def run_external_agent(
                 logger.error("forge.external_agent_tests_error", error=str(exc))
                 tests = None
 
+        review: ReviewReport | None = None
+        review_error = False
+        if run_review_flag:
+            try:
+                review = run_review(worktree_path, changed, use_llm=True, llm=llm)
+            except Exception:  # noqa: BLE001
+                review_error = True
+                logger.error("forge.external_agent_review_error")
+
         post_repo_state = _tracked_changes(real_repo)
         baseline = set(pre_repo_state)
         main_repo_changes = tuple(p for p in post_repo_state if p not in baseline)
@@ -588,6 +601,10 @@ def run_external_agent(
         if security.gate != "PASS":
             overall = "FAIL"
         if tests is not None and tests.gate != "PASS":
+            overall = "FAIL"
+        if review is not None and review.gate != "PASS":
+            overall = "FAIL"
+        if review_error:
             overall = "FAIL"
         if protected_hits:
             overall = "FAIL"
@@ -618,6 +635,10 @@ def run_external_agent(
         if tests is not None:
             caveats = [c for c in caveats if c != "tests_not_run"]
         caveats = [c for c in caveats if c != "security_review_not_run"]
+        if review is not None:
+            caveats = [c for c in caveats if c != "review_not_run"]
+        if review_error:
+            caveats.append("review_error")
 
         note = "External coding agent run; Forge does not auto-merge or authorize release."
         if violations:
@@ -645,6 +666,7 @@ def run_external_agent(
             inspection=inspection,
             security=security,
             tests=tests,
+            review=review,
             gate=overall,
             caveats=tuple(caveats),
             note=note,

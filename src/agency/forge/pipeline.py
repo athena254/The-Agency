@@ -9,7 +9,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, Self
+from typing import Any, Literal, Self
 from uuid import uuid4
 
 import structlog
@@ -107,6 +107,7 @@ def run_pipeline(
     test_paths: list[str] | None = None,
     test_timeout_s: int = 120,
     run_review_flag: bool = True,
+    llm: Any = None,
 ) -> ForgePipelineReport:
     real_root = Path(root)
     if not real_root.is_absolute():
@@ -121,7 +122,7 @@ def run_pipeline(
 
     review: ReviewReport | None = None
     if run_review_flag:
-        review = run_review(real_root, changed_paths)
+        review = run_review(real_root, changed_paths, use_llm=True, llm=llm)
 
     overall: PipelineGate = "PASS"
     if inspection.gate != "PASS":
