@@ -57,6 +57,9 @@ _DANGEROUS_CALLS: dict[str, tuple[Severity, str]] = {
     "marshal.loads": ("high", "SEC014 unsafe deserialization"),
 }
 
+_SUBPROCESS_RULE_IDS = frozenset({"SEC007", "SEC008", "SEC009", "SEC010"})
+_TEST_PATH_PARTS = frozenset({"tests", "testing"})
+
 _SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
         re.compile(r"(?i)(api[_-]?key|secret|token|password|passwd)\s*=\s*['\"][^'\"]{8,}['\"]"),
@@ -116,8 +119,21 @@ def _call_name(node: ast.Call) -> str:
     return ""
 
 
+def _is_test_file(path: str) -> bool:
+    parts = [p for p in path.replace("\\", "/").split("/") if p not in ("", ".")]
+    if not parts:
+        return False
+    basename = parts[-1]
+    if basename.startswith("test_") and basename.endswith(".py"):
+        return True
+    if basename.endswith("_test.py") or basename == "conftest.py":
+        return True
+    return any(p.lower() in _TEST_PATH_PARTS for p in parts)
+
+
 def _scan_python(path: str, source: str) -> list[SecurityFinding]:
     findings: list[SecurityFinding] = []
+    is_test_file = _is_test_file(path)
     try:
         tree = ast.parse(source, filename=path)
     except SyntaxError:
@@ -128,11 +144,14 @@ def _scan_python(path: str, source: str) -> list[SecurityFinding]:
             name = _call_name(node)
             if name in _DANGEROUS_CALLS:
                 sev, msg = _DANGEROUS_CALLS[name]
+                rule_id = msg.split()[0]
+                if is_test_file and rule_id in _SUBPROCESS_RULE_IDS:
+                    continue
                 findings.append(
                     SecurityFinding(
                         path=path,
                         line=getattr(node, "lineno", 1) or 1,
-                        rule_id=msg.split()[0],
+                        rule_id=rule_id,
                         severity=sev,
                         message=msg,
                     )
