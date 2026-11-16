@@ -394,3 +394,110 @@ def test_launch_value_error_reports_127(tmp_path):
     assert report.exit_code == 127
     assert "failed to launch agent" in report.stderr
     assert report.gate == "FAIL"
+
+
+def test_isolation_violation_untracked_file_in_original_checkout_fails(tmp_path):
+    """An agent that creates a NEW file in the original checkout fails the gate.
+
+    The pre-existing ``_tracked_changes`` check ignores untracked files, so this
+    is the regression test for the shared ``snapshot_changes`` isolation guard.
+    """
+    repo = _git_repo(tmp_path)
+    agent = _write_agent(
+        tmp_path,
+        f"""from pathlib import Path
+Path({str(repo / "ESCAPED.txt")!r}).write_text("escaped" + chr(10))
+Path("README.md").write_text("hi" + chr(10) + "changed" + chr(10))
+""",
+    )
+
+    report = run_external_agent(str(repo), [sys.executable, str(agent)], "escape", cleanup=True)
+
+    assert report.gate == "FAIL"
+    assert report.isolation_violations == ("ESCAPED.txt",)
+    assert "ESCAPED.txt" in report.note
+    assert "left its isolated worktree" in report.note
+    assert "isolation_violation" in report.caveats
+    # The worktree-only edit is still visible to Forge's normal inspection.
+    assert report.changed_paths == ("README.md",)
+    assert report.inspection.gate == "PASS"
+
+
+def test_isolation_violation_tracked_edit_in_original_checkout_names_path(tmp_path):
+    repo = _git_repo(tmp_path)
+    agent = _write_agent(
+        tmp_path,
+        f"""from pathlib import Path
+Path({str(repo / "README.md")!r}).write_text("main repo touched" + chr(10))
+Path("README.md").write_text("hi" + chr(10) + "changed" + chr(10))
+""",
+    )
+
+    report = run_external_agent(str(repo), [sys.executable, str(agent)], "escape", cleanup=True)
+
+    assert report.gate == "FAIL"
+    assert report.isolation_violations == ("README.md",)
+    assert "README.md" in report.note
+
+
+def test_confined_agent_has_no_isolation_violations(tmp_path):
+    repo = _git_repo(tmp_path)
+    agent = _readme_agent(tmp_path)
+
+    report = run_external_agent(str(repo), [sys.executable, str(agent)], "confine", cleanup=True)
+
+    assert report.gate == "PASS"
+    assert report.isolation_violations == ()
+
+
+def test_failure_detail_keeps_bounded_stderr_tail(tmp_path):
+    repo = _git_repo(tmp_path)
+    marker = "PROVIDER_ERROR_401_UNAUTHORIZED"
+    agent = _write_agent(
+        tmp_path,
+        f"""import sys
+sys.stderr.write("x" * 5000 + chr(10))
+sys.stderr.write({marker!r} + chr(10))
+sys.exit(3)
+""",
+    )
+
+    report = run_external_agent(str(repo), [sys.executable, str(agent)], "fail", cleanup=True)
+
+    assert report.gate == "FAIL"
+    assert report.failure_detail.endswith(marker)
+    assert len(report.failure_detail) <= ea.MAX_FAILURE_DETAIL_CHARS + len("...[truncated]...") + 1
+
+
+def test_failure_detail_falls_back_to_stdout(tmp_path):
+    repo = _git_repo(tmp_path)
+    agent = _write_agent(
+        tmp_path,
+        """import sys
+print("provider stdout: rate limited")
+sys.exit(1)
+""",
+    )
+
+    report = run_external_agent(str(repo), [sys.executable, str(agent)], "fail", cleanup=True)
+
+    assert report.gate == "FAIL"
+    assert "provider stdout: rate limited" in report.failure_detail
+
+
+def test_failure_detail_redacts_secrets(tmp_path):
+    repo = _git_repo(tmp_path)
+    agent = _write_agent(
+        tmp_path,
+        """import sys
+sys.stderr.write("auth failed for sk-abcdefghijklmnop123456 and API_KEY=hunter2secret" + chr(10))
+sys.exit(1)
+""",
+    )
+
+    report = run_external_agent(str(repo), [sys.executable, str(agent)], "fail", cleanup=True)
+
+    assert report.gate == "FAIL"
+    assert "sk-abcdefghijklmnop123456" not in report.failure_detail
+    assert "hunter2secret" not in report.failure_detail
+    assert "[redacted]" in report.failure_detail

@@ -23,6 +23,7 @@ authorizes release; the driver's gates remain the authority.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import time
 from collections.abc import Callable
@@ -45,8 +46,21 @@ logger = structlog.get_logger(__name__)
 
 MIN_TIMEOUT_S = 1
 MAX_TIMEOUT_S = 7200
-MAX_STDIO_CHARS = 64 * 1024
+FAILURE_TAIL_CHARS = 400
 GIT_TIMEOUT_S = 30
+
+# Conservative credential shapes redacted from worker output before it is
+# stored in the loop state or proof.
+_SECRET_RE = re.compile(
+    r"(?:sk|pk|api|key|tok|secret)[_-][A-Za-z0-9]{16,}"
+    r"|ghp_[A-Za-z0-9]{16,}"
+    r"|github_pat_[A-Za-z0-9]{16,}"
+    r"|xox[baprs]-[A-Za-z0-9\-]{16,}"
+    r"|AKIA[0-9A-Z]{16}"
+    r"|Bearer\s+[A-Za-z0-9._~+/=-]{8,}"
+    r"|(?:API_KEY|SECRET|TOKEN|PASSWORD|PASSWD)\s*[=:]\s*\S+",
+    re.IGNORECASE,
+)
 
 EditProvider = Callable[[LoopItem, Path, str], list[dict[str, Any]]]
 
@@ -75,11 +89,21 @@ def build_task_prompt(item: LoopItem, feedback: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _truncate(text: str, limit: int = MAX_STDIO_CHARS) -> str:
+def _failure_tail(stderr: str, stdout: str, limit: int = FAILURE_TAIL_CHARS) -> str:
+    """Return a bounded tail of stderr, falling back to stdout.
+
+    Provider errors (``Free usage limit reached``, ``ECONNREFUSED``, ...) are
+    usually at the end of the stream, so the tail is what matters. The result
+    is capped at *limit* characters and never contains secrets beyond what the
+    worker itself printed.
+    """
+    text = (stderr or "").strip() or (stdout or "").strip()
+    if not text:
+        return ""
+    text = _SECRET_RE.sub("[redacted]", text)
     if len(text) <= limit:
         return text
-    half = limit // 2
-    return text[:half] + "\n...[truncated]...\n" + text[-half:]
+    return "...[truncated]...\n" + text[-limit:]
 
 
 def _spawn_agent(cmd: list[str], cwd: str, env: dict[str, str] | None) -> subprocess.Popen[str]:
@@ -131,10 +155,11 @@ class ExternalWorker:
     """Run an operator-configured CLI inside the driver's worktree.
 
     The command runs with ``cwd=worktree`` and receives
-    :func:`build_task_prompt` on stdin. stdout/stderr are capped at
-    ``MAX_STDIO_CHARS``. ``timeout_s`` is clamped to ``[1, 7200]``; on expiry
-    the whole process tree is killed. ``changed_paths`` comes from git, and
-    the gate is ``PASS`` only when the command exits 0 and changed something.
+    :func:`build_task_prompt` on stdin. A bounded tail of stderr (falling back
+    to stdout) is kept in the failure detail. ``timeout_s`` is clamped to
+    ``[1, 7200]``; on expiry the whole process tree is killed.
+    ``changed_paths`` comes from git, and the gate is ``PASS`` only when the
+    command exits 0 and changed something.
     """
 
     def __init__(
@@ -156,10 +181,13 @@ class ExternalWorker:
     def run(self, item: LoopItem, worktree: Path, feedback: str) -> WorkerResult:
         start = time.monotonic()
         prompt = build_task_prompt(item, feedback)
-        cmd = list(self.command)
+        root = Path(worktree)
+        # ``{workdir}`` is replaced with the absolute worktree path so agents
+        # that resolve a relative ``--dir`` against their own detected root
+        # are still confined to the isolated worktree.
+        cmd = [str(part).replace("{workdir}", str(root)) for part in self.command]
         cmd[0] = _resolve_executable(cmd[0])
         child_env = None if self.env is None else {**os.environ, **self.env}
-        root = Path(worktree)
 
         try:
             proc = _spawn_agent(cmd, str(root), child_env)
@@ -196,10 +224,9 @@ class ExternalWorker:
         detail = f"exit_code={exit_code}"
         if timed_out:
             detail += "\ntimeout"
-        if stderr:
-            detail += f"\nstderr:\n{_truncate(stderr)}"
-        if stdout:
-            detail += f"\nstdout:\n{_truncate(stdout)}"
+        tail = _failure_tail(stderr, stdout)
+        if tail:
+            detail += f"\noutput_tail:\n{tail}"
         gate: WorkerGate = "PASS" if exit_code == 0 and bool(changed) else "FAIL"
         return self._result(
             gate=gate,
@@ -236,11 +263,14 @@ class ExternalWorker:
 def OpencodeWorker(model: str | None = None, **kw: Any) -> ExternalWorker:
     """opencode CLI preset.
 
-    Assumed flags: ``run --auto --dir .`` plus an optional ``--model``.
-    ``--dir .`` is intentional because the worker's cwd is already the
-    isolated worktree. The prompt is fed on stdin.
+    Assumed flags: ``run --auto --dir {workdir}`` plus an optional ``--model``.
+    ``{workdir}`` is replaced with the absolute isolated worktree path at run
+    time. An absolute ``--dir`` is deliberate: opencode resolves a relative
+    ``--dir .`` against its own detected project root, which was observed to
+    escape the worktree and edit the original checkout (or an unrelated repo).
+    The prompt is fed on stdin.
     """
-    command = ["opencode", "run", "--auto", "--dir", "."]
+    command = ["opencode", "run", "--auto", "--dir", "{workdir}"]
     if model is not None:
         command += ["--model", model]
     return ExternalWorker(command, **kw)

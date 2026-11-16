@@ -167,13 +167,13 @@ def test_noop_worker_passes_without_changes(tmp_path):
 
 
 def test_preset_commands_and_names():
-    assert list(OpencodeWorker().command) == ["opencode", "run", "--auto", "--dir", "."]
+    assert list(OpencodeWorker().command) == ["opencode", "run", "--auto", "--dir", "{workdir}"]
     assert list(OpencodeWorker(model="gpt-5").command) == [
         "opencode",
         "run",
         "--auto",
         "--dir",
-        ".",
+        "{workdir}",
         "--model",
         "gpt-5",
     ]
@@ -183,3 +183,55 @@ def test_preset_commands_and_names():
     assert list(CursorWorker().command) == ["cursor-agent", "-p"]
     assert OpencodeWorker().name == "opencode"
     assert ClaudeCodeWorker().name == "claude"
+
+
+def test_external_worker_substitutes_absolute_workdir_placeholder(tmp_path):
+    repo = _git_repo(tmp_path)
+    worker = ExternalWorker(
+        [PYTHON, "-c", "import sys; open(sys.argv[1], 'w').write('x')", "{workdir}/out.txt"]
+    )
+    result = worker.run(_item(), repo, "")
+    assert result.gate == "PASS"
+    assert result.changed_paths == ("out.txt",)
+    assert (repo / "out.txt").read_text(encoding="utf-8") == "x"
+
+
+def test_external_worker_failure_detail_has_bounded_stderr_tail(tmp_path):
+    repo = _git_repo(tmp_path)
+    worker = ExternalWorker(
+        [
+            PYTHON,
+            "-c",
+            "import sys; sys.stderr.write('E' * 5000 + 'Free usage limit reached\\n'); sys.exit(1)",
+        ]
+    )
+    result = worker.run(_item(), repo, "")
+    assert result.gate == "FAIL"
+    assert "Free usage limit reached" in result.detail
+    assert result.detail.count("E") <= 400
+    assert len(result.detail) < 1200
+
+
+def test_external_worker_failure_falls_back_to_stdout(tmp_path):
+    repo = _git_repo(tmp_path)
+    worker = ExternalWorker(
+        [PYTHON, "-c", "import sys; sys.stdout.write('ECONNREFUSED\\n'); sys.exit(2)"]
+    )
+    result = worker.run(_item(), repo, "")
+    assert result.gate == "FAIL"
+    assert "ECONNREFUSED" in result.detail
+
+
+def test_external_worker_failure_tail_redacts_secrets(tmp_path):
+    repo = _git_repo(tmp_path)
+    worker = ExternalWorker(
+        [
+            PYTHON,
+            "-c",
+            "import sys; sys.stderr.write('auth failed for sk-abcdefghijklmnop123456\\n'); sys.exit(1)",
+        ]
+    )
+    result = worker.run(_item(), repo, "")
+    assert result.gate == "FAIL"
+    assert "sk-abcdefghijklmnop123456" not in result.detail
+    assert "[redacted]" in result.detail

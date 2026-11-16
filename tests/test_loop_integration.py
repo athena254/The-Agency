@@ -142,3 +142,47 @@ def test_cli_loop_run_loads_local_goal_without_repo(monkeypatch, tmp_path):
         assert state.queue[0].status == "done"
     finally:
         store.close()
+
+
+def test_cli_loop_run_defaults_model_to_beam_free(monkeypatch, tmp_path):
+    """The loop's default worker model matches forge code (beam-free)."""
+    import importlib
+
+    from typer.testing import CliRunner
+
+    from agency.cli.main import app
+
+    cli_main = importlib.import_module("agency.cli.main")
+
+    repo = _git_repo(tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_load_queue(source, **kwargs):
+        return parse_goal_plan(repo / "GOAL.md", repo / "fix_plan.md")
+
+    class FakeWorker:
+        name = "fake"
+
+        def run(self, item, worktree, feedback=""):
+            (Path(worktree) / "out.txt").write_text("ok", encoding="utf-8")
+            return WorkerResult(gate="PASS", changed_paths=("out.txt",))
+
+    class FakeGate:
+        def run(self, worktree, item, changed_paths):
+            return GateResult(gate="PASS")
+
+    def fake_make_worker(name, model, timeout_s):
+        captured["model"] = model
+        return FakeWorker()
+
+    monkeypatch.setattr(cli_main, "load_queue", fake_load_queue)
+    monkeypatch.setattr(cli_main, "_make_worker", fake_make_worker)
+    monkeypatch.setattr(cli_main, "ForgeGateRunner", lambda **kwargs: FakeGate())
+
+    db = tmp_path / "loop.db"
+    result = CliRunner().invoke(
+        app, ["loop", "run", str(repo), "--repo", str(repo), "--db", str(db)]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["model"] == "opencode/beam-free"

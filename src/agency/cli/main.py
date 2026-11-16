@@ -1039,7 +1039,9 @@ def loop_run(
     worker: str = typer.Option(
         "opencode", "--worker", "-w", help="opencode|claudecode|codex|pi|cursor."
     ),
-    model: str | None = typer.Option(None, "--model", "-m", help="Model for the worker."),
+    model: str | None = typer.Option(
+        "opencode/beam-free", "--model", "-m", help="Model for the worker."
+    ),
     session_id: str = typer.Option("agency-loop", "--session-id", help="Loop session id."),
     db: str = typer.Option("loop.db", "--db", help="Loop state database path."),
     max_hours: float | None = typer.Option(None, "--max-hours", help="Optional wall-clock cap."),
@@ -1115,7 +1117,9 @@ def loop_resume(
     worker: str = typer.Option(
         "opencode", "--worker", "-w", help="opencode|claudecode|codex|pi|cursor."
     ),
-    model: str | None = typer.Option(None, "--model", "-m"),
+    model: str | None = typer.Option(
+        "opencode/beam-free", "--model", "-m", help="Model for the worker."
+    ),
     db: str = typer.Option("loop.db", "--db", help="Loop state database path."),
     worker_timeout: int = typer.Option(7200, "--worker-timeout"),
     dry_run: bool = typer.Option(False, "--dry-run"),
