@@ -97,6 +97,25 @@ def create_worktree(
     return WorktreeInfo(worktree_path=str(wt_path), branch=branch, base_ref=base_ref)
 
 
+def snapshot_changes(repo_root: str | Path) -> frozenset[str]:
+    """Record the changed paths (tracked + untracked) of a git working tree."""
+    repo = Path(repo_root)
+    proc = _run_git(repo, ["status", "--porcelain"])
+    if proc.returncode != 0:
+        raise WorktreeError(f"cannot read git status for {repo}: {proc.stderr.strip()}")
+    return frozenset(line[3:].strip() for line in proc.stdout.splitlines() if line.strip())
+
+
+def isolation_violations(repo_root: str | Path, before: frozenset[str]) -> tuple[str, ...]:
+    """Return paths that changed in the original checkout since ``before``.
+
+    A worker that escapes its isolated worktree edits the original checkout,
+    and those edits are invisible to the worktree diff. Comparing the main
+    checkout's status before and after the run exposes them.
+    """
+    return tuple(sorted(snapshot_changes(repo_root) - before))
+
+
 def remove_worktree(repo_root: str | Path, worktree_path: str | Path) -> None:
     repo = Path(repo_root)
     wt = Path(worktree_path)
