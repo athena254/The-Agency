@@ -167,21 +167,22 @@ async def test_coding_status_reports_configured(coding_api) -> None:
 
 
 async def test_coding_submit_publishes_receipt_and_diff(coding_api) -> None:
-    client, c, _app = coding_api
+    client, c, app = coding_api
     accepted = await client.post(
         "/api/pilot/coding-tasks", json=coding_payload(c).model_dump(mode="json")
     )
     assert accepted.status_code == 202, accepted.text
     task_id = accepted.json()["task_id"]
 
-    async with asyncio.timeout(20):
-        while True:
-            read = await client.get(f"/api/pilot/tasks/{task_id}")
-            assert read.status_code == 200, read.text
-            if read.json()["state"] not in {"ADMITTED", "RUNNING"}:
-                break
-            await asyncio.sleep(0.005)
+    # Synchronise on the real execution task instead of racing a wall-clock
+    # polling budget; the HTTP read below still asserts the published state.
+    service = app.state.pilot
+    assert service is not None and service._execution is not None, "coding task not admitted"
+    async with asyncio.timeout(60):
+        await asyncio.shield(service._execution)
 
+    read = await client.get(f"/api/pilot/tasks/{task_id}")
+    assert read.status_code == 200, read.text
     result = read.json()
     assert result["state"] == "COMPLETED", result
     assert "Patch follows as DATA" in (result["response"] or "")
