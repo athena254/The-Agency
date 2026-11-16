@@ -43,6 +43,25 @@ CAVEATS: tuple[str, ...] = (
     "tests_not_run",
 )
 
+_LLM_FAILURE_RULE = "LLM_REVIEW_FAILED"
+_LLM_FAILURE_MESSAGE = "LLM reviewer did not produce a usable verdict; gate failed closed."
+_LLM_FINDING_MESSAGE = "LLM reviewer finding."
+_REFUSAL_MARKERS: tuple[str, ...] = (
+    "i cannot",
+    "i can't",
+    "i am unable",
+    "i'm unable",
+    "i refuse",
+    "cannot comply",
+    "can't comply",
+    "as an ai",
+    "content policy",
+)
+
+
+class _LLMReviewError(Exception):
+    """The configured reviewer could not produce a usable verdict."""
+
 
 class ReviewFinding(BaseModel):
     """One finding raised by the (heuristic) reviewer."""
@@ -313,13 +332,17 @@ def _llm_review_one_round(
     test_paths: list[str] | None,
     test_timeout_s: int,
     run_tests_flag: bool,
-) -> tuple[int, list[ReviewFinding], str] | None:
-    """Try an Agency-native LLM critic. Returns None on any failure (fallback)."""
-    try:
-        # Build a compact evidence bundle for the model.
-        from agency.forge.inspection import inspect_changes
-        from agency.forge.security_scan import scan_changes
+) -> tuple[int, list[ReviewFinding], str]:
+    """Run one LLM review round. Raise :class:`_LLMReviewError` on any failure.
 
+    Errors, refusals and malformed responses are all failures: the caller must
+    fail the gate closed rather than fall back to a passing heuristic verdict.
+    No prompt or response text is ever retained in the returned findings.
+    """
+    from agency.forge.inspection import inspect_changes
+    from agency.forge.security_scan import scan_changes
+
+    try:
         insp = inspect_changes(root, changed_paths)
         sec = scan_changes(root, changed_paths)
         findings_summary: dict[str, Any] = {
@@ -337,7 +360,6 @@ def _llm_review_one_round(
             ],
             "lint": [],
         }
-        # lint-ish
         for p in changed_paths:
             for lf in _lint_check(root, p):
                 findings_summary["lint"].append(
@@ -367,44 +389,93 @@ def _llm_review_one_round(
             "block. Respond with JSON only.\n\n"
             f"CHANGE SET:\n{json.dumps(findings_summary, indent=2)[:6000]}"
         )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("forge.review_llm_evidence_error", error_class=type(exc).__name__)
+        raise _LLMReviewError from None
+
+    try:
         try:
-            response = asyncio.run(llm.generate(prompt))
+            asyncio.get_running_loop()
         except RuntimeError:
-            # already in an event loop; use a new loop
+            response = asyncio.run(llm.generate(prompt))
+        else:
             loop = asyncio.new_event_loop()
             try:
                 response = loop.run_until_complete(llm.generate(prompt))
             finally:
                 loop.close()
-        text = (response or "").strip()
-        # extract JSON
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1:
-            return None
+    except _LLMReviewError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("forge.review_llm_call_failed", error_class=type(exc).__name__)
+        raise _LLMReviewError from None
+
+    text = response.strip() if isinstance(response, str) else ""
+    lowered = text.lower()
+    if not text or any(marker in lowered for marker in _REFUSAL_MARKERS):
+        raise _LLMReviewError
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end <= start:
+        raise _LLMReviewError
+    try:
         data = json.loads(text[start : end + 1])
-        score = int(data.get("score", 0))
-        score = max(0, min(5, score))
-        llm_findings: list[ReviewFinding] = []
-        for raw in data.get("findings", []) or []:
-            if not isinstance(raw, dict):
-                continue
-            sev = raw.get("severity", "medium")
-            if sev not in ("low", "medium", "high", "critical"):
-                sev = "medium"
-            llm_findings.append(
-                ReviewFinding(
-                    path=str(raw.get("path", ""))[:512],
-                    line=int(raw.get("line", 1) or 1),
-                    rule_id=str(raw.get("rule_id", "LLM"))[:64] or "LLM",
-                    severity=sev,
-                    message=str(raw.get("message", "llm finding"))[:500],
-                    resolved=bool(raw.get("resolved", False)),
-                )
+    except (TypeError, ValueError):
+        raise _LLMReviewError from None
+    if not isinstance(data, dict) or "score" not in data:
+        raise _LLMReviewError
+    try:
+        score = max(0, min(5, int(data["score"])))
+    except (TypeError, ValueError):
+        raise _LLMReviewError from None
+
+    llm_findings: list[ReviewFinding] = []
+    raw_findings = data.get("findings") or []
+    if not isinstance(raw_findings, list):
+        raise _LLMReviewError
+    for raw in raw_findings:
+        if not isinstance(raw, dict):
+            continue
+        sev = raw.get("severity", "medium")
+        if sev not in ("low", "medium", "high", "critical"):
+            sev = "medium"
+        try:
+            line = int(raw.get("line", 1) or 1)
+        except (TypeError, ValueError):
+            line = 1
+        llm_findings.append(
+            ReviewFinding(
+                path=str(raw.get("path", ""))[:512],
+                line=max(1, line),
+                rule_id=(str(raw.get("rule_id", "LLM")).strip()[:64] or "LLM"),
+                severity=sev,
+                message=_LLM_FINDING_MESSAGE,
+                resolved=bool(raw.get("resolved", False)),
             )
-        tests_note = "tests_run" if (run_tests_flag and test_paths) else "tests_not_run"
-        return score, llm_findings, tests_note
+        )
+
+    tests_note = "tests_run" if (run_tests_flag and test_paths) else "tests_not_run"
+    return score, llm_findings, tests_note
+
+
+def build_review_llm() -> Any | None:
+    """Build the configured Agency LLM for the review gate.
+
+    Uses the same ``agency.llm`` configuration path as the rest of the
+    application, so ``AGENCY_LLM_*`` settings and ``.env`` are honoured. The
+    echo/offline fallback is treated as "no provider configured" and returns
+    ``None`` so hermetic runs never attempt a network call.
+    """
+    try:
+        from agency.llm.adapter import LLMAdapter
+        from agency.llm.config import ProviderKind, load_config
+
+        config = load_config()
+        if config.provider is ProviderKind.ECHO:
+            return None
+        return LLMAdapter(config=config)
     except Exception:  # noqa: BLE001
+        logger.warning("forge.review_llm_unavailable")
         return None
 
 
@@ -447,43 +518,60 @@ def run_review(
     report_id = str(uuid4())
     created_at = datetime.now(UTC)
 
+    if use_llm and llm is None:
+        llm = build_review_llm()
+    llm_requested = bool(use_llm and llm is not None)
+
     used_llm = False
     rounds_done = 0
     final_score = 0
     final_findings: list[ReviewFinding] = []
     for _ in range(max_rounds):
         rounds_done += 1
-        if use_llm and llm is not None:
-            llm_result = _llm_review_one_round(
-                llm, real_root, changed_paths, test_paths, test_timeout_s, run_tests_flag
-            )
-            if llm_result is not None:
-                score, findings, _ = llm_result
+        if llm_requested:
+            try:
+                score, findings, _ = _llm_review_one_round(
+                    llm, real_root, changed_paths, test_paths, test_timeout_s, run_tests_flag
+                )
                 used_llm = True
-            else:
-                score, findings, _ = _one_round(
+            except _LLMReviewError:
+                # Heuristic remains the scorer of last resort, but the failed
+                # LLM gate keeps an unresolved high finding so the gate fails.
+                logger.warning("forge.review_llm_failed_closed")
+                score, heuristic_findings, _ = _one_round(
                     real_root,
                     changed_paths,
                     test_paths=test_paths,
                     test_timeout_s=test_timeout_s,
                     run_tests_flag=run_tests_flag,
                 )
-        else:
-            score, findings, _ = _one_round(
-                real_root,
-                changed_paths,
-                test_paths=test_paths,
-                test_timeout_s=test_timeout_s,
-                run_tests_flag=run_tests_flag,
-            )
-        final_score = score
-        final_findings = findings
+                findings = [
+                    *heuristic_findings,
+                    ReviewFinding(
+                        path="",
+                        line=1,
+                        rule_id=_LLM_FAILURE_RULE,
+                        severity="high",
+                        message=_LLM_FAILURE_MESSAGE,
+                    ),
+                ]
+            # The prompt is identical each round; a second call only adds cost.
+            break
+        score, findings, _ = _one_round(
+            real_root,
+            changed_paths,
+            test_paths=test_paths,
+            test_timeout_s=test_timeout_s,
+            run_tests_flag=run_tests_flag,
+        )
         unresolved_high = sum(
             1 for f in findings if (not f.resolved) and f.severity in ("high", "critical")
         )
         if score >= threshold and unresolved_high == 0:
             break
 
+    final_score = score
+    final_findings = findings
     unresolved_high = sum(
         1 for f in final_findings if (not f.resolved) and f.severity in ("high", "critical")
     )
@@ -495,6 +583,11 @@ def run_review(
     if run_tests_flag:
         caveats = [c for c in caveats if c != "tests_not_run"]
 
+    note = (
+        "LLM-assisted review; not a human review; does not authorize merge or deploy."
+        if used_llm
+        else "Heuristic review; not a human review; does not authorize merge or deploy."
+    )
     report = ReviewReport(
         report_id=report_id,
         created_at=created_at,
@@ -507,6 +600,7 @@ def run_review(
         findings=tuple(final_findings),
         unresolved_high=unresolved_high,
         caveats=tuple(caveats),
+        note=note,
     )
     logger.info(
         "forge.review", root=str(real_root), gate=gate, score=final_score, rounds=rounds_done
@@ -520,5 +614,6 @@ __all__ = [
     "ReviewFinding",
     "ReviewReport",
     "ReviewStore",
+    "build_review_llm",
     "run_review",
 ]

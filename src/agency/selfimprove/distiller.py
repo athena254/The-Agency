@@ -100,3 +100,46 @@ def distill_skill(
         return None
     except Exception:  # noqa: BLE001 - distillation must never break a task
         return None
+
+
+def evolve_skill(
+    skill_id: str,
+    trace: TaskTrace,
+    registry: SkillRegistry,
+) -> SkillSpec | None:
+    """Create a DRAFT successor from a published skill and new task evidence.
+
+    The prior version is read-only. The successor retains its logical operation
+    and requested permissions; changed authority requires separate review.
+    """
+    if trace.status.strip().lower() != "completed" or not trace.description.strip():
+        return None
+    try:
+        published = [
+            item
+            for item in registry.list_versions(skill_id)
+            if item.status is SkillStatus.PUBLISHED
+        ]
+        if not published:
+            return None
+        current = max(published, key=lambda item: tuple(int(p) for p in item.version.split(".")))
+        version = _next_version(registry, skill_id)
+        evidence = _description_from_trace(trace)
+        if trace.subtask_outputs:
+            evidence = f"{evidence} Observed outcome: {trace.subtask_outputs[0][:300]}"
+        return registry.register(
+            SkillSpec(
+                skill_id=current.skill_id,
+                version=version,
+                name=current.name,
+                description=evidence[:500],
+                inputs=current.inputs,
+                outputs=current.outputs,
+                permissions=current.permissions,
+                implementation=current.implementation,
+                provenance=f"evolved:{current.skill_id}@{current.version}:task:{trace.task_id}",
+                status=SkillStatus.DRAFT,
+            )
+        )
+    except Exception:  # noqa: BLE001 - evolution must not break completed work.
+        return None

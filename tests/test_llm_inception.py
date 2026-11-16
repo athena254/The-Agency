@@ -15,8 +15,11 @@ def test_inception_provider_kind_exists() -> None:
 
 def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("INCEPTION_API_KEY", "test-inception-key")
-    monkeypatch.delenv("LLM_PROVIDER", raising=False)
-    config = load_config(provider="inception")
+    # conftest pins AGENCY_LLM_PROVIDER/MODEL to the offline echo defaults;
+    # drop them so this test exercises provider-specific resolution only.
+    for key in ("LLM_PROVIDER", "AGENCY_LLM_PROVIDER", "AGENCY_LLM_MODEL"):
+        monkeypatch.delenv(key, raising=False)
+    config = load_config(provider="inception", load_dotenv=False)
     assert config.provider is ProviderKind.INCEPTION
     assert config.model == "mercury-3"
     assert config.api_key is not None
@@ -29,7 +32,7 @@ def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_named_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("INCEPTION_API_KEY", "named-key")
-    config = load_named_provider("inception")
+    config = load_named_provider("inception", load_dotenv=False)
     assert config.provider is ProviderKind.INCEPTION
     assert config.model == "mercury-3"
     assert config.api_key is not None
@@ -37,10 +40,15 @@ def test_named_provider(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_detect_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"):
+    for key in (
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENROUTER_API_KEY",
+        "AGENCY_LLM_PROVIDER",
+    ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("INCEPTION_API_KEY", "detect-key")
-    assert load_config().provider is ProviderKind.INCEPTION
+    assert load_config(load_dotenv=False).provider is ProviderKind.INCEPTION
 
 
 @pytest.mark.asyncio

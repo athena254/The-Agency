@@ -212,7 +212,7 @@ async def test_partial_start_failure_drains_native_before_owned_cleanup(coding_c
     monkeypatch.setattr(service._audit, "initialize", fail_audit)
     starting = asyncio.create_task(service.start())
     try:
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(attempted.wait(), 5)
         assert attempted.is_set(), "partial startup must also drain transferred executor"
         assert not starting.done() and not service._closed
         release.set()

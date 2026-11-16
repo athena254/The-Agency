@@ -60,7 +60,9 @@ from agency.security.sandbox.config import SandboxBackend, SandboxConfig
 from agency.security.sandbox.manager import SandboxManager
 from agency.selfimprove.distiller import TaskTrace
 from agency.selfimprove.loop import SelfImprovementLoop
+from agency.skills.executor import OperationRegistry, SkillExecutor, SkillRunResult
 from agency.skills.registry import SkillRegistry
+from agency.skills.tool import SkillInvokeTool
 from agency.tools.base import BetaPrincipal, ToolContext
 from agency.tools.builtin import register_all as register_builtin_tools
 from agency.tools.driver import ToolDriver
@@ -138,6 +140,7 @@ class AgencyOrchestrator:
         llm: LLMAdapter | None = None,
         memory_db_path: str | None = None,
         skill_db_path: str | None = None,
+        skill_operations: OperationRegistry | None = None,
     ) -> None:
         self._config = config or {}
         self._log = structlog.get_logger(__name__)
@@ -197,8 +200,13 @@ class AgencyOrchestrator:
         )
         self._skill_registry: SkillRegistry | None = None
         self._self_improvement: SelfImprovementLoop | None = None
+        self._skill_operations = skill_operations or OperationRegistry()
+        self._skill_authorizer = self._config.get("skill_authorizer")
+        skill_allowed_permissions = frozenset(self._config.get("skill_allowed_permissions", ()))
         try:
-            self._skill_registry = SkillRegistry(resolved_skill_db)
+            self._skill_registry = SkillRegistry(
+                resolved_skill_db, allowed_permissions=skill_allowed_permissions
+            )
             self._self_improvement = SelfImprovementLoop(self._skill_registry)
         except Exception:  # noqa: BLE001 - optional component
             self._skill_registry = None
@@ -266,6 +274,7 @@ class AgencyOrchestrator:
             return
         registry = ToolRegistry(audit=self._audit_log)
         register_builtin_tools(registry)
+        registry.register(SkillInvokeTool(self.execute_skill))
         self._tool_registry = registry
         self._tool_driver = ToolDriver(registry=registry, llm=self._llm_adapter)
         self._log.info(
@@ -686,6 +695,7 @@ class AgencyOrchestrator:
         # Execute each subtask
         outputs: list[str] = []
         assessments: list[SubtaskAssessment] = []
+        skill_tool_steps: list[dict[str, Any]] = []
 
         # Tool-capable agents run the tool-driver loop instead of a single
         # LLM call: the agent plans with tools (search/fetch/memory), acts,
@@ -731,13 +741,26 @@ class AgencyOrchestrator:
                     learned = self._self_improvement.relevant_skills(description, limit=3)
                 except Exception:  # noqa: BLE001
                     learned = []
+                pinned_refs = set()
+                if tool_ctx_agent is not None:
+                    raw_refs = tool_ctx_agent.metadata.get("skill_refs", [])
+                    if isinstance(raw_refs, list):
+                        pinned_refs = {
+                            (ref[0], ref[1])
+                            for ref in raw_refs
+                            if isinstance(ref, list)
+                            and len(ref) == 2
+                            and all(isinstance(part, str) for part in ref)
+                        }
+                learned = [s for s in learned if (s.skill_id, s.version) in pinned_refs]
                 if learned:
                     skill_lines = "\n".join(
                         f"- {s.name} ({s.skill_id} v{s.version}): {s.description}" for s in learned
                     )
                     system_prompt = (
                         f"{system_prompt}\n\nRelevant learned skills "
-                        f"(Agency-native, versioned):\n{skill_lines}"
+                        f"(Agency-native, versioned, pinned to this agent):\n{skill_lines}\n"
+                        "To invoke one, use agency_skill with its exact ID, version, and inputs."
                     )
 
             tool_ctx = self._tool_context(task.created_by, task_id)
@@ -747,6 +770,17 @@ class AgencyOrchestrator:
                 ctx=tool_ctx,
                 max_tool_iterations=_TOOL_ITERATIONS.get(agent_domain or "", 4),
             )
+            skill_tool_steps = [
+                {
+                    "tool": step.tool,
+                    "args": {},
+                    "ok": step.ok,
+                    "skill_id": getattr(step, "evidence", {}).get("skill_id"),
+                    "version": getattr(step, "evidence", {}).get("version"),
+                }
+                for step in loop_result.steps
+                if getattr(step, "tool", None) == "agency_skill"
+            ]
             # The driver puts provider exception bodies into llm_error's answer.
             # There is no model artifact to present on that path.
             output = (
@@ -869,8 +903,14 @@ class AgencyOrchestrator:
                     status="completed",
                     agent_id=task.created_by,
                     subtask_outputs=list(outputs),
+                    tool_steps=skill_tool_steps,
                 )
                 self._self_improvement.distill(trace)
+                for step in skill_tool_steps:
+                    if step.get("ok") is True:
+                        skill_id = step.get("skill_id")
+                        if isinstance(skill_id, str):
+                            self._self_improvement.evolve(skill_id, trace)
             except Exception:  # noqa: BLE001 - never break a task
                 self._log.warning("self_improvement.distill_failed", task_id=task.task_id)
 
@@ -1040,6 +1080,51 @@ class AgencyOrchestrator:
     # ------------------------------------------------------------------ #
     # Memory
     # ------------------------------------------------------------------ #
+
+    def execute_skill(
+        self,
+        agent_id: str,
+        skill_id: str,
+        version: str,
+        inputs: dict[str, Any] | None = None,
+    ) -> SkillRunResult:
+        """Execute one exact, blueprint-pinned published skill.
+
+        This explicit host-facing seam is not exposed to model-generated text.
+        Required permissions are checked by the trusted ``skill_authorizer``
+        configured by the host; absent authorization denies permissioned skills.
+        """
+
+        def failed(error: str) -> SkillRunResult:
+            return SkillRunResult(skill_id=skill_id, version=version, success=False, error=error)
+
+        if self._skill_registry is None:
+            return failed("skill registry unavailable")
+        agent = self._identity_registry.get(agent_id)
+        if agent is None or agent.revoked:
+            return failed("unknown or revoked agent")
+        if agent.metadata.get("factory") != "agent-factory-v1":
+            return failed("agent is not factory-issued")
+        refs = agent.metadata.get("skill_refs")
+        if not isinstance(refs, list) or [skill_id, version] not in refs:
+            return failed("skill is not pinned to this agent")
+        try:
+            skill = self._skill_registry.get(skill_id, version)
+        except (KeyError, ValueError):
+            return failed("unknown skill version")
+
+        grants: set[str] = set()
+        if skill.permissions:
+            if not callable(self._skill_authorizer):
+                return failed("permission denied")
+            try:
+                for permission in skill.permissions:
+                    if self._skill_authorizer(agent_id, permission) is not True:
+                        return failed("permission denied")
+                    grants.add(permission)
+            except Exception:  # noqa: BLE001 - authorization errors deny by default.
+                return failed("permission denied")
+        return SkillExecutor(self._skill_operations, frozenset(grants)).run(skill, inputs)
 
     async def search_memory(
         self,

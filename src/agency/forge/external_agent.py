@@ -17,6 +17,11 @@ Reliability hardening (Windows + CI):
   block when ``cleanup=True``; a failed worktree create prunes stale metadata.
 - Tracked lockfiles (``uv.lock``) and the original checkout are guarded: an
   agent that changes them fails the gate instead of passing silently.
+- Isolation is re-verified after the run: the original checkout's git status is
+  snapshotted before the agent starts and compared afterwards, so an agent that
+  escapes its worktree (edits outside it) fails the gate naming the paths.
+- Agent failures keep a bounded, secret-redacted tail of stderr (stdout
+  fallback) in ``failure_detail`` so provider errors are diagnosable.
 - JSON serialization never goes through Rich, whose 80-column default wrap
   would corrupt machine-readable output when stdout is piped.
 """
@@ -24,6 +29,7 @@ Reliability hardening (Windows + CI):
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import sqlite3
@@ -41,13 +47,22 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agency.forge.inspection import InspectionReport, inspect_changes
 from agency.forge.pipeline import CAVEATS as _PIPELINE_CAVEATS
+from agency.forge.reviewer import ReviewReport, run_review
 from agency.forge.security_scan import SecurityReport, scan_changes
 from agency.forge.test_runner import MAX_TEST_TIMEOUT_S, TestReport, run_tests
-from agency.forge.worktree import WorktreeError, WorktreeInfo, create_worktree, remove_worktree
+from agency.forge.worktree import (
+    WorktreeError,
+    WorktreeInfo,
+    create_worktree,
+    isolation_violations,
+    remove_worktree,
+    snapshot_changes,
+)
 
 logger = structlog.get_logger(__name__)
 
 MAX_STDIO_CHARS = 4000
+MAX_FAILURE_DETAIL_CHARS = 500
 MAX_CHANGED_PATHS = 256
 
 DEFAULT_BRANCH = "forge-external-agent"
@@ -72,7 +87,7 @@ _IGNORED_CHANGED_PREFIXES: tuple[str, ...] = (
 
 ExternalAgentGate = Literal["PASS", "FAIL"]
 
-_BASE_CAVEATS = ("agent_output_unverified", *_PIPELINE_CAVEATS)
+_BASE_CAVEATS = ("agent_output_unverified", *_PIPELINE_CAVEATS, "review_not_run")
 
 
 class ExternalAgentReport(BaseModel):
@@ -90,11 +105,14 @@ class ExternalAgentReport(BaseModel):
     changed_paths: tuple[str, ...] = ()
     protected_paths: tuple[str, ...] = ()
     main_repo_changes: tuple[str, ...] = ()
+    isolation_violations: tuple[str, ...] = ()
     stdout: str = ""
     stderr: str = ""
+    failure_detail: str = ""
     inspection: InspectionReport
     security: SecurityReport
     tests: TestReport | None = None
+    review: ReviewReport | None = None
     gate: ExternalAgentGate
     caveats: tuple[str, ...] = _BASE_CAVEATS
     note: str = "External coding agent run; Forge does not auto-merge or authorize release."
@@ -205,6 +223,36 @@ def _truncate(text: str, limit: int = MAX_STDIO_CHARS) -> str:
     if len(text) <= limit:
         return text
     return text[: limit // 2] + "\n...[truncated]...\n" + text[-limit // 2 :]
+
+
+_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"sk-[A-Za-z0-9_\-]{16,}"),
+    re.compile(r"ghp_[A-Za-z0-9]{16,}"),
+    re.compile(r"github_pat_[A-Za-z0-9_]{16,}"),
+    re.compile(r"xox[baprs]-[A-Za-z0-9\-]{16,}"),
+    re.compile(r"AKIA[0-9A-Z]{16}"),
+    re.compile(r"Bearer\s+[A-Za-z0-9._\-]{16,}", re.IGNORECASE),
+    re.compile(r"(?:API_KEY|SECRET|TOKEN|PASSWORD|PASSWD)\s*[=:]\s*\S+", re.IGNORECASE),
+)
+
+
+def _redact_secrets(text: str) -> str:
+    """Best-effort redaction of common credential shapes before reporting."""
+    redacted = text
+    for pattern in _SECRET_PATTERNS:
+        redacted = pattern.sub("[redacted]", redacted)
+    return redacted
+
+
+def _failure_detail(stdout: str, stderr: str, limit: int = MAX_FAILURE_DETAIL_CHARS) -> str:
+    """Bounded, redacted tail of agent stderr (stdout fallback) for diagnostics."""
+    source = stderr.strip() or stdout.strip()
+    if not source:
+        return ""
+    source = _redact_secrets(source)
+    if len(source) <= limit:
+        return source
+    return "...[truncated]...\n" + source[-limit:]
 
 
 def _decode_stream(value: bytes | bytearray | str | None) -> str:
@@ -439,6 +487,8 @@ def run_external_agent(
     run_tests_flag: bool = False,
     test_paths: list[str] | None = None,
     test_timeout_s: int = DEFAULT_TEST_TIMEOUT_S,
+    run_review_flag: bool = True,
+    llm: Any = None,
     cleanup: bool = False,
     protected_paths: Iterable[str] | None = None,
 ) -> ExternalAgentReport:
@@ -491,12 +541,19 @@ def run_external_agent(
         raise ValueError(f"failed to create worktree: {exc}") from exc
 
     worktree_path = Path(info.worktree_path)
-    # Baseline after worktree creation so its own git activity is not flagged.
-    pre_repo_state = _tracked_changes(real_repo)
     cmd_list = [str(x).replace("{workdir}", str(worktree_path)) for x in cmd_list]
 
     try:
+        # Baseline after worktree creation so its own git activity is not
+        # flagged. snapshot_changes includes untracked files, so an agent that
+        # creates new files in the original checkout is caught too.
+        try:
+            before_snapshot = snapshot_changes(real_repo)
+        except WorktreeError as exc:
+            raise ValueError(f"cannot snapshot repository state: {exc}") from exc
+        pre_repo_state = _tracked_changes(real_repo)
         exit_code, stdout, stderr = _run_agent(cmd_list, str(worktree_path), timeout_s)
+        violations = isolation_violations(real_repo, before_snapshot)
         changed = _changed_paths(worktree_path)
 
         try:
@@ -520,6 +577,15 @@ def run_external_agent(
                 logger.error("forge.external_agent_tests_error", error=str(exc))
                 tests = None
 
+        review: ReviewReport | None = None
+        review_error = False
+        if run_review_flag:
+            try:
+                review = run_review(worktree_path, changed, use_llm=True, llm=llm)
+            except Exception:  # noqa: BLE001
+                review_error = True
+                logger.error("forge.external_agent_review_error")
+
         post_repo_state = _tracked_changes(real_repo)
         baseline = set(pre_repo_state)
         main_repo_changes = tuple(p for p in post_repo_state if p not in baseline)
@@ -536,6 +602,10 @@ def run_external_agent(
             overall = "FAIL"
         if tests is not None and tests.gate != "PASS":
             overall = "FAIL"
+        if review is not None and review.gate != "PASS":
+            overall = "FAIL"
+        if review_error:
+            overall = "FAIL"
         if protected_hits:
             overall = "FAIL"
             logger.warning(
@@ -548,15 +618,35 @@ def run_external_agent(
                 "forge.external_agent_main_repo_changed",
                 paths=list(main_repo_changes),
             )
+        if violations:
+            overall = "FAIL"
+            logger.warning(
+                "forge.external_agent_isolation_violation",
+                paths=list(violations),
+            )
 
         caveats: list[str] = list(_BASE_CAVEATS)
         if protected_hits:
             caveats.append("protected_file_modified")
         if main_repo_changes:
             caveats.append("main_repo_modified")
+        if violations:
+            caveats.append("isolation_violation")
         if tests is not None:
             caveats = [c for c in caveats if c != "tests_not_run"]
         caveats = [c for c in caveats if c != "security_review_not_run"]
+        if review is not None:
+            caveats = [c for c in caveats if c != "review_not_run"]
+        if review_error:
+            caveats.append("review_error")
+
+        note = "External coding agent run; Forge does not auto-merge or authorize release."
+        if violations:
+            note += (
+                " ISOLATION VIOLATION: the agent left its isolated worktree and modified"
+                f" paths outside it: {', '.join(violations)}."
+            )
+        failure_detail = _failure_detail(stdout, stderr) if overall == "FAIL" else ""
 
         report = ExternalAgentReport(
             report_id=report_id,
@@ -569,14 +659,17 @@ def run_external_agent(
             changed_paths=tuple(changed),
             protected_paths=protected_hits,
             main_repo_changes=main_repo_changes,
+            isolation_violations=violations,
             stdout=_truncate(stdout),
             stderr=_truncate(stderr),
+            failure_detail=failure_detail,
             inspection=inspection,
             security=security,
             tests=tests,
+            review=review,
             gate=overall,
             caveats=tuple(caveats),
-            note="External coding agent run; Forge does not auto-merge or authorize release.",
+            note=note,
         )
 
         logger.info(

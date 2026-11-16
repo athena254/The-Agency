@@ -151,20 +151,47 @@ def _get(env: dict[str, str], *names: str, default: str | None = None) -> str | 
     return default
 
 
+def _prefixed(name: str) -> str:
+    """Return the ``AGENCY_``-prefixed spelling of an env var name.
+
+    Only unprefixed names (``LLM_PROVIDER`` -> ``AGENCY_LLM_PROVIDER``) and
+    provider-specific keys (``INCEPTION_API_KEY`` -> ``AGENCY_INCEPTION_API_KEY``)
+    are rewritten, so already-prefixed names are returned unchanged. This
+    mirrors the repository's ``AGENCY_`` settings prefix.
+    """
+    return f"AGENCY_{name}" if not name.startswith("AGENCY_") else name
+
+
 def detect_provider(env: dict[str, str] | None = None) -> ProviderKind:
-    """Auto-select a provider from available credentials."""
+    """Auto-select a provider from available credentials.
+
+    Credential keys are looked up with their unprefixed spelling first and the
+    ``AGENCY_``-prefixed spelling second, so ``AGENCY_LLM_*`` configuration is
+    honoured just like the equivalent bare keys.
+    """
     env = dict(os.environ) if env is None else env
-    if _get(env, "OPENAI_API_KEY"):
+    if _get(env, "OPENAI_API_KEY", _prefixed("OPENAI_API_KEY")):
         return ProviderKind.OPENAI
-    if _get(env, "ANTHROPIC_API_KEY"):
+    if _get(env, "ANTHROPIC_API_KEY", _prefixed("ANTHROPIC_API_KEY")):
         return ProviderKind.ANTHROPIC
-    if _get(env, "OPENROUTER_API_KEY"):
+    if _get(env, "OPENROUTER_API_KEY", _prefixed("OPENROUTER_API_KEY")):
         return ProviderKind.OPENROUTER
-    if _get(env, "INCEPTION_API_KEY", "INCEPTION_LABS_API_KEY"):
+    if _get(
+        env,
+        "INCEPTION_API_KEY",
+        "INCEPTION_LABS_API_KEY",
+        _prefixed("INCEPTION_API_KEY"),
+        _prefixed("INCEPTION_LABS_API_KEY"),
+    ):
         return ProviderKind.INCEPTION
     if _get(env, "OLLAMA_HOST", "OLLAMA_BASE_URL"):
         return ProviderKind.OLLAMA
-    if _get(env, "OPENAI_BASE_URL", "LLM_BASE_URL", "LOCAL_LLM_URL"):
+    if _get(env, "OPENAI_BASE_URL", "LLM_BASE_URL", "LOCAL_LLM_URL", _prefixed("OPENAI_BASE_URL")):
+        return ProviderKind.LOCAL
+    if _get(env, "LLM_API_KEY", _prefixed("LLM_API_KEY")):
+        # A generic credential with no provider-specific key: treat it as an
+        # OpenAI-compatible endpoint so the caller does not silently degrade to
+        # echo. An explicit ``LLM_PROVIDER`` / ``AGENCY_LLM_PROVIDER`` still wins.
         return ProviderKind.LOCAL
     return ProviderKind.ECHO
 
@@ -177,9 +204,9 @@ def load_config(
 ) -> LLMConfig:
     """Build an :class:`LLMConfig` from ``.env`` / environment variables.
 
-    Resolution order: explicit args > generic ``LLM_*`` vars > provider
-    specific vars > built-in defaults. Falls back to ``echo`` when no
-    credentials are found.
+    Resolution order: explicit args > generic ``LLM_*`` vars > ``AGENCY_LLM_*``
+    vars > provider specific vars > built-in defaults. Falls back to ``echo``
+    only when no provider credentials are configured at all.
     """
     if load_dotenv:
         _load_dotenv(env_file)
@@ -187,33 +214,69 @@ def load_config(
 
     kind: ProviderKind
     if provider is None:
-        raw = _get(env, "LLM_PROVIDER")
+        raw = _get(env, "LLM_PROVIDER", "AGENCY_LLM_PROVIDER")
         kind = ProviderKind(raw.lower()) if raw else detect_provider(env)
     else:
         kind = (
             provider if isinstance(provider, ProviderKind) else ProviderKind(str(provider).lower())
         )
 
-    api_key = _get(env, "LLM_API_KEY")
-    base_url = _get(env, "LLM_BASE_URL")
-    resolved_model = model or _get(env, "LLM_MODEL")
+    # Generic values: the unprefixed spelling wins, the AGENCY_-prefixed one is
+    # only a fallback. Explicit args still win (handled above / via ``model``).
+    api_key = _get(env, "LLM_API_KEY", "AGENCY_LLM_API_KEY")
+    base_url = _get(env, "LLM_BASE_URL", "AGENCY_LLM_BASE_URL")
+    resolved_model = model or _get(env, "LLM_MODEL", "AGENCY_LLM_MODEL")
 
     if kind is ProviderKind.OPENAI:
-        api_key = api_key or _get(env, "OPENAI_API_KEY")
-        base_url = base_url or _get(env, "OPENAI_BASE_URL")
-        resolved_model = resolved_model or _get(env, "OPENAI_MODEL") or _DEFAULT_MODELS[kind]
-    elif kind is ProviderKind.ANTHROPIC:
-        api_key = api_key or _get(env, "ANTHROPIC_API_KEY")
-        base_url = base_url or _get(env, "ANTHROPIC_BASE_URL")
-        resolved_model = resolved_model or _get(env, "ANTHROPIC_MODEL") or _DEFAULT_MODELS[kind]
-    elif kind is ProviderKind.OPENROUTER:
-        api_key = api_key or _get(env, "OPENROUTER_API_KEY")
-        base_url = base_url or _get(env, "OPENROUTER_BASE_URL", "OPENAI_BASE_URL")
-        resolved_model = resolved_model or _get(env, "OPENROUTER_MODEL") or _DEFAULT_MODELS[kind]
-    elif kind in (ProviderKind.OLLAMA, ProviderKind.LOCAL):
-        base_url = base_url or _get(env, "OLLAMA_HOST", "OLLAMA_BASE_URL", "LOCAL_LLM_URL")
+        api_key = api_key or _get(env, "OPENAI_API_KEY", _prefixed("OPENAI_API_KEY"))
+        base_url = base_url or _get(env, "OPENAI_BASE_URL", _prefixed("OPENAI_BASE_URL"))
         resolved_model = (
-            resolved_model or _get(env, "OLLAMA_MODEL", "LOCAL_LLM_MODEL") or _DEFAULT_MODELS[kind]
+            resolved_model
+            or _get(env, "OPENAI_MODEL", _prefixed("OPENAI_MODEL"))
+            or _DEFAULT_MODELS[kind]
+        )
+    elif kind is ProviderKind.ANTHROPIC:
+        api_key = api_key or _get(env, "ANTHROPIC_API_KEY", _prefixed("ANTHROPIC_API_KEY"))
+        base_url = base_url or _get(env, "ANTHROPIC_BASE_URL", _prefixed("ANTHROPIC_BASE_URL"))
+        resolved_model = (
+            resolved_model
+            or _get(env, "ANTHROPIC_MODEL", _prefixed("ANTHROPIC_MODEL"))
+            or _DEFAULT_MODELS[kind]
+        )
+    elif kind is ProviderKind.OPENROUTER:
+        api_key = api_key or _get(env, "OPENROUTER_API_KEY", _prefixed("OPENROUTER_API_KEY"))
+        base_url = base_url or _get(
+            env,
+            "OPENROUTER_BASE_URL",
+            "OPENAI_BASE_URL",
+            _prefixed("OPENROUTER_BASE_URL"),
+            _prefixed("OPENAI_BASE_URL"),
+        )
+        resolved_model = (
+            resolved_model
+            or _get(env, "OPENROUTER_MODEL", _prefixed("OPENROUTER_MODEL"))
+            or _DEFAULT_MODELS[kind]
+        )
+    elif kind in (ProviderKind.OLLAMA, ProviderKind.LOCAL):
+        base_url = base_url or _get(
+            env,
+            "OLLAMA_HOST",
+            "OLLAMA_BASE_URL",
+            "LOCAL_LLM_URL",
+            _prefixed("OLLAMA_HOST"),
+            _prefixed("OLLAMA_BASE_URL"),
+            _prefixed("LOCAL_LLM_URL"),
+        )
+        resolved_model = (
+            resolved_model
+            or _get(
+                env,
+                "OLLAMA_MODEL",
+                "LOCAL_LLM_MODEL",
+                _prefixed("OLLAMA_MODEL"),
+                _prefixed("LOCAL_LLM_MODEL"),
+            )
+            or _DEFAULT_MODELS[kind]
         )
     elif kind in (
         ProviderKind.INCEPTION,
@@ -227,24 +290,38 @@ def load_config(
             "INCEPTION_API_KEY",
             "INCEPTION_LABS_API_KEY",
             f"{str(kind).upper().replace('-', '_')}_API_KEY",
+            _prefixed("INCEPTION_API_KEY"),
+            _prefixed("INCEPTION_LABS_API_KEY"),
+            _prefixed(f"{str(kind).upper().replace('-', '_')}_API_KEY"),
         )
         base_url = base_url or _get(
             env,
             "INCEPTION_BASE_URL",
             "INCEPTION_LABS_BASE_URL",
             "INCEPTION_API_BASE_URL",
+            _prefixed("INCEPTION_BASE_URL"),
+            _prefixed("INCEPTION_LABS_BASE_URL"),
+            _prefixed("INCEPTION_API_BASE_URL"),
         )
         resolved_model = (
             resolved_model
-            or _get(env, "INCEPTION_MODEL", "INCEPTION_LABS_MODEL", "MERCURY_MODEL")
+            or _get(
+                env,
+                "INCEPTION_MODEL",
+                "INCEPTION_LABS_MODEL",
+                "MERCURY_MODEL",
+                _prefixed("INCEPTION_MODEL"),
+                _prefixed("INCEPTION_LABS_MODEL"),
+                _prefixed("MERCURY_MODEL"),
+            )
             or _DEFAULT_MODELS[kind]
         )
     else:  # echo
         resolved_model = resolved_model or _DEFAULT_MODELS[ProviderKind.ECHO]
 
-    max_tokens = int(_get(env, "LLM_MAX_TOKENS") or 1024)
-    temperature = float(_get(env, "LLM_TEMPERATURE") or 0.7)
-    timeout = float(_get(env, "LLM_TIMEOUT", "LLM_TIMEOUT_S") or 60.0)
+    max_tokens = int(_get(env, "LLM_MAX_TOKENS", "AGENCY_LLM_MAX_TOKENS") or 1024)
+    temperature = float(_get(env, "LLM_TEMPERATURE", "AGENCY_LLM_TEMPERATURE") or 0.7)
+    timeout = float(_get(env, "LLM_TIMEOUT", "LLM_TIMEOUT_S", "AGENCY_LLM_TIMEOUT") or 60.0)
 
     config = LLMConfig(
         provider=kind,
@@ -283,10 +360,10 @@ def load_named_provider(
     model = str(overrides.pop("model", None) or _get(env, f"{prefix}_MODEL") or default_model)
     api_key = overrides.pop("api_key", None) or _get(env, f"{prefix}_API_KEY")
     if not api_key and prefix not in ("INCEPTION",):
-        api_key = _get(env, "INCEPTION_API_KEY")
+        api_key = _get(env, "INCEPTION_API_KEY", "AGENCY_INCEPTION_API_KEY")
     base_url = overrides.pop("base_url", None) or _get(env, f"{prefix}_BASE_URL")
     if not base_url:
-        base_url = _get(env, "INCEPTION_BASE_URL")
+        base_url = _get(env, "INCEPTION_BASE_URL", "AGENCY_INCEPTION_BASE_URL")
 
     base = load_config(provider=kind, model=model, load_dotenv=False)
     data: dict[str, Any] = base.model_dump()

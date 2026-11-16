@@ -78,9 +78,9 @@ To certify an arbitrary revision, run `CD` via `workflow_dispatch` with the full
 
 * `bash -n` passes on both scripts.
 * YAML parses for both workflows and the compose file.
-* `uv lock --check` passes; `uv export --frozen --extra dev` resolves pinned tool versions.
 * The Node UI tests pass locally (`node --test tests/*.test.mjs`, 79 tests).
 * The health endpoint, module runner and env-var names above were read from the source.
+* The lockfile was refreshed for this branch (`uv lock`): `theagency` 0.2.1 with `textual>=0.86.0` and the `forge` script, and the unused `pytest-textual-snapshot` dev dependency dropped. `uv lock --check` and `uv export --frozen --extra dev` both exit 0.
 
 ## Not verified in this pass
 
