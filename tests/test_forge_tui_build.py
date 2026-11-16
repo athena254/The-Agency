@@ -186,3 +186,22 @@ def test_original_checkout_never_written_to(tmp_path):
     assert pipeline_calls[0]["root"] == str(worktree)
     assert (worktree / "new_feature.py").exists()
     assert result.gate == "PASS"
+
+
+def test_agent_skips_review_so_the_llm_runs_once(tmp_path):
+    """The verification pipeline runs the LLM review; the agent pass must not too."""
+    agent_calls: list[dict[str, Any]] = []
+    pipeline_calls: list[dict[str, Any]] = []
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+
+    build_from_spec(
+        tmp_path,
+        VALID_SPEC,
+        agent_runner=_fake_agent(agent_calls, FakeAgentReport(worktree_path=str(worktree))),
+        pipeline_runner=_fake_pipeline(pipeline_calls, FakePipelineReport()),
+    )
+
+    assert agent_calls[0]["run_tests_flag"] is False
+    assert agent_calls[0]["run_review_flag"] is False
+    assert pipeline_calls[0]["run_tests_flag"] is True
