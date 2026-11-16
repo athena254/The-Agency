@@ -109,6 +109,10 @@ def build_from_spec(
     CLI uses. The agent only writes inside its worktree; the pipeline runs there
     with ``run_tests_flag=True`` and the original checkout is never touched.
     The isolated worktree is removed in a ``finally`` block.
+
+    The agent's own internal pipeline pass is asked not to run the LLM review:
+    the verification pipeline below runs it once, on the final artifact. Running
+    it in both places would double the LLM review cost for one build.
     """
     repo = Path(repo_root)
     command = ["opencode", "run", "--auto", "--dir", "{workdir}", "--model", model]
@@ -119,6 +123,7 @@ def build_from_spec(
         spec_text,
         branch=BUILD_BRANCH,
         run_tests_flag=False,
+        run_review_flag=False,
         cleanup=False,
         protected_paths=FORGE_BUILD_PROTECTED_PATHS,
     )
