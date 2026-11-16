@@ -121,10 +121,10 @@ async def test_forge_app_renders_and_intake_gates():
 async def test_forge_app_intake_markers_pass(tmp_path, monkeypatch):
     app = ForgeApp(repo=str(tmp_path))
 
-    async def noop_pipeline() -> None:
+    async def noop_build() -> None:
         return None
 
-    monkeypatch.setattr(app, "_pipeline", noop_pipeline)
+    monkeypatch.setattr(app, "_build", noop_build)
     request = (
         "build a cli tool that sorts lines\n"
         "scope: read stdin and write sorted stdout\n"
@@ -143,10 +143,10 @@ async def test_forge_app_intake_markers_pass(tmp_path, monkeypatch):
 async def test_forge_app_spec_slash_uses_new_text(tmp_path, monkeypatch):
     app = ForgeApp(repo=str(tmp_path))
 
-    async def noop_pipeline() -> None:
+    async def noop_build() -> None:
         return None
 
-    monkeypatch.setattr(app, "_pipeline", noop_pipeline)
+    monkeypatch.setattr(app, "_build", noop_build)
     request = (
         "build a cli tool that sorts lines\n"
         "scope: read stdin and write sorted stdout\n"
