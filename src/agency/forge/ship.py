@@ -1,10 +1,11 @@
-"""Forge Ship slice: auto-merge a worktree branch locally.
+"""Forge Ship slice: locally merge a worktree branch into its target.
 
-Fully auto by default (local): ``git merge --ff-only`` the worktree's
-branch into the target branch in the worktree's main repo, clean up the
-branch (and linked worktree), and append a proof event. Only ships when
-the pipeline gate and the smoke gate are both PASS. A human gate is only
-enforced when explicitly requested via ``require_human_approval=True``.
+Human approval is REQUIRED by default. A local ``git merge --ff-only``
+the worktree's branch into the target branch in the worktree's main repo
+(plus branch/worktree cleanup and a proof event) happens only when the
+pipeline gate and the smoke gate are both PASS and either a human approval
+is granted or auto-merge is explicitly opted into via ``allow_auto_merge=True``.
+No release is authorized.
 """
 
 from __future__ import annotations
@@ -43,7 +44,10 @@ class ShipReport(BaseModel):
     stderr: str = ""
     proof_path: str = ""
     caveats: tuple[str, ...] = CAVEATS
-    note: str = "Local auto-ship via git merge --ff-only; requires pipeline PASS and smoke PASS."
+    note: str = (
+        "Local ship via git merge --ff-only; human approval required by default; "
+        "requires pipeline PASS and smoke PASS."
+    )
 
 
 def _gate_value(obj: Any) -> str:
@@ -120,7 +124,8 @@ def ship_branch(
     smoke_report: Any = None,
     pipeline: Any = None,
     smoke: Any = None,
-    require_human_approval: bool = False,
+    allow_auto_merge: bool = False,
+    require_human_approval: bool = True,
     human_gate: bool = False,
     approved: bool = False,
     approval: bool = False,
@@ -139,10 +144,13 @@ def ship_branch(
         pipeline_gate = kwargs.get("pipeline_gate", kwargs.get("pipeline"))
     if smoke_gate is None:
         smoke_gate = kwargs.get("smoke_gate", kwargs.get("smoke"))
+    # Human approval is required by default; auto-merge is opt-in only.
     require_human = bool(
         require_human_approval or human_gate or kwargs.get("require_human_approval", False)
+    ) and not bool(allow_auto_merge or kwargs.get("allow_auto_merge", False))
+    is_approved = bool(
+        approved or approval or kwargs.get("approved", False) or kwargs.get("approval", False)
     )
-    is_approved = bool(approved or approval or kwargs.get("approved", False))
 
     blocked: list[str] = []
     stdout_parts: list[str] = []
