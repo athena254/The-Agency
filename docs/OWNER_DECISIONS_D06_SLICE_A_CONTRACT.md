@@ -1,8 +1,9 @@
-# Owner decision D-06 — Slice A protocol contract (proposed)
+# Owner decision D-06 — Slice A protocol contract (approved)
 
-Status: **PROPOSED — awaiting owner sign-off. Nothing in this document is decided until the
-owner approves it. No defaults are invented: every proposal below names an open decision from
-RESEARCH_LATTICE_FULL_BUILD.md §8 and offers a recommendation for rejection or approval.**
+Status: **APPROVED by the owner (2026-11-17).** All nine decisions below are adopted, and the
+numeric-ceiling table in D-06.8 is pinned as written. They are the policy inputs for the Slice A
+contract freeze. They do not by themselves enable beta, peer actuation, or release; approval of
+D-06 is not release authorization.
 
 ## D-06.1 — Fault bound and validator power
 
@@ -144,11 +145,11 @@ RESEARCH_LATTICE_FULL_BUILD.md §8 and offers a recommendation for rejection or 
 
 ## D-06.8 — D-05 numeric ceilings (left unpinned at D-05)
 
-- **Decision (proposed):** Propose this table for the owner to pin or edit: MAX_MEMBERS=4
-  (already pinned in peers/canonical.py); max envelope 64 KiB; max ballots per (voter,
-  proposal version) = 1 (a second differing one is evidence, never input); ballot expiry
-  window ≤ 24 h; grant expiry ≤ 1 h; grant nonce 128-bit minimum; monotonic seq ceiling
-  2^53-1; proposals per epoch ≤ 256; evidence retention 30 days (already D-05).
+- **Decision (adopted):** The pinned ceilings: MAX_MEMBERS=4 (already pinned in
+  peers/canonical.py); max envelope 64 KiB; max ballots per (voter, proposal version) = 1 (a
+  second differing one is evidence, never input); ballot expiry window ≤ 24 h; grant expiry
+  ≤ 1 h; grant nonce 128-bit minimum; monotonic seq ceiling 2^53-1; proposals per epoch
+  ≤ 256; evidence retention 30 days (already D-05).
 - **Rationale:**
   - D-05 in `OWNER_DECISIONS_D01_D05.md` left limits "to be pinned in the P1 contract"
     (line 51); `RESEARCH_LATTICE_FULL_BUILD.md` §8 item 8 names numeric ceilings as open.
@@ -205,5 +206,5 @@ Condensed from `RESEARCH_LATTICE_FULL_BUILD.md` §7, Slice A:
 
 ## Still required before live actuation
 
-- Independent adversarial review of the contract; owner sign-off of this document; Slices B
-  and C evidence. Approval of D-06 is not release authorization.
+- Independent adversarial review of the contract; Slices B and C evidence. Approval of D-06
+  is not release authorization.
