@@ -13,8 +13,9 @@
 
 **Overall status**: scaffolding exists across the pipeline (Butler → orchestrator →
 agents/tools, Lattice, memory, policies/audit/sandbox), but the differentiators —
-authenticated multi-threaded work, autonomous Agent Factory, integrated Forge, durable
-governance — remain incomplete. Thread, skill and workflow foundations now exist.
+authenticated multi-threaded work, autonomous Agent Factory, the full integrated Forge, durable
+governance — remain incomplete (Forge v2 exists as a bounded, human-gated foundation, not a
+released product). Thread, skill and workflow foundations now exist.
 Two prior status tables were factually wrong
 (research agent "0%", CI/CD "0%"); both are corrected below.
 
@@ -27,7 +28,7 @@ Two prior status tables were factually wrong
 | Secrets management | Partial | `src/agency/memory/sms/secrets.py`, `config/keys.py`; ACL/rotation story unproven |
 | Retrieval / memory | Partial | `src/agency/memory/sms/`; sender-scoped, hierarchical isolation planned |
 | Agent lifecycle scaffolding | Partial | `kernel/registry.py`, `agents/registry.py`, `agents/loop.py`; no factory gate |
-| Model routing | Partial | `src/agency/llm/` multi-provider; capability/cost metadata incomplete |
+| Model routing | Partial | `src/agency/llm/` multi-provider; Gemini 3.x (`gemini` alias, `gemini-3.5-flash-lite`, `llm/config.py:105`) now configured; capability/cost metadata incomplete |
 | API server + CLI | Partial | `src/agency/api/server.py`, `cli/main.py`; live operation unverified |
 | Tests | Partial | Suite exists under `tests/`; prior "155 tests passing" count not re-verified here |
 
@@ -62,7 +63,7 @@ but production hardness was not established in this pass.
 | Agent Factory (versioned) | Partial v1 | `factory/service.py` versioned blueprints, approval gate, L0/UNKNOWN identity activation; no evaluation, automatic grants, or restart rehydration |
 | Prompt library (factory) | Partial v1 | `factory/prompts.py` versioned prompt records + deterministic composition; bundled segments and 26 REAP packs (MIT, pinned commit, safety-pairing enforced); runtime consumption and Forge tool-availability params implemented |
 | Skill registry / workflow registry + executor | Partial | Versioned registries and a bounded deterministic runner exist; no agent/Forge integration yet |
-| Forge + native coding agent | Partial inspection gate | `forge/inspection.py` read-only inventory/syntax reports; no tests, coding agent, security review or release; legacy prototypes are separate |
+| Forge + native coding agent | Partial v2, human-gated | `forge/pipeline.py:102` composes inspection, static security scan, isolated tests and LLM review with SQLite evidence (`forge/evidence.py:98`); bounded coding agent (`forge/coding_agent.py`), worker loop (`autonomy/loop_driver.py`) and tool authoring (`autonomy/forge_auto.py:137`); local ship requires human approval by default (`forge/ship.py:113`); no auto-release; legacy prototypes are separate |
 | CI/CD lineage | CI verified, CD unverified | All seven GitHub CI checks passed for PR #7 commit `5c4720c`; this is not deployment or production approval |
 
 **ATHENA boundary:** ATHENA is a separate peer platform, not an Agency component
@@ -86,7 +87,7 @@ separate pattern source, not a dependency.
 ## Critical Risks
 
 ### Risk 1: Differentiators still missing
-autonomous Agent Factory, integrated Forge, authenticated thread API and end-to-end skill/workflow integration
+autonomous Agent Factory, the full integrated Forge (only a bounded v2 foundation exists), authenticated thread API and end-to-end skill/workflow integration
 are still missing; existing registry/runner foundations alone are not the finished product.
 **Mitigation**: follow the reconciliation build slice in order; do not claim outputs
 from other branches until they land and pass gates.
@@ -130,7 +131,7 @@ after review and an authorized rollout; retain the existing warnings as debt.
 6. Re-baseline any timeline only from demonstrated gates, not percentages.
 
 ### Medium-term
-7. Specify then build the integrated Forge and bounded coding agent.
+7. Harden and extend the bounded Forge v2 and coding agent; the full integrated Forge remains planned.
 8. Workspace/project UI and thread branching after isolation is proven.
 9. External skill adaptation, distributed execution, competitive benchmarks last.
 
@@ -141,7 +142,7 @@ after review and an authorized rollout; retain the existing warnings as debt.
 | Scaffolding (Butler/orchestrator/agents/tools/Lattice/memory/audit/sandbox) | Partial — code exists, maturity varies |
 | Research agent, CI workflows | Offline research tests exist; all seven PR #7 CI checks passed at `5c4720c`; live-provider behavior is unverified |
 | Thread store, skill registry, workflow runner | Partial foundations; tests pass, full runtime integration pending |
-| Agent Factory v1, Forge inspection gate | Partial foundations |
+| Agent Factory v1, Forge v2 bounded factory | Partial foundations |
 | Autonomous Agent Factory, full Forge, durable governance | Planned |
 | Production deployment | Planned; no date promised |
 
@@ -151,8 +152,8 @@ withdrawn — they rested on the unverified percentages removed above.
 ## Simple Summary
 
 The Agency has working scaffolding and partial thread, skill, and workflow foundations,
-but its full governed product is not built: autonomous Agent Factory, integrated Forge, durable governance,
-and authenticated thread access remain planned. Prior docs overstated readiness and
+but its full governed product is not built: autonomous Agent Factory, the full integrated Forge (only a bounded,
+human-gated v2 foundation exists), durable governance, and authenticated thread access remain planned. Prior docs overstated readiness and
 understated what exists (research agent, CI). Claims remain tied to code evidence.
 
 *No precise grade or percentage is given — the evidence does not warrant one.*

@@ -91,7 +91,12 @@ def test_ship_refuses_on_fail(tmp_path: Path):
     _init_repo(repo)
     wt = _make_worktree(repo, tmp_path)
     report = ship_branch(
-        wt, "main", pipeline_gate="FAIL", smoke_gate="PASS", proof_log=tmp_path / "proof.jsonl"
+        wt,
+        "main",
+        pipeline_gate="FAIL",
+        smoke_gate="PASS",
+        allow_auto_merge=True,
+        proof_log=tmp_path / "proof.jsonl",
     )
     assert report.gate == "FAIL"
     assert report.merged is False
@@ -101,13 +106,18 @@ def test_ship_refuses_on_fail(tmp_path: Path):
     assert not (repo / "feature.txt").exists()
 
     report2 = ship_branch(
-        wt, "main", pipeline_gate="PASS", smoke_gate="FAIL", proof_log=tmp_path / "proof.jsonl"
+        wt,
+        "main",
+        pipeline_gate="PASS",
+        smoke_gate="FAIL",
+        allow_auto_merge=True,
+        proof_log=tmp_path / "proof.jsonl",
     )
     assert report2.merged is False
     assert any("smoke_gate_not_pass" in r for r in report2.blocked_reasons)
 
 
-def test_ship_refuses_without_human_approval_when_required(tmp_path: Path):
+def test_ship_requires_human_approval_by_default(tmp_path: Path):
     repo = tmp_path / "repo"
     _init_repo(repo)
     wt = _make_worktree(repo, tmp_path)
@@ -116,11 +126,13 @@ def test_ship_refuses_without_human_approval_when_required(tmp_path: Path):
         "main",
         pipeline_gate="PASS",
         smoke_gate="PASS",
-        require_human_approval=True,
         proof_log=tmp_path / "proof.jsonl",
     )
+    assert report.gate == "FAIL"
     assert report.merged is False
-    assert any("human_approval" in r for r in report.blocked_reasons)
+    assert any("human_approval_required" in r for r in report.blocked_reasons)
+    assert _git_out(repo, "rev-parse", "--verify", "refs/heads/feature-x")
+    assert not (repo / "feature.txt").exists()
 
 
 def test_ship_succeeds_on_pass(tmp_path: Path):
@@ -128,7 +140,14 @@ def test_ship_succeeds_on_pass(tmp_path: Path):
     _init_repo(repo)
     wt = _make_worktree(repo, tmp_path)
     proof = tmp_path / "proof.jsonl"
-    report = ship_branch(wt, "main", pipeline_gate="PASS", smoke_gate="PASS", proof_log=proof)
+    report = ship_branch(
+        wt,
+        "main",
+        pipeline_gate="PASS",
+        smoke_gate="PASS",
+        allow_auto_merge=True,
+        proof_log=proof,
+    )
     assert report.gate == "PASS"
     assert report.merged is True
     assert report.source_branch == "feature-x"
@@ -153,6 +172,26 @@ def test_ship_default_proof_path(tmp_path: Path):
     repo = tmp_path / "repo"
     _init_repo(repo)
     wt = _make_worktree(repo, tmp_path)
-    report = ship_branch(wt, "main", pipeline_gate="PASS", smoke_gate="PASS")
+    report = ship_branch(wt, "main", pipeline_gate="PASS", smoke_gate="PASS", approved=True)
     assert report.merged is True
     assert Path(report.proof_path).is_file()
+
+
+def test_ship_fail_gate_never_merges_even_with_approval(tmp_path: Path):
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    wt = _make_worktree(repo, tmp_path)
+    report = ship_branch(
+        wt,
+        "main",
+        pipeline_gate="FAIL",
+        smoke_gate="PASS",
+        allow_auto_merge=True,
+        approved=True,
+        proof_log=tmp_path / "proof.jsonl",
+    )
+    assert report.gate == "FAIL"
+    assert report.merged is False
+    assert any("pipeline_gate_not_pass" in r for r in report.blocked_reasons)
+    assert _git_out(repo, "rev-parse", "--verify", "refs/heads/feature-x")
+    assert not (repo / "feature.txt").exists()

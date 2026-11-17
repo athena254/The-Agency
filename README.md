@@ -3,8 +3,12 @@
 **Current checkpoint — November 9, 2026:** pre-production prototype, not daily-driver-qualified or a deployed decentralized runtime. [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) is the authoritative status for the current revision; start there, with [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the artifact contract. The bounded owner pilot, persistent task workspace, local pilot UI and Mission Control console are implemented local surfaces; beta model/tool ingress remains disabled and legacy HTTP business routes remain closed. The uncommitted `feat/dual-tui-agency-forge` branch adds bounded foundations — a Textual dual TUI (`agency tui`, `forge`), a durable Ralph-style autonomous loop (`agency loop run|resume|status`) and the `forge` entry point — none of which are production-qualified or covered by the recorded gates. Historical passing totals below are not current release evidence. The browser surfaces are local prototypes, not a deployed production GUI.
 
 > Target: Human ↔ Butler ↔ the Lattice-connected Agency peers. Butler is the human gateway, not a validator or unilateral authority. The in-process orchestrator diagram below shows prototype implementation, not the decentralized target.
-> Agent Factory and Forge now have narrow v1 foundations alongside partial thread,
-> skill, and workflow components. The full governed product is not built.
+> Agent Factory has a narrow v1 foundation; Forge v2 is a bounded, human-gated
+> factory (inspection + security scan + isolated tests + LLM review + composed
+> pipeline + SQLite evidence), not a released product. The Gemini 3.x LLM
+> provider (`gemini` alias, `gemini-3.5-flash-lite`, `src/agency/llm/config.py:105`)
+> is configured. These sit alongside partial thread, skill, and workflow components.
+> The full governed product is not built.
 
 **Canonical direction:** `docs/SOURCE_CONSOLIDATED_BRIEF.md` (target design, all 51 sections)
 and `docs/SPEC_AGENCY_CORE_RECONCILIATION.md` (code-backed gap matrix and build slice).
@@ -48,8 +52,9 @@ are historical/superseded (see `docs/ARCHITECTURE.md`).
                                    src/agency/security/sandbox/)
 
    PARTIAL: thread/workspace store, skill registry, workflow runner,
-            Agent Factory v1, read-only Forge inspection gate.
-   PLANNED: integrated coding/release Forge, authenticated thread API.
+            Agent Factory v1, Forge v2 bounded factory (inspect/scan/test/
+            review/pipeline/evidence) with human-gated local ship.
+   PLANNED: autonomous release, protected-path resolution, authenticated thread API.
 ```
 
 Cross-cutting (partial, code-enforced where noted): security policies
@@ -73,7 +78,7 @@ provenance/evidence (`src/agency/evidence/`), sandbox isolation
 | Threads / workspaces | Partial | `src/agency/butler/threads.py` persists workspaces/threads/messages; project hierarchy, authenticated API and UI remain planned |
 | Agent Factory | Partial v1 | `src/agency/factory/`: versioned blueprints, approval, L0 identity activation/revocation; no autonomous creation/evaluation or runtime restart recovery |
 | Skill registry, workflow registry/executor | Partial | `src/agency/skills/`, `src/agency/workflows/` provide versioned metadata and a bounded allowlisted runner; not yet integrated with an agent/Forge execution path |
-| Forge | Partial v1 | `src/agency/forge/` persists bounded read-only file inventory/syntax reports; no test runner, coding agent, security review, package, or release. Dark/ghost factories remain separate prototypes |
+| Forge | Partial v2 | `src/agency/forge/` composes bounded inspection, a static security scan, an isolated test runner and LLM/static review into one pipeline (`pipeline.py:102`) with SQLite evidence (`evidence.py:98`); coding agent (`coding_agent.py`), worker loop (`autonomy/loop_driver.py`) and tool authoring (`autonomy/forge_auto.py:137`) are bounded; local ship requires human approval by default (`ship.py:113`). No auto-release. Dark/ghost factories remain separate prototypes |
 | Internal metering / local recovery | Implemented bounded seams | Request-bound strict ToolDriver wrapper and explicit OS-locked recoverable workflow APIs; beta ingress and distributed recovery remain disabled/unimplemented |
 | External bridges (Claude, Codex, Hermes, OpenClaw) | Partial adapters | `src/agency/bridges/`; optional integrations behind explicit boundaries, never architectural dependencies |
 
@@ -148,7 +153,7 @@ historical/superseded rather than deleting them.
   auto-imported from it.
 - Addons and bridges are not labeled production-ready. Prototypes (e.g. dark/ghost
   factory) do not imply a complete Forge.
-- Agent Factory v1, Forge's read-only inspection gate, threads, skills, and workflows are **partial foundations**. Autonomous creation, coding/release, and durable governance are not implemented.
+- Agent Factory v1, Forge v2 (a bounded, human-gated factory with no auto-release), threads, skills, and workflows are **partial foundations**. Autonomous creation, autonomous release, and durable governance are not implemented.
 
 ## License
 
