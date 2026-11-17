@@ -13,6 +13,7 @@ import asyncio
 import json
 import os
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Self
@@ -399,11 +400,8 @@ def _llm_review_one_round(
         except RuntimeError:
             response = asyncio.run(llm.generate(prompt))
         else:
-            loop = asyncio.new_event_loop()
-            try:
-                response = loop.run_until_complete(llm.generate(prompt))
-            finally:
-                loop.close()
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                response = executor.submit(lambda: asyncio.run(llm.generate(prompt))).result()
     except _LLMReviewError:
         raise
     except Exception as exc:  # noqa: BLE001

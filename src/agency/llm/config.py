@@ -3,7 +3,7 @@
 Supports multiple named providers (``claude``, ``gpt``, ``local``, ...)
 via prefixed env vars, e.g. ``CLAUDE_MODEL`` / ``GPT_API_KEY``, as well as
 the well-known provider keys (``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``,
-``OPENROUTER_API_KEY``, ``OLLAMA_HOST``).
+``OPENROUTER_API_KEY``, ``GOOGLE_API_KEY``, ``OLLAMA_HOST``).
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ class ProviderKind(str, Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     OPENROUTER = "openrouter"
+    GOOGLE = "google"
     OLLAMA = "ollama"
     LOCAL = "local"
     ECHO = "echo"
@@ -80,6 +81,7 @@ _DEFAULT_MODELS: dict[ProviderKind, str] = {
     ProviderKind.OPENAI: "gpt-4o-mini",
     ProviderKind.ANTHROPIC: "claude-sonnet-4-20250514",
     ProviderKind.OPENROUTER: "openrouter/auto",
+    ProviderKind.GOOGLE: "gemini-3.5-flash-lite",
     ProviderKind.OLLAMA: "llama3.1",
     ProviderKind.LOCAL: "local-model",
     ProviderKind.ECHO: "echo",
@@ -100,6 +102,8 @@ _NAMED_PRESETS: dict[str, tuple[ProviderKind, str]] = {
     "gpt4": (ProviderKind.OPENAI, "gpt-4o"),
     "gpt35": (ProviderKind.OPENAI, "gpt-3.5-turbo"),
     "openrouter": (ProviderKind.OPENROUTER, "openrouter/auto"),
+    "google": (ProviderKind.GOOGLE, "gemini-3.5-flash-lite"),
+    "gemini": (ProviderKind.GOOGLE, "gemini-3.5-flash-lite"),
     "local": (ProviderKind.OLLAMA, "llama3.1"),
     "ollama": (ProviderKind.OLLAMA, "llama3.1"),
     "echo": (ProviderKind.ECHO, "echo"),
@@ -176,6 +180,8 @@ def detect_provider(env: dict[str, str] | None = None) -> ProviderKind:
         return ProviderKind.ANTHROPIC
     if _get(env, "OPENROUTER_API_KEY", _prefixed("OPENROUTER_API_KEY")):
         return ProviderKind.OPENROUTER
+    if _get(env, "GOOGLE_API_KEY", _prefixed("GOOGLE_API_KEY")):
+        return ProviderKind.GOOGLE
     if _get(
         env,
         "INCEPTION_API_KEY",
@@ -215,11 +221,21 @@ def load_config(
     kind: ProviderKind
     if provider is None:
         raw = _get(env, "LLM_PROVIDER", "AGENCY_LLM_PROVIDER")
-        kind = ProviderKind(raw.lower()) if raw else detect_provider(env)
+        if raw:
+            name = str(raw).strip().lower()
+            if name == "gemini":
+                name = "google"
+            kind = ProviderKind(name)
+        else:
+            kind = detect_provider(env)
     else:
-        kind = (
-            provider if isinstance(provider, ProviderKind) else ProviderKind(str(provider).lower())
-        )
+        if isinstance(provider, ProviderKind):
+            kind = provider
+        else:
+            name = str(provider).strip().lower()
+            if name == "gemini":
+                name = "google"
+            kind = ProviderKind(name)
 
     # Generic values: the unprefixed spelling wins, the AGENCY_-prefixed one is
     # only a fallback. Explicit args still win (handled above / via ``model``).
@@ -255,6 +271,32 @@ def load_config(
         resolved_model = (
             resolved_model
             or _get(env, "OPENROUTER_MODEL", _prefixed("OPENROUTER_MODEL"))
+            or _DEFAULT_MODELS[kind]
+        )
+    elif kind is ProviderKind.GOOGLE:
+        api_key = api_key or _get(
+            env,
+            "GOOGLE_API_KEY",
+            "GEMINI_API_KEY",
+            _prefixed("GOOGLE_API_KEY"),
+            _prefixed("GEMINI_API_KEY"),
+        )
+        base_url = base_url or _get(
+            env,
+            "GOOGLE_BASE_URL",
+            "GEMINI_BASE_URL",
+            _prefixed("GOOGLE_BASE_URL"),
+            _prefixed("GEMINI_BASE_URL"),
+        )
+        resolved_model = (
+            resolved_model
+            or _get(
+                env,
+                "GOOGLE_MODEL",
+                "GEMINI_MODEL",
+                _prefixed("GOOGLE_MODEL"),
+                _prefixed("GEMINI_MODEL"),
+            )
             or _DEFAULT_MODELS[kind]
         )
     elif kind in (ProviderKind.OLLAMA, ProviderKind.LOCAL):

@@ -216,3 +216,21 @@ def test_llm_refusal_fails_gate_closed(tmp_path: Path, monkeypatch: pytest.Monke
     assert report.review is not None
     assert report.review.gate == "FAIL"
     assert stub.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_llm_review_with_running_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _configure_provider(monkeypatch)
+    stub = _StubLLM(_CLEAN_JSON)
+    _patch_generate(monkeypatch, stub)
+    (tmp_path / "ok.py").write_text("x = 1\n", encoding="utf-8")
+
+    report = run_pipeline(tmp_path, ["ok.py"])
+
+    assert stub.calls == 1
+    assert report.gate == "PASS"
+    assert report.review is not None
+    assert report.review.gate == "PASS"
+    assert "heuristic_review" not in report.review.caveats

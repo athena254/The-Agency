@@ -37,8 +37,8 @@ MIN_GENERIC_KEY_LENGTH: int = 8
 _KEY_FORMATS: dict[str, tuple[tuple[str, ...], int]] = {
     "openai": (("sk-",), 20),
     "anthropic": (("sk-ant-",), 20),
-    "google": (("AIza",), 20),
-    "gemini": (("AIza",), 20),
+    "google": (("AIza", "AQ."), 20),
+    "gemini": (("AIza", "AQ."), 20),
     "mistral": ((), 20),
     "azure": ((), 20),
     "cohere": ((), 20),

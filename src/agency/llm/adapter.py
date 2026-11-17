@@ -360,6 +360,8 @@ class LLMAdapter:
                 return await self._anthropic_generate(prompt, model)
             elif provider == "openrouter":
                 return await self._openrouter_generate(prompt, model)
+            elif provider == "google":
+                return await self._google_generate(prompt, model)
             elif provider == "pollinations":
                 return await self._pollinations_generate(prompt, model)
             elif provider in _INCEPTION_PROVIDERS:
@@ -379,6 +381,7 @@ class LLMAdapter:
                 provider=provider,
                 model=model,
                 error_class=type(e).__name__,
+                status=getattr(getattr(e, "response", None), "status_code", None),
             )
             # A failed model call is never a successful echo reply, even when
             # the caller requests strict=False. Echo is an explicit provider.
@@ -489,6 +492,49 @@ class LLMAdapter:
             data = resp.json()
 
         return _response_text(data["choices"][0]["message"]["content"])
+
+    async def _google_generate(self, prompt: str, model: str) -> str:
+        """Generate via Google Gemini (REST generateContent)."""
+        import httpx
+
+        base_url = self._base_url or "https://generativelanguage.googleapis.com/v1beta"
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            resp = await client.post(
+                f"{base_url.rstrip('/')}/models/{model}:generateContent",
+                headers={
+                    "x-goog-api-key": self._api_key,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "maxOutputTokens": self._max_tokens,
+                        "temperature": self._temperature,
+                    },
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        candidates = data.get("candidates") if isinstance(data, dict) else None
+        if not isinstance(candidates, list) or not candidates:
+            raise ValueError("Google response contained no candidates")
+        first = candidates[0]
+        content = first.get("content") if isinstance(first, dict) else None
+        parts = content.get("parts") if isinstance(content, dict) else None
+        texts = (
+            [
+                part["text"]
+                for part in parts
+                if isinstance(part, dict) and isinstance(part.get("text"), str)
+            ]
+            if isinstance(parts, list)
+            else []
+        )
+        text = "".join(value for value in texts if value)
+        if not text:
+            raise ValueError("Google response contained no text")
+        return text
 
     async def _pollinations_generate(self, prompt: str, model: str) -> str:
         """Generate via Pollinations — keyless and free."""
