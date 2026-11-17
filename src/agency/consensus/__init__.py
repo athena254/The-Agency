@@ -1,7 +1,9 @@
-"""Slice B Lattice application state machine (deterministic, pure).
+"""Lattice consensus building blocks (deterministic, pure).
 
-An ordered block of signed peer records is executed into a byte-stable app hash
-and derived decisions. Ordering-engine (ABCI++) integration comes later.
+Slice B provides the application state machine; Slice C adds an
+ordering-engine-agnostic block adapter and task-scoped execution grants. Both are
+protocol foundation only: ABCI++, a real ordering engine, and peer actuation
+remain follow-ups.
 """
 
 from agency.consensus.app_state import (
