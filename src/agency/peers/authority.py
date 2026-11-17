@@ -95,6 +95,8 @@ class PeerAuthority:
         self.registry = registry or PeerRegistry()
         self._ballots: dict[str, dict[str, PeerMessage]] = {}  # proposal -> voter -> msg
         self._ballot_seq: dict[tuple[str, str], int] = {}  # (proposal, voter) -> seq
+        self._equivocators: dict[str, set[str]] = {}  # proposal -> equivocating voters
+        self._equivocation_evidence: dict[str, dict[str, list[PeerMessage]]] = {}
 
     @property
     def epoch(self) -> int:
@@ -205,10 +207,26 @@ class PeerAuthority:
         if msg.membership_epoch != self.epoch:
             raise AuthorityError("stale membership epoch")
 
+        proposal_id = str(p["proposal_id"])
+        ballots_for_proposal = self._ballots.setdefault(proposal_id, {})
+        equivocators = self._equivocators.setdefault(proposal_id, set())
+
+        if sender in equivocators:
+            self._retain_evidence(proposal_id, sender, msg)
+            raise AuthorityError(f"ballot equivocation by peer {sender} for proposal {proposal_id}")
+
+        stored = ballots_for_proposal.get(sender)
+        if stored is not None and stored.payload_digest != msg.payload_digest:
+            self._retain_evidence(proposal_id, sender, stored)
+            self._retain_evidence(proposal_id, sender, msg)
+            equivocators.add(sender)
+            ballots_for_proposal.pop(sender, None)
+            raise AuthorityError(f"ballot equivocation by peer {sender} for proposal {proposal_id}")
+
         # Persist replay state only AFTER all checks pass.
         self.registry.bump_seq(sender, msg.monotonic_seq)
-        self._ballot_seq[(p["proposal_id"], sender)] = int(p["ballot_seq"])
-        self._ballots.setdefault(p["proposal_id"], {})[sender] = msg
+        self._ballot_seq[(proposal_id, sender)] = int(p["ballot_seq"])
+        ballots_for_proposal[sender] = msg
         return msg
 
     # -- deterministic outcome --
@@ -233,6 +251,18 @@ class PeerAuthority:
 
     def quorum_met(self, proposal_id: str) -> bool:
         return self.decide(proposal_id) == "passed"
+
+    # -- equivocation evidence --
+    def _retain_evidence(self, proposal_id: str, peer_id: str, msg: PeerMessage) -> None:
+        by_voter = self._equivocation_evidence.setdefault(proposal_id, {})
+        by_voter.setdefault(peer_id, []).append(msg)
+
+    def is_equivocating(self, proposal_id: str, peer_id: str) -> bool:
+        return peer_id in self._equivocators.get(proposal_id, set())
+
+    def equivocation_evidence(self, proposal_id: str) -> dict[str, list[PeerMessage]]:
+        evidence = self._equivocation_evidence.get(proposal_id, {})
+        return {peer_id: list(msgs) for peer_id, msgs in evidence.items()}
 
 
 __all__ = ["AuthorityError", "PeerAuthority", "PeerRegistry"]

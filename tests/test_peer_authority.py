@@ -133,3 +133,78 @@ def test_registry_sqlite_roundtrip(tmp_path):
     assert reg2.get(ids[0].peer_id).fingerprint == ids[0].fingerprint
     assert reg2.last_seq(ids[0].peer_id) == 5
     reg2.close()
+
+
+def test_second_differing_ballot_is_equivocation_not_replacement():
+    ids, auth = setup4()
+    pid = "prop_" + "1" * 32
+    auth.submit_ballot(ballot(auth, ids[1], pid, "approve", 1))
+    auth.submit_ballot(ballot(auth, ids[0], pid, "approve", 1))
+    auth.submit_ballot(ballot(auth, ids[2], pid, "approve", 1))
+    assert auth.decide(pid) == "passed"
+    with pytest.raises(AuthorityError, match="equivocation"):
+        auth.submit_ballot(ballot(auth, ids[1], pid, "deny", 2, ballot_seq=2))
+    assert auth.tally(pid)["approve"] == 2
+    assert auth.decide(pid) == "open"
+
+
+def test_both_ballots_retained_as_evidence():
+    ids, auth = setup4()
+    pid = "prop_" + "2" * 32
+    first_wire = ballot(auth, ids[1], pid, "approve", 1)
+    first = auth.submit_ballot(first_wire)
+    second_wire = ballot(auth, ids[1], pid, "deny", 2, ballot_seq=2)
+    with pytest.raises(AuthorityError, match="equivocation"):
+        auth.submit_ballot(second_wire)
+    assert auth.is_equivocating(pid, ids[1].peer_id) is True
+    evidence = auth.equivocation_evidence(pid)
+    assert list(evidence) == [ids[1].peer_id]
+    msgs = evidence[ids[1].peer_id]
+    assert [m.wire for m in msgs] == [first_wire, second_wire]
+    digests = {m.payload_digest for m in msgs}
+    assert len(digests) == 2
+    assert first.payload_digest in digests
+
+
+def test_third_ballot_from_equivocator_also_rejected_and_retained():
+    ids, auth = setup4()
+    pid = "prop_" + "3" * 32
+    first_wire = ballot(auth, ids[1], pid, "approve", 1)
+    auth.submit_ballot(first_wire)
+    second_wire = ballot(auth, ids[1], pid, "deny", 2, ballot_seq=2)
+    with pytest.raises(AuthorityError, match="equivocation"):
+        auth.submit_ballot(second_wire)
+    third_wire = ballot(auth, ids[1], pid, "abstain", 3, ballot_seq=3)
+    with pytest.raises(AuthorityError, match="equivocation"):
+        auth.submit_ballot(third_wire)
+    msgs = auth.equivocation_evidence(pid)[ids[1].peer_id]
+    assert [m.wire for m in msgs] == [first_wire, second_wire, third_wire]
+    assert auth.tally(pid) == {"approve": 0, "deny": 0, "abstain": 0}
+
+
+def test_equivocation_does_not_block_clean_quorum():
+    ids, auth = setup4()
+    pid = "prop_" + "4" * 32
+    auth.submit_ballot(ballot(auth, ids[1], pid, "approve", 1))
+    with pytest.raises(AuthorityError, match="equivocation"):
+        auth.submit_ballot(ballot(auth, ids[1], pid, "deny", 2, ballot_seq=2))
+    for i in (0, 2, 3):
+        auth.submit_ballot(ballot(auth, ids[i], pid, "approve", 1))
+    assert auth.quorum_required() == 3
+    assert auth.tally(pid)["approve"] == 3
+    assert auth.decide(pid) == "passed"
+
+
+def test_equivocation_cannot_flip_decision():
+    ids, auth = setup4()
+    pid = "prop_" + "5" * 32
+    for i in (1, 0, 2):
+        auth.submit_ballot(ballot(auth, ids[i], pid, "deny", 1))
+    assert auth.decide(pid) == "denied"
+    with pytest.raises(AuthorityError, match="equivocation"):
+        auth.submit_ballot(ballot(auth, ids[1], pid, "approve", 2, ballot_seq=2))
+    t = auth.tally(pid)
+    assert t["approve"] == 0
+    assert t["deny"] == 2
+    assert auth.decide(pid) == "open"
+    assert auth.decide(pid) != "denied"

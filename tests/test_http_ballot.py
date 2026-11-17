@@ -132,3 +132,22 @@ def test_legacy_unsigned_vote_rejected(client):
     assert r.status_code == 400
     assert r.headers.get("deprecation") == "true"
     assert auth.tally("prop_" + "a" * 32) == {"approve": 0, "deny": 0, "abstain": 0}
+
+
+def test_http_second_differing_ballot_rejected(client):
+    c, ids, auth = client
+    pid = "prop_" + "f" * 32
+    assert post_hex(c, auth.make_ballot(ids[1], pid, "approve", monotonic_seq=1)).status_code == 200
+    r = post_hex(c, auth.make_ballot(ids[1], pid, "deny", monotonic_seq=2, ballot_seq=2))
+    assert r.status_code == 400
+    assert "equivocation" in r.json()["detail"]
+    assert auth.tally(pid) == {"approve": 0, "deny": 0, "abstain": 0}
+    for i in (0, 2):
+        r = post_hex(c, auth.make_ballot(ids[i], pid, "approve", monotonic_seq=1))
+        assert r.status_code == 200, r.text
+    assert r.json()["tally"] == {"approve": 2, "deny": 0, "abstain": 0}
+    assert r.json()["outcome"] == "open"
+    r = post_hex(c, auth.make_ballot(ids[3], pid, "approve", monotonic_seq=1))
+    assert r.status_code == 200, r.text
+    assert r.json()["tally"] == {"approve": 3, "deny": 0, "abstain": 0}
+    assert r.json()["outcome"] == "passed"
