@@ -63,13 +63,14 @@ def test_run_autonomous_e2e() -> None:
     assert gaps["web_search"]["action"] == "USE"
     assert gaps["quantum_sim"]["action"] == "BUILD"
     assert gaps["quantum_sim"]["rule"] == "T-BUILD"
-    # forge: simulate build + publish gate
+    # forge: no ops/specs supplied -> honest build_blocked, never a fake publish
     sha = hashlib.sha256(b"quantum_sim").hexdigest()
     assert decide_tool_gap("quantum_sim", {"web_search"}).action == "BUILD"
     assert can_self_publish("PASS", sha, sha) is True
     assert can_self_publish("FAIL", sha, sha) is False
-    assert any(
-        e.actor == "forge" and e.action == "self_publish" and e.payload["published"] is True
+    assert any(e.actor == "forge" and e.action == "build_blocked" for e in result.proof.events)
+    assert not any(
+        e.actor == "forge" and e.action == "self_publish" and e.payload.get("published")
         for e in result.proof.events
     )
     # proof chain verifies + manifest
