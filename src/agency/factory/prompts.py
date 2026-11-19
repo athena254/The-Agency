@@ -194,12 +194,13 @@ def reap_packs_missing_safety(prompt_ids: frozenset[str] | set[str]) -> set[str]
 class PromptRegistry:
     """SQLite-backed immutable store of versioned prompt records."""
 
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str, publish_authorizer: Any = None) -> None:
         if db_path != ":memory:":
             parent = Path(db_path).parent
             if str(parent) and not parent.exists():
                 parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = sqlite3.connect(db_path)
+        self._publish_authorizer = publish_authorizer
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS prompts ("
             "prompt_id TEXT NOT NULL, version TEXT NOT NULL, "
@@ -211,8 +212,17 @@ class PromptRegistry:
             "CREATE TABLE IF NOT EXISTS prompt_events ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, prompt_id TEXT NOT NULL, "
             "version TEXT NOT NULL, from_status TEXT NOT NULL, "
-            "to_status TEXT NOT NULL, evidence TEXT NOT NULL, at TEXT NOT NULL)"
+            "to_status TEXT NOT NULL, evidence TEXT NOT NULL, "
+            "approver TEXT NOT NULL DEFAULT '', "
+            "at TEXT NOT NULL)"
         )
+        try:
+            self._conn.execute(
+                "ALTER TABLE prompt_events ADD COLUMN approver TEXT NOT NULL DEFAULT ''"
+            )
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
         self._conn.commit()
 
     def _conn_required(self) -> sqlite3.Connection:
@@ -345,6 +355,9 @@ class PromptRegistry:
         version: str,
         to_status: PromptStatus | str,
         evidence: str = "",
+        *,
+        approver: str = "",
+        authorizer: Any = None,
     ) -> PromptSpec:
         """Move one record forward a single lifecycle step; only status changes."""
         try:
@@ -356,6 +369,16 @@ class PromptRegistry:
             raise ValueError(f"illegal transition: {current.status.value} -> {target.value}.")
         if target.value in _EVIDENCE_STATUSES and not _is_nonblank(evidence):
             raise ValueError(f"transition to {target.value} requires nonempty evidence.")
+        effective_authorizer = authorizer if authorizer is not None else self._publish_authorizer
+        if target is PromptStatus.PUBLISHED and effective_authorizer is not None:
+            if not _is_nonblank(approver):
+                raise ValueError("transition to PUBLISHED requires a nonblank approver.")
+            try:
+                allowed = effective_authorizer(approver, "prompt.publish") is True
+            except Exception:  # noqa: BLE001 - authorization errors deny by default
+                allowed = False
+            if not allowed:
+                raise ValueError("prompt publication denied by authorizer.")
         conn = self._conn_required()
         with conn:
             updated = conn.execute(
@@ -366,37 +389,62 @@ class PromptRegistry:
                 raise ValueError("prompt state changed concurrently; transition rejected.")
             conn.execute(
                 "INSERT INTO prompt_events (prompt_id, version, from_status,"
-                " to_status, evidence, at) VALUES (?, ?, ?, ?, ?, ?)",
+                " to_status, evidence, approver, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     prompt_id,
                     version,
                     current.status.value,
                     target.value,
                     evidence,
+                    approver,
                     datetime.now(UTC).isoformat(),
                 ),
             )
         return self.get(prompt_id, version)
 
-    def publish(self, prompt_id: str, version: str, evidence: str) -> PromptSpec:
+    def publish(
+        self,
+        prompt_id: str,
+        version: str,
+        evidence: str,
+        *,
+        approver: str = "",
+        authorizer: Any = None,
+    ) -> PromptSpec:
         """Publish an APPROVED prompt; requires nonempty evidence."""
         if not _is_nonblank(evidence):
             raise ValueError("publish requires nonempty evidence.")
         current = self.get(prompt_id, version)
         if current.status is not PromptStatus.APPROVED:
             raise ValueError(f"publish requires status APPROVED, found {current.status.value}.")
-        return self.transition(prompt_id, version, PromptStatus.PUBLISHED, evidence)
+        return self.transition(
+            prompt_id,
+            version,
+            PromptStatus.PUBLISHED,
+            evidence,
+            approver=approver,
+            authorizer=authorizer,
+        )
 
     def list_events(self, prompt_id: str, version: str) -> list[dict[str, str]]:
         """Return durable lifecycle evidence in order; unknown raises KeyError."""
         self.get(prompt_id, version)
         conn = self._conn_required()
         rows = conn.execute(
-            "SELECT from_status, to_status, evidence, at FROM prompt_events"
+            "SELECT from_status, to_status, evidence, approver, at FROM prompt_events"
             " WHERE prompt_id = ? AND version = ? ORDER BY id",
             (prompt_id, version),
         ).fetchall()
-        return [dict(zip(("from_status", "to_status", "evidence", "at"), row)) for row in rows]
+        return [
+            {
+                "from_status": row[0],
+                "to_status": row[1],
+                "evidence": row[2],
+                "approver": row[3],
+                "at": row[4],
+            }
+            for row in rows
+        ]
 
     @staticmethod
     def _row_to_spec(row: tuple[Any, ...]) -> PromptSpec:

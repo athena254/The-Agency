@@ -183,9 +183,15 @@ class SkillRegistry:
         self,
         db_path: str,
         allowed_permissions: frozenset[str] | set[str] = frozenset(),
+        publish_authorizer: Any = None,
     ) -> None:
         self._db_path = db_path
         self._allowed_permissions = frozenset(allowed_permissions)
+        # Publication authority is distinct from skill-execution permission
+        # checks. When unset, publication keeps legacy (unauthenticated)
+        # behavior; when set, PUBLISHED transitions require an approver that
+        # the authorizer accepts for "skill.publish" (fail closed).
+        self._publish_authorizer = publish_authorizer
         if db_path != ":memory:":
             parent = Path(db_path).parent
             if str(parent) and not parent.exists():
@@ -209,8 +215,18 @@ class SkillRegistry:
             "CREATE TABLE IF NOT EXISTS skill_events ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, skill_id TEXT NOT NULL, "
             "version TEXT NOT NULL, from_status TEXT NOT NULL, "
-            "to_status TEXT NOT NULL, evidence TEXT NOT NULL, at TEXT NOT NULL)"
+            "to_status TEXT NOT NULL, evidence TEXT NOT NULL, "
+            "approver TEXT NOT NULL DEFAULT '', "
+            "at TEXT NOT NULL)"
         )
+        # Migrate older databases that predate the approver column.
+        try:
+            self._conn.execute(
+                "ALTER TABLE skill_events ADD COLUMN approver TEXT NOT NULL DEFAULT ''"
+            )
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
         self._conn.commit()
 
     def close(self) -> None:
@@ -278,6 +294,9 @@ class SkillRegistry:
         version: str,
         to_status: SkillStatus | str,
         evidence: str = "",
+        *,
+        approver: str = "",
+        authorizer: Any = None,
     ) -> SkillSpec:
         """Move one record forward a single lifecycle step; only status changes."""
         try:
@@ -289,6 +308,18 @@ class SkillRegistry:
             raise ValueError(f"illegal transition: {current.status.value} -> {target.value}.")
         if target.value in _EVIDENCE_STATUSES and not _is_nonblank(evidence):
             raise ValueError(f"transition to {target.value} requires nonempty evidence.")
+        # Publication is a governed action: when an authorizer is available
+        # (instance-level or call-level), require an authenticated approver.
+        effective_authorizer = authorizer if authorizer is not None else self._publish_authorizer
+        if target is SkillStatus.PUBLISHED and effective_authorizer is not None:
+            if not _is_nonblank(approver):
+                raise ValueError("transition to PUBLISHED requires a nonblank approver.")
+            try:
+                allowed = effective_authorizer(approver, "skill.publish") is True
+            except Exception:  # noqa: BLE001 - authorization errors deny by default
+                allowed = False
+            if not allowed:
+                raise ValueError("skill publication denied by authorizer.")
         with self._conn:
             updated = self._conn.execute(
                 "UPDATE skills SET status = ? WHERE skill_id = ? AND version = ? AND status = ?",
@@ -297,14 +328,15 @@ class SkillRegistry:
             if updated.rowcount != 1:
                 raise ValueError("skill state changed concurrently; transition rejected.")
             self._conn.execute(
-                "INSERT INTO skill_events (skill_id, version, from_status, to_status, evidence, at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO skill_events (skill_id, version, from_status, to_status, evidence, approver, at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     skill_id,
                     version,
                     current.status.value,
                     target.value,
                     evidence,
+                    approver,
                     datetime.now(UTC).isoformat(),
                 ),
             )
@@ -314,20 +346,44 @@ class SkillRegistry:
         """Return durable evidence for lifecycle transitions in order."""
         self.get(skill_id, version)
         rows = self._conn.execute(
-            "SELECT from_status, to_status, evidence, at FROM skill_events "
+            "SELECT from_status, to_status, evidence, approver, at FROM skill_events "
             "WHERE skill_id = ? AND version = ? ORDER BY id",
             (skill_id, version),
         ).fetchall()
-        return [dict(zip(("from_status", "to_status", "evidence", "at"), row)) for row in rows]
+        return [
+            {
+                "from_status": row[0],
+                "to_status": row[1],
+                "evidence": row[2],
+                "approver": row[3],
+                "at": row[4],
+            }
+            for row in rows
+        ]
 
-    def publish(self, skill_id: str, version: str, evidence: str) -> SkillSpec:
+    def publish(
+        self,
+        skill_id: str,
+        version: str,
+        evidence: str,
+        *,
+        approver: str = "",
+        authorizer: Any = None,
+    ) -> SkillSpec:
         """Publish an APPROVED skill; requires nonempty evidence, status-only update."""
         if not _is_nonblank(evidence):
             raise ValueError("publish requires nonempty evidence.")
         current = self.get(skill_id, version)
         if current.status is not SkillStatus.APPROVED:
             raise ValueError(f"publish requires status APPROVED, found {current.status.value}.")
-        return self.transition(skill_id, version, SkillStatus.PUBLISHED, evidence)
+        return self.transition(
+            skill_id,
+            version,
+            SkillStatus.PUBLISHED,
+            evidence,
+            approver=approver,
+            authorizer=authorizer,
+        )
 
     @staticmethod
     def _row_to_spec(row: tuple[Any, ...]) -> SkillSpec:
