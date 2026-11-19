@@ -13,6 +13,12 @@ from agency.factory.prompts import (
     PromptSpec,
     PromptStatus,
 )
+from agency.factory.requested_agent import (
+    ImprovementReport,
+    RequestedAgentRequest,
+    RequestedAgentResult,
+    RequestedAgentService,
+)
 from agency.factory.service import AgentFactory, Blueprint, BlueprintStatus
 
 __all__ = [
@@ -22,11 +28,15 @@ __all__ = [
     "ComposedPrompt",
     "ImportError",
     "ImportedMarkdown",
+    "ImprovementReport",
     "MarkdownImportService",
     "PromptKind",
     "PromptRegistry",
     "PromptSpec",
     "PromptStatus",
+    "RequestedAgentRequest",
+    "RequestedAgentResult",
+    "RequestedAgentService",
     "SimilarityMatch",
     "compose_system_prompt",
 ]
