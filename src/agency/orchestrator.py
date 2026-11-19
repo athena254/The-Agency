@@ -43,6 +43,7 @@ from agency.evidence.store.models import (
     VerificationState,
 )
 from agency.evidence.store.store import EvidenceStore
+from agency.forge.orchestration import BlacksmithOps, JobState
 from agency.kernel.audit import AuditEntry, AuditLog
 from agency.kernel.identity import Agent, Capability, TrustLevel
 from agency.kernel.policies import ActionClass, Permission, PolicyEngine
@@ -142,8 +143,10 @@ class AgencyOrchestrator:
         memory_db_path: str | None = None,
         skill_db_path: str | None = None,
         skill_operations: OperationRegistry | None = None,
+        blacksmith_ops: BlacksmithOps | None = None,
     ) -> None:
         self._config = config or {}
+        self._blacksmith_ops = blacksmith_ops
         self._log = structlog.get_logger(__name__)
 
         # LLM — shared adapter for all agent execution. Falls back to
@@ -687,6 +690,75 @@ class AgencyOrchestrator:
                     await self._task_manager.update_status(task_id, TaskStatus.FAILED)
             raise
 
+    async def _execute_forge(self, task: Task) -> ExecutionResult:
+        """Forge-domain work is managed by BlacksmithOps — never the chat path.
+
+        Submits one bounded job and dispatches it through the real Forge
+        pipeline. PASS lands in the merge queue awaiting human approval;
+        missing configuration fails honestly instead of falling back to chat.
+        """
+        task_id = task.task_id
+        description = task.input.get("description", task.title)
+        ops = self._blacksmith_ops
+        reason = ""
+        if ops is None:
+            reason = "forge ops not configured; build not dispatched"
+        elif not self._config.get("forge_repo"):
+            reason = "no forge_repo configured; build not dispatched"
+        if reason:
+            await self._task_manager.update_status(task_id, TaskStatus.FAILED)
+            return ExecutionResult(
+                task_id=task_id,
+                status=ExecutionStatus.FAILED,
+                output=reason,
+                error="forge_not_configured",
+                attempts=0,
+                duration_s=0.0,
+            )
+        assert ops is not None
+        repo = str(self._config["forge_repo"])
+        test_paths = tuple(str(p) for p in self._config.get("forge_test_paths", ()))
+        job = ops.submit(task.title, description, repo, test_paths=test_paths)
+        done = ops.dispatch_next()
+        if done is None:
+            done = ops.get(job.job_id)
+        passed = done.state in (JobState.PASSED, JobState.AWAITING_HUMAN)
+        output = (
+            f"forge job {done.job_id}: {done.state.value}; gate={done.gate or 'n/a'}; "
+            f"report={done.report_id or 'n/a'}"
+        )
+        if done.failure_detail:
+            output += f"; detail={done.failure_detail}"
+        if done.state is JobState.AWAITING_HUMAN:
+            output += "; awaiting human ship approval"
+        await self._audit_log.append(
+            AuditEntry(
+                timestamp=datetime.now(UTC),
+                agent=task.created_by,
+                task=task_id,
+                target=task.title,
+                authorization="policy_engine",
+                capability="execute",
+                action="forge_dispatch",
+                result=done.state.value,
+                evidence={"job_id": done.job_id, "report_id": done.report_id},
+                model="blacksmith",
+                model_version="0.1.0",
+                tool_version="0.1.0",
+                environment={"name": "default"},
+            )
+        )
+        await self._task_manager.update_status(
+            task_id, TaskStatus.COMPLETED if passed else TaskStatus.FAILED
+        )
+        return ExecutionResult(
+            task_id=task_id,
+            status=ExecutionStatus.COMPLETED if passed else ExecutionStatus.FAILED,
+            output=output,
+            attempts=done.attempts,
+            duration_s=0.0,
+        )
+
     async def _execute_running(
         self,
         task: Task,
@@ -723,6 +795,10 @@ class AgencyOrchestrator:
             system_context = f"{issued_prompt}\n\n{system_context}"
         tool_driver = self._tool_driver
         tool_capable = agent_domain in TOOL_CAPABLE_DOMAINS and tool_driver is not None
+        if agent_domain == "forge":
+            # The Blacksmith manages builds through BlacksmithOps; forge work
+            # never takes the conversational LLM path.
+            return await self._execute_forge(task)
         if tool_capable:
             assert tool_driver is not None
             if issued_prompt:

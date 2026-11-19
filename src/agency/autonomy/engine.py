@@ -99,6 +99,13 @@ def run_autonomous(
         if d.spawn:
             if "forge" in d.capabilities and factory is not None:
                 agent_id: str | None = activate_blacksmith(factory)
+                assigned_graph = planner.get_plan(graph.plan_id)
+                assigned_sub = (
+                    assigned_graph.get(a.subtask_id) if assigned_graph is not None else None
+                )
+                if agent_id is not None and assigned_sub is not None:
+                    with suppress(ValueError, KeyError):
+                        planner.assign_subtask(agent_id, assigned_sub, plan_id=graph.plan_id)
             else:
                 agent_id = _spawn_agent(
                     registry, planner, graph.plan_id, a.subtask_id, d.capabilities
