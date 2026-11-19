@@ -43,6 +43,7 @@ from agency.evidence.store.models import (
     VerificationState,
 )
 from agency.evidence.store.store import EvidenceStore
+from agency.factory.requested_agent import RequestedAgentService
 from agency.kernel.audit import AuditEntry, AuditLog
 from agency.kernel.identity import Agent, Capability, TrustLevel
 from agency.kernel.policies import ActionClass, Permission, PolicyEngine
@@ -213,6 +214,23 @@ class AgencyOrchestrator:
         except Exception:  # noqa: BLE001 - optional component
             self._skill_registry = None
             self._self_improvement = None
+
+        # Requested-agent onboarding / self-improvement (optional, fail-closed).
+        self._requested_agent_service: RequestedAgentService | None = None
+        factory = self._config.get("agent_factory")
+        prompt_registry = self._config.get("prompt_registry")
+        if factory is not None and prompt_registry is not None and self._skill_registry is not None:
+            try:
+                self._requested_agent_service = RequestedAgentService(
+                    factory=factory,
+                    prompt_registry=prompt_registry,
+                    skill_registry=self._skill_registry,
+                    approver=str(
+                        self._config.get("factory_improvement_approver", "factory-improvement")
+                    ),
+                )
+            except Exception:  # noqa: BLE001 - optional component
+                self._requested_agent_service = None
 
         # Evidence & Risk
         self._evidence_store = EvidenceStore()
@@ -938,6 +956,39 @@ class AgencyOrchestrator:
             except Exception:  # noqa: BLE001 - never break a task
                 self._log.warning("self_improvement.distill_failed", task_id=task.task_id)
 
+        # Requested-agent self-improvement: refine skills/prompt and re-version
+        # the blueprint for factory-issued agents that completed this task.
+        if (
+            self._requested_agent_service is not None
+            and self._requested_agent_service.is_factory_issued(task.created_by)
+            and all_completed
+            and final_status is TaskStatus.COMPLETED
+        ):
+            try:
+                improve_trace = TaskTrace(
+                    task_id=task.task_id,
+                    title=task.title,
+                    description=description,
+                    status="completed",
+                    agent_id=task.created_by,
+                    subtask_outputs=list(outputs),
+                    tool_steps=skill_tool_steps,
+                )
+                improvement = self._requested_agent_service.improve_agent(
+                    task.created_by, improve_trace
+                )
+                self._log.info(
+                    "requested_agent.improved",
+                    task_id=task.task_id,
+                    blueprint_id=improvement.blueprint_id,
+                    blueprint_version=improvement.blueprint_version,
+                    prompt_refined=improvement.prompt_refined,
+                )
+            except Exception:  # noqa: BLE001 - never break a task
+                self._log.warning(
+                    "requested_agent.improve_failed", task_id=task.task_id, exc_info=True
+                )
+
         result = ExecutionResult(
             task_id=task_id,
             status=ExecutionStatus.COMPLETED if all_completed else ExecutionStatus.FAILED,
@@ -1186,6 +1237,11 @@ class AgencyOrchestrator:
     def self_improvement_loop(self) -> SelfImprovementLoop | None:
         """The self-improvement loop (may be None)."""
         return self._self_improvement
+
+    @property
+    def requested_agent_service(self) -> RequestedAgentService | None:
+        """The requested-agent onboarding/improvement service (may be None)."""
+        return self._requested_agent_service
 
     async def health_check(self) -> dict[str, Any]:
         """Check all components."""
