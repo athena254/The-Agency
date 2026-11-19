@@ -122,7 +122,7 @@ def run_pipeline(
 
     review: ReviewReport | None = None
     if run_review_flag:
-        review = run_review(real_root, changed_paths, use_llm=True, llm=llm)
+        review = run_review(real_root, changed_paths, use_llm=True, llm=llm, tests_report=tests)
 
     overall: PipelineGate = "PASS"
     if inspection.gate != "PASS":

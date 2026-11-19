@@ -581,7 +581,9 @@ def run_external_agent(
         review_error = False
         if run_review_flag:
             try:
-                review = run_review(worktree_path, changed, use_llm=True, llm=llm)
+                review = run_review(
+                    worktree_path, changed, use_llm=True, llm=llm, tests_report=tests
+                )
             except Exception:  # noqa: BLE001
                 review_error = True
                 logger.error("forge.external_agent_review_error")

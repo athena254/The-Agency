@@ -24,6 +24,7 @@ import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
 from agency.autonomy.forge_auto import ToolBuildResult, build_tool
+from agency.forge.backlog import BacklogStore, slice_prd
 from agency.forge.cost import CostStore, record_cost
 from agency.forge.evidence import EvidenceReport, EvidenceStore
 from agency.forge.external_agent import ExternalAgentReport, run_external_agent
@@ -119,6 +120,7 @@ class BlacksmithOps:
         evidence: EvidenceStore | None = None,
         merge_queue: MergeQueueStore | None = None,
         costs: CostStore | None = None,
+        backlog: BacklogStore | None = None,
         audit_sink: Callable[[str, dict[str, Any]], None] | None = None,
         max_retries: int = DEFAULT_MAX_RETRIES,
         worktree_root: str | Path | None = None,
@@ -146,6 +148,7 @@ class BlacksmithOps:
             merge_queue if merge_queue is not None else self._own(MergeQueueStore(":memory:"))
         )
         self._costs = costs if costs is not None else self._own(CostStore(":memory:"))
+        self.backlog = backlog if backlog is not None else self._own(BacklogStore(":memory:"))
         self._recover_uncertain()
 
     def _own(self, store: Any) -> Any:
@@ -199,6 +202,23 @@ class BlacksmithOps:
         self._notify(job, "job_submitted", "", JobState.QUEUED.value, "")
         logger.info("blacksmith.job_submitted", job_id=job.job_id, title=job.title)
         return job
+
+    def ingest_backlog(
+        self,
+        prd_text: str,
+        repo: str,
+        *,
+        test_paths: tuple[str, ...] | list[str] = (),
+    ) -> tuple[ForgeJob, ...]:
+        """Slice a PRD into bounded backlog items and queue one job per item."""
+        report = slice_prd(prd_text)
+        self.backlog.save(report)
+        jobs: list[ForgeJob] = []
+        for item in report.items:
+            task = item.body or item.title
+            jobs.append(self.submit(item.title, task, repo, test_paths=test_paths))
+        logger.info("blacksmith.backlog_ingested", report_id=report.report_id, jobs=len(jobs))
+        return tuple(jobs)
 
     def get(self, job_id: str) -> ForgeJob:
         row = self._conn.execute(

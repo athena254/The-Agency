@@ -929,6 +929,31 @@ def forge_code(
         raise typer.Exit(1)
 
 
+@forge_app.command("status")
+def forge_status(
+    db: str = typer.Option("forge_jobs.db", "--db", help="Blacksmith job database path."),
+    output_json: bool = typer.Option(False, "--json", help="Emit the status as JSON."),
+) -> None:
+    """Show the Blacksmith's Forge job queue (read-only; no ship authority)."""
+    from agency.forge.orchestration import BlacksmithOps
+
+    ops = BlacksmithOps(db)
+    try:
+        status = ops.status()
+    finally:
+        ops.close()
+    if output_json:
+        _print_json(status.model_dump(mode="json"))
+        return
+    console.print(f"Forge jobs: {status.total}")
+    for state, count in sorted(status.by_state.items()):
+        console.print(f"  {state}: {count}")
+    if status.blocked:
+        console.print("Blocked (escalate to human): " + ", ".join(status.blocked))
+    for job in status.recent:
+        console.print(f"  {job.job_id[:8]} {job.state.value} {job.title} gate={job.gate or '-'}")
+
+
 # --------------------------------------------------------------------------- #
 # Forge: reverse-engineering tool catalog
 # --------------------------------------------------------------------------- #
