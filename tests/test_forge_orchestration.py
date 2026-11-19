@@ -236,6 +236,28 @@ def test_status_reports_queue(tmp_path) -> None:
         ops.close()
 
 
+def test_import_orders_do_not_cycle() -> None:
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    pairs = (
+        ("agency.forge.orchestration", "agency.autonomy.engine"),
+        ("agency.autonomy.engine", "agency.forge.orchestration"),
+    )
+    for first, second in pairs:
+        proc = subprocess.run(
+            [sys.executable, "-c", f"import {first}; import {second}; print('OK')"],
+            capture_output=True,
+            text=True,
+            cwd=str(root),
+            check=False,
+            timeout=120,
+        )
+        assert proc.returncode == 0, proc.stderr[-800:]
+
+
 def test_build_tool_job_uses_real_gates(tmp_path) -> None:
     ops, events = _ops(tmp_path, lambda *a, **k: _report())
     registry = ToolRegistry()

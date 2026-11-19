@@ -67,3 +67,11 @@ State: FIXED on this branch (`ddb4eed`, refined in the working tree). The test h
 - Eager handler -> Butler import caused fresh ToolDriver/MeteredModel imports and spawned admission-test workers to fail; fixed with deferred command imports.
 
 These fixes do not close P1 end-to-end metering/identity/audit or P2 peer application authority in the production plan.
+
+## KI-09 — Engine tool-gap self-publish was simulated (FIXED on feat/blacksmith-orchestrator)
+
+Before this branch, `run_autonomous` hashed the tool NAME, passed literal `"PASS"` to `can_self_publish`, compared the digest to itself, and recorded `published=true` in the proof chain with no build, no gates, and no artifact (observed live for `weather_lookup`). Replaced in commit `f45bdf7`: real builds via `BlacksmithOps.build_tool_job` with real verdicts, report ids, and artifact digests — or an honest `build_blocked` when no ops/spec is supplied. Regression coverage: `tests/test_autonomy_engine_honesty.py` (4 tests, including one asserting the old name-hash can never appear). The e2e assertion that encoded the simulation was updated to assert the honest behavior.
+
+## KI-10 — Sticker worker provider availability (OPEN, external)
+
+Live acceptance (Nov 20, `D:/blacksmith-acceptance`): the opencode free tier returned "Free usage limit reached" (beam-free, hy4-flash-free) after concurrent sessions consumed the quota. The hermes proxy path (`127.0.0.1:8645`, Nous Portal) returned "Unexpected server error" for opencode's agentic requests across three models (qwen4-max, longcat-2.5, hy4-flash), while plain, tools-bearing, and 100KB curl requests through the same proxy succeeded — an upstream request-shape incompatibility, not a Forge defect. The manager lifecycle (dispatch, isolation, honest FAIL recording, retry, BLOCKED, UNCERTAIN crash recovery) is fully verified live; a live sticker PASS through BlacksmithOps is pending a working worker model. Retry when the quota resets or the proxy path is fixed. The pre-quota live `forge code` PASS (00:29, beam-free, report in `D:/agency-cleanup/forge-run.json`) remains valid evidence for the pipeline itself.

@@ -17,18 +17,23 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
-from agency.autonomy.forge_auto import ToolBuildResult, build_tool
 from agency.forge.backlog import BacklogStore, slice_prd
 from agency.forge.cost import CostStore, record_cost
 from agency.forge.evidence import EvidenceReport, EvidenceStore
 from agency.forge.external_agent import ExternalAgentReport, run_external_agent
 from agency.forge.merge_queue import MergeQueueReport, MergeQueueStore, evaluate_merge
+
+if TYPE_CHECKING:
+    # Imported lazily at runtime: agency.autonomy.__init__ imports engine,
+    # which imports this module; a module-level autonomy import here is a
+    # circular import when forge.orchestration is imported first.
+    from agency.autonomy.forge_auto import ToolBuildResult
 
 logger = structlog.get_logger(__name__)
 
@@ -343,6 +348,8 @@ class BlacksmithOps:
         tests: str,
         registry: Any = None,
     ) -> ToolBuildResult:
+        from agency.autonomy.forge_auto import build_tool
+
         result = build_tool(name, code, tests, registry)
         now = _now()
         job = ForgeJob(
