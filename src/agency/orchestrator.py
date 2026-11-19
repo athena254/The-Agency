@@ -51,10 +51,10 @@ from agency.kernel.tasks import Task, TaskManager, TaskStatus
 from agency.lattice import LatticeLease, acquire_lattice
 from agency.lattice.api import Lattice
 from agency.llm.adapter import LLMAdapter
+from agency.memory.factory import build_memory_backend
 from agency.memory.sms.lifecycle import TieredMemoryEngine
 from agency.memory.sms.models import MemoryItem, MemoryTier
 from agency.memory.sms.retrieval import RetrievalEngine
-from agency.memory.sms.store import MemoryStore
 from agency.risk.engine.engine import RiskEngine
 from agency.security.sandbox.config import SandboxBackend, SandboxConfig
 from agency.security.sandbox.manager import SandboxManager
@@ -180,8 +180,8 @@ class AgencyOrchestrator:
 
         # Memory — persistent by default so turns and findings survive
         # restarts. Tests pass ":memory:" explicitly for speed.
-        self._memory_store = MemoryStore(
-            db_path=memory_db_path
+        self._memory_store = build_memory_backend(
+            memory_db_path
             if memory_db_path is not None
             else (self._config.get("memory_db_path") or _DEFAULT_MEMORY_DB)
         )
@@ -252,6 +252,9 @@ class AgencyOrchestrator:
             return
         try:
             await self._memory_store.initialize()
+            # Single aging owner: the lifecycle engine is the policy layer;
+            # the store's bulk auto_age() is removed so nothing else ages memory.
+            self._memory_lifecycle.start_periodic()
             await self._evidence_store.initialize()
             await self._audit_log.initialize()
             self._lattice_lease = await acquire_lattice()

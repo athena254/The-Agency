@@ -60,6 +60,8 @@ from agency.evidence.store.store import EvidenceStore
 from agency.kernel.registry import AgentRegistry
 from agency.kernel.tasks import TaskManager
 from agency.lattice import LatticeLease, acquire_lattice
+from agency.memory.factory import build_memory_backend
+from agency.memory.sms.lifecycle import TieredMemoryEngine
 from agency.memory.sms.retrieval import RetrievalEngine
 from agency.memory.sms.store import MemoryStore
 from agency.risk.engine.engine import RiskEngine
@@ -123,6 +125,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     """Own one local Lattice lease and roll back every allocated store."""
     evidence_store: EvidenceStore | None = None
     memory_store: MemoryStore | None = None
+    memory_lifecycle: TieredMemoryEngine | None = None
     lease: LatticeLease | None = None
     primary: BaseException | None = None
     state_names = (
@@ -150,9 +153,11 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         await evidence_store.initialize()
         application.state.evidence_store = evidence_store
 
-        memory_store = MemoryStore(_database_path("AGENCY_MEMORY_DB", ":memory:"))
+        memory_store = build_memory_backend(_database_path("AGENCY_MEMORY_DB", ":memory:"))
         await memory_store.initialize()
         application.state.memory_store = memory_store
+        memory_lifecycle = TieredMemoryEngine(memory_store)
+        memory_lifecycle.start_periodic()
         application.state.memory_retrieval = RetrievalEngine(memory_store)
 
         # Record ownership before exposing the borrowed handle or running hooks.
@@ -191,6 +196,8 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
                 closers.append(lease.release)
             if evidence_store is not None:
                 closers.append(evidence_store.close)
+            if memory_lifecycle is not None:
+                closers.append(memory_lifecycle.stop_periodic)
             if memory_store is not None:
                 closers.append(memory_store.close)
             for close in closers:
@@ -260,11 +267,12 @@ def create_app() -> FastAPI:
     )
     async def health(request: Request) -> HealthResponse:
         """Liveness probe plus per-component readiness."""
+        memory_store = getattr(request.app.state, "memory_store", None)
         components: dict[str, bool] = {
             "task_manager": getattr(request.app.state, "task_manager", None) is not None,
             "agent_registry": getattr(request.app.state, "agent_registry", None) is not None,
             "evidence_store": getattr(request.app.state, "evidence_store", None) is not None,
-            "memory": getattr(request.app.state, "memory_retrieval", None) is not None,
+            "memory": await memory_store.check_ready() if memory_store is not None else False,
             "risk_engine": getattr(request.app.state, "risk_engine", None) is not None,
             "bridges": getattr(request.app.state, "bridge_coordinator", None) is not None,
         }

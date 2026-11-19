@@ -58,8 +58,8 @@ from agency.kernel.audit import AuditEntry, BetaAuditLog
 from agency.llm.adapter import LLMAdapter
 from agency.llm.config import LLMConfig
 from agency.llm.metered import MeteredDenied, MeteredError, MeteredModel
+from agency.memory.factory import build_memory_backend
 from agency.memory.sms.scope import PrincipalMemoryScope, PrincipalScope
-from agency.memory.sms.store import MemoryStore
 from agency.tools.builtin.calculator import CalculatorTool
 from agency.tools.builtin.memory import MemoryQueryTool, MemoryWriteTool
 from agency.tools.builtin.utc_time import UtcTimeTool
@@ -156,7 +156,7 @@ class OwnerPilotService:
         self._enable_memory_tools = enable_memory_tools
         self._enable_web_fetch = enable_web_fetch
         self._memory_store = (
-            MemoryStore(memory_db_path) if enable_memory_tools and memory_db_path else None
+            build_memory_backend(memory_db_path) if enable_memory_tools and memory_db_path else None
         )
         self._coding = coding
         self._coding_profile = coding.profile if coding is not None else None

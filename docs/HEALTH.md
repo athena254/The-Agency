@@ -25,7 +25,7 @@ Two prior status tables were factually wrong
 | Component | State | Notes |
 |-----------|-------|-------|
 | Secrets management | Partial | `src/agency/memory/sms/secrets.py`, `config/keys.py`; ACL/rotation story unproven |
-| Retrieval / memory | Partial | `src/agency/memory/sms/`; sender-scoped, hierarchical isolation planned |
+| Retrieval / memory | Partial | `src/agency/memory/sms/`; scoped FTS/retrieval, tier aging now started, backend protocols added; hierarchical isolation planned |
 | Agent lifecycle scaffolding | Partial | `kernel/registry.py`, `agents/registry.py`, `agents/loop.py`; no factory gate |
 | Model routing | Partial | `src/agency/llm/` multi-provider; capability/cost metadata incomplete |
 | API server + CLI | Partial | `src/agency/api/server.py`, `cli/main.py`; live operation unverified |

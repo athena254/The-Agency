@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Self
 
 import aiosqlite
@@ -28,8 +28,8 @@ from agency.memory.sms.models import (
 
 logger = structlog.get_logger(__name__)
 
-DEFAULT_AGING_THRESHOLD = timedelta(days=7)
-"""Items untouched for this long are demoted by :meth:`MemoryStore.auto_age`."""
+SCHEMA_VERSION = 1
+"""Current on-disk schema version, recorded in SQLite's ``user_version``."""
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS memory_items (
@@ -56,16 +56,6 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
 """
 
 _ITEM_COLUMNS = "id, agent_id, content, tier, created_at, accessed_at, importance, tags"
-
-_DEMOTE_CASE = """
-CASE tier
-    WHEN 'hot'    THEN 'warm'
-    WHEN 'warm'   THEN 'normal'
-    WHEN 'normal' THEN 'cool'
-    WHEN 'cool'   THEN 'cold'
-    ELSE 'cold'
-END
-"""
 
 
 def _parse_datetime(raw: str) -> datetime:
@@ -106,14 +96,8 @@ class MemoryStore:
     initialize the schema, so explicit ``initialize`` is optional.
     """
 
-    def __init__(
-        self,
-        db_path: str = ":memory:",
-        *,
-        aging_threshold: timedelta = DEFAULT_AGING_THRESHOLD,
-    ) -> None:
+    def __init__(self, db_path: str = ":memory:") -> None:
         self._db_path = db_path
-        self._aging_threshold = aging_threshold
         self._conn: aiosqlite.Connection | None = None
         self._initialized = False
         self._init_lock = asyncio.Lock()
@@ -150,6 +134,7 @@ class MemoryStore:
             await self._conn.execute("PRAGMA journal_mode=WAL")
             await self._conn.execute("PRAGMA busy_timeout=5000")
             await self._conn.executescript(_SCHEMA)
+            await self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             await self._conn.commit()
             self._initialized = True
             logger.info("memory_store.initialized", db_path=self._db_path)
@@ -162,6 +147,19 @@ class MemoryStore:
             self._conn = None
             self._initialized = False
             logger.info("memory_store.closed", db_path=self._db_path)
+
+    async def check_ready(self) -> bool:
+        """True when the store is open and both core tables are queryable."""
+
+        try:
+            await self.initialize()
+            async with self.connection.execute("SELECT 1 FROM memory_items LIMIT 1") as cursor:
+                await cursor.fetchone()
+            async with self.connection.execute("SELECT 1 FROM memory_fts LIMIT 1") as cursor:
+                await cursor.fetchone()
+        except Exception:  # noqa: BLE001 - readiness is a boolean probe
+            return False
+        return True
 
     async def store(self, item: MemoryItem) -> MemoryItem:
         """Insert or replace ``item`` and keep the FTS index in sync."""
@@ -361,27 +359,40 @@ class MemoryStore:
             rows = await cursor.fetchall()
         return [_row_to_item(row) for row in rows]
 
-    async def auto_age(self) -> int:
-        """Demote every item untouched for :data:`DEFAULT_AGING_THRESHOLD`.
+    async def search_text(
+        self, text: str, *, agent_id: str | None = None, limit: int = 10
+    ) -> list[MemoryItem]:
+        """Free-text search: FTS5 first, bounded substring fallback stays scoped.
 
-        Each stale item moves down exactly one tier and its ``accessed_at`` is
-        refreshed so the aging clock restarts; without the refresh an item
-        would cascade to COLD on subsequent runs. Returns the number of rows
-        demoted.
+        Never widens to an unscoped scan when ``agent_id`` is given.
         """
 
         await self.initialize()
-        now = utc_now()
-        cutoff = now - self._aging_threshold
-        cursor = await self.connection.execute(
-            f"""
-            UPDATE memory_items
-            SET tier = {_DEMOTE_CASE}, accessed_at = ?
-            WHERE accessed_at < ? AND tier != 'cold'
-            """,
-            (now.isoformat(), cutoff.isoformat()),
-        )
-        await self.connection.commit()
-        moved = cursor.rowcount
-        logger.info("memory_store.auto_age", moved=moved, threshold=self._aging_threshold)
-        return moved
+        # Local import avoids a circular import: retrieval imports store at top.
+        from agency.memory.sms.retrieval import build_fts_match, tokenize
+
+        match = build_fts_match(text)
+        items: list[MemoryItem] = []
+        if match:
+            items = await self.search_fts(match, agent_id=agent_id, limit=limit)
+        if not items:
+            tokens = tokenize(text)
+            if tokens and agent_id is not None:
+                candidates = await self.list_by_agent(agent_id, limit=1000)
+            elif tokens:
+                candidates = await self.list_all(limit=1000)
+            else:
+                return []
+            scored: list[tuple[int, MemoryItem]] = []
+            for item in candidates:
+                haystack = (item.content + " " + " ".join(item.tags)).lower()
+                score = sum(1 for t in tokens if t in haystack)
+                if score > 0:
+                    scored.append((score, item))
+            scored.sort(key=lambda pair: (-pair[0], -pair[1].importance))
+            items = [item for _, item in scored[:limit]]
+        return items
+
+    # No bulk ``auto_age`` here: the store owns persistence only; aging is owned
+    # by :class:`~agency.memory.sms.lifecycle.TieredMemoryEngine`, the single
+    # policy layer started by ``AgencyOrchestrator.start``.
