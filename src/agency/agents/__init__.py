@@ -19,7 +19,6 @@ _EXPORTS = {
     "Observation": ("agency.agents.loop", "Observation"),
     "Reflection": ("agency.agents.loop", "Reflection"),
     "StepResult": ("agency.agents.loop", "StepResult"),
-    "Thought": ("agency.agents.loop", "Thought"),
     "AgentPlanner": ("agency.agents.planner", "AgentPlanner"),
     "PlanStatus": ("agency.agents.planner", "PlanStatus"),
     "PlanSummary": ("agency.agents.planner", "PlanSummary"),
@@ -37,6 +36,18 @@ _EXPORTS = {
     "VerificationCriterion": ("agency.agents.verifier", "VerificationCriterion"),
     "VerificationResult": ("agency.agents.verifier", "VerificationResult"),
     "VerificationStatus": ("agency.agents.verifier", "VerificationStatus"),
+    "PersonalAgent": ("agency.agents.personal.agent", "PersonalAgent"),
+    "PERSONAL_SYSTEM_PROMPT": ("agency.agents.personal.agent", "PERSONAL_SYSTEM_PROMPT"),
+    "WorkAgent": ("agency.agents.work.agent", "WorkAgent"),
+    "WORK_SYSTEM_PROMPT": ("agency.agents.work.agent", "WORK_SYSTEM_PROMPT"),
+    "BusinessAgent": ("agency.agents.business.agent", "BusinessAgent"),
+    "BUSINESS_SYSTEM_PROMPT": ("agency.agents.business.agent", "BUSINESS_SYSTEM_PROMPT"),
+    "SecurityAgent": ("agency.agents.security.agent", "SecurityAgent"),
+    "SECURITY_SYSTEM_PROMPT": ("agency.agents.security.agent", "SECURITY_SYSTEM_PROMPT"),
+    "ResearchAgent": ("agency.agents.research.agent", "ResearchAgent"),
+    "RESEARCH_SYSTEM_PROMPT": ("agency.agents.research.agent", "RESEARCH_SYSTEM_PROMPT"),
+    "GeneralAgent": ("agency.agents.general.agent", "GeneralAgent"),
+    "GENERAL_SYSTEM_PROMPT": ("agency.agents.general.agent", "GENERAL_SYSTEM_PROMPT"),
 }
 
 __all__ = [
