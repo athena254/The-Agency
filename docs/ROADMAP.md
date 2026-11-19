@@ -1,6 +1,6 @@
 # The Agency — Roadmap (honest implemented / partial / planned)
 
-> November 9, 2026 update: the current source-backed feature ledger is [CURRENT_STATE.md](CURRENT_STATE.md). The active engineering order is P0 reproducible baseline -> P1 end-to-end identity/budget/audit -> P2 peer application authority -> P3 isolation/privacy/recovery -> P4 Factory/skills/Forge integration -> P5 deployment operations -> P6 independent release review. See [PRODUCTION_READINESS_PLAN.md](PRODUCTION_READINESS_PLAN.md) for dependencies and acceptance criteria. The owner decisions D-01–D-05 are approved and recorded in [OWNER_DECISIONS_D01_D05.md](OWNER_DECISIONS_D01_D05.md). The hermetic Python suite, owner pilot service/API/UI, persistent task workspace and Mission Control console now exist as bounded local surfaces; none of them is production readiness or peer authority.
+> November 19, 2026 update: the current source-backed feature ledger is [CURRENT_STATE.md](CURRENT_STATE.md). The active engineering order is P0 reproducible baseline -> P1 end-to-end identity/budget/audit -> P2 peer application authority -> P3 isolation/privacy/recovery -> P4 Factory/skills/Forge integration -> P5 deployment operations -> P6 independent release review. See [PRODUCTION_READINESS_PLAN.md](PRODUCTION_READINESS_PLAN.md) for dependencies and acceptance criteria. The owner decisions D-01–D-05 are approved and recorded in [OWNER_DECISIONS_D01_D05.md](OWNER_DECISIONS_D01_D05.md). The hermetic Python suite, owner pilot service/API/UI, persistent task workspace and Mission Control console now exist as bounded local surfaces; none of them is production readiness or peer authority.
 
 > **Normative direction:** `docs/SOURCE_CONSOLIDATED_BRIEF.md` §§45–46 (priorities and
 > build sequence) and `docs/SPEC_AGENCY_CORE_RECONCILIATION.md` (code-backed gap matrix
@@ -19,8 +19,10 @@
   verified in this docs pass.
 - **The October 18 status ledger described a blocked suite and 16 Node UI tests.**
   Superseded: the suite is now hermetic (`tests/conftest.py` pins settings and
-  isolates every runtime database) and records 3513 passed, 3 skipped, 4
-  Windows-only harness errors; 79 Node UI tests pass. See `CURRENT_STATE.md`.
+  isolates every runtime database) and recorded 3513 passed, 3 skipped, 4
+  Windows-only harness errors at the Nov 9 checkpoint; the harness-ID issue was
+  fixed in `4406f59` (focused re-run: 11 passed), with a full-suite re-run still
+  pending. 79 Node UI tests passed. See `CURRENT_STATE.md`.
 - **The owner pilot service/API/UI, persistent task workspace and Mission Control
   console were absent from the earlier ledger.** They now exist as bounded local
   surfaces and are listed below. They do not change the P2 gap.
@@ -38,7 +40,7 @@
 | Persistent task workspace | Implemented (local) | owner-scoped SQLite threads/messages/tasks; replay, cancel, UNCERTAIN recovery; no auto-resume |
 | Mission Control console | Implemented (local) | `gui/` React 18 + TS + Vite + Tailwind; built to `static/mission-control`; served at `/mission-control`; honest locked states for P2 surfaces |
 | Pilot workspace UI | Implemented (local) | dependency-free `static/pilot.html|pilot.js|pilot.css` at `/pilot` |
-| Hermetic test suite | Implemented | `tests/conftest.py` isolates env and DBs; 3513 passed, 3 skipped, 4 Windows-only harness errors |
+| Hermetic test suite | Implemented | `tests/conftest.py` isolates env and DBs; Nov 9: 3513 passed, 3 skipped, 4 Windows-only harness errors (fixed in `4406f59`; focused re-run 11 passed; full re-run pending) |
 | Secrets management | Partial | `src/agency/memory/sms/secrets.py`, `src/agency/config/keys.py` |
 | Retrieval / memory | Partial | `src/agency/memory/sms/store.py`, `retrieval.py`, `lifecycle.py`, `cpr.py` |
 | Agent lifecycle scaffolding | Partial | `src/agency/kernel/registry.py`, `agents/registry.py`, `agents/loop.py`, `agents/executor.py` |
@@ -51,9 +53,10 @@
 | Bridges (claude, codex, hermes, openclaw) | Partial adapters | `src/agency/bridges/`; optional integrations, never dependencies |
 | Lattice + governance + reputation | Partial (single-process prototype) | `src/agency/lattice/`; process-local state, best-effort mirroring, `user` override; not peer consensus |
 | API server + CLI | Partial | `src/agency/api/server.py` (`/v1` closed except health), `src/agency/cli/main.py`; prototype `/api` and `/api/pilot` surfaces are separate |
-| CI / CD workflows | Exists, outcome unverified at this SHA | `.github/workflows/ci.yml`, `cd.yml`; no exact-SHA run is certified in this docs pass |
+| CI / CD workflows | Exists, outcome unverified at this SHA | `.github/workflows/ci.yml`, `cd.yml`; `feat/self-improve-forge` added to CI triggers on Nov 19, but no exact-SHA run is certified in this docs pass |
 | Coding agent / Forge | Partial | `agents/coding.py` operator over Forge with protected-path guardrail; owner factory coding exposed over the pilot API (`/api/pilot/coding-tasks`) and console coding page, gated on an opt-in fixture repo; merge/release remain planned |
 | Peer protocol slice A | Implemented (contracts only) | `src/agency/peers/`: identities, canonical serialization, envelope binding, membership/epoch types, redaction, durable hash-chained log; no transport, executor, actuator or consensus |
+| ABCI app + codec (Wave 0) | In-flight, not landed | Work exists in `C:\Users\PC\.zcode\worktrees\5ab0\The-Agency`; canonical tree has no `src/agency/consensus/abci/` yet. Left untouched pending owner direction. |
 | Prototype factories (dark/ghost) | Prototypes only | Standalone; not an integrated Forge |
 
 ### New partial foundations and remaining planned systems
@@ -61,7 +64,7 @@
 | Item | State | Planned next step (per reconciliation spec) |
 |------|-------|----------------------------------------------|
 | Durable thread / workspace / task store | Implemented (local owner) | Public authenticated API awaits P2; project model pending |
-| Owner pilot API / UI | Implemented (local) | Live provider, real-browser and restart/crash qualification; decide whether to expose coding over HTTP |
+| Owner pilot API / UI | Implemented (local) | Live provider, real-browser and restart/crash qualification; coding is exposed over `/api/pilot/*` behind an opt-in fixture gate |
 | Mission Control | Implemented (local) | Add GUI tests; wire live telemetry or honest empty states; resolve pilot-mode bearer wiring |
 | Agent Factory (versioned) | Partial v1 | Versioned blueprints, approval, L0/UNKNOWN activation; no evaluation, autonomous creation or restart rehydration |
 | Prompt library (factory) | Partial v1 | Versioned prompt records, deterministic composition, bundled segments + REAP packs; runtime consumption and Forge tool-availability params implemented |

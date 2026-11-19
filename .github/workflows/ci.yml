@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master, main, develop]
+    branches: [master, main, develop, feat/self-improve-forge]
   pull_request:
-    branches: [master, main]
+    branches: [master, main, feat/self-improve-forge]
   workflow_dispatch:
 
 env:

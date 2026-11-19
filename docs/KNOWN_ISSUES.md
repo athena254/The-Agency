@@ -1,15 +1,15 @@
 # Known qualification issues
 
-Updated November 9, 2026. These are tracked engineering findings, not waived warnings. The active status reference is `CURRENT_STATE.md`; the approved policy inputs are `OWNER_DECISIONS_D01_D05.md`. Older qualification files remain historical. Production/daily-driver gates remain open.
+Updated November 19, 2026. These are tracked engineering findings, not waived warnings. The active status reference is `CURRENT_STATE.md`; the approved policy inputs are `OWNER_DECISIONS_D01_D05.md`. Older qualification files remain historical. Production/daily-driver gates remain open.
 
 ## KI-01 — Windows-only harness errors from oversized test IDs (harness, not product)
 
-At `c0a1de9`, the hermetic suite records 3513 passed, 3 skipped, 4 errors. All four errors are setup/teardown failures on two parameterized tests whose IDs are tens of thousands of characters long:
+At `c0a1de9`, the hermetic suite recorded 3513 passed, 3 skipped, 4 errors. All four errors were setup/teardown failures on two parameterized tests whose IDs were tens of thousands of characters long:
 
 - `tests/test_factory_coding_models.py::test_canonical_rejects_non_json_or_unbounded_values` with the `"x" * 65537` parameter.
 - `tests/test_factory_coding_publication.py::test_original_long_or_calculator_looking_task_never_selects_calculator` with the `"雪" * 8000` parameter.
 
-On Windows the pytest harness cannot set its per-test environment variable once the ID exceeds the OS environment-block limit; the same tests pass on Linux. State: OPEN (harness/test-ID limit). Do not shorten product strings to fix it; add explicit short parameter IDs or a harness-level workaround, then rerun on Linux and Windows. This is not a product failure and does not block the Python gate, but it must not be relabeled as a product defect.
+State: **FIXED** in commit `4406f59`. Both cases now carry explicit short test IDs (`oversized-ascii-65537`, `oversized-snowman-8000`) while the long product payloads are unchanged. On Nov 19 the two parameterized tests re-ran clean on Windows (**11 passed**). A full-suite re-run on this branch has not completed (timed out at 81%), so no new total is claimed. This was a harness/test-ID limit, not a product failure.
 
 ## KI-02 — SQLite worker threads after event-loop shutdown (carried from W-01)
 
@@ -39,7 +39,7 @@ State: PARTIAL. The console is a real built UI with honest locked states for P2 
 
 ## KI-06 — Owner pilot qualification boundaries
 
-Observed: the owner pilot service/API/UI and persistent workspace are implemented and unit/integration tested offline, but no live admitted provider conversation, real-browser session or deployment qualification is recorded in this tree. The coding factory core (`OwnerPilotService.submit_coding`/`get_coding_receipt`) is not exposed over `/api/pilot/*`; Telegram owner authentication is not wired; the spending ledger is disabled unless explicitly configured; calculator verification covers only the exact marker-message fixture.
+Observed: the owner pilot service/API/UI and persistent workspace are implemented and unit/integration tested offline, but no live admitted provider conversation, real-browser session or deployment qualification is recorded in this tree. The coding factory core (`OwnerPilotService.submit_coding`/`get_coding_receipt`) is exposed over `/api/pilot/*` but gated on an opt-in fixture repository; Telegram owner authentication is not wired; the spending ledger is disabled unless explicitly configured; calculator verification covers only the exact marker-message fixture.
 
 State: PARTIAL/OPEN. These are scope boundaries, not defects, but they must not be described as completed daily-driver qualification. Live provider, real-browser, restart/crash and coding-surface qualification remain separate gates.
 
@@ -47,7 +47,7 @@ State: PARTIAL/OPEN. These are scope boundaries, not defects, but they must not 
 
 Observed: the Lattice is a single-process SQLite/in-memory prototype with process-local proposal state, best-effort mirroring, a `user` override and no membership epoch. `/v1/*` business routes are closed with HTTP 503 except `GET /v1/health`. Signed peer-envelope primitives and a historical four-process CometBFT loopback lab exist, but no Agency task grants, affected-consumer input, human attestation, membership changes or actuator enforcement are implemented.
 
-State: OPEN (core production blocker). The owner decisions D-01–D-05 are approved and the migration path is specified in `SPEC_KNOWN_PEER_PROTOCOL.md` §18 and `SPEC_PEER_LATTICE_GOVERNANCE.md`, but no peer application implementation exists. Do not describe the Lattice, the pilot or the CometBFT lab as decentralized authority.
+State: OPEN (core production blocker). The owner decisions D-01–D-05 are approved and the migration path is specified in `SPEC_KNOWN_PEER_PROTOCOL.md` §18 and `SPEC_PEER_LATTICE_GOVERNANCE.md`, but no peer application implementation exists. It is slated for Wave 1 in `docs/PLAN_V1_FULLY_WORKING.md`. Do not describe the Lattice, the pilot or the CometBFT lab as decentralized authority.
 
 ## KI-08 — POSIX private-mode check failed owner-recovery tests (test harness, not product)
 
