@@ -198,7 +198,10 @@ class AgentExecutor:
                     # Keep cancellation in this task: wait_for can discard a
                     # child's typed unknown outcome on caller cancellation.
                     async with asyncio.timeout(timeout):
-                        output = await self._invoke_llm(prompt, {"task_id": tid, **ctx.metadata})
+                        llm_context: dict[str, Any] = {"task_id": tid, **ctx.metadata}
+                        if ctx.model:
+                            llm_context["model"] = ctx.model
+                        output = await self._invoke_llm(prompt, llm_context)
                     self._set_status(tid, ExecutionStatus.COMPLETED)
                     self._log.info("executor.completed", task_id=tid, attempts=attempts)
                     return self._result(

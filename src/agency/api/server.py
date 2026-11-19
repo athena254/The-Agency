@@ -55,8 +55,10 @@ from agency.api.routers import evidence as evidence_router
 from agency.api.routers import governance as governance_router
 from agency.api.routers import memory as memory_router
 from agency.api.routers import tasks as tasks_router
+from agency.autonomy.blacksmith import activate_blacksmith
 from agency.bridges.coordinator import ExternalCoordinator
 from agency.evidence.store.store import EvidenceStore
+from agency.factory.service import AgentFactory
 from agency.kernel.registry import AgentRegistry
 from agency.kernel.tasks import TaskManager
 from agency.lattice import LatticeLease, acquire_lattice
@@ -172,6 +174,20 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
                 application.state.coding_agent = None
                 log.warning(
                     "api.startup.coding_agent_failed",
+                    error_type=type(exc).__name__,
+                )
+            try:
+                activate_blacksmith(
+                    AgentFactory(
+                        ":memory:",
+                        kernel_registry=kernel_registry,
+                        runtime_registry=runtime_registry,
+                        allowed_capabilities={"forge"},
+                    )
+                )
+            except BaseException as exc:  # noqa: BLE001 - startup must not crash
+                log.warning(
+                    "api.startup.blacksmith_failed",
                     error_type=type(exc).__name__,
                 )
 

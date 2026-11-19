@@ -14,11 +14,13 @@ from pydantic import BaseModel, ConfigDict
 
 from agency.agents.planner import AgentPlanner
 from agency.agents.registry import AgentRegistry
+from agency.autonomy.blacksmith import activate_blacksmith
 from agency.autonomy.decisions import decide
 from agency.autonomy.proof import ProofBundle
 from agency.autonomy.router import assign_task
 from agency.autonomy.spawner import decide_spawn
 from agency.autonomy.toolforge import can_self_publish, decide_tool_gap
+from agency.factory.service import AgentFactory
 from agency.kernel.identity import Agent, Capability
 
 
@@ -66,6 +68,7 @@ def run_autonomous(
     available_tools: set[str],
     required_tools: list[str] | None = None,
     budget: int = 10,
+    factory: AgentFactory | None = None,
 ) -> RunResult:
     """Run one autonomous task: plan, assign/spawn, forge gaps, prove."""
     proof = ProofBundle()
@@ -85,7 +88,12 @@ def run_autonomous(
         req = sub.required_capabilities if sub else []
         d = decide_spawn(req, existing_caps)
         if d.spawn:
-            agent_id = _spawn_agent(registry, planner, graph.plan_id, a.subtask_id, d.capabilities)
+            if "forge" in d.capabilities and factory is not None:
+                agent_id: str | None = activate_blacksmith(factory)
+            else:
+                agent_id = _spawn_agent(
+                    registry, planner, graph.plan_id, a.subtask_id, d.capabilities
+                )
             existing_caps.update(d.capabilities)
             spawns.append(
                 {

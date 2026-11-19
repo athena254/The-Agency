@@ -115,6 +115,23 @@ _NAMED_PRESETS: dict[str, tuple[ProviderKind, str]] = {
     "mercury-3": (ProviderKind.MERCURY_3, "mercury-3"),
 }
 
+# Generic variables that describe the *default* provider. They must not be
+# inherited by a named preset: doing so lets an unconfigured preset look usable
+# while actually carrying another provider's key and endpoint.
+_GENERIC_LLM_KEYS = (
+    "LLM_API_KEY",
+    "AGENCY_LLM_API_KEY",
+    "LLM_BASE_URL",
+    "AGENCY_LLM_BASE_URL",
+    "LLM_MODEL",
+    "AGENCY_LLM_MODEL",
+)
+
+
+def _without_generic(env: dict[str, str]) -> dict[str, str]:
+    """Copy ``env`` with the generic default-provider variables removed."""
+    return {key: value for key, value in env.items() if key not in _GENERIC_LLM_KEYS}
+
 
 def _load_dotenv(path: str | Path | None = None) -> None:
     """Minimal ``.env`` loader (no extra dependency).
@@ -207,16 +224,20 @@ def load_config(
     model: str | None = None,
     env_file: str | Path | None = None,
     load_dotenv: bool = True,
+    env: dict[str, str] | None = None,
 ) -> LLMConfig:
     """Build an :class:`LLMConfig` from ``.env`` / environment variables.
 
     Resolution order: explicit args > generic ``LLM_*`` vars > ``AGENCY_LLM_*``
     vars > provider specific vars > built-in defaults. Falls back to ``echo``
     only when no provider credentials are configured at all.
+
+    ``env`` overrides the environment mapping read by this call (tests and named
+    presets use it to keep another provider's generic credentials out).
     """
     if load_dotenv:
         _load_dotenv(env_file)
-    env = dict(os.environ)
+    env = dict(os.environ if env is None else env)
 
     kind: ProviderKind
     if provider is None:
@@ -401,13 +422,18 @@ def load_named_provider(
 
     model = str(overrides.pop("model", None) or _get(env, f"{prefix}_MODEL") or default_model)
     api_key = overrides.pop("api_key", None) or _get(env, f"{prefix}_API_KEY")
-    if not api_key and prefix not in ("INCEPTION",):
+    inception_family = prefix.startswith("INCEPTION")
+    if not api_key and inception_family:
         api_key = _get(env, "INCEPTION_API_KEY", "AGENCY_INCEPTION_API_KEY")
     base_url = overrides.pop("base_url", None) or _get(env, f"{prefix}_BASE_URL")
-    if not base_url:
+    if not base_url and inception_family:
         base_url = _get(env, "INCEPTION_BASE_URL", "AGENCY_INCEPTION_BASE_URL")
 
-    base = load_config(provider=kind, model=model, load_dotenv=False)
+    # Generic ``LLM_*`` / ``AGENCY_LLM_*`` values describe the *default* provider,
+    # not this preset. Without this, a preset with no credentials of its own
+    # inherits another provider's key and endpoint (for example an ``anthropic``
+    # preset sending Anthropic requests to a Google base URL) and looks usable.
+    base = load_config(provider=kind, model=model, load_dotenv=False, env=_without_generic(env))
     data: dict[str, Any] = base.model_dump()
     if api_key:
         data["api_key"] = SecretStr(str(api_key))

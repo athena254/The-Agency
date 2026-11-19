@@ -1078,6 +1078,8 @@ def loop_run(
         _fail(str(exc))
         return
 
+    worker_obj.name = "sticker"
+
     config = LoopConfig(
         session_id=session_id,
         goal=goal_source,
@@ -1145,6 +1147,7 @@ def loop_resume(
         except typer.BadParameter as exc:
             _fail(str(exc))
             return
+        worker_obj.name = "sticker"
         config = LoopConfig(
             session_id=session_id,
             goal=state.goal,
