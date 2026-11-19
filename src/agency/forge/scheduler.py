@@ -16,6 +16,8 @@ from uuid import uuid4
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
+from agency.llm.cron_model import cron_model
+
 logger = structlog.get_logger(__name__)
 
 MAX_COMMAND_CHARS = 2000
@@ -44,6 +46,10 @@ class SchedulerConfig(BaseModel):
     service_name: str = Field(default="agency-forge", min_length=1, max_length=MAX_NAME_CHARS)
     working_directory: str = Field(default=".", max_length=MAX_PATH_CHARS)
     on_calendar: str | None = Field(default=None, max_length=MAX_SCHEDULE_CHARS)
+    model: str = Field(
+        default_factory=cron_model,
+        description="Model used by Agency-scheduled cron jobs (AGENCY_CRON_MODEL).",
+    )
 
 
 class SchedulerReport(BaseModel):

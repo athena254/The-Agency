@@ -467,10 +467,15 @@ def build_review_llm() -> Any | None:
     try:
         from agency.llm.adapter import LLMAdapter
         from agency.llm.config import ProviderKind, load_config
+        from agency.llm.serious_models import serious_model
 
         config = load_config()
         if config.provider is ProviderKind.ECHO:
             return None
+        if config.provider is ProviderKind.GOOGLE:
+            # Serious-work models are Gemini models; only override the model
+            # when the configured provider is Google, never for other backends.
+            config = config.model_copy(update={"model": serious_model()})
         return LLMAdapter(config=config)
     except Exception:  # noqa: BLE001
         logger.warning("forge.review_llm_unavailable")

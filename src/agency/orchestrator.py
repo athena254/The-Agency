@@ -51,6 +51,7 @@ from agency.kernel.tasks import Task, TaskManager, TaskStatus
 from agency.lattice import LatticeLease, acquire_lattice
 from agency.lattice.api import Lattice
 from agency.llm.adapter import LLMAdapter
+from agency.memory.sms.embedder import default_embedder
 from agency.memory.sms.lifecycle import TieredMemoryEngine
 from agency.memory.sms.models import MemoryItem, MemoryTier
 from agency.memory.sms.retrieval import RetrievalEngine
@@ -183,7 +184,8 @@ class AgencyOrchestrator:
         self._memory_store = MemoryStore(
             db_path=memory_db_path
             if memory_db_path is not None
-            else (self._config.get("memory_db_path") or _DEFAULT_MEMORY_DB)
+            else (self._config.get("memory_db_path") or _DEFAULT_MEMORY_DB),
+            embedder=default_embedder(),
         )
         self._memory_lifecycle = TieredMemoryEngine(self._memory_store)
         self._memory_retrieval = RetrievalEngine(self._memory_store)
@@ -389,6 +391,14 @@ class AgencyOrchestrator:
 
         self._log.info("agent_registered", agent_id=agent.id, name=name, domain=domain)
         return agent
+
+    def _agent_model(self, agent: Agent | None) -> str | None:
+        """Per-agent model override from ``Agent.metadata["model"]``, if set."""
+
+        if agent is None:
+            return None
+        value = (agent.metadata or {}).get("model")
+        return value if isinstance(value, str) and value else None
 
     async def resolve_agent_proposal(
         self,
@@ -658,6 +668,12 @@ class AgencyOrchestrator:
         if task is None:
             raise ValueError(f"Task not found: {task_id}")
 
+        agent_model: str | None = None
+        if task.created_by:
+            agent_model = self._agent_model(self._identity_registry.get(task.created_by))
+        if agent_model:
+            context = {**(context or {}), "model": agent_model}
+
         # Update status
         await self._task_manager.update_status(task_id, TaskStatus.RUNNING)
 
@@ -807,10 +823,18 @@ class AgencyOrchestrator:
             )
 
         for subtask in graph.subtasks if not tool_capable else []:
-            # Execute
+            # Execute. Forward only ExecutionContext knobs (the per-agent model
+            # override); caller context also carries prompt-side data such as
+            # memory_context/sender, which the strict ExecutionContext forbids.
+            exec_context: dict[str, Any] = {
+                "agent_id": task.created_by,
+                "subtask_id": subtask.subtask_id,
+            }
+            if context and context.get("model"):
+                exec_context["model"] = context["model"]
             exec_result = await self._executor.execute(
                 task=system_context,
-                context={"agent_id": task.created_by, "subtask_id": subtask.subtask_id},
+                context=exec_context,
                 task_id=task_id,
             )
 
@@ -1048,9 +1072,13 @@ class AgencyOrchestrator:
         issued_prompt = issued_system_prompt(agent)
         if issued_prompt:
             system_context = f"{issued_prompt}\n\n{system_context}"
+        exec_context: dict[str, Any] = {"agent_id": agent_id}
+        agent_model = self._agent_model(agent)
+        if agent_model:
+            exec_context["model"] = agent_model
         result = await self._executor.execute(
             task=system_context,
-            context={"agent_id": agent_id},
+            context=exec_context,
         )
         output = render_output(result.output)
         status = result.status
