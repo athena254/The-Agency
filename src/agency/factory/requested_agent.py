@@ -190,6 +190,7 @@ class RequestedAgentService:
         kernel_registry: Any | None = None,
         attestation_store: AttestationStore | None = None,
         approver: str = "factory-improvement",
+        auto_promote: bool = True,
     ) -> None:
         self._factory = factory
         self._prompt_registry = prompt_registry
@@ -197,6 +198,7 @@ class RequestedAgentService:
         self._kernel = kernel_registry if kernel_registry is not None else factory.kernel_registry
         self._attestation_store = attestation_store
         self._approver = approver
+        self._auto_promote = bool(auto_promote)
         self._loop = SelfImprovementLoop(skill_registry)
 
     def _validate_request(self, request: RequestedAgentRequest) -> None:
@@ -316,7 +318,10 @@ class RequestedAgentService:
             evidence="Validated for blueprint pinning",
         )
         self._prompt_registry.publish(
-            pid, prompt_version, evidence="Published for blueprint approval"
+            pid,
+            prompt_version,
+            evidence="Published for blueprint approval",
+            approver=self._approver,
         )
 
         prompt_refs = list(BASE_PROMPT_REFS) + [(pid, prompt_version)]
@@ -412,7 +417,7 @@ class RequestedAgentService:
         prompt_version = ""
         new_bp_version = ""
         new_agent_id = agent_id
-        if gaps:
+        if gaps and self._auto_promote:
             pid = _purpose_prompt_id(blueprint_id)
             versions = [s.version for s in self._prompt_registry.list_versions(pid)]
             new_prompt_version = _next_version(versions)
@@ -448,7 +453,10 @@ class RequestedAgentService:
                 evidence="Validated by self-improvement loop",
             )
             self._prompt_registry.publish(
-                pid, new_prompt_version, evidence="Published for blueprint re-activation"
+                pid,
+                new_prompt_version,
+                evidence="Published for blueprint re-activation",
+                approver=self._approver,
             )
             prompt_refined = True
             prompt_version = new_prompt_version
@@ -547,7 +555,10 @@ class RequestedAgentService:
                 evidence=evidence or "Approved before publish",
             )
         return self._skill_registry.publish(
-            skill_id, version, evidence=evidence or "Published by requested-agent service"
+            skill_id,
+            version,
+            evidence=evidence or "Published by requested-agent service",
+            approver=approver,
         )
 
 

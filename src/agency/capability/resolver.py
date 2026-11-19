@@ -218,6 +218,11 @@ class CapabilityResolver:
 
     def _adapter_for(self, ref: CapabilityRef) -> CapabilityAdapter:
         if ref.capability_type not in _SUPPORTED_TYPES:
+            if ref.capability_type == CapabilityType.AGENT_TEAM:
+                raise UnsupportedCapabilityTypeError(
+                    "capability type 'agent_team' is not implemented; "
+                    "The Agency has no agent-division/team construct."
+                )
             raise UnsupportedCapabilityTypeError(
                 f"unsupported capability type: {ref.capability_type.value!r}"
             )

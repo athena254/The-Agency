@@ -73,7 +73,9 @@ from agency.tools.registry import ToolRegistry
 
 logger = structlog.get_logger(__name__)
 
-TOOL_CAPABLE_DOMAINS = frozenset({"research", "general"})
+TOOL_CAPABLE_DOMAINS = frozenset(
+    {"research", "general", "personal", "work", "business", "security"}
+)
 
 # Per-domain tool-loop budgets (general is lighter: mostly chat).
 _TOOL_ITERATIONS: dict[str, int] = {"research": 6, "general": 4}
@@ -211,7 +213,9 @@ class AgencyOrchestrator:
         skill_allowed_permissions = frozenset(self._config.get("skill_allowed_permissions", ()))
         try:
             self._skill_registry = SkillRegistry(
-                resolved_skill_db, allowed_permissions=skill_allowed_permissions
+                resolved_skill_db,
+                allowed_permissions=skill_allowed_permissions,
+                publish_authorizer=self._config.get("skill_publish_authorizer"),
             )
             self._self_improvement = SelfImprovementLoop(self._skill_registry)
         except Exception:  # noqa: BLE001 - optional component
@@ -831,6 +835,22 @@ class AgencyOrchestrator:
                     from agency.agents.research import RESEARCH_SYSTEM_PROMPT
 
                     system_prompt = RESEARCH_SYSTEM_PROMPT
+                elif agent_domain == "personal":
+                    from agency.agents.personal.agent import PERSONAL_SYSTEM_PROMPT
+
+                    system_prompt = PERSONAL_SYSTEM_PROMPT
+                elif agent_domain == "work":
+                    from agency.agents.work.agent import WORK_SYSTEM_PROMPT
+
+                    system_prompt = WORK_SYSTEM_PROMPT
+                elif agent_domain == "business":
+                    from agency.agents.business.agent import BUSINESS_SYSTEM_PROMPT
+
+                    system_prompt = BUSINESS_SYSTEM_PROMPT
+                elif agent_domain == "security":
+                    from agency.agents.security.agent import SECURITY_SYSTEM_PROMPT
+
+                    system_prompt = SECURITY_SYSTEM_PROMPT
                 else:
                     from agency.agents.general import GENERAL_SYSTEM_PROMPT
 
