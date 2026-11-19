@@ -346,6 +346,11 @@ class AgentFactory:
         if conn is not None:
             conn.close()
 
+    @property
+    def kernel_registry(self) -> Any:
+        """Kernel registry this factory registers activated identities into."""
+        return self._kernels
+
     def create(
         self,
         blueprint_id: str,
