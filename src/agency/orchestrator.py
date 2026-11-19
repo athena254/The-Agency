@@ -299,6 +299,12 @@ class AgencyOrchestrator:
         registry = ToolRegistry(audit=self._audit_log)
         register_builtin_tools(registry)
         registry.register(SkillInvokeTool(self.execute_skill))
+        try:
+            from agency.tools.external import register_external_tools
+
+            register_external_tools(registry)
+        except Exception:  # noqa: BLE001 - external tools are optional
+            self._log.warning("external_tools_unavailable")
         self._tool_registry = registry
         self._tool_driver = ToolDriver(registry=registry, llm=self._llm_adapter)
         self._log.info(

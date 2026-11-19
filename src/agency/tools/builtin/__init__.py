@@ -55,15 +55,9 @@ def build_beta_search_registry(
     return registry
 
 
-__all__ = [
-    "CalculatorTool",
-    "MemoryQueryTool",
-    "MemoryWriteTool",
-    "SandboxExecTool",
-    "UtcTimeTool",
-    "WebFetchTool",
-    "WebSearchTool",
-    "build_beta_search_registry",
-    "register_all",
-    "register_opt_in_local_tools",
-]
+from agency.tools.external import register_external_tools
+
+
+def register_opt_in_external_tools(registry: Any) -> list[Any]:
+    """Explicitly add imported external tools to a separately constructed registry."""
+    return register_external_tools(registry)
