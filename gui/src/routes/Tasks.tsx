@@ -231,7 +231,8 @@ export function TasksPage() {
                   <span className="mc-label">GET /api/pilot/tasks/:id/verification</span>
                   <button
                     type="button"
-                    className="mc-btn flex-none"
+                    className="mc-icon-btn"
+                    aria-label="Refresh verification"
                     onClick={() => verification.refetch()}
                     disabled={!verifyTaskId || verification.isFetching}
                   >
@@ -325,6 +326,7 @@ export function TasksPage() {
                 <button
                   type="submit"
                   className="mc-btn mc-btn-primary w-full justify-center"
+                  aria-busy={submitting}
                   disabled={
                     submitting ||
                     !csrf ||
@@ -338,13 +340,13 @@ export function TasksPage() {
               </form>
 
               {calcError ? (
-                <div className="mt-3">
+                <div className="mt-3" role="alert">
                   <PilotErrorNote error={calcError} />
                 </div>
               ) : null}
 
               {calcView ? (
-                <div className="mt-4 border-t border-line pt-4">
+                <div className="mt-4 border-t border-line pt-4" aria-live="polite">
                   <div className="mc-label mb-2">Task result</div>
                   <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
                     <PanelRow label="Task">{calcView.task_id}</PanelRow>

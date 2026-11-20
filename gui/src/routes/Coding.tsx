@@ -227,6 +227,7 @@ export function CodingPage() {
                 <button
                   type="submit"
                   className="mc-btn mc-btn-primary w-full justify-center"
+                  aria-busy={submitting}
                   disabled={
                     submitting || !csrf || !threadId || !requestId.trim() || !task.trim()
                   }
@@ -236,18 +237,21 @@ export function CodingPage() {
               </form>
 
               {error ? (
-                <div className="mt-3">
+                <div className="mt-3" role="alert">
                   <PilotErrorNote error={error} />
                 </div>
               ) : null}
               {notice ? (
-                <div className="mt-3 rounded-control border border-green/30 bg-green/10 px-3 py-2 text-xs text-green">
+                <div
+                  className="mt-3 rounded-control border border-green/30 bg-green/10 px-3 py-2 text-xs text-green"
+                  role="status"
+                >
                   {notice}
                 </div>
               ) : null}
             </section>
 
-            <section className="mc-panel flex flex-col p-5">
+            <section className="mc-panel flex flex-col p-5" aria-live="polite">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-text-1">
                   <Code size={14} className="text-text-3" /> Receipt &amp; evidence

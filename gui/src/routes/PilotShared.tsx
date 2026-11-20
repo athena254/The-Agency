@@ -23,6 +23,7 @@ export function PilotErrorNote({ error }: { error: unknown }) {
   if (!error) return null
   return (
     <div
+      role="alert"
       className={`flex items-start gap-2 rounded-control border px-3 py-2 text-xs ${
         failed
           ? 'border-red/30 bg-red/10 text-red'
@@ -45,7 +46,8 @@ export function PilotGate({ children }: { children: ReactNode }) {
 
   if (!token) {
     return (
-      <div className="mc-panel px-5 py-4">
+      <div className="mc-panel px-5 py-4" role="status">
+        <p className="sr-only">This module is locked; no data is shown.</p>
         {notice ? (
           <div className="mb-3 flex items-start gap-2 rounded-control border border-red/30 bg-red/10 px-3 py-2 text-xs text-red">
             <AlertTriangle size={13} className="mt-0.5 flex-none" />
@@ -73,7 +75,11 @@ export function PilotGate({ children }: { children: ReactNode }) {
 }
 
 export function LoadingBlock({ label = 'Loading…' }: { label?: string }) {
-  return <div className="px-5 py-10 text-center text-sm text-text-3">{label}</div>
+  return (
+    <div role="status" className="px-5 py-10 text-center text-sm text-text-3">
+      {label}
+    </div>
+  )
 }
 
 export function PanelRow({ label, children }: { label: string; children: ReactNode }) {

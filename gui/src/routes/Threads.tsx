@@ -137,17 +137,21 @@ export function ThreadsPage() {
               <button
                 type="submit"
                 className="mc-btn mc-btn-primary w-full justify-center"
+                aria-busy={busy}
                 disabled={busy || !csrf || !title.trim() || !requestId.trim()}
               >
                 <Plus size={13} /> Create thread
               </button>
               {error ? (
-                <div className="pt-1">
+                <div className="pt-1" role="alert">
                   <PilotErrorNote error={error} />
                 </div>
               ) : null}
               {notice ? (
-                <div className="rounded-control border border-green/30 bg-green/10 px-3 py-2 text-xs text-green">
+                <div
+                  className="rounded-control border border-green/30 bg-green/10 px-3 py-2 text-xs text-green"
+                  role="status"
+                >
                   {notice}
                 </div>
               ) : null}
@@ -219,7 +223,7 @@ export function ThreadsPage() {
               </button>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4" aria-live="polite">
               {!selected ? (
                 <EmptyState
                   title="No thread selected"

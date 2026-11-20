@@ -445,12 +445,17 @@ export function ObservabilityPage() {
         </div>
         <button
           type="button"
-          className="mc-btn flex-none"
+          className="mc-icon-btn"
           onClick={refresh}
           disabled={overview.isFetching}
+          aria-label="Refresh observability data"
+          title="Refresh observability data"
         >
-          <RefreshCw size={13} className={overview.isFetching ? 'animate-spin' : ''} />
-          Refresh
+          <RefreshCw
+            size={13}
+            className={overview.isFetching ? 'animate-spin' : ''}
+            aria-hidden="true"
+          />
         </button>
       </div>
 
@@ -472,9 +477,11 @@ export function ObservabilityPage() {
 
       <PilotGate>
         {overview.isLoading ? (
-          <LoadingBlock label="Reading local runtime state…" />
+          <div aria-live="polite">
+            <LoadingBlock label="Reading local runtime state…" />
+          </div>
         ) : overview.error ? (
-          <div className="mc-panel p-4">
+          <div className="mc-panel p-4" aria-live="polite">
             <PilotErrorNote error={overview.error} />
           </div>
         ) : !data ? null : (
@@ -553,7 +560,7 @@ export function ObservabilityPage() {
                 {tools.data ? <ToolsBody view={tools.data} /> : null}
               </Section>
             </div>
-            <div className="mc-label text-right">
+            <div className="mc-label text-right" role="status">
               collected {data.collected_at} · read-only · no write controls
             </div>
           </div>

@@ -28,13 +28,18 @@ export function SettingsPage() {
         </p>
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
+            <label htmlFor="mc-owner-token" className="sr-only">
+              Owner pilot bearer token
+            </label>
             <input
+              id="mc-owner-token"
               className="mc-input pr-10"
               type={visible ? 'text' : 'password'}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               placeholder="paste owner token"
               autoComplete="off"
+              spellCheck={false}
             />
             <button
               type="button"
@@ -69,10 +74,8 @@ export function SettingsPage() {
             </button>
           ) : null}
         </div>
-        <div className="mt-2 flex items-center gap-2 text-xs">
-          <span
-            className={`mc-status-dot ${ownerToken ? 'bg-green' : 'bg-amber'}`}
-          />
+        <div className="mt-2 flex items-center gap-2 text-xs" aria-live="polite">
+          <span className={`mc-status-dot ${ownerToken ? 'bg-green' : 'bg-amber'}`} />
           <span className="text-text-3">
             {ownerToken ? 'Token set for this session' : 'No token set'}
           </span>
