@@ -72,10 +72,10 @@ These fixes do not close P1 end-to-end metering/identity/audit or P2 peer applic
 
 Before this branch, `run_autonomous` hashed the tool NAME, passed literal `"PASS"` to `can_self_publish`, compared the digest to itself, and recorded `published=true` in the proof chain with no build, no gates, and no artifact (observed live for `weather_lookup`). Replaced in commit `f45bdf7`: real builds via `BlacksmithOps.build_tool_job` with real verdicts, report ids, and artifact digests — or an honest `build_blocked` when no ops/spec is supplied. Regression coverage: `tests/test_autonomy_engine_honesty.py` (4 tests, including one asserting the old name-hash can never appear). The e2e assertion that encoded the simulation was updated to assert the honest behavior.
 
-## KI-10 — Sticker worker provider availability (RESOLVED via Hermes sticker)
+## KI-10 — Striker worker provider availability (RESOLVED via Hermes striker)
 
 Live acceptance (Nov 20, `D:/blacksmith-acceptance`): the opencode free tier returned "Free usage limit reached" (beam-free, hy4-flash-free) after concurrent sessions consumed the quota. The hermes proxy path (`127.0.0.1:8645`, Nous Portal) returned "Unexpected server error" for opencode's agentic requests across three models (qwen4-max, longcat-2.5, hy4-flash), while plain, tools-bearing, and 100KB curl requests through the same proxy succeeded — an upstream request-shape incompatibility, not a Forge defect. The manager lifecycle (dispatch, isolation, honest FAIL recording, retry, BLOCKED, UNCERTAIN crash recovery) was fully verified live during the outage.
 
-**Resolution:** a Hermes one-shot worker replaces opencode as the sticker:
+**Resolution:** a Hermes one-shot worker replaces opencode as the striker:
 `hermes chat -q {task} --in {workdir} --oneshot --yolo -t terminal,file --max-turns 20 --run-budget 300 --reasoning low`.
 Two live PASS runs through BlacksmithOps (jobs `66f9cf6b` retry-after-provider-failure and `f2ecaffa` with durable file-backed stores): all four sub-gates PASS (review score 5), correct `multiply` edit confined to the worktree, tests re-run independently (2 passed), evidence + merge-queue reports loadable from disk, merge entry `approved=False` (human approval required), cost recorded, scratch repo and canonical Agency checkout unchanged. The opencode/proxy incompatibility remains open upstream but no longer blocks Forge builds.

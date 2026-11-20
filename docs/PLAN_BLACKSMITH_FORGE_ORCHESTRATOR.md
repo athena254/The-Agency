@@ -1,9 +1,9 @@
 # PLAN: Blacksmith — Forge Orchestrator & Manager
 
-**Date:** 2026-11-20 · **Status:** COMPLETE — Phases 1–6 landed on `feat/blacksmith-orchestrator`; live sticker PASS verified with a Hermes one-shot worker (KI-10 resolved) · **Branch target:** `feat/blacksmith-orchestrator` (off `feat/self-improve-forge`)
+**Date:** 2026-11-20 · **Status:** COMPLETE — Phases 1–6 landed on `feat/blacksmith-orchestrator`; live striker PASS verified with a Hermes one-shot worker (KI-10 resolved) · **Branch target:** `feat/blacksmith-orchestrator` (off `feat/self-improve-forge`)
 
 **Goal:** Make the Blacksmith the real orchestrator and manager of the Forge: it takes build
-requests, dispatches bounded jobs to sticker workers through the existing gate pipeline,
+requests, dispatches bounded jobs to striker workers through the existing gate pipeline,
 tracks verdicts/retries/costs, and reports honest evidence. It never writes code itself and
 never authorizes merge or release.
 
@@ -23,8 +23,12 @@ deterministic code, not LLM improvisation.
 ## 1. Role definition (agreed with owner)
 
 - **Blacksmith = manager.** Intake → slice → dispatch → monitor gates → retry/escalate → report.
-- **Stickers = builders.** External CLI workers (opencode etc.) do the editing, in isolated
-  worktrees, via the existing pipeline. "Sticker" remains a display name only.
+- **Strikers = builders.** External CLI workers (opencode, Hermes, etc.) do the editing, in
+  isolated worktrees, via the existing pipeline. Labels keep the real identity:
+  `striker:<executable>`.
+- **Apprentices = the Agency's own factory-issued agents** (default name `apprentice-<caps>`).
+  L0-only today; bounded read/write, tools and collaboration under Blacksmith orchestration
+  are specified separately in `PLAN_APPRENTICE_CAPABILITY.md`.
 - **Human = ship authority.** PASS jobs land in the merge queue awaiting human approval.
   `release_not_authorized` stays. No auto-merge, no deploy, ever.
 
@@ -58,7 +62,7 @@ QUEUED → DISPATCHED → GATED ─┬→ PASSED → AWAITING_HUMAN (merge queue
                                           └→ BLOCKED (escalate to human, no auto-retry)
 ```
 
-- One job in flight at a time (RAM constraint: each sticker worker ≈ 600MB).
+- One job in flight at a time (RAM constraint: each striker worker ≈ 600MB).
 - Every transition: SQLite row update + kernel audit event + proof event with the REAL
   `report_id`, gate values and artifact digests. No transition without evidence.
 - Retry feedback = previous attempt's failure detail (bounded tail, secrets redacted —
@@ -103,7 +107,7 @@ class BlacksmithOps:
 ```markdown
 # Forge Orchestrator (Blacksmith)
 You are the Blacksmith, the Agency's forge manager. You orchestrate builds; you do not write code.
-- Dispatch bounded, single-purpose build jobs to sticker workers through the Forge pipeline.
+- Dispatch bounded, single-purpose build jobs to striker workers through the Forge pipeline.
 - Read every sub-gate (inspection, security, tests, review) before judging a result.
 - Never claim a build, test or check that did not happen; quote real report ids and digests.
 - Retry a failed job at most twice with concrete feedback, then BLOCK and escalate to a human.
@@ -236,7 +240,7 @@ Run the real demo (recipe: skill `agency-development/references/real-end-to-end-
 ## 5. Acceptance scenario (the definition of done)
 
 Human: "build a weather_lookup tool" →
-Blacksmith job QUEUED → sticker dispatched into isolated worktree (absolute path) →
+Blacksmith job QUEUED → striker dispatched into isolated worktree (absolute path) →
 real inspection/security/tests/review gates → verdict recorded with report_id + digests →
 PASS: tool registered via real `can_self_publish`, merge-queue entry awaits human;
 FAIL: ≤2 retries with feedback, then BLOCKED + human escalation →
@@ -244,7 +248,7 @@ proof chain contains NO event without real evidence → human ship approval stil
 
 ## 6. Risks / constraints
 
-- **RAM:** one sticker at a time; queue the rest. Review LLM calls are small.
+- **RAM:** one striker at a time; queue the rest. Review LLM calls are small.
 - **Disk:** C: effectively full — all job repos/worktrees on D:; submit refuses C: repos
   under 1GB free. Evidence DBs small (SQLite).
 - **Concurrent agent:** canonical checkout is owned by another running agent; this plan

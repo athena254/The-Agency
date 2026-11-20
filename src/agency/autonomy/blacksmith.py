@@ -2,9 +2,11 @@
 
 Activated through the autonomy bridge (agency.autonomy.factory_auto.activate_for_caps)
 so the agency can dispatch forge work to it: capability `forge`, domain `forge`.
-The Blacksmith orchestrates and manages Forge builds; sticker workers do the
-editing. Its identity pins the shared discipline segments plus the
-forge-orchestrator role segment as a factory-issued system prompt.
+The Blacksmith orchestrates and manages Forge builds; striker workers (external
+CLI agents) do the editing, and apprentices (the Agency's own factory-issued
+agents) assist under governance. Its identity pins the shared discipline
+segments plus the forge-orchestrator role segment as a factory-issued system
+prompt.
 """
 
 from __future__ import annotations
