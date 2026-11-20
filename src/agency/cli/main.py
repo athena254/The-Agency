@@ -177,6 +177,8 @@ def start(
             str(port),
             "--log-level",
             log_level,
+            "--workers",
+            str(workers),
         ]
         if reload:
             cmd.append("--reload")
@@ -359,7 +361,6 @@ def agent_propose(
         "name": name,
         "domain": domain,
         "capabilities": capability or [],
-        "proposer": proposer,
         "quorum": quorum,
         "ttl": ttl,
     }

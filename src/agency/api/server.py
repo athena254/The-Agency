@@ -138,6 +138,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         "memory_store",
         "memory_retrieval",
         "lattice",
+        "peer_authority",
     )
     for name in state_names:
         setattr(application.state, name, None)
@@ -210,6 +211,21 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
                     error_type=type(exc).__name__,
                 )
 
+        # Wire peer authority from a pinned genesis if available (opens ballot route).
+        try:
+            from agency.consensus.genesis import load_genesis
+            from agency.peers.authority import PeerAuthority, PeerRegistry
+
+            genesis_path = os.environ.get("AGENCY_GENESIS_PATH", "data/consensus/genesis.json")
+            if os.path.exists(genesis_path):
+                membership = load_genesis(genesis_path)
+                registry = PeerRegistry()
+                application.state.peer_authority = PeerAuthority(membership, registry)
+                log.info("api.startup.peer_authority_loaded", path=genesis_path)
+        except BaseException as exc:  # noqa: BLE001
+            application.state.peer_authority = None
+            log.warning("api.startup.peer_authority_failed", error_type=type(exc).__name__)
+
         log.info("api.startup", version=__version__)
         yield
     except BaseException as exc:
@@ -275,7 +291,8 @@ def create_app() -> FastAPI:
         # Signed ballots carry their own authority (Ed25519 envelope verified
         # by PeerAuthority); they must reach the router to be verified.
         is_ballot = path == "/v1/governance/ballot"
-        if (request.method != "GET" or path != "/v1/health") and not is_ballot:
+        is_root = request.method == "GET" and path == "/"
+        if (request.method != "GET" or path != "/v1/health") and not is_ballot and not is_root:
             return JSONResponse(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 content={"detail": "Peer authorization is unavailable."},
