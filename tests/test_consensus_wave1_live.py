@@ -20,8 +20,8 @@ pytestmark = pytest.mark.skipif(
 from agency.agents.executor import AgentExecutor
 from agency.consensus.actions import ActionRegistry, ActionSpec, make_agent_executor_adapter
 from agency.consensus.app import AgencyApplication
+from agency.consensus.block_adapter import BlockEngineAdapter
 from agency.consensus.consumer_input import ConsumerInput
-from agency.consensus.engine_adapter import EngineAdapter
 from agency.peers.log import PeerLog
 from tests.test_consensus_app_state import ballot, context, proposal
 from tests.test_consensus_grants import BFT_TIME_MS, consumers
@@ -46,7 +46,7 @@ def test_wave1_live_agent_executor(tmp_path: Path) -> None:
     registry = ActionRegistry()
     executor = AgentExecutor()
     registry.register("agent_task", make_agent_executor_adapter(executor))
-    adapter = EngineAdapter(
+    adapter = BlockEngineAdapter(
         app=app,
         ledger=ledger,
         issuer=ids[0],

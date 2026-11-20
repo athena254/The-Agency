@@ -55,10 +55,10 @@ def test_host_wiring_durable_result(tmp_path):
     )
     log.open()
     from agency.consensus.actions import ActionRegistry, ActionSpec
-    from agency.consensus.engine_adapter import EngineAdapter
+    from agency.consensus.block_adapter import BlockEngineAdapter
 
     registry = ActionRegistry()
-    adapter = EngineAdapter(
+    adapter = BlockEngineAdapter(
         app=app,
         ledger=ledger,
         issuer=ids[0],

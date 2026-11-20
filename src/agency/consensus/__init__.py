@@ -16,8 +16,9 @@ from agency.consensus.app_state import (
     Rejection,
     RejectionReason,
 )
+from agency.consensus.block_adapter import BlockEngineAdapter, ExecutionReport
 from agency.consensus.consumer_input import ConsumerInput, check_coverage
-from agency.consensus.engine_adapter import EngineAdapter, ExecutionReport
+from agency.consensus.engine_adapter import EngineAdapter, ExecutionAttempt, ExecutionResult
 
 __all__ = [
     "ZERO_STATE_ROOT",
@@ -25,11 +26,14 @@ __all__ = [
     "ActionRegistry",
     "ActionSpec",
     "BlockContext",
+    "BlockEngineAdapter",
     "BlockResult",
     "ConsumerInput",
     "Decision",
     "EngineAdapter",
+    "ExecutionAttempt",
     "ExecutionReport",
+    "ExecutionResult",
     "LatticeAppState",
     "Rejection",
     "RejectionReason",

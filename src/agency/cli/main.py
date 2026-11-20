@@ -1310,7 +1310,7 @@ def consensus_abci_host(
     adapter = None
     if peer_log:
         from agency.consensus.actions import ActionRegistry
-        from agency.consensus.engine_adapter import EngineAdapter
+        from agency.consensus.block_adapter import BlockEngineAdapter
         from agency.consensus.grants import GrantLedger
         from agency.peers.identities import PeerIdentity
         from agency.peers.log import PeerLog
@@ -1338,7 +1338,7 @@ def consensus_abci_host(
         issuer = PeerIdentity.from_private_key(Ed25519PrivateKey.from_private_bytes(raw))
         ledger = GrantLedger(membership=membership)
         registry = ActionRegistry()
-        adapter = EngineAdapter(
+        adapter = BlockEngineAdapter(
             app=app,
             ledger=ledger,
             issuer=issuer,

@@ -11,8 +11,8 @@ from pathlib import Path
 
 from agency.consensus.actions import ActionOutcome, ActionRegistry, ActionSpec
 from agency.consensus.app import AgencyApplication
+from agency.consensus.block_adapter import BlockEngineAdapter
 from agency.consensus.consumer_input import ConsumerInput
-from agency.consensus.engine_adapter import EngineAdapter
 from agency.peers.log import PeerLog
 from tests.test_consensus_app_state import ballot, context, proposal
 from tests.test_consensus_grants import BFT_TIME_MS, consumers
@@ -35,7 +35,7 @@ def _make(tmp_path: Path):
     )
     log.open()
     registry = ActionRegistry()
-    adapter = EngineAdapter(
+    adapter = BlockEngineAdapter(
         app=app,
         ledger=ledger,
         issuer=ids[0],
