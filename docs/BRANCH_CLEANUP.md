@@ -220,3 +220,33 @@ The `src` and `tests` Git tree IDs match the previously verified combined revisi
 historical counts. Cleanup verification checks branch coverage, archive tips,
 bundle contents, unchanged local files, stash identity and exact remaining branches.
 Machine-readable dispositions are in `research-evidence/branch-cleanup.json`.
+
+## Pass 3 (2026-11-20) — done work merged into main
+
+The owner asked to merge all completed agency work into `main`, work the open
+issues/PRs, refresh documentation and leave only worktrees with unfinished work.
+
+- No open PRs existed at `athena254/The-Agency`; issue #11 (daily-driver and
+  autonomy completion tracker) remained open and was updated with a status
+  comment rather than closed.
+- `feat/blacksmith-orchestrator` (8 commits) merged at `2dbb9c8`;
+  `feat/memory-honcho` (`59fa56f`) merged at `e44fab2` after resolving conflicts
+  in `pyproject.toml`, memory store/retrieval, orchestrator and admission
+  service so both SMS embeddings and the optional Honcho backend remain active.
+- `agency-slice-c`, `forge-hardening`, `wave1-engine-20261119`,
+  `wave1-grants-20261119`, `agency-loop` and
+  `feature/full-lattice-implementation` were already ancestors of `main`;
+  the detached snapshot tips `d8170eb` and `e7edd1c` were too.
+- Removed clean, fully merged worktrees: agency-slice-c, forge-hardening,
+  memory-honcho, wave1-engine, wave1-grants, verify-main, The-Agency-latest and
+  The-Agency-v0.1.1. Deleted their fully merged branches with `git branch -d`
+  (forced `-D` only where the upstream was still the unpushed `origin/main`,
+  after verifying ancestry of local `main`).
+- Worktrees retained because they hold incomplete work: `C:/Users/PC/The-Agency`
+  (`feat/self-improve-forge`), `C:/Users/PC/.zcode/worktrees/5ab0/The-Agency`
+  (`fix/peer-ballot-equivocation`), `D:/agency-blacksmith-work` (new uncommitted
+  striker/apprentice naming edits). `main` is checked out in the
+  `main-merge-20261119` worktree.
+- Verification: 49 focused Python tests passed; Ruff check/format passed on the
+  resolved files. No push, deployment, beta enablement or runtime database
+  changes.

@@ -1,10 +1,10 @@
 # The Agency — current implementation state
 
-Updated November 19, 2026. **Pre-production prototype; not daily-driver-qualified or a production-ready decentralized runtime.** The target remains `SOURCE_CONSOLIDATED_BRIEF.md`. The approved policy inputs are recorded in `OWNER_DECISIONS_D01_D05.md`; the gated engineering plan is `PRODUCTION_READINESS_PLAN.md`. Older status/resume/audit files (including `STATUS_AND_RESUME_20261018.md` and `research-evidence/status-audit-20261018.json`) are historical and are not current acceptance.
+Updated November 20, 2026. **Pre-production prototype; not daily-driver-qualified or a production-ready decentralized runtime.** The target remains `SOURCE_CONSOLIDATED_BRIEF.md`. The approved policy inputs are recorded in `OWNER_DECISIONS_D01_D05.md`; the gated engineering plan is `PRODUCTION_READINESS_PLAN.md`. Older status/resume/audit files (including `STATUS_AND_RESUME_20261018.md` and `research-evidence/status-audit-20261018.json`) are historical and are not current acceptance.
 
 ## Repository and verification
 
-Canonical checkout: `C:/Users/PC/The-Agency`; active branch `feat/self-improve-forge` at `5c798e9` (11 commits ahead of `origin/main`, unpushed). The Nov 9 gate numbers below are the recorded prior-checkpoint result; a partial Nov 19 re-check is recorded in "Verification and known limitations". No push, release, deployment, beta enablement, daemon launch or real-resource authority is implied by this document alone.
+Canonical checkout: `C:/Users/PC/The-Agency` (currently on in-flight `feat/self-improve-forge` at `fb8389f`, 7 commits ahead of local `main` with uncommitted work). Local `main` is at `e44fab2` in the `main-merge-20261119` worktree, 30 commits ahead of `origin/main` and unpushed. The Nov 9 gate numbers below are the recorded prior-checkpoint result; partial Nov 19 and Nov 20 re-checks are recorded in "Verification and known limitations". No push, release, deployment, beta enablement, daemon launch or real-resource authority is implied by this document alone.
 
 Gates at this revision:
 
@@ -14,6 +14,15 @@ Gates at this revision:
 - Node UI tests: **79 passed** (`node --test tests/*.test.mjs`), covering the pilot workspace UI, the legacy prototype UI and the calculator-verification UI against mocked HTTP/DOM leaves.
 
 No live provider call, real browser session, deployment or OS-sandbox qualification is part of these gates. Historical passing totals (for example 1,297, 1,664, 1,870, 2,450 or 2,718 cases) are not current acceptance.
+
+## Branch and worktree merge pass (November 20, 2026)
+
+- Local `main` advanced to `2dbb9c8` (merge of `feat/blacksmith-orchestrator`: 8 commits of real Blacksmith/Forge orchestration, live acceptance tests and Google model mapping) and then to `e44fab2` (merge of `feat/memory-honcho` `59fa56f`: SMS lifecycle hardening and an optional pinned Honcho mirror). Honcho merge conflicts in `pyproject.toml`, the memory store/retrieval, orchestrator and admission service were resolved to keep both the SMS embedding path and the optional Honcho backend behind `build_memory_backend`; `uv.lock` now pins `honcho-ai`.
+- Verification of the merged tree: 49 focused Python tests passed (`test_memory_honcho`, `test_memory_sms`, `test_memory_sms_embedding`, `test_forge_orchestration`, `test_forge_management`, `test_blacksmith_prompt`); Ruff `check` and `format --check` passed on the resolved files. The full-suite totals above remain historical results, not a fresh full qualification.
+- Already contained in `main` before this pass: `agency-slice-c`, `forge-hardening`, `wave1-engine-20261119`, `wave1-grants-20261119`, `agency-loop`, `feature/full-lattice-implementation` and the detached snapshot tips `d8170eb` (`The-Agency-latest`) and `e7edd1c` (`The-Agency-v0.1.1`). No new merge was needed for these.
+- Retired: clean, fully merged worktrees for `agency-slice-c`, `forge-hardening`, `feat/memory-honcho`, `wave1-engine-20261119`, `wave1-grants-20261119`, the detached `verify-main-20261119` checkout and the two detached snapshot directories. Deleted the fully merged branches `agency-slice-c`, `forge-hardening`, `feat/memory-honcho`, `wave1-engine-20261119` and `wave1-grants-20261119`; the last three needed forced deletion because their upstream is still the unpushed `origin/main`, after verifying their tips are ancestors of local `main`.
+- Retained worktrees with incomplete work: `C:/Users/PC/The-Agency` (in-flight `feat/self-improve-forge` work: Forge `test_runner.py`, early Blacksmith paths, plan docs, `loop.db*` and scratch logs); `C:/Users/PC/.zcode/worktrees/5ab0/The-Agency` (untracked `src/agency/consensus/abci/`, `src/agency/consensus/app.py` and two consensus tests); `D:/agency-blacksmith-work` (new uncommitted striker/apprentice naming edits and `tests/test_striker_apprentice_naming.py`, discovered during cleanup). The `main-merge-20261119` worktree holds the `main` checkout.
+- No push, remote branch deletion, release, deployment, beta enablement or runtime database change was performed. Issue #11 (daily-driver/autonomy tracker) remains open.
 
 ## Implemented foundations (bounded, not whole product completion)
 
