@@ -18,9 +18,9 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
+from agency.memory.sms.interfaces import MemoryBackend
 from agency.memory.sms.models import MemoryItem, MemoryTier
 from agency.memory.sms.retrieval import build_fts_match, tokenize
-from agency.memory.sms.store import MemoryStore
 
 _MAX_LIMIT = 100
 _MAX_QUERY_CHARS = 200
@@ -70,15 +70,15 @@ class PrincipalScope:
 
 
 class PrincipalMemoryScope:
-    """A :class:`MemoryStore` view bound to exactly one :class:`PrincipalScope`.
+    """A :class:`MemoryBackend` view bound to exactly one :class:`PrincipalScope`.
 
     Every method is scoped by the principal's memory ``agent_id``. There is no
     method that accepts a caller-selected agent id and no unscoped enumeration.
     """
 
-    def __init__(self, store: MemoryStore, principal: PrincipalScope) -> None:
-        if type(store) is not MemoryStore or type(principal) is not PrincipalScope:
-            raise TypeError("principal memory scope requires concrete types")
+    def __init__(self, store: MemoryBackend, principal: PrincipalScope) -> None:
+        if not isinstance(store, MemoryBackend) or type(principal) is not PrincipalScope:
+            raise TypeError("principal memory scope requires a memory backend and principal")
         self._store = store
         self._principal = principal
 

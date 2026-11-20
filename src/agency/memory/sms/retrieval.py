@@ -116,15 +116,9 @@ class RetrievalEngine:
                 logger.debug("retrieval.vector_search_unavailable", agent_id=agent_id)
                 results = []
 
-        # Fallback: FTS when the embedding path is unavailable or returns nothing.
+        # Fallback: scoped text search (Honcho-aware) when vectors are unavailable.
         if not results:
-            match = build_fts_match(query)
-            if match:
-                results = await self._store.search_fts(match, agent_id=agent_id, limit=limit)
-
-        # Fallback: substring scan when FTS returns nothing.
-        if not results:
-            results = await self._substring_fallback(query, agent_id=agent_id, limit=limit)
+            results = await self._store.search_text(query, agent_id=agent_id, limit=limit)
 
         # Phrase boost: items containing the full query phrase first.
         q_lower = query.strip().lower()
@@ -144,27 +138,6 @@ class RetrievalEngine:
             results=len(results),
         )
         return results[:limit]
-
-    async def _substring_fallback(
-        self, query: str, *, agent_id: str | None, limit: int
-    ) -> list[MemoryItem]:
-        tokens = tokenize(query)
-        if not tokens and not query.strip():
-            return []
-        if agent_id is not None:
-            candidates = await self._store.list_by_agent(agent_id, limit=1000)
-        else:
-            candidates = await self._store.list_all(limit=1000)
-        scored: list[tuple[int, MemoryItem]] = []
-        for item in candidates:
-            content_low = item.content.lower()
-            tag_text = " ".join(item.tags).lower()
-            haystack = content_low + " " + tag_text
-            score = sum(1 for t in tokens if t in haystack)
-            if score > 0:
-                scored.append((score, item))
-        scored.sort(key=lambda pair: (-pair[0], -pair[1].importance))
-        return [item for _, item in scored[:limit]]
 
     async def graph_search(
         self,
@@ -200,9 +173,8 @@ class RetrievalEngine:
             if seed_tags and (item_tags & seed_tags) or entity_low in item.content.lower():
                 related.append(item)
                 seen.add(item.id)
-        # rank by importance then recency
-        related.sort(key=lambda m: (-m.importance, m.accessed_at), reverse=False)
-        related.sort(key=lambda m: m.importance, reverse=True)
+        # rank by importance then recency (newest first on ties)
+        related.sort(key=lambda m: (-m.importance, -m.accessed_at.timestamp()), reverse=False)
         return related[:limit]
 
     async def hybrid_search(

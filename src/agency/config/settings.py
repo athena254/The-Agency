@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 
 import structlog
 from dotenv import load_dotenv, set_key
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 log = structlog.get_logger(__name__)
@@ -114,6 +114,14 @@ class AgencySettings(BaseSettings):
     butler_port: int = Field(default=8000, description="API server bind port.")
 
     memory_db_path: str = Field(default="data/memory.db", description="Memory SQLite path.")
+    memory_backend: str = Field(
+        default="sms", description="Memory backend: 'sms' (default) or 'honcho'."
+    )
+    honcho_enabled: bool = Field(default=False, description="Enable the optional Honcho mirror.")
+    honcho_url: str | None = Field(default=None, description="Honcho server base URL.")
+    honcho_api_key: SecretStr | None = Field(default=None, description="Honcho API key.")
+    honcho_workspace: str | None = Field(default=None, description="Honcho workspace id.")
+    honcho_timeout: float = Field(default=5.0, ge=0.1, le=60.0, description="Honcho call timeout.")
     evidence_db_path: str = Field(default="data/evidence.db", description="Evidence SQLite path.")
     audit_db_path: str = Field(default="data/audit.db", description="Audit SQLite path.")
 
@@ -131,6 +139,24 @@ class AgencySettings(BaseSettings):
         if isinstance(data, dict):
             return {k: v for k, v in data.items() if v != ""}
         return data
+
+    @model_validator(mode="after")
+    def _validate_memory_backend(self) -> AgencySettings:
+        if self.memory_backend not in ("sms", "honcho"):
+            raise ValueError("memory_backend must be 'sms' or 'honcho'")
+        if self.memory_backend == "honcho":
+            missing = [
+                name
+                for name, value in (
+                    ("honcho_url", self.honcho_url),
+                    ("honcho_workspace", self.honcho_workspace),
+                    ("honcho_api_key", self.honcho_api_key),
+                )
+                if value is None
+            ]
+            if missing:
+                raise ValueError(f"honcho backend requires {', '.join(missing)}")
+        return self
 
     # ------------------------------------------------------------------ #
     # Loading / persistence

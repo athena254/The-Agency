@@ -22,7 +22,7 @@ from typing import Any
 
 import structlog
 
-from agency.memory.sms.models import MemoryItem, MemoryQuery, MemoryTier
+from agency.memory.sms.models import MemoryItem, MemoryTier
 from agency.memory.sms.scope import PrincipalMemoryScope
 from agency.tools.base import ToolContext, ToolResult, ToolRisk, ToolSpec
 
@@ -113,21 +113,15 @@ class MemoryQueryTool:
         try:
             if has_query:
                 assert isinstance(query, str)
-                try:
-                    items = await store.search_fts(
-                        query.strip(),
-                        agent_id=normalized_agent_id,
-                        limit=limit,
+                q = query.strip()
+                if len(q) > _MAX_QUERY_CHARS:
+                    return ToolResult(
+                        tool="memory_query",
+                        ok=False,
+                        error="'query' exceeds the bounded length",
+                        duration_ms=int((time.perf_counter() - start) * 1000),
                     )
-                except Exception:  # noqa: BLE001 — any FTS failure falls back
-                    # FTS syntax (e.g. reserved chars) — fall back to filters.
-                    logger.warning("tool.memory_query.fts_fallback")
-                    items = await store.search(
-                        MemoryQuery(
-                            agent_id=normalized_agent_id,
-                            limit=limit,
-                        )
-                    )
+                items = await store.search_text(q, agent_id=normalized_agent_id, limit=limit)
             else:
                 assert isinstance(agent_id, str)
                 items = await store.list_by_agent(agent_id.strip(), limit)

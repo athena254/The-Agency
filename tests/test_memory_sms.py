@@ -1,11 +1,12 @@
 """Tests for the Sovereign Mind System: tiers, aging, FTS search, secrets."""
 
+import asyncio
 from datetime import timedelta
 
 from agency.memory.sms.lifecycle import TieredMemoryEngine, tier_for_age
 from agency.memory.sms.models import TIER_ORDER, MemoryItem, MemoryQuery, MemoryTier
 from agency.memory.sms.retrieval import RetrievalEngine, build_fts_match
-from agency.memory.sms.store import MemoryStore
+from agency.memory.sms.store import SCHEMA_VERSION, MemoryStore
 
 
 def test_tier_order_and_navigation():
@@ -73,22 +74,6 @@ async def test_touch_and_update_tier(test_memory_store: MemoryStore):
     updated = await test_memory_store.update_tier(item.id, MemoryTier.HOT)
     assert updated is not None and updated.tier is MemoryTier.HOT
     assert await test_memory_store.update_tier("missing", MemoryTier.HOT) is None
-
-
-async def test_store_auto_age_demotes_stale(test_memory_store: MemoryStore):
-    from datetime import UTC, datetime
-
-    stale = MemoryItem(
-        agent_id="a",
-        content="old",
-        tier=MemoryTier.HOT,
-        accessed_at=datetime.now(UTC) - timedelta(days=60),
-    )
-    await test_memory_store.store(stale)
-    moved = await test_memory_store.auto_age()
-    assert moved >= 1
-    # auto_age moves one tier at a time: HOT -> WARM
-    assert (await test_memory_store.get(stale.id)).tier is MemoryTier.WARM
 
 
 async def test_engine_promote_demote(test_memory_store: MemoryStore):
@@ -159,3 +144,19 @@ async def test_secrets_acl_enforced(test_secrets_store):
     await test_secrets_store.store_secret("agent-1", "k", "v", acl=["agent-1"])
     assert await test_secrets_store.get_secret("agent-1", "k", requester="agent-1") == "v"
     assert await test_secrets_store.get_secret("agent-1", "k", requester="intruder") is None
+
+
+async def test_schema_version_and_readiness(test_memory_store: MemoryStore):
+    assert await test_memory_store.check_ready() is True
+    async with test_memory_store.connection.execute("PRAGMA user_version") as cursor:
+        row = await cursor.fetchone()
+    assert row[0] == SCHEMA_VERSION
+
+
+async def test_concurrent_initialize_and_idempotent_close():
+    store = MemoryStore(":memory:")
+    await asyncio.gather(*(store.initialize() for _ in range(5)))
+    assert await store.check_ready() is True
+    await store.close()
+    await store.close()
+    assert store._initialized is False

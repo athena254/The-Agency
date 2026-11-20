@@ -1,0 +1,42 @@
+# Example local Honcho stack. NOT a production deployment.
+# Pin HONCHO_VERSION and (in deployment) replace the tag with an image digest.
+services:
+  honcho-db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: honcho
+      POSTGRES_PASSWORD: honcho
+      POSTGRES_DB: honcho
+    volumes:
+      - honcho-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U honcho"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  honcho-api:
+    image: ghcr.io/plastic-labs/honcho:${HONCHO_VERSION:?set HONCHO_VERSION to a pinned release}
+    depends_on:
+      honcho-db:
+        condition: service_healthy
+    environment:
+      DB_CONNECTION_URI: postgresql+psycopg://honcho:honcho@honcho-db:5432/honcho
+      LLM_OPENAI_API_KEY: ${LLM_OPENAI_API_KEY:?required for the Honcho deriver}
+      AUTH_USE_AUTH: "true"
+      AUTH_JWT_SECRET: ${HONCHO_JWT_SECRET:?required}
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  honcho-deriver:
+    image: ghcr.io/plastic-labs/honcho:${HONCHO_VERSION:?set HONCHO_VERSION to a pinned release}
+    depends_on:
+      honcho-api:
+        condition: service_started
+    environment:
+      DB_CONNECTION_URI: postgresql+psycopg://honcho:honcho@honcho-db:5432/honcho
+      LLM_OPENAI_API_KEY: ${LLM_OPENAI_API_KEY:?required for the Honcho deriver}
+    command: ["python", "-m", "src.deriver"]
+
+volumes:
+  honcho-pgdata:

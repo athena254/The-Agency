@@ -33,6 +33,9 @@ logger = structlog.get_logger(__name__)
 DEFAULT_AGING_THRESHOLD = timedelta(days=7)
 """Items untouched for this long are demoted by :meth:`MemoryStore.auto_age`."""
 
+SCHEMA_VERSION = 1
+"""Current on-disk schema version, recorded in SQLite's ``user_version``."""
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS memory_items (
     id          TEXT PRIMARY KEY,
@@ -176,6 +179,7 @@ class MemoryStore:
             await self._conn.execute("PRAGMA busy_timeout=5000")
             await self._conn.executescript(_SCHEMA)
             await self._migrate_embedding_column()
+            await self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             await self._conn.commit()
             self._initialized = True
             logger.info("memory_store.initialized", db_path=self._db_path)
@@ -197,6 +201,19 @@ class MemoryStore:
             self._conn = None
             self._initialized = False
             logger.info("memory_store.closed", db_path=self._db_path)
+
+    async def check_ready(self) -> bool:
+        """True when the store is open and both core tables are queryable."""
+
+        try:
+            await self.initialize()
+            async with self.connection.execute("SELECT 1 FROM memory_items LIMIT 1") as cursor:
+                await cursor.fetchone()
+            async with self.connection.execute("SELECT 1 FROM memory_fts LIMIT 1") as cursor:
+                await cursor.fetchone()
+        except Exception:  # noqa: BLE001 - readiness is a boolean probe
+            return False
+        return True
 
     async def store(self, item: MemoryItem) -> MemoryItem:
         """Insert or replace ``item`` and keep the FTS index in sync."""
@@ -403,6 +420,40 @@ class MemoryStore:
         async with self.connection.execute(sql, params) as cursor:
             rows = await cursor.fetchall()
         return [_row_to_item(row) for row in rows]
+
+    async def search_text(
+        self, text: str, *, agent_id: str | None = None, limit: int = 10
+    ) -> list[MemoryItem]:
+        """Free-text search: FTS5 first, bounded substring fallback stays scoped.
+
+        Never widens to an unscoped scan when ``agent_id`` is given.
+        """
+
+        await self.initialize()
+        # Local import avoids a circular import: retrieval imports store at top.
+        from agency.memory.sms.retrieval import build_fts_match, tokenize
+
+        match = build_fts_match(text)
+        items: list[MemoryItem] = []
+        if match:
+            items = await self.search_fts(match, agent_id=agent_id, limit=limit)
+        if not items:
+            tokens = tokenize(text)
+            if tokens and agent_id is not None:
+                candidates = await self.list_by_agent(agent_id, limit=1000)
+            elif tokens:
+                candidates = await self.list_all(limit=1000)
+            else:
+                return []
+            scored: list[tuple[int, MemoryItem]] = []
+            for item in candidates:
+                haystack = (item.content + " " + " ".join(item.tags)).lower()
+                score = sum(1 for t in tokens if t in haystack)
+                if score > 0:
+                    scored.append((score, item))
+            scored.sort(key=lambda pair: (-pair[0], -pair[1].importance))
+            items = [item for _, item in scored[:limit]]
+        return items
 
     async def search_vectors(
         self,
