@@ -1,6 +1,8 @@
 # PLAN: Prompt Hardening — Audit & Improvement of All Agency System Prompts
 
-**Date:** 2026-11-20 · **Status:** DRAFT for owner review · **Branch target:** `feat/prompt-hardening` (off `prompts`)
+**Date:** 2026-11-20 · **Status:** EXECUTED on `prompts` (owner decisions resolved: name is **striker**; apprentice deferred; `{"final":...}` single-sourced in `agents/_prompt_shared.py`)
+
+**Landed commits:** `f51248d` contract tests + general dedupe · `0ecad70` AGENTS.md global rules + this plan · `e183181` sticker→striker rename · `0993ef7` shared prompt rules · `d3c295e` striker work-order template + `forge code --work-order` · `7e16a83` forge-orchestrator segment pinned on Blacksmith · `579d15f` reviewer rubric/evidence/truncation. Remaining from PLAN_BLACKSMITH_FORGE_ORCHESTRATOR: engine honesty fix, planner routing, management surfaces (Phases 2–6 there).
 
 **Goal:** Find weaknesses in every system prompt the Agency ships, fix the outright defects,
 close the two biggest gaps (Blacksmith prompt is dead code; striker workers get no prompt at
