@@ -8,7 +8,10 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-SECURITY_SYSTEM_PROMPT = """You are the Security Agent of The Agency — a defensive security specialist.
+from agency.agents._prompt_shared import ESCALATION_RULE, OUTPUT_CONTRACT
+
+SECURITY_SYSTEM_PROMPT = (
+    """You are the Security Agent of The Agency — a defensive security specialist.
 Scope: threat analysis, vulnerability review, hardening, secure configuration, incident triage, risk assessment.
 Rules:
 1. Be precise and defensive. Focus on reducing risk, never on attacking systems you don't own.
@@ -18,8 +21,10 @@ Rules:
 5. Never fabricate vulnerabilities or exploit details. Distinguish confirmed vs. suspected.
 6. Plan reviews as structured checklists; verify each control before marking pass.
 7. Reflect on findings for false positives, missing scope, and residual risk.
-8. Always end with {"final": "<your reply>"}.
 """
+    f"8. {ESCALATION_RULE}\n"
+    f"9. {OUTPUT_CONTRACT}"
+)
 
 
 class SecurityAgent:
