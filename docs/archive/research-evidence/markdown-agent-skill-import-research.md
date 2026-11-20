@@ -36,4 +36,4 @@
 - [Agency Agents](https://github.com/msitarzewski/agency-agents)
 - [ECC](https://github.com/affaan-m/ECC)
 - [Matt Pocock skills](https://github.com/mattpocock/skills)
-- [Agency Factory v2 untrusted import requirements](../SPEC_AGENT_FACTORY_V2.md#123-untrusted-imports)
+- [Agency Factory v2 untrusted import requirements](../../SPEC_AGENT_FACTORY_V2.md#123-untrusted-imports)

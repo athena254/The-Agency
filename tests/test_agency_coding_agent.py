@@ -72,6 +72,11 @@ def test_read_skill_missing_raises(tmp_path: Path):
 
 
 def test_agency_coding_agent_default_workspace_is_agency():
+    import agency
+
+    # The default workspace is the Agency checkout that owns the installed
+    # package, whatever the checkout directory is named (worktrees differ).
+    repo_root = Path(agency.__file__).resolve().parents[2]
     agent = AgencyCodingAgent()
-    assert agent.workspace.name == "The-Agency"
+    assert agent.workspace == repo_root
     assert (agent.workspace / "src" / "agency").is_dir()
