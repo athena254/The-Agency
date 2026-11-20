@@ -33,6 +33,15 @@ OWNER_TOOL_NAMES = frozenset(
     {"calculator", "utc_time", "web_search", "memory_query", "memory_write", "web_fetch"}
 )
 
+# External tools imported from the broader agent ecosystem. They are opt-in:
+# the owner pilot enables them via ``enable_external_tools`` (default off).
+# ``google_workspace`` and ``computer_use`` are deliberately excluded here
+# until their read-only/human-gate contracts are closed.
+OWNER_EXTERNAL_TOOL_NAMES = frozenset({"web_scrape", "last30days"})
+
+# Union used for grant validation; admission still gates on the config flag.
+OWNER_ALL_TOOL_NAMES = OWNER_TOOL_NAMES | OWNER_EXTERNAL_TOOL_NAMES
+
 
 class PilotError(Exception):
     def __init__(self, code: str, status_code: int = 503, uncertain: bool = False) -> None:
@@ -117,7 +126,7 @@ class OwnerExecutionGrant:
         if (
             type(self.allowed_tools) is not frozenset
             or any(type(tool) is not str for tool in self.allowed_tools)
-            or not self.allowed_tools <= OWNER_TOOL_NAMES
+            or not self.allowed_tools <= OWNER_ALL_TOOL_NAMES
         ):
             raise PilotError("invalid_request")
         if (

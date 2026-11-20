@@ -23,6 +23,7 @@ from agency.admission.calculator_verification import (
 from agency.admission.coding_store import CodingEvidence, CodingRecord
 from agency.admission.coding_store import model_snapshot as _model_snapshot
 from agency.admission.models import (
+    OWNER_EXTERNAL_TOOL_NAMES,
     AdmissionRecord,
     MessageView,
     OwnerExecutionGrant,
@@ -88,6 +89,7 @@ class OwnerPilotService:
         memory_db_path: str | None = None,
         enable_memory_tools: bool = False,
         enable_web_fetch: bool = False,
+        enable_external_tools: bool = False,
         recovery_key: SecretStr | None = None,
     ) -> None:
         if (
@@ -146,7 +148,7 @@ class OwnerPilotService:
                     raise ValueError
             except (ValueError, TypeError, AttributeError):
                 raise PilotError("invalid_request") from None
-        if type(enable_memory_tools) is not bool or type(enable_web_fetch) is not bool:
+        if type(enable_memory_tools) is not bool or type(enable_web_fetch) is not bool or type(enable_external_tools) is not bool:
             raise PilotError("invalid_request")
         if type(memory_db_path) is not str and memory_db_path is not None:
             raise PilotError("invalid_request")
@@ -156,6 +158,7 @@ class OwnerPilotService:
             raise PilotError("invalid_request")
         self._enable_memory_tools = enable_memory_tools
         self._enable_web_fetch = enable_web_fetch
+        self._enable_external_tools = enable_external_tools
         self._memory_store = (
             build_memory_backend(memory_db_path, embedder=default_embedder())
             if enable_memory_tools and memory_db_path
@@ -387,6 +390,8 @@ class OwnerPilotService:
         if self._enable_memory_tools:
             tools.extend(["memory_query", "memory_write"])
             disabled.remove("memory")
+        if self._enable_external_tools:
+            tools.extend(["web_scrape", "last30days"])
         return PilotCapabilities(
             enabled=True,
             ready=True,
@@ -411,6 +416,12 @@ class OwnerPilotService:
                 "enabled": self._enable_web_fetch,
                 "guard": "B-05",
                 "reason": "configured" if self._enable_web_fetch else "opt_in_disabled",
+            },
+            "external_tools": {
+                "enabled": self._enable_external_tools,
+                "guard": "TOOLS-IMPORT",
+                "reason": "configured" if self._enable_external_tools else "opt_in_disabled",
+                "tools": ["web_scrape", "last30days"],
             },
         }
 
@@ -961,6 +972,8 @@ class OwnerPilotService:
                 allowed_tools = allowed_tools | {"web_fetch"}
             if self._enable_memory_tools:
                 allowed_tools = allowed_tools | {"memory_query", "memory_write"}
+            if self._enable_external_tools:
+                allowed_tools = allowed_tools | OWNER_EXTERNAL_TOOL_NAMES
         grant = OwnerExecutionGrant(
             lease,
             self._budget,
@@ -1002,7 +1015,7 @@ class OwnerPilotService:
             )
             memory_scope = PrincipalMemoryScope(self._memory_store, principal_scope)
         registry = ToolRegistry(
-            owner_policy=OwnerToolPolicy(),
+            owner_policy=OwnerToolPolicy(enable_external_tools=self._enable_external_tools),
             audit=self._audit,
             owner_memory_scope=memory_scope,
             owner_recovery=recovery,
@@ -1015,6 +1028,14 @@ class OwnerPilotService:
         if self._enable_memory_tools:
             registry.register(MemoryQueryTool(scoped=True))
             registry.register(MemoryWriteTool(scoped=True))
+        if self._enable_external_tools:
+            from agency.tools.external import (
+                Last30DaysTool,
+                WebScrapeTool,
+            )
+
+            for tool in (WebScrapeTool(), Last30DaysTool()):
+                registry.register(tool)
         payload = json.loads(row.input_json)
         reply = await self._butler.handle_owner_message(
             payload["message"], row.thread_id, grant=grant, model=model, registry=registry

@@ -5,13 +5,14 @@ from __future__ import annotations
 from typing import Any
 
 from agency.admission.models import (
+    OWNER_EXTERNAL_TOOL_NAMES,
     OWNER_TOOL_NAMES,
     OwnerExecutionGrant,
     PilotError,
 )
 from agency.tools.base import ToolContext, ToolPolicyDecision, ToolRisk, ToolSpec
 
-_ALLOWED_TOOLS = OWNER_TOOL_NAMES
+_ALLOWED_TOOLS = OWNER_TOOL_NAMES | OWNER_EXTERNAL_TOOL_NAMES
 _MEMORY_TOOLS = frozenset({"memory_query", "memory_write"})
 _MAX_EXPRESSION_CHARS = 120
 _MAX_QUERY_CHARS = 200
@@ -31,14 +32,15 @@ class OwnerToolPolicy:
     The default allowlist is the three read-only tools (calculator, utc_time,
     web_search). The additional memory and fetch tools are admitted only when
     the owner pilot configuration explicitly opts in and the call carries the
-    matching guard: memory tools require a principal-bound memory scope (R-04)
-    and web_fetch requires connection-address pinning (B-05), which the tool
-    itself enforces. The policy performs no I/O, mints no grants and dispatches
-    no tools. It revalidates the concrete grant and asks the issuing budget
-    adapter whether the original lease object is still owned and live.
-    Cancellation, expiry, revocation, closed stores and mutated/copied leases
-    therefore fail closed. ``ctx.metadata`` is never consulted for authority.
+    matching guard. External tools (web_scrape, last30days) are admitted only
+    when ``enable_external_tools`` is True (default off); google_workspace and
+    computer_use are always denied here until their contracts close.
     """
+
+    def __init__(self, enable_external_tools: bool = False) -> None:
+        if type(enable_external_tools) is not bool:
+            raise TypeError("enable_external_tools must be a bool")
+        self._enable_external = enable_external_tools
 
     def __call__(
         self, spec: ToolSpec, args: dict[str, Any], ctx: ToolContext
@@ -65,8 +67,13 @@ class OwnerToolPolicy:
             return ToolPolicyDecision(False, "owner: task binding mismatch")
         name = getattr(spec, "name", None)
         risk = getattr(spec, "risk", None)
+        # Always deny not-yet-contracted tools, regardless of configuration.
+        if name in {"google_workspace", "computer_use"}:
+            return ToolPolicyDecision(False, f"owner: tool {name!r} denied (contract not closed)")
         if name not in _ALLOWED_TOOLS or name not in grant.allowed_tools:
             return ToolPolicyDecision(False, f"owner: tool {name!r} denied")
+        if name in OWNER_EXTERNAL_TOOL_NAMES and not self._enable_external:
+            return ToolPolicyDecision(False, f"owner: external tool {name!r} disabled")
         scoped_memory = name in _MEMORY_TOOLS
         if scoped_memory and ctx.memory_scope is None:
             return ToolPolicyDecision(False, "owner: memory tools require a principal-bound scope")
@@ -136,6 +143,18 @@ class OwnerToolPolicy:
             url = args["url"]
             if type(url) is not str or not url.strip() or len(url) > _MAX_FETCH_URL_CHARS:
                 return ToolPolicyDecision(False, "owner: web_fetch url invalid")
+        elif name == "web_scrape":
+            if set(args) != {"url"}:
+                return ToolPolicyDecision(False, "owner: web_scrape args invalid")
+            url = args["url"]
+            if type(url) is not str or not url.strip() or len(url) > _MAX_FETCH_URL_CHARS:
+                return ToolPolicyDecision(False, "owner: web_scrape url invalid")
+        elif name == "last30days":
+            if set(args) != {"topic"}:
+                return ToolPolicyDecision(False, "owner: last30days args invalid")
+            topic = args["topic"]
+            if type(topic) is not str or not topic.strip() or len(topic.strip()) > _MAX_QUERY_CHARS:
+                return ToolPolicyDecision(False, "owner: last30days topic invalid")
         else:
             return ToolPolicyDecision(False, f"owner: tool {name!r} denied")
         return ToolPolicyDecision(True, f"owner: allowed {name}")
