@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -22,7 +23,7 @@ from agency.factory.prompts import PromptKind, PromptRegistry, PromptSpec, Promp
 MAX_MARKDOWN_BYTES = 64 * 1024
 MAX_FILES = 500
 MAX_REPOSITORY_BYTES = 5 * 1024 * 1024
-MAX_TREE_BYTES = 1024 * 1024
+MAX_TREE_BYTES = 4 * 1024 * 1024
 _ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
@@ -222,8 +223,37 @@ class MarkdownImportService:
     ) -> ImportedMarkdown:
         return self._persist(self._parse_markdown(source, source_label=source_label))
 
+    def remote_tree_sha(self, repository_url: str, *, ref: str = "main") -> str:
+        """Return the current immutable tree SHA of a GitHub repository ref."""
+        _safe_source(repository_url)
+        parsed = urlparse(repository_url)
+        parts = [part for part in parsed.path.strip("/").removesuffix(".git").split("/") if part]
+        if len(parts) != 2 or any(part in {".", ".."} for part in parts):
+            raise ImportError("expected https://github.com/{owner}/{repo}[.git]")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", ref):
+            raise ImportError("ref must be a simple branch or tag name")
+        owner, repo = parts
+        url = (
+            f"https://api.github.com/repos/{quote(owner)}/{quote(repo)}"
+            f"/git/trees/{quote(ref, safe='')}"
+        )
+        try:
+            response = self._client.get(url, params={"recursive": "0"})
+            response.raise_for_status()
+            payload = response.json()
+        except httpx.HTTPError as exc:
+            raise ImportError(f"GitHub read failed: {exc}") from exc
+        sha = payload.get("sha") if isinstance(payload, dict) else None
+        if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-fA-F]{40,64}", sha):
+            raise ImportError("GitHub tree response is missing a valid immutable tree SHA")
+        return sha
+
     def import_github_repository(
-        self, repository_url: str, *, ref: str = "main"
+        self,
+        repository_url: str,
+        *,
+        ref: str = "main",
+        include_paths: Callable[[str], bool] | None = None,
     ) -> list[ImportedMarkdown]:
         _safe_source(repository_url)
         parsed = urlparse(repository_url)
@@ -241,7 +271,7 @@ class MarkdownImportService:
             tree_response.raise_for_status()
             tree_bytes = tree_response.content
             if len(tree_bytes) > MAX_TREE_BYTES:
-                raise ImportError("Git tree exceeds 1 MiB")
+                raise ImportError("Git tree exceeds 4 MiB")
             tree = tree_response.json()
             if not isinstance(tree, dict) or not isinstance(tree.get("tree"), list):
                 raise ImportError("GitHub tree response is malformed or truncated")
@@ -266,6 +296,8 @@ class MarkdownImportService:
                 and isinstance(entry.get("path"), str)
                 and entry["path"].casefold().endswith(".md")
             ]
+            if include_paths is not None:
+                blobs = [entry for entry in blobs if include_paths(entry["path"])]
             if len(blobs) > MAX_FILES:
                 raise ImportError(f"repository has more than {MAX_FILES} Markdown files")
             try:

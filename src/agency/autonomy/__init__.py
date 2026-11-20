@@ -29,6 +29,7 @@ from agency.autonomy.loop_queue import (
     load_queue,
     parse_github_issues,
     parse_goal_plan,
+    parse_repo_imports,
 )
 from agency.autonomy.loop_state import (
     LoopBudgets,
@@ -104,6 +105,7 @@ __all__ = [
     "load_queue",
     "parse_github_issues",
     "parse_goal_plan",
+    "parse_repo_imports",
     "run_autonomous",
     "score_agent",
     "verify_chain",

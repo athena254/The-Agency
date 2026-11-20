@@ -21,3 +21,11 @@ Read it before touching `agency.capability`, `agency.factory`, `agency.skills`,
 or `agency.selfimprove`. Avoid the patterns it flags — in particular, never add
 module-level `agency.capability.*` imports under `agency/factory/` (import cycle).
 All agents are free to fix any gap in that file; claim one and close it when done.
+
+## Auto-import of GitHub skills/agents
+To ingest new repositories without manual copy-paste:
+`uv run python scripts/import_github_skills.py --discover-new` prints repos whose
+tree SHA is new/changed. Add `--emit-plan data/repo_imports.txt` to write a
+newline-delimited plan; run `agency loop run repos:data/repo_imports.txt` so the
+autonomous loop imports each repo through the governed pipeline. Import with
+`--promote` only after reviewing the catalog; never execute upstream code.

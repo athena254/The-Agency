@@ -64,3 +64,46 @@ Verification was offline: 16 service tests + 1 orchestrator E2E with a mocked to
 factory/capability/skill/orchestrator suites (76 tests), ruff, format, mypy. No live LLM/provider
 run of request→task→improve, no multi-restart / concurrency soak. **Do not claim production
 certification** until these are exercised with the configured provider and a real agent run.
+
+## 11. GitHub-imported skills are metadata-only
+`scripts/import_github_skills.py` publishes `ext-*` `SkillSpec` records whose `implementation`
+names are never registered in `OperationRegistry`; `SkillExecutor.run` returns "unknown
+operation" for all of them. They are discoverable by `relevant_skills()` and attachable as L0
+capabilities, but cannot execute. **Fix:** register an operation that returns the quarantined
+prompt body, or label these skills explicitly as documentation-only.
+
+## 12. Large-repo import bounds need per-repo narrowing
+`MarkdownImportService` caps tree JSON at 4 MiB, 500 Markdown files and 5 MiB total content.
+`ECC` has 1,089 `SKILL.md` files (433 at root depth) and a 1.6 MiB tree; `rea`, `gstack` and
+`claude-mem` also exceed the original 1 MiB tree bound. The service now uses per-repo path
+filters (`_ecc_skill_only`, `_skill_only`) and a `--from-registry` replay path. **Fix:** add a
+generic subtree-walk importer instead of hand-tuned filters.
+
+## 13. Import promotion has no distinct human approver
+The `--promote` flag publishes imported drafts using automated review evidence and a default
+approver `owner`; SPEC_AGENT_FACTORY_V2 §12.3 requires promotion only after the Agency's own
+review *and approval*. There is no separate human decision recorded. **Fix:** require an
+explicit authorizer callback and a real approver identity for `skill.publish`.
+
+## 14. Manifest attachment is applied only by the API startup path
+`grant_manifest_capabilities()` is called from `api/server.py` lifespan after the coding agent
+and Blacksmith are registered. CLI and direct orchestrator usage do not grant the manifest's L0
+capabilities. **Fix:** centralize agent bootstrap so every entry point applies attachments.
+
+## 15. Imported agent PACK prompts are not yet blueprint mappings
+`MarkdownImportService` classifies `AGENTS.md`-style sources as `PromptKind.PACK` DRAFT prompts,
+but no consumer turns them into Factory blueprints. Plan A (auto-install mapping) is scoped to
+the two registered agents in `data/agents/agents.yaml`; the remaining quarantined PACK prompts
+still have no runtime identity. **Fix:** implement a PACK→blueprint service with evidence.
+
+## 16. Installed-agent registry is a flat manifest
+`data/agents/agents.yaml` is a hand-maintained list (`AgentManager`, `InstalledAgent`) with no
+PLAN.json per agent and no dedup against Factory blueprints. `scripts/setup_autonomous_loop.sh`
+does not exist; `agents.toml` duplicates the manifest. **Fix:** generate both from one source,
+and add lifecycle validation before install.
+
+## 17. PAK sync is modelled but not wired to an external PAK repository
+`InstallPlan`, `PAKSyncInstallPlan`, `install()` and `apply_install_plan()` implement install,
+invert and merge locally, but no PAK repo/workflow consumes them. `docs/opensource/pak.md`
+and the A2-Security-Advisors-LTD `pak`/`schema` docs were unavailable (404). **Fix:** connect a
+real PAK repository and verify the sync flow against its manifest format.

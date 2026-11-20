@@ -225,6 +225,50 @@ def from_backlog(prd_text: str) -> list[LoopItem]:
     return items
 
 
+_REPO_URL_RE = re.compile(r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?/?$")
+
+
+def parse_repo_imports(source: str | Path, *, limit: int = 64) -> list[LoopItem]:
+    """Parse a newline-delimited list of GitHub repos into import loop items.
+
+    The file may contain blank lines and ``#`` comments. Each item tells a loop
+    worker to run the governed GitHub import pipeline for that repo.
+    """
+    path = Path(source)
+    repos: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        value = line.strip()
+        if not value or value.startswith("#"):
+            continue
+        if _REPO_URL_RE.fullmatch(value) is None:
+            raise ValueError(f"invalid GitHub repo URL in {path}: {value[:120]!r}")
+        if value not in repos:
+            repos.append(value)
+        if len(repos) >= limit:
+            break
+    used: set[str] = set()
+    items: list[LoopItem] = []
+    for index, repo in enumerate(repos):
+        owner_repo = repo.removeprefix("https://github.com/").removesuffix(".git").strip("/")
+        slug = _unique_slug(_slugify(owner_repo), used)
+        items.append(
+            LoopItem(
+                id=f"repo-import-{slug}",
+                title=f"Import skills/agents from {repo}",
+                description=(
+                    f"Run `uv run python scripts/import_github_skills.py --promote "
+                    f"--repos {repo}`; never execute upstream code."
+                ),
+                acceptance=(
+                    f"test: quarantined prompts for {repo} exist in data/prompts.db",
+                    f"test: published skills with provenance {repo} exist in data/skills.db",
+                ),
+                priority=len(repos) - index,
+            )
+        )
+    return items
+
+
 def load_queue(
     source: str | Path, *, repo: str | None = None, label: str | None = None
 ) -> list[LoopItem]:
@@ -235,15 +279,18 @@ def load_queue(
     1. an explicit ``repo`` selects the GitHub source;
     2. a ``source`` starting with ``gh:`` selects the GitHub source, with
        the rest of the string as the repo;
-    3. a directory, or a path named ``GOAL.md`` / ``fix_plan.md``, selects
-       the goal-plan source (the sibling file is the partner);
-    4. anything else is read as a PRD text file.
+     3. ``repos:`` selects the newline-delimited GitHub repo-import source;
+     4. a directory, or a path named ``GOAL.md`` / ``fix_plan.md``, selects
+        the goal-plan source (the sibling file is the partner);
+     5. anything else is read as a PRD text file.
     """
     if repo is not None:
         return parse_github_issues(repo, label=label)
     text = str(source)
     if text.startswith("gh:"):
         return parse_github_issues(text[3:], label=label)
+    if text.startswith("repos:"):
+        return parse_repo_imports(text[6:])
     path = Path(source)
     if path.is_dir():
         return parse_goal_plan(path / "GOAL.md", path / "fix_plan.md")
@@ -259,4 +306,5 @@ __all__ = [
     "load_queue",
     "parse_github_issues",
     "parse_goal_plan",
+    "parse_repo_imports",
 ]
