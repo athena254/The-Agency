@@ -1,6 +1,6 @@
 # PLAN: Blacksmith — Forge Orchestrator & Manager
 
-**Date:** 2026-11-20 · **Status:** Phases 1–5 landed on `feat/blacksmith-orchestrator`; Phase 6 live acceptance complete except a live sticker PASS through BlacksmithOps (worker-provider limitation, see `KNOWN_ISSUES.md` KI-10) · **Branch target:** `feat/blacksmith-orchestrator` (off `feat/self-improve-forge`)
+**Date:** 2026-11-20 · **Status:** COMPLETE — Phases 1–6 landed on `feat/blacksmith-orchestrator`; live sticker PASS verified with a Hermes one-shot worker (KI-10 resolved) · **Branch target:** `feat/blacksmith-orchestrator` (off `feat/self-improve-forge`)
 
 **Goal:** Make the Blacksmith the real orchestrator and manager of the Forge: it takes build
 requests, dispatches bounded jobs to sticker workers through the existing gate pipeline,
