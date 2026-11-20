@@ -1,0 +1,22 @@
+============================================================
+THE AGENCY — LIVE TEST
+============================================================
+
+[1/4] Initializing orchestrator...
+2026-11-19 20:40:34 [info     ] llm_adapter_initialized        has_api_key=True model=gemini-3.5-flash-lite provider=google
+2026-11-19 20:40:34 [info     ] memory_store.initialized       db_path=data/memory.db
+2026-11-19 20:40:34 [info     ] evidence_store_initialized     database=:memory:
+2026-11-19 20:40:34 [info     ] audit.ready                    path=:memory:
+2026-11-19 20:40:34 [info     ] lattice.config.loaded          backend=sqlite
+2026-11-19 20:40:34 [info     ] lattice.api.backend_selected   backend=sqlite
+2026-11-19 20:40:34 [info     ] lattice.api.created            backend=sqlite
+2026-11-19 20:40:34 [info     ] lattice.api.initializing       backend=sqlite
+2026-11-19 20:40:34 [info     ] lattice.api.initialized        backend=sqlite
+2026-11-19 20:40:34 [info     ] tool.registered                tool=web_search
+2026-11-19 20:40:34 [info     ] tool.registered                tool=web_fetch
+2026-11-19 20:40:34 [info     ] tool.registered                tool=memory_query
+2026-11-19 20:40:34 [info     ] tool.registered                tool=memory_write
+2026-11-19 20:40:34 [info     ] tool.registered                tool=sandbox_exec
+2026-11-19 20:40:34 [info     ] tool.registered                tool=agency_skill
+2026-11-19 20:40:34 [info     ] tool_layer_ready               tools=['agency_skill', 'memory_query', 'memory_write', 'sandbox_exec', 'web_fetch', 'web_search']
+2026-11-19 20:40:34 [info     ] orchestrator_started
