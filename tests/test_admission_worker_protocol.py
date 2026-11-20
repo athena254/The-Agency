@@ -174,6 +174,59 @@ def test_parent_rejects_real_split_claim_two_ran_mutant(tmp_path):
     print(f"unsafe split claim rejected: two held calls, pids={[m['pid'] for m in ran]}")
 
 
+def test_bootstrap_deadline_expiry_reproduces_q18_failure(tmp_path):
+    """Hermetic reproduction of the Oct-18 ``bootstrap deadline expired`` failure.
+
+    Two real spawned workers initialize the concrete audit/registry/policy/
+    principal dependencies but withhold ``bootstrap_complete`` through a
+    controlled event. The unchanged parent protocol (60s aggregate budget,
+    15s observation, 10s gates, 5s barrier, real two-tool-run assertion) must
+    fail with the exact historical classification before the race assertion is
+    ever reached, keep every gate closed, reap both workers and leave no durable
+    intent/outcome rows. This reproduces the failure MODE only; it does not
+    establish why the historical bootstrap stalled, so no assertion or deadline
+    is weakened and no production fix is asserted.
+    """
+    import multiprocessing
+    import re
+
+    from tests.worker_support.admission import AdmissionProtocolError, run_admission_race
+
+    class RecordingContext:
+        def __init__(self):
+            self.real = multiprocessing.get_context("spawn")
+            self.gates = []
+
+        def Event(self):
+            event = self.real.Event()
+            self.gates.append(event)
+            return event
+
+        def Barrier(self, count):
+            return self.real.Barrier(count)
+
+        def Queue(self):
+            return self.real.Queue()
+
+        def Process(self, **kwargs):
+            return self.real.Process(**kwargs)
+
+    context = RecordingContext()
+    stall = context.real.Event()
+    path = str(tmp_path / "q18-stalled-bootstrap.db")
+    with pytest.raises(AdmissionProtocolError) as caught:
+        run_admission_race(path, context=context, stall_bootstrap=stall)
+    error = caught.value
+    assert re.fullmatch(r"bootstrap deadline expired; pids=\[\d+, \d+\]", str(error)), str(error)
+    assert "two tools ran before release" not in str(error)
+    assert not any(gate.is_set() for gate in context.gates)
+    observed = error.observations
+    assert len([m for m in observed if m["event"] == "bootstrap_started"]) == 2
+    assert not any(m["event"] in {"bootstrap_complete", "ready", "ran", "result"} for m in observed)
+    rows, pending = asyncio.run(audit_state(path))
+    assert rows == [] and pending is False
+
+
 class FailingStartContext:
     """Delegate real spawn, then fail after second child acquired a PID."""
 
