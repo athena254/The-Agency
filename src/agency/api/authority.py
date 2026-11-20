@@ -94,5 +94,10 @@ def require_peer_authority(request: Request) -> None:
     if not verification.ok:
         _deny(f"Grant rejected: {verification.reason.value if verification.reason else 'unknown'}")
 
+    if scope.startswith("GET /v1/memory/search"):
+        owner_scope = request.query_params.get("agent_id")
+        if owner_scope and owner_scope not in grant.affected_consumers:
+            _deny("Memory owner scope is not covered by the grant")
+
     if not is_read:
         _verify_finality(request)

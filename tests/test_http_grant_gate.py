@@ -75,3 +75,44 @@ def test_read_route_with_valid_grant(tmp_path, monkeypatch):
         header = _grant_header(ledger, ids[0], "GET /v1/agents")
         response = client.get("/v1/agents", headers={"X-Agency-Grant": header})
         assert response.status_code == 200
+
+
+def test_write_route_closed_without_owner_policy(tmp_path, monkeypatch):
+    ids, _mem, genesis = _genesis(tmp_path)
+    monkeypatch.setenv("AGENCY_GENESIS_PATH", str(genesis))
+    monkeypatch.setenv("AGENCY_V1_OPEN_WRITES", "1")
+    monkeypatch.delenv("AGENCY_FINALITY_POLICY", raising=False)
+    from agency.api.server import create_app
+
+    with TestClient(create_app()) as client:
+        ledger = client.app.state.grant_ledger
+        header = _grant_header(ledger, ids[0], "POST /v1/tasks")
+        response = client.post(
+            "/v1/tasks",
+            headers={"X-Agency-Grant": header},
+            json={"title": "t", "created_by": "peer"},
+        )
+        assert response.status_code == 503
+        assert "Finality policy" in response.json()["detail"]
+
+
+def test_write_route_with_finality_policy(tmp_path, monkeypatch):
+    ids, _mem, genesis = _genesis(tmp_path)
+    monkeypatch.setenv("AGENCY_GENESIS_PATH", str(genesis))
+    monkeypatch.setenv("AGENCY_V1_OPEN_WRITES", "1")
+    monkeypatch.setenv("AGENCY_FINALITY_POLICY", "test-policy")
+    from agency.api.server import create_app
+
+    with TestClient(create_app()) as client:
+        ledger = client.app.state.grant_ledger
+        header = _grant_header(ledger, ids[0], "POST /v1/tasks")
+        response = client.post(
+            "/v1/tasks",
+            headers={
+                "X-Agency-Grant": header,
+                "X-Agency-Finality": '{"height": 1, "app_hash": "abc"}',
+            },
+            json={"title": "t", "created_by": "peer"},
+        )
+        assert response.status_code in (200, 201)
+
