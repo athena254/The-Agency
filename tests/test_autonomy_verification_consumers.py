@@ -24,7 +24,7 @@ from tests.test_autonomy_verification_assessment import (
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("domain", ["general", "security"])
+@pytest.mark.parametrize("domain", ["general", "memory"])
 async def test_butler_string_reply_appends_real_runtime_notice(runtime, domain):
     orch, model = runtime
     model.output = '{"final":"completeness accuracy safety"}'
@@ -263,7 +263,7 @@ async def test_failed_heuristic_checks_still_deliver_once_without_telegram_retry
 ):
     orch, model = runtime
     model.output = "An answer without the criterion keywords."
-    agent = await orch.register_agent("fixture", "security", ["respond"])
+    agent = await orch.register_agent("fixture", "memory", ["respond"])
     service = ButlerService(
         config=ButlerConfig(_env_file=None, llm_provider="none"), orchestrator=orch
     )

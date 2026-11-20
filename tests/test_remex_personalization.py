@@ -220,7 +220,7 @@ async def test_classic_agent_prompt_uses_user_display_name_without_changing_butl
     orch = AgencyOrchestrator(llm=llm, memory_db_path=":memory:")
     await orch.start()
     try:
-        agent = await orch.register_agent("security-probe", "security", ["inspect"])
+        agent = await orch.register_agent("memory-probe", "memory", ["inspect"])
         task = await orch.submit_task("identity", "What is your name?", agent.id)
         result = await orch.execute_task(
             task.task_id, context={"sender": "telegram:101", "assistant_name": "Atlas"}

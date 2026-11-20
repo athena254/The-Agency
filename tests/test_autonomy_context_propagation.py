@@ -57,7 +57,7 @@ async def runtime(
 async def test_classic_execution_receives_recalled_context_as_quoted_data(runtime) -> None:
     """A1-T01: the old classic route silently omitted this input."""
     orch, model = runtime
-    agent = await orch.register_agent("fixture-classic", "security", ["respond"])
+    agent = await orch.register_agent("fixture-classic", "memory", ["respond"])
     task = await orch.submit_task("Fixture", "Summarize this synthetic fixture.", agent.id)
     recalled = "SYNTHETIC_A1_RECALL_01"
 
@@ -78,7 +78,7 @@ async def test_malformed_recall_is_rejected_before_task_or_store_effects(
 ) -> None:
     """A1-T06: invalid internal data cannot start a task or reach providers."""
     orch, model = runtime
-    agent = await orch.register_agent("fixture-classic", "security", ["respond"])
+    agent = await orch.register_agent("fixture-classic", "memory", ["respond"])
     task = await orch.submit_task("Fixture", "Summarize this synthetic fixture.", agent.id)
     probes: list[AsyncMock | Mock] = []
     for obj, name in (
@@ -140,7 +140,7 @@ async def test_tool_domains_receive_same_quoted_reference_block(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("domain", ["security", "general", "research"])
+@pytest.mark.parametrize("domain", ["memory", "general", "research"])
 @pytest.mark.parametrize(
     "context",
     [None, {}, {"memory_context": None}, {"memory_context": ""}, {"memory_context": " \n\t"}],
@@ -155,7 +155,7 @@ async def test_empty_recall_preserves_effective_prompt(runtime, domain, context)
     description = "Summarize this synthetic fixture."
     task = await orch.submit_task("Fixture", description, agent.id)
     original = deepcopy(context)
-    if domain == "security":
+    if domain == "memory":
         expected = orch._system_context(description, context, channel="Telegram gateway")
     else:
         domain_prompt = GENERAL_SYSTEM_PROMPT if domain == "general" else RESEARCH_SYSTEM_PROMPT
@@ -178,7 +178,7 @@ async def test_empty_recall_preserves_effective_prompt(runtime, domain, context)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("domain", ["security", "general", "research"])
+@pytest.mark.parametrize("domain", ["memory", "general", "research"])
 @pytest.mark.parametrize(
     "recalled",
     [
@@ -308,7 +308,7 @@ async def test_butler_assembles_only_owner_thread_context_and_ignores_forged_rec
 ) -> None:
     """A1-T09: real stores/assembler, synthetic internal owners, not ingress proof."""
     orch, model = runtime
-    agent = await orch.register_agent("fixture-classic", "security", ["respond"])
+    agent = await orch.register_agent("fixture-classic", "memory", ["respond"])
     store = ThreadStore(str(tmp_path / "threads.db"))
     service = ButlerService(
         config=ButlerConfig(_env_file=None, llm_provider="none"),
@@ -368,7 +368,7 @@ async def test_butler_assembles_only_owner_thread_context_and_ignores_forged_rec
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("domain", ["security", "general"])
+@pytest.mark.parametrize("domain", ["memory", "general"])
 async def test_recalled_context_cannot_turn_failed_execution_into_a_butler_success(
     runtime, domain
 ) -> None:
