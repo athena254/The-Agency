@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import importlib
 import json
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, BinaryIO, Protocol
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, BinaryIO, Protocol, cast
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agency.workflows.registry import WorkflowDefinition
@@ -93,6 +95,53 @@ class RecoverableRun:
         object.__setattr__(self, "ops_binding", dict(self.ops_binding))
 
 
+def _is_windows() -> bool:
+    return sys.platform == "win32"
+
+
+def _load_msvcrt() -> ModuleType:
+    return importlib.import_module("msvcrt")
+
+
+def _load_fcntl() -> ModuleType:
+    return importlib.import_module("fcntl")
+
+
+def _int_attr(module: ModuleType, name: str) -> int:
+    return cast(int, getattr(module, name))
+
+
+def _call_attr(module: ModuleType, name: str, *args: object) -> object:
+    return getattr(module, name)(*args)
+
+
+_LOCKING_NAME: str = "locking"
+_FLOCK_NAME: str = "flock"
+_LK_NBLCK_NAME: str = "LK_NBLCK"
+_LK_UNLCK_NAME: str = "LK_UNLCK"
+_LOCK_EX_NAME: str = "LOCK_EX"
+_LOCK_NB_NAME: str = "LOCK_NB"
+_LOCK_UN_NAME: str = "LOCK_UN"
+
+if _is_windows():
+    _LOCK_EXCLUSIVE_NB: int = _int_attr(_load_msvcrt(), _LK_NBLCK_NAME)
+    _LOCK_UNLOCK: int = _int_attr(_load_msvcrt(), _LK_UNLCK_NAME)
+else:
+    _fcntl = _load_fcntl()
+    _LOCK_EXCLUSIVE_NB = _int_attr(_fcntl, _LOCK_EX_NAME) | _int_attr(_fcntl, _LOCK_NB_NAME)
+    _LOCK_UNLOCK = _int_attr(_fcntl, _LOCK_UN_NAME)
+
+
+def _apply_os_lock(handle: BinaryIO, lock: bool) -> None:
+    """Take or release the nonblocking exclusive OS lock; raise OSError on contention."""
+    mode = _LOCK_EXCLUSIVE_NB if lock else _LOCK_UNLOCK
+    if _is_windows():
+        handle.seek(0)
+        _call_attr(_load_msvcrt(), _LOCKING_NAME, handle.fileno(), mode, 1)
+    else:
+        _call_attr(_load_fcntl(), _FLOCK_NAME, handle.fileno(), mode)
+
+
 class RecoverableLock:
     """Nonblocking OS file lock adjacent to the concrete DB file.
 
@@ -116,23 +165,10 @@ class RecoverableLock:
             return True
         handle: BinaryIO = open(self._path, "a+b")  # noqa: SIM115 - lock handle
         try:
-            if sys.platform == "win32":
-                import msvcrt
-
-                handle.seek(0)
-                try:
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                except OSError:
-                    handle.close()
-                    return False
-            else:
-                import fcntl
-
-                try:
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except OSError:
-                    handle.close()
-                    return False
+            _apply_os_lock(handle, True)
+        except OSError:
+            handle.close()
+            return False
         except Exception:
             handle.close()
             raise
@@ -145,21 +181,9 @@ class RecoverableLock:
         if handle is None:
             return
         try:
-            if sys.platform == "win32":
-                import msvcrt
-
-                try:
-                    handle.seek(0)
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-                except OSError:
-                    pass
-            else:
-                import fcntl
-
-                try:
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-                except OSError:
-                    pass
+            _apply_os_lock(handle, False)
+        except OSError:
+            pass
         finally:
             handle.close()
 
