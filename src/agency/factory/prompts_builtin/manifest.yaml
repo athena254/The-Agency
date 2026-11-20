@@ -300,6 +300,16 @@
       "provenance": "builtin:agency-factory/segments/agency-l0-scope"
     },
     {
+      "id": "apprentice-researcher",
+      "version": "1.0.0",
+      "name": "Apprentice Researcher",
+      "description": "A1 forge apprentice segment: bounded worktree read/analysis.",
+      "domain": "forge",
+      "kind": "SEGMENT",
+      "file": "segments/apprentice-researcher.md",
+      "provenance": "builtin:agency-factory/segments/apprentice-researcher"
+    },
+    {
       "id": "agency-forge-orchestrator",
       "version": "1.0.0",
       "name": "Forge Orchestrator",

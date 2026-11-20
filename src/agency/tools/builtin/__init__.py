@@ -8,6 +8,7 @@ import httpx
 
 from agency.tools.base import BetaToolPolicy, Tool
 from agency.tools.builtin.calculator import CalculatorTool
+from agency.tools.builtin.forge_read import ForgeReadTool
 from agency.tools.builtin.memory import MemoryQueryTool, MemoryWriteTool
 from agency.tools.builtin.sandbox import SandboxExecTool
 from agency.tools.builtin.utc_time import UtcTimeTool
@@ -36,7 +37,7 @@ def register_all(registry: Any, transport: httpx.AsyncBaseTransport | None = Non
 
 def register_opt_in_local_tools(registry: Any) -> list[Tool]:
     """Explicitly add safe local tools to a separately constructed nonbeta registry."""
-    tools: list[Tool] = [CalculatorTool(), UtcTimeTool()]
+    tools: list[Tool] = [CalculatorTool(), UtcTimeTool(), ForgeReadTool()]
     for tool in tools:
         registry.register(tool)
     return tools
@@ -61,3 +62,19 @@ from agency.tools.external import register_external_tools
 def register_opt_in_external_tools(registry: Any) -> list[Any]:
     """Explicitly add imported external tools to a separately constructed registry."""
     return register_external_tools(registry)
+
+
+__all__ = [
+    "CalculatorTool",
+    "ForgeReadTool",
+    "MemoryQueryTool",
+    "MemoryWriteTool",
+    "SandboxExecTool",
+    "UtcTimeTool",
+    "WebFetchTool",
+    "WebSearchTool",
+    "build_beta_search_registry",
+    "register_all",
+    "register_opt_in_external_tools",
+    "register_opt_in_local_tools",
+]

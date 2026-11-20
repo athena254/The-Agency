@@ -142,6 +142,42 @@ def _normalize_caps(caps: Any, allowed: frozenset[str] | None) -> tuple[str, ...
     return tuple(out)
 
 
+def _normalize_ceilings(value: Any, allowed_caps: tuple[str, ...]) -> tuple[tuple[str, str], ...]:
+    """Normalize (capability, ActionClass value) ceilings; fail closed."""
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise TypeError("capability_ceilings must be a list of (name, value) pairs.")
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for entry in value:
+        name: object
+        ceiling: object
+        if isinstance(entry, dict):
+            name = entry.get("name", entry.get("capability"))
+            ceiling = entry.get("value", entry.get("level", entry.get("max_level")))
+        elif isinstance(entry, (list, tuple)) and len(entry) == 2:
+            name, ceiling = entry
+        else:
+            raise ValueError(f"invalid ceiling entry {entry!r}: use (name, value).")
+        if not isinstance(name, str) or not isinstance(ceiling, str):
+            raise TypeError(f"invalid ceiling entry {entry!r}: name and value must be strings.")
+        normalized = name.strip().lower()
+        if normalized not in allowed_caps:
+            raise ValueError(f"ceiling capability {normalized!r} is not in capabilities.")
+        try:
+            action = ActionClass(ceiling)
+        except ValueError:
+            raise ValueError(f"invalid ceiling value {ceiling!r}.") from None
+        if action.level > ActionClass.L2_CONTROLLED_TESTING.level:
+            raise ValueError(f"ceiling {ceiling!r} exceeds L2_CONTROLLED_TESTING (v1 hard cap).")
+        if normalized in seen:
+            raise ValueError(f"duplicate ceiling for capability {normalized!r}.")
+        seen.add(normalized)
+        out.append((normalized, action.value))
+    return tuple(out)
+
+
 def _normalize_refs(value: Any, kind: str) -> tuple[tuple[str, str], ...]:
     """Normalize pinned (id, version) refs; unpinned refs raise ValueError."""
     if value is None:
@@ -226,6 +262,7 @@ class Blueprint:
     name: str
     domain: str
     capabilities: tuple[str, ...] = ()
+    capability_ceilings: tuple[tuple[str, str], ...] = ()
     skill_refs: tuple[tuple[str, str], ...] = ()
     workflow_refs: tuple[tuple[str, str], ...] = ()
     prompt_refs: tuple[tuple[str, str], ...] = ()
@@ -248,6 +285,7 @@ class Blueprint:
             "name": self.name,
             "domain": self.domain,
             "capabilities": list(self.capabilities),
+            "capability_ceilings": [list(r) for r in self.capability_ceilings],
             "skill_refs": [list(r) for r in self.skill_refs],
             "workflow_refs": [list(r) for r in self.workflow_refs],
             "prompt_refs": [list(r) for r in self.prompt_refs],
@@ -310,7 +348,9 @@ class AgentFactory:
             "CREATE TABLE IF NOT EXISTS blueprints ("
             "blueprint_id TEXT NOT NULL, version TEXT NOT NULL, "
             "name TEXT NOT NULL, domain TEXT NOT NULL, "
-            "capabilities_json TEXT NOT NULL, skills_json TEXT NOT NULL, "
+            "capabilities_json TEXT NOT NULL, "
+            "capability_ceilings_json TEXT NOT NULL DEFAULT '[]', "
+            "skills_json TEXT NOT NULL, "
             "workflows_json TEXT NOT NULL, prompts_json TEXT NOT NULL DEFAULT '[]', "
             "prompt_params_json TEXT NOT NULL DEFAULT '{}', "
             "prompt_override TEXT NOT NULL DEFAULT '', "
@@ -334,6 +374,7 @@ class AgentFactory:
         """Add prompt columns to blueprint tables created before this slice."""
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(blueprints)")}
         additions = {
+            "capability_ceilings_json": "TEXT NOT NULL DEFAULT '[]'",
             "prompts_json": "TEXT NOT NULL DEFAULT '[]'",
             "prompt_params_json": "TEXT NOT NULL DEFAULT '{}'",
             "prompt_override": "TEXT NOT NULL DEFAULT ''",
@@ -361,6 +402,7 @@ class AgentFactory:
         *,
         domain: str = "general",
         capabilities: Any = (),
+        capability_ceilings: Any = (),
         skill_refs: Any = (),
         workflow_refs: Any = (),
         prompt_refs: Any = (),
@@ -379,6 +421,7 @@ class AgentFactory:
         if len(creator) > MAX_ID_LEN:
             raise ValueError("creator exceeds 128 chars.")
         caps = _normalize_caps(capabilities, self._allowed)
+        ceilings = _normalize_ceilings(capability_ceilings, caps)
         skills = _normalize_refs(skill_refs, "skill")
         workflows = _normalize_refs(workflow_refs, "workflow")
         prompts = _normalize_refs(prompt_refs, "prompt")
@@ -389,6 +432,7 @@ class AgentFactory:
         _check_json_bounded(
             {
                 "caps": list(caps),
+                "cc": ceilings,
                 "sk": skills,
                 "wf": workflows,
                 "pr": prompts,
@@ -401,17 +445,19 @@ class AgentFactory:
             with self._conn:
                 self._conn.execute(
                     "INSERT INTO blueprints (blueprint_id, version, name, domain,"
-                    " capabilities_json, skills_json, workflows_json, prompts_json,"
+                    " capabilities_json, capability_ceilings_json, skills_json,"
+                    " workflows_json, prompts_json,"
                     " prompt_params_json, prompt_override, creator,"
                     " status, approver, evidence, runtime_agent_id,"
                     " created_at, updated_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         bid,
                         ver,
                         nm,
                         dom,
                         json.dumps(list(caps)),
+                        json.dumps([list(r) for r in ceilings]),
                         json.dumps([list(r) for r in skills]),
                         json.dumps([list(r) for r in workflows]),
                         json.dumps([list(r) for r in prompts]),
@@ -447,6 +493,7 @@ class AgentFactory:
         _check_name(bp.name)
         _check_version(bp.version)
         _normalize_caps(list(bp.capabilities), self._allowed)
+        _normalize_ceilings(list(bp.capability_ceilings), bp.capabilities)
         self._check_published_refs(bp)
         return bp
 
@@ -624,16 +671,27 @@ class AgentFactory:
                     metadata["prompt_composed_sha256"] = composed.sha256
                     if params:
                         metadata["prompt_params"] = params
+                ceilings: dict[str, ActionClass] = {}
+                for name, value in bp.capability_ceilings:
+                    action = ActionClass(value)
+                    if action.level > ActionClass.L2_CONTROLLED_TESTING.level:
+                        raise ValueError(
+                            "factory ceiling exceeds L2_CONTROLLED_TESTING (v1 hard cap)."
+                        )
+                    ceilings[name] = action
                 agent = Agent(
                     name=bp.name,
                     domain=bp.domain,
-                    capabilities=[Capability(name=c) for c in bp.capabilities],
+                    capabilities=[
+                        Capability(
+                            name=c,
+                            max_level=ceilings.get(c, ActionClass.L0_OBSERVATION),
+                        )
+                        for c in bp.capabilities
+                    ],
                     trust_level=TrustLevel.UNKNOWN,
                     metadata=metadata,
                 )
-                for cap in agent.capabilities:
-                    if cap.max_level != ActionClass.L0_OBSERVATION:
-                        raise ValueError("factory issues L0-only capability claims.")
                 registration_attempted = True
                 try:
                     self._kernels.register(agent)
@@ -870,7 +928,8 @@ class AgentFactory:
         """Return one blueprint snapshot; unknown raises KeyError."""
         row = self._conn.execute(
             "SELECT blueprint_id, version, name, domain, capabilities_json,"
-            " skills_json, workflows_json, prompts_json, prompt_params_json,"
+            " capability_ceilings_json, skills_json, workflows_json,"
+            " prompts_json, prompt_params_json,"
             " prompt_override, creator, status, approver, evidence,"
             " runtime_agent_id, created_at, updated_at"
             " FROM blueprints WHERE blueprint_id = ? AND version = ?",
@@ -884,7 +943,8 @@ class AgentFactory:
         """Return all versions for blueprint_id sorted by semver."""
         rows = self._conn.execute(
             "SELECT blueprint_id, version, name, domain, capabilities_json,"
-            " skills_json, workflows_json, prompts_json, prompt_params_json,"
+            " capability_ceilings_json, skills_json, workflows_json,"
+            " prompts_json, prompt_params_json,"
             " prompt_override, creator, status, approver, evidence,"
             " runtime_agent_id, created_at, updated_at"
             " FROM blueprints WHERE blueprint_id = ?",
@@ -912,6 +972,7 @@ class AgentFactory:
             name,
             domain,
             caps_j,
+            cc_j,
             sk_j,
             wf_j,
             pr_j,
@@ -927,6 +988,7 @@ class AgentFactory:
         ) = row
         try:
             caps = tuple(json.loads(caps_j))
+            ceilings_j = tuple(json.loads(cc_j))
             skills = tuple(tuple(r) for r in json.loads(sk_j))
             wfs = tuple(tuple(r) for r in json.loads(wf_j))
             prompts = tuple(tuple(r) for r in json.loads(pr_j))
@@ -937,12 +999,17 @@ class AgentFactory:
             norm_caps = _normalize_caps(list(caps), None)
         except ValueError as exc:
             raise ValueError(f"corrupt blueprint capabilities: {exc}") from None
+        try:
+            ceilings = _normalize_ceilings(ceilings_j, norm_caps)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"corrupt blueprint ceilings: {exc}") from None
         return Blueprint(
             blueprint_id=bid,
             version=ver,
             name=name,
             domain=domain,
             capabilities=norm_caps,
+            capability_ceilings=ceilings,
             skill_refs=skills,
             workflow_refs=wfs,
             prompt_refs=prompts,
