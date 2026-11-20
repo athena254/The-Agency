@@ -22,6 +22,7 @@ uvicorn agency.api.server:app --host 0.0.0.0 --port 8000
 | `AGENCY_LLM_PROVIDER` | `agency.config.settings` | `openai`, `anthropic`, `ollama`, … |
 | `AGENCY_LLM_MODEL` | `agency.config.settings` | model id |
 | `AGENCY_LLM_API_KEY` | `agency.config.settings` | required unless provider is keyless (`ollama`) |
+| `AGENCY_GOOGLE_API_KEY` (or `GOOGLE_API_KEY` / `GEMINI_API_KEY`) | `agency.llm.config` / `agency.config.keys` | Google Gemini provider; accepts `AIza`/`AQ.` prefixed keys. `AGENCY_LLM_API_KEY` also works. |
 | `AGENCY_LLM_BASE_URL` | `agency.config.settings` | custom OpenAI-compatible endpoint |
 | `AGENCY_LOG_LEVEL` | `agency.config.settings` | default `INFO` |
 | `AGENCY_EVIDENCE_DB` | `api/server.py` | SQLite path; default `:memory:` |

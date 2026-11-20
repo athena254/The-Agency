@@ -16,6 +16,7 @@ import re
 
 import structlog
 
+from agency.memory.sms.embedder import Embedder
 from agency.memory.sms.models import MemoryItem, utc_now
 from agency.memory.sms.store import MemoryStore
 
@@ -89,10 +90,12 @@ def build_fts_match(query: str) -> str:
 
 
 class RetrievalEngine:
-    """Search across agent memory using FTS, graph, or both."""
+    """Search across agent memory using embeddings (free Lattice model), FTS, or both."""
 
-    def __init__(self, store: MemoryStore) -> None:
+    def __init__(self, store: MemoryStore, embedder: Embedder | None = None) -> None:
+        """Create an engine for ``store``; ``embedder`` overrides the store's own."""
         self._store = store
+        self._embedder = embedder
 
     async def semantic_search(
         self,
@@ -100,11 +103,24 @@ class RetrievalEngine:
         agent_id: str | None = None,
         limit: int = DEFAULT_LIMIT,
     ) -> list[MemoryItem]:
-        """Full-text search ranked by BM25, with a local fallback."""
-        match = build_fts_match(query)
+        """Embedding-similarity search over SMS memory, with an FTS fallback."""
         results: list[MemoryItem] = []
-        if match:
-            results = await self._store.search_fts(match, agent_id=agent_id, limit=limit)
+        embedder = self._embedder or self._store.embedder
+        if embedder is not None:
+            try:
+                query_vector = await embedder(query)
+                results = await self._store.search_vectors(
+                    query_vector, agent_id=agent_id, limit=limit
+                )
+            except Exception:  # noqa: BLE001 — embeddings are best-effort; FTS remains available
+                logger.debug("retrieval.vector_search_unavailable", agent_id=agent_id)
+                results = []
+
+        # Fallback: FTS when the embedding path is unavailable or returns nothing.
+        if not results:
+            match = build_fts_match(query)
+            if match:
+                results = await self._store.search_fts(match, agent_id=agent_id, limit=limit)
 
         # Fallback: substring scan when FTS returns nothing.
         if not results:

@@ -300,6 +300,16 @@
       "provenance": "builtin:agency-factory/segments/agency-l0-scope"
     },
     {
+      "id": "agency-forge-orchestrator",
+      "version": "1.0.0",
+      "name": "Forge Orchestrator",
+      "description": "Blacksmith role segment: manages Forge builds, never writes code, human ship authority.",
+      "domain": "forge",
+      "kind": "SEGMENT",
+      "file": "segments/agency-forge-orchestrator.md",
+      "provenance": "builtin:agency-factory/segments/agency-forge-orchestrator"
+    },
+    {
       "id": "reap-core-methodology",
       "version": "1.0.0",
       "name": "REA Investigation Methodology",

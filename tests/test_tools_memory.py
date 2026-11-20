@@ -39,15 +39,12 @@ async def test_query_with_text_finds_stored_item(file_memory_store: MemoryStore)
     assert set(result.output[0]) == {"id", "content", "tier", "agent_id", "created_at"}
 
 
-async def test_query_with_agent_id_lists_items(file_memory_store: MemoryStore):
+async def test_query_with_agent_id_in_legacy_mode_is_rejected(file_memory_store: MemoryStore):
     await file_memory_store.store(MemoryItem(agent_id="agent-7", content="first note"))
-    await file_memory_store.store(MemoryItem(agent_id="agent-7", content="second note"))
-    await file_memory_store.store(MemoryItem(agent_id="other", content="unrelated"))
     tool = MemoryQueryTool()
     result = await tool.run({"agent_id": "agent-7"}, _ctx(file_memory_store))
-    assert result.ok is True
-    assert len(result.output) == 2
-    assert all(item["agent_id"] == "agent-7" for item in result.output)
+    assert result.ok is False
+    assert "agent_id" in (result.error or "")
 
 
 async def test_query_requires_query_or_agent_id(file_memory_store: MemoryStore):

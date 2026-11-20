@@ -7,8 +7,8 @@ rules; tool gaps go to Forge; every step appends to ProofBundle.
 
 from __future__ import annotations
 
-import hashlib
 from contextlib import suppress
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -19,8 +19,9 @@ from agency.autonomy.decisions import decide
 from agency.autonomy.proof import ProofBundle
 from agency.autonomy.router import assign_task
 from agency.autonomy.spawner import decide_spawn
-from agency.autonomy.toolforge import can_self_publish, decide_tool_gap
+from agency.autonomy.toolforge import decide_tool_gap
 from agency.factory.service import AgentFactory
+from agency.forge.orchestration import BlacksmithOps
 from agency.kernel.identity import Agent, Capability
 
 
@@ -69,8 +70,16 @@ def run_autonomous(
     required_tools: list[str] | None = None,
     budget: int = 10,
     factory: AgentFactory | None = None,
+    ops: BlacksmithOps | None = None,
+    tool_specs: dict[str, tuple[str, str]] | None = None,
+    tool_registry: Any = None,
 ) -> RunResult:
-    """Run one autonomous task: plan, assign/spawn, forge gaps, prove."""
+    """Run one autonomous task: plan, assign/spawn, forge gaps, prove.
+
+    Tool gaps are built for real through ``ops`` (BlacksmithOps) when both a
+    manager and an explicit ``(code, tests)`` spec are supplied; otherwise the
+    gap is recorded as ``build_blocked``. No simulated builds or publications.
+    """
     proof = ProofBundle()
     graph = planner.plan(task)
     proof.append(
@@ -90,6 +99,13 @@ def run_autonomous(
         if d.spawn:
             if "forge" in d.capabilities and factory is not None:
                 agent_id: str | None = activate_blacksmith(factory)
+                assigned_graph = planner.get_plan(graph.plan_id)
+                assigned_sub = (
+                    assigned_graph.get(a.subtask_id) if assigned_graph is not None else None
+                )
+                if agent_id is not None and assigned_sub is not None:
+                    with suppress(ValueError, KeyError):
+                        planner.assign_subtask(agent_id, assigned_sub, plan_id=graph.plan_id)
             else:
                 agent_id = _spawn_agent(
                     registry, planner, graph.plan_id, a.subtask_id, d.capabilities
@@ -158,10 +174,30 @@ def run_autonomous(
         gaps.append({"tool": t, "action": g.action, "rule": g.rule_id})
         proof.append("forge", g.rule_id, {"tool": t, "action": g.action})
         if g.action == "BUILD":
-            digest = hashlib.sha256(t.encode()).hexdigest()
-            published = can_self_publish("PASS", digest, digest)
+            spec = (tool_specs or {}).get(t)
+            if ops is None:
+                proof.append(
+                    "forge", "build_blocked", {"tool": t, "reason": "no forge ops configured"}
+                )
+                continue
+            if spec is None:
+                proof.append(
+                    "forge", "build_blocked", {"tool": t, "reason": "no build spec supplied"}
+                )
+                continue
+            code, tests = spec
+            result = ops.build_tool_job(t, code, tests, tool_registry)
             proof.append(
-                "forge", "self_publish", {"tool": t, "published": published, "sha256": digest}
+                "forge",
+                "self_publish",
+                {
+                    "tool": t,
+                    "published": result.gate == "PASS",
+                    "registered": result.registered,
+                    "gate": result.gate,
+                    "report_id": result.report_id,
+                    "sha256": result.sha256,
+                },
             )
     object.__setattr__(
         proof,

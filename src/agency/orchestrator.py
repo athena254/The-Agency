@@ -43,6 +43,7 @@ from agency.evidence.store.models import (
     VerificationState,
 )
 from agency.evidence.store.store import EvidenceStore
+from agency.forge.orchestration import BlacksmithOps, JobState
 from agency.kernel.audit import AuditEntry, AuditLog
 from agency.kernel.identity import Agent, Capability, TrustLevel
 from agency.kernel.policies import ActionClass, Permission, PolicyEngine
@@ -51,6 +52,7 @@ from agency.kernel.tasks import Task, TaskManager, TaskStatus
 from agency.lattice import LatticeLease, acquire_lattice
 from agency.lattice.api import Lattice
 from agency.llm.adapter import LLMAdapter
+from agency.memory.sms.embedder import default_embedder
 from agency.memory.sms.lifecycle import TieredMemoryEngine
 from agency.memory.sms.models import MemoryItem, MemoryTier
 from agency.memory.sms.retrieval import RetrievalEngine
@@ -141,8 +143,10 @@ class AgencyOrchestrator:
         memory_db_path: str | None = None,
         skill_db_path: str | None = None,
         skill_operations: OperationRegistry | None = None,
+        blacksmith_ops: BlacksmithOps | None = None,
     ) -> None:
         self._config = config or {}
+        self._blacksmith_ops = blacksmith_ops
         self._log = structlog.get_logger(__name__)
 
         # LLM — shared adapter for all agent execution. Falls back to
@@ -183,7 +187,8 @@ class AgencyOrchestrator:
         self._memory_store = MemoryStore(
             db_path=memory_db_path
             if memory_db_path is not None
-            else (self._config.get("memory_db_path") or _DEFAULT_MEMORY_DB)
+            else (self._config.get("memory_db_path") or _DEFAULT_MEMORY_DB),
+            embedder=default_embedder(),
         )
         self._memory_lifecycle = TieredMemoryEngine(self._memory_store)
         self._memory_retrieval = RetrievalEngine(self._memory_store)
@@ -389,6 +394,14 @@ class AgencyOrchestrator:
 
         self._log.info("agent_registered", agent_id=agent.id, name=name, domain=domain)
         return agent
+
+    def _agent_model(self, agent: Agent | None) -> str | None:
+        """Per-agent model override from ``Agent.metadata["model"]``, if set."""
+
+        if agent is None:
+            return None
+        value = (agent.metadata or {}).get("model")
+        return value if isinstance(value, str) and value else None
 
     async def resolve_agent_proposal(
         self,
@@ -658,6 +671,12 @@ class AgencyOrchestrator:
         if task is None:
             raise ValueError(f"Task not found: {task_id}")
 
+        agent_model: str | None = None
+        if task.created_by:
+            agent_model = self._agent_model(self._identity_registry.get(task.created_by))
+        if agent_model:
+            context = {**(context or {}), "model": agent_model}
+
         # Update status
         await self._task_manager.update_status(task_id, TaskStatus.RUNNING)
 
@@ -670,6 +689,75 @@ class AgencyOrchestrator:
                 if task.status is TaskStatus.RUNNING:
                     await self._task_manager.update_status(task_id, TaskStatus.FAILED)
             raise
+
+    async def _execute_forge(self, task: Task) -> ExecutionResult:
+        """Forge-domain work is managed by BlacksmithOps — never the chat path.
+
+        Submits one bounded job and dispatches it through the real Forge
+        pipeline. PASS lands in the merge queue awaiting human approval;
+        missing configuration fails honestly instead of falling back to chat.
+        """
+        task_id = task.task_id
+        description = task.input.get("description", task.title)
+        ops = self._blacksmith_ops
+        reason = ""
+        if ops is None:
+            reason = "forge ops not configured; build not dispatched"
+        elif not self._config.get("forge_repo"):
+            reason = "no forge_repo configured; build not dispatched"
+        if reason:
+            await self._task_manager.update_status(task_id, TaskStatus.FAILED)
+            return ExecutionResult(
+                task_id=task_id,
+                status=ExecutionStatus.FAILED,
+                output=reason,
+                error="forge_not_configured",
+                attempts=0,
+                duration_s=0.0,
+            )
+        assert ops is not None
+        repo = str(self._config["forge_repo"])
+        test_paths = tuple(str(p) for p in self._config.get("forge_test_paths", ()))
+        job = ops.submit(task.title, description, repo, test_paths=test_paths)
+        done = ops.dispatch_next()
+        if done is None:
+            done = ops.get(job.job_id)
+        passed = done.state in (JobState.PASSED, JobState.AWAITING_HUMAN)
+        output = (
+            f"forge job {done.job_id}: {done.state.value}; gate={done.gate or 'n/a'}; "
+            f"report={done.report_id or 'n/a'}"
+        )
+        if done.failure_detail:
+            output += f"; detail={done.failure_detail}"
+        if done.state is JobState.AWAITING_HUMAN:
+            output += "; awaiting human ship approval"
+        await self._audit_log.append(
+            AuditEntry(
+                timestamp=datetime.now(UTC),
+                agent=task.created_by,
+                task=task_id,
+                target=task.title,
+                authorization="policy_engine",
+                capability="execute",
+                action="forge_dispatch",
+                result=done.state.value,
+                evidence={"job_id": done.job_id, "report_id": done.report_id},
+                model="blacksmith",
+                model_version="0.1.0",
+                tool_version="0.1.0",
+                environment={"name": "default"},
+            )
+        )
+        await self._task_manager.update_status(
+            task_id, TaskStatus.COMPLETED if passed else TaskStatus.FAILED
+        )
+        return ExecutionResult(
+            task_id=task_id,
+            status=ExecutionStatus.COMPLETED if passed else ExecutionStatus.FAILED,
+            output=output,
+            attempts=done.attempts,
+            duration_s=0.0,
+        )
 
     async def _execute_running(
         self,
@@ -707,6 +795,10 @@ class AgencyOrchestrator:
             system_context = f"{issued_prompt}\n\n{system_context}"
         tool_driver = self._tool_driver
         tool_capable = agent_domain in TOOL_CAPABLE_DOMAINS and tool_driver is not None
+        if agent_domain == "forge":
+            # The Blacksmith manages builds through BlacksmithOps; forge work
+            # never takes the conversational LLM path.
+            return await self._execute_forge(task)
         if tool_capable:
             assert tool_driver is not None
             if issued_prompt:
@@ -807,10 +899,18 @@ class AgencyOrchestrator:
             )
 
         for subtask in graph.subtasks if not tool_capable else []:
-            # Execute
+            # Execute. Forward only ExecutionContext knobs (the per-agent model
+            # override); caller context also carries prompt-side data such as
+            # memory_context/sender, which the strict ExecutionContext forbids.
+            exec_context: dict[str, Any] = {
+                "agent_id": task.created_by,
+                "subtask_id": subtask.subtask_id,
+            }
+            if context and context.get("model"):
+                exec_context["model"] = context["model"]
             exec_result = await self._executor.execute(
                 task=system_context,
-                context={"agent_id": task.created_by, "subtask_id": subtask.subtask_id},
+                context=exec_context,
                 task_id=task_id,
             )
 
@@ -1048,9 +1148,13 @@ class AgencyOrchestrator:
         issued_prompt = issued_system_prompt(agent)
         if issued_prompt:
             system_context = f"{issued_prompt}\n\n{system_context}"
+        exec_context: dict[str, Any] = {"agent_id": agent_id}
+        agent_model = self._agent_model(agent)
+        if agent_model:
+            exec_context["model"] = agent_model
         result = await self._executor.execute(
             task=system_context,
-            context={"agent_id": agent_id},
+            context=exec_context,
         )
         output = render_output(result.output)
         status = result.status

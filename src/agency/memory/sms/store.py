@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 from datetime import datetime, timedelta
 from typing import Any, Self
 
 import aiosqlite
 import structlog
 
+from agency.memory.sms.embedder import Embedder
 from agency.memory.sms.models import (
     MemoryItem,
     MemoryQuery,
@@ -40,7 +42,8 @@ CREATE TABLE IF NOT EXISTS memory_items (
     created_at  TEXT NOT NULL,
     accessed_at TEXT NOT NULL,
     importance  REAL NOT NULL DEFAULT 0.5,
-    tags        TEXT NOT NULL DEFAULT '[]'
+    tags        TEXT NOT NULL DEFAULT '[]',
+    embedding   TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_memory_items_agent    ON memory_items(agent_id);
@@ -55,7 +58,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
 );
 """
 
-_ITEM_COLUMNS = "id, agent_id, content, tier, created_at, accessed_at, importance, tags"
+_ITEM_COLUMNS = "id, agent_id, content, tier, created_at, accessed_at, importance, tags, embedding"
 
 _DEMOTE_CASE = """
 CASE tier
@@ -87,7 +90,21 @@ def _row_to_item(row: aiosqlite.Row) -> MemoryItem:
         accessed_at=_parse_datetime(row["accessed_at"]),
         importance=float(row["importance"]),
         tags=json.loads(tags_raw) if tags_raw else [],
+        embedding=json.loads(row["embedding"]) if row["embedding"] else None,
     )
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Cosine similarity in [-1, 1]; 0.0 when a norm is zero or lengths differ."""
+
+    if len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return float(dot / (norm_a * norm_b))
 
 
 class MemoryStore:
@@ -111,9 +128,11 @@ class MemoryStore:
         db_path: str = ":memory:",
         *,
         aging_threshold: timedelta = DEFAULT_AGING_THRESHOLD,
+        embedder: Embedder | None = None,
     ) -> None:
         self._db_path = db_path
         self._aging_threshold = aging_threshold
+        self._embedder = embedder
         self._conn: aiosqlite.Connection | None = None
         self._initialized = False
         self._init_lock = asyncio.Lock()
@@ -137,6 +156,12 @@ class MemoryStore:
     def db_path(self) -> str:
         return self._db_path
 
+    @property
+    def embedder(self) -> Embedder | None:
+        """The embedder used for semantic retrieval, if configured."""
+
+        return self._embedder
+
     async def initialize(self) -> None:
         """Open the connection and create the schema (idempotent)."""
 
@@ -150,9 +175,19 @@ class MemoryStore:
             await self._conn.execute("PRAGMA journal_mode=WAL")
             await self._conn.execute("PRAGMA busy_timeout=5000")
             await self._conn.executescript(_SCHEMA)
+            await self._migrate_embedding_column()
             await self._conn.commit()
             self._initialized = True
             logger.info("memory_store.initialized", db_path=self._db_path)
+
+    async def _migrate_embedding_column(self) -> None:
+        """Add ``memory_items.embedding`` to databases created before SMS embeddings."""
+
+        cursor = await self.connection.execute("PRAGMA table_info(memory_items)")
+        columns = {row["name"] for row in await cursor.fetchall()}
+        if "embedding" not in columns:
+            await self.connection.execute("ALTER TABLE memory_items ADD COLUMN embedding TEXT")
+            await self.connection.commit()
 
     async def close(self) -> None:
         """Close the connection. Safe to call more than once."""
@@ -169,10 +204,16 @@ class MemoryStore:
         await self.initialize()
         conn = self.connection
         tags_json = json.dumps(item.tags)
+        embedding: list[float] | None
+        if item.embedding is not None:
+            embedding = item.embedding
+        else:
+            embedding = await self._embed_text(item.content)
+        embedding_json = json.dumps(embedding) if embedding is not None else None
         await conn.execute(
             f"""
             INSERT INTO memory_items ({_ITEM_COLUMNS})
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 agent_id    = excluded.agent_id,
                 content     = excluded.content,
@@ -180,7 +221,8 @@ class MemoryStore:
                 created_at  = excluded.created_at,
                 accessed_at = excluded.accessed_at,
                 importance  = excluded.importance,
-                tags        = excluded.tags
+                tags        = excluded.tags,
+                embedding   = excluded.embedding
             """,
             (
                 item.id,
@@ -191,6 +233,7 @@ class MemoryStore:
                 item.accessed_at.isoformat(),
                 item.importance,
                 tags_json,
+                embedding_json,
             ),
         )
         await conn.execute("DELETE FROM memory_fts WHERE item_id = ?", (item.id,))
@@ -360,6 +403,40 @@ class MemoryStore:
         async with self.connection.execute(sql, params) as cursor:
             rows = await cursor.fetchall()
         return [_row_to_item(row) for row in rows]
+
+    async def search_vectors(
+        self,
+        query_vector: list[float],
+        *,
+        agent_id: str | None = None,
+        limit: int = 10,
+    ) -> list[MemoryItem]:
+        """Cosine-ranked items that have embeddings, best first."""
+
+        await self.initialize()
+        scored: list[tuple[float, MemoryItem]] = []
+        async with self.connection.execute(
+            "SELECT * FROM memory_items WHERE embedding IS NOT NULL"
+        ) as cursor:
+            rows = await cursor.fetchall()
+        for row in rows:
+            if agent_id is not None and row["agent_id"] != agent_id:
+                continue
+            similarity = _cosine_similarity(query_vector, json.loads(row["embedding"]))
+            scored.append((similarity, _row_to_item(row)))
+        scored.sort(key=lambda entry: entry[0], reverse=True)
+        return [item for _, item in scored[:limit]]
+
+    async def _embed_text(self, text: str) -> list[float] | None:
+        """Best-effort text embedding; ``None`` when no embedder is configured."""
+
+        if self._embedder is None:
+            return None
+        try:
+            return await self._embedder(text)
+        except Exception:  # noqa: BLE001 — embeddings are best-effort; FTS remains available
+            logger.warning("memory_store.embed_failed")
+            return None
 
     async def auto_age(self) -> int:
         """Demote every item untouched for :data:`DEFAULT_AGING_THRESHOLD`.

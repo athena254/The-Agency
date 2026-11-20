@@ -87,6 +87,7 @@ class MemoryItem(BaseModel):
     accessed_at: datetime = Field(default_factory=utc_now)
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     tags: list[str] = Field(default_factory=list)
+    embedding: list[float] | None = Field(default=None, repr=False)
 
     @field_validator("created_at", "accessed_at")
     @classmethod

@@ -100,6 +100,16 @@ class MemoryQueryTool:
                 error="query or agent_id required",
                 duration_ms=int((time.perf_counter() - start) * 1000),
             )
+        if normalized_agent_id is not None:
+            return ToolResult(
+                tool="memory_query",
+                ok=False,
+                error=(
+                    "agent_id is not permitted in legacy mode: the legacy memory "
+                    "runtime is not tenant-safe (see memory.py docstring)"
+                ),
+                duration_ms=int((time.perf_counter() - start) * 1000),
+            )
         try:
             if has_query:
                 assert isinstance(query, str)

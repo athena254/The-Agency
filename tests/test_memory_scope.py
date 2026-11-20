@@ -125,12 +125,16 @@ async def test_scoped_tools_require_a_scope(test_memory_store: MemoryStore) -> N
     assert write.ok is False and "scope" in (write.error or "")
 
 
-async def test_legacy_unscoped_tool_path_is_unchanged(
+async def test_legacy_unscoped_tool_rejects_caller_agent_id(
     test_memory_store: MemoryStore,
 ) -> None:
     await test_memory_store.store(MemoryItem(agent_id="agent-1", content="legacy note"))
     ctx = ToolContext(agent_id="agent-1", task_id="task-1", memory_store=test_memory_store)
     listed = await MemoryQueryTool().run({"agent_id": "agent-1"}, ctx)
-    assert listed.ok is True and len(listed.output) == 1
+    assert listed.ok is False
+    assert "agent_id" in (listed.error or "")
+    # Owner-side (principal-bound) query still works in legacy mode.
+    listed = await MemoryQueryTool().run({"query": "legacy"}, ctx)
+    assert listed.ok is True
     written = await MemoryWriteTool().run({"content": "another"}, ctx)
     assert written.ok is True

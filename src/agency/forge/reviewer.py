@@ -333,6 +333,7 @@ def _llm_review_one_round(
     test_paths: list[str] | None,
     test_timeout_s: int,
     run_tests_flag: bool,
+    tests_report: Any = None,
 ) -> tuple[int, list[ReviewFinding], str]:
     """Run one LLM review round. Raise :class:`_LLMReviewError` on any failure.
 
@@ -372,8 +373,15 @@ def _llm_review_one_round(
                         "msg": lf.message,
                     }
                 )
-        tests_info = "not_run"
-        if run_tests_flag and test_paths:
+        tests_info: Any = "not_run"
+        if tests_report is not None:
+            # Real results from the pipeline's tests sub-gate, not a re-run.
+            tests_info = {
+                "gate": tests_report.gate,
+                "returncode": tests_report.returncode,
+                "summary": (tests_report.stdout or "")[-500:],
+            }
+        elif run_tests_flag and test_paths:
             try:
                 tr = run_tests(root, test_paths, timeout_s=test_timeout_s)
                 tests_info = tr.gate
@@ -452,7 +460,13 @@ def _llm_review_one_round(
             )
         )
 
-    tests_note = "tests_run" if (run_tests_flag and test_paths) else "tests_not_run"
+    tests_ran = tests_report is not None or bool(run_tests_flag and test_paths)
+    if tests_ran:
+        # The LLM may not claim tests were skipped when real results were supplied.
+        llm_findings = [
+            f for f in llm_findings if f.rule_id.lower() not in {"tests-not-run", "tests_not_run"}
+        ]
+    tests_note = "tests_run" if tests_ran else "tests_not_run"
     return score, llm_findings, tests_note
 
 
@@ -467,10 +481,15 @@ def build_review_llm() -> Any | None:
     try:
         from agency.llm.adapter import LLMAdapter
         from agency.llm.config import ProviderKind, load_config
+        from agency.llm.serious_models import serious_model
 
         config = load_config()
         if config.provider is ProviderKind.ECHO:
             return None
+        if config.provider is ProviderKind.GOOGLE:
+            # Serious-work models are Gemini models; only override the model
+            # when the configured provider is Google, never for other backends.
+            config = config.model_copy(update={"model": serious_model()})
         return LLMAdapter(config=config)
     except Exception:  # noqa: BLE001
         logger.warning("forge.review_llm_unavailable")
@@ -489,6 +508,7 @@ def run_review(
     run_tests_flag: bool = False,
     llm: Any = None,
     use_llm: bool = False,
+    tests_report: Any = None,
     **kwargs: Any,
 ) -> ReviewReport:
     real_root = _resolve_root(root)
@@ -529,7 +549,13 @@ def run_review(
         if llm_requested:
             try:
                 score, findings, _ = _llm_review_one_round(
-                    llm, real_root, changed_paths, test_paths, test_timeout_s, run_tests_flag
+                    llm,
+                    real_root,
+                    changed_paths,
+                    test_paths,
+                    test_timeout_s,
+                    run_tests_flag,
+                    tests_report=tests_report,
                 )
                 used_llm = True
             except _LLMReviewError:
@@ -578,7 +604,7 @@ def run_review(
     caveats = list(CAVEATS)
     if used_llm:
         caveats = [c for c in caveats if c != "heuristic_review"]
-    if run_tests_flag:
+    if run_tests_flag or tests_report is not None:
         caveats = [c for c in caveats if c != "tests_not_run"]
 
     note = (
