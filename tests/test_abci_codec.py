@@ -59,8 +59,8 @@ def test_varint_roundtrip_and_bounds() -> None:
 
 def test_echo_response_exact_bytes() -> None:
     encoded = encode_response(ResponseEcho("abci_example"))
-    assert encoded == bytes.fromhex("0a0c616263695f6578616d706c65")
-    assert encoded.hex(" ") == "0a 0c 61 62 63 69 5f 65 78 61 6d 70 6c 65"
+    assert encoded == bytes.fromhex("120c616263695f6578616d706c65")
+    assert encoded.hex(" ") == "12 0c 61 62 63 69 5f 65 78 61 6d 70 6c 65"
 
 
 def test_decode_request_echo_exact_vector() -> None:
@@ -87,7 +87,7 @@ def test_decode_finalize_block_with_header_and_unknown_fields() -> None:
         + encode_message_field(2, header_body)
         + encode_message_field(4, b"\xaa" * 32)
     )
-    envelope = decode_request(encode_message_field(12, body))
+    envelope = decode_request(encode_message_field(20, body))
     assert envelope.kind == "finalize_block"
     finalize = envelope.finalize_block
     assert finalize is not None
@@ -124,7 +124,7 @@ def test_response_roundtrip_stability() -> None:
             consensus_param_updates=b"\x1a\x02cd",
             app_hash=b"\xef" * 32,
         ),
-        ResponseCommit(b"", 0),
+        ResponseCommit(retain_height=0),
         ResponseException("boom"),
     )
     for response in responses:
@@ -141,8 +141,8 @@ def test_finalize_block_response_shape() -> None:
     )
     encoded = encode_response(response)
     field_number, payload = split_frame(encoded)
-    assert field_number == 12
-    assert encoded[0] == 0x62
+    assert field_number == 21
+    assert encoded[0] == 0xaa
     decoded = decode_finalize_payload(payload)
     assert len(decoded.tx_results) == 2
     assert decoded.tx_results[0].code == 0
@@ -154,10 +154,10 @@ def test_finalize_block_response_shape() -> None:
 
 
 def test_commit_response_and_flush() -> None:
-    commit = encode_response(ResponseCommit(data=b"", retain_height=0))
-    assert commit == bytes.fromhex("5a00")
+    commit = encode_response(ResponseCommit(retain_height=0))
+    assert commit == bytes.fromhex("6200")
     flush = encode_response(ResponseFlush())
-    assert flush == bytes.fromhex("4a00")
-    field_number, payload = split_frame(encode_response(ResponseCommit(b"payload", 9)))
-    assert field_number == 11
-    assert payload == b"\x0a\x07payload\x10\x09"
+    assert flush == bytes.fromhex("1a00")
+    field_number, payload = split_frame(encode_response(ResponseCommit(retain_height=9)))
+    assert field_number == 12
+    assert payload == b"\x18\x09"

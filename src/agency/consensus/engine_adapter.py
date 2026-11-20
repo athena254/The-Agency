@@ -53,20 +53,17 @@ class EngineAdapter:
         self._consumers = tuple(affected_consumers)
         self._bft_time_ms = bft_time_ms
 
-    def process_block(
+    def process_result(
         self,
-        txs: list[bytes],
+        result: Any,
         ctx: Any,
         actions: Mapping[str, ActionSpec],
         consumer_inputs: Sequence[ConsumerInput],
     ) -> list[ExecutionReport]:
-        result = self._app.finalize_block(txs, ctx)
         reports: list[ExecutionReport] = []
-        for decision in result.decisions:
+        for decision in getattr(result, "decisions", ()):
             if decision.outcome != "passed":
-                reports.append(
-                    ExecutionReport(decision.proposal_id, decision.outcome, None, None, set(), None)
-                )
+                reports.append(ExecutionReport(decision.proposal_id, decision.outcome, None, None, set(), None))
                 continue
 
             spec = actions.get(decision.proposal_id)
@@ -74,11 +71,7 @@ class EngineAdapter:
             snapshot = {"members": [{"consumer_id": c, "kind": "human-consumer"} for c in affected]}
             covered, missing = check_coverage(consumer_inputs, snapshot)
             if not covered:
-                reports.append(
-                    ExecutionReport(
-                        decision.proposal_id, decision.outcome, None, None, missing, None
-                    )
-                )
+                reports.append(ExecutionReport(decision.proposal_id, decision.outcome, None, None, missing, None))
                 continue
 
             issued_at = self._bft_time_ms
@@ -113,12 +106,18 @@ class EngineAdapter:
                 action_outcome = ActionOutcome(True, actuation.value)
 
             self._app.commit()
-            reports.append(
-                ExecutionReport(
-                    decision.proposal_id, decision.outcome, grant, actuation, set(), action_outcome
-                )
-            )
+            reports.append(ExecutionReport(decision.proposal_id, decision.outcome, grant, actuation, set(), action_outcome))
         return reports
+
+    def process_block(
+        self,
+        txs: list[bytes],
+        ctx: Any,
+        actions: Mapping[str, ActionSpec],
+        consumer_inputs: Sequence[ConsumerInput],
+    ) -> list[ExecutionReport]:
+        result = self._app.finalize_block(txs, ctx)
+        return self.process_result(result, ctx, actions, consumer_inputs)
 
     def results_for(self, proposal_id: str) -> list[Any]:
         out: list[Any] = []

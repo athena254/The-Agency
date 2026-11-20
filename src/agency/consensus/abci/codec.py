@@ -82,20 +82,21 @@ _REQ_PREPARE_PROPOSAL: Final = 16  # types.proto:55 Request.prepare_proposal = 1
 _REQ_PROCESS_PROPOSAL: Final = 17  # types.proto:56 Request.process_proposal = 17
 _REQ_EXTEND_VOTE: Final = 18  # types.proto:57 Request.extend_vote = 18
 _REQ_VERIFY_VOTE_EXTENSION: Final = 19  # types.proto:58 verify_vote_extension = 19
-_REQ_FINALIZE_BLOCK: Final = 12  # types.proto:59 Request.finalize_block = 20
+_REQ_FINALIZE_BLOCK: Final = 20 
+  # types.proto:59 Request.finalize_block = 20
 
 # --- Response oneof members (types.proto:200-217, v0.38.26) ------------------
-_RES_EXCEPTION: Final = 22  # types.proto:201 Response.exception = 1
-_RES_ECHO: Final = 1  # types.proto:202 Response.echo = 2
-_RES_FLUSH: Final = 9  # types.proto:203 Response.flush = 3
+_RES_EXCEPTION: Final = 1  # types.proto:201 Response.exception = 1
+_RES_ECHO: Final = 2  # types.proto:202 Response.echo = 2
+_RES_FLUSH: Final = 3  # types.proto:203 Response.flush = 3
 _RES_INFO: Final = 4  # types.proto:204 Response.info = 4
 _RES_INIT_CHAIN: Final = 6  # types.proto:205 Response.init_chain = 6
 _RES_PREPARE_PROPOSAL: Final = 17  # types.proto:213 Response.prepare_proposal = 17
 _RES_PROCESS_PROPOSAL: Final = 18  # types.proto:214 Response.process_proposal = 18
 _RES_EXTEND_VOTE: Final = 19  # types.proto:215 Response.extend_vote = 19
 _RES_VERIFY_VOTE_EXTENSION: Final = 20  # types.proto:216 verify_vote_extension = 20
-_RES_COMMIT: Final = 11  # types.proto:208 Response.commit = 12
-_RES_FINALIZE_BLOCK: Final = 12  # types.proto:217 Response.finalize_block = 21
+_RES_COMMIT: Final = 12  # types.proto:208 Response.commit = 12
+_RES_FINALIZE_BLOCK: Final = 21  # types.proto:217 Response.finalize_block = 21
 
 # --- Inner-message field numbers -------------------------------------------
 TIMESTAMP_SECONDS_FIELD: Final = 1  # google.protobuf.Timestamp.seconds = 1
@@ -285,8 +286,8 @@ class ResponseFinalizeBlock:
 
 @dataclass(frozen=True, slots=True)
 class ResponseCommit:
-    data: bytes = b""  # test-aligned field 1
-    retain_height: int = 0  # test-aligned field 2
+    # types.proto:279-282: fields 1 and 2 are RESERVED (data moved to FinalizeBlock).
+    retain_height: int = 0  # types.proto:281 retain_height = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -620,10 +621,8 @@ def encode_response(response: ResponseEnvelope) -> bytes:
         return encode_message_field(_RES_FINALIZE_BLOCK, _encode_finalize_payload(response))
     if isinstance(response, ResponseCommit):
         out = bytearray()
-        if response.data:
-            out += encode_bytes_field(1, response.data)
         if response.retain_height:
-            out += encode_uint64_field(2, response.retain_height)
+            out += encode_uint64_field(3, response.retain_height)
         return encode_message_field(_RES_COMMIT, bytes(out))
     if isinstance(response, ResponseException):
         body = encode_string_field(1, response.error) if response.error else b""

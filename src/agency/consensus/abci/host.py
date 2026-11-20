@@ -54,6 +54,8 @@ def _ctx(app: AgencyApplication, *, height: int, bft_time_ms: int, chain_id: str
 
 
 class ABCIHost:
+    on_block: Any = None
+
     def __init__(self, app: AgencyApplication, *, host: str = "127.0.0.1", port: int = 0) -> None:
         self._app = app
         self._host = host
@@ -61,6 +63,7 @@ class ABCIHost:
         self._sock: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self.on_block = None
 
     @property
     def port(self) -> int:
@@ -195,13 +198,17 @@ class ABCIHost:
             ctx = _ctx(app, height=height, bft_time_ms=bft, chain_id=chain_id)
             result = app.finalize_block(txs, ctx)
             tx_results = tuple(ExecTxResult(code=0, info="ok") for _ in txs)
+            if self.on_block is not None:
+                try:
+                    self.on_block(result, ctx)
+                except Exception:  # noqa: BLE001, S110
+                    pass
             raw_hash1: object = result.app_hash
             app_hash_bytes = cast(bytes, raw_hash1.encode() if isinstance(raw_hash1, str) else raw_hash1)
             return ResponseFinalizeBlock(tx_results=tx_results, app_hash=app_hash_bytes)
         if kind == "commit":
-            raw_hash2: object = app.commit()
-            app_hash_bytes = cast(bytes, raw_hash2.encode() if isinstance(raw_hash2, str) else raw_hash2)
-            return ResponseCommit(data=app_hash_bytes, retain_height=app.info().last_block_height)
+            app.commit()
+            return ResponseCommit(retain_height=app.info().last_block_height)
         return ResponseException("unknown request kind")
 
 
