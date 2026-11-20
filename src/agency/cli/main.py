@@ -36,7 +36,6 @@ import httpx
 import structlog
 import typer
 from rich.console import Console
-from rich.json import JSON
 from rich.panel import Panel
 from rich.table import Table
 
@@ -142,7 +141,9 @@ def _handle_response(response: httpx.Response) -> Any:
 
 
 def _print_json(data: Any) -> None:
-    console.print(JSON(json.dumps(data, default=str)))
+    # ``--json`` is the machine-readable contract: plain JSON on stdout, no
+    # Rich decoration, so `| python -c "import json;json.load(sys.stdin)"` works.
+    print(json.dumps(data, default=str, indent=2))
 
 
 def _table(title: str, columns: list[str]) -> Table:
