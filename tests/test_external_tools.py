@@ -52,7 +52,9 @@ async def test_driver_dynamically_invokes_web_scrape() -> None:
         spec = ToolSpec(name="web_scrape", description="scrape", parameters={"type": "object"})
 
         async def run(self, args, ctx):
-            return ToolResult(tool="web_scrape", ok=True, output={"text": "hello"}, evidence={"url": args["url"]})
+            return ToolResult(
+                tool="web_scrape", ok=True, output={"text": "hello"}, evidence={"url": args["url"]}
+            )
 
     reg._tools["web_scrape"] = FakeScrape()
     llm = _FakeLLM(
