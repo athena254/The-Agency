@@ -4,7 +4,7 @@ Updated November 20, 2026. **Pre-production prototype; not daily-driver-qualifie
 
 ## Repository and verification
 
-Canonical checkout: `C:/Users/PC/The-Agency` (currently on in-flight `feat/self-improve-forge` at `fb8389f`, 7 commits ahead of local `main` with uncommitted work). Local `main` is at `21c27cf` in the `main-merge-20261119` worktree, 31 commits ahead of `origin/main` and unpushed. The Nov 9 gate numbers below are the recorded prior-checkpoint result; partial Nov 19 and Nov 20 re-checks are recorded in "Verification and known limitations". No push, release, deployment, beta enablement, daemon launch or real-resource authority is implied by this document alone.
+Canonical checkout: `C:/Users/PC/The-Agency` (currently on in-flight `feat/self-improve-forge` at `fb8389f`, 7 commits ahead of local `main` with uncommitted work). Local `main` is checked out in the `main-merge-20261119` worktree and is ahead of `origin/main` (unpushed); see `git log` for the current tip. The Nov 9 gate numbers below are the recorded prior-checkpoint result; partial Nov 19 and Nov 20 re-checks are recorded in "Verification and known limitations". No push, release, deployment, beta enablement, daemon launch or real-resource authority is implied by this document alone.
 
 Gates at this revision:
 
