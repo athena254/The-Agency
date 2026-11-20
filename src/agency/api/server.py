@@ -49,6 +49,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from agency import __version__
 from agency.agents.coding_bootstrap import bootstrap_coding_agent
 from agency.agents.registry import AgentRegistry as RuntimeAgentRegistry
+from agency.api.auth import TokenRegistry
 from agency.api.routers import agents as agents_router
 from agency.api.routers import bridges as bridges_router
 from agency.api.routers import evidence as evidence_router
@@ -60,14 +61,21 @@ from agency.bridges.coordinator import ExternalCoordinator
 from agency.evidence.store.store import EvidenceStore
 from agency.factory.service import AgentFactory
 from agency.kernel.registry import AgentRegistry
+from agency.kernel.task_store import TaskStore
 from agency.kernel.tasks import TaskManager
 from agency.lattice import LatticeLease, acquire_lattice
 from agency.memory.sms.retrieval import RetrievalEngine
 from agency.memory.sms.store import MemoryStore
+from agency.orchestrator import AgencyOrchestrator
 from agency.risk.engine.engine import RiskEngine
 from agency.risk.engine.models import RiskCategory, RiskModel
 
 log = structlog.get_logger(__name__)
+
+# Paths served to authenticated callers (see agency.api.auth). The middleware
+# below refuses to route them when no token file is configured (fail closed);
+# fine-grained auth + scopes are enforced by the router dependencies.
+ENABLED_AUTHED_PREFIXES = ("/v1/tasks",)
 
 
 # --------------------------------------------------------------------------- #
@@ -125,9 +133,12 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     """Own one local Lattice lease and roll back every allocated store."""
     evidence_store: EvidenceStore | None = None
     memory_store: MemoryStore | None = None
+    task_store: TaskStore | None = None
+    orchestrator: AgencyOrchestrator | None = None
     lease: LatticeLease | None = None
     primary: BaseException | None = None
     state_names = (
+        "task_store",
         "task_manager",
         "agent_registry",
         "runtime_registry",
@@ -138,11 +149,20 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         "memory_store",
         "memory_retrieval",
         "lattice",
+        "orchestrator",
     )
     for name in state_names:
         setattr(application.state, name, None)
     try:
-        application.state.task_manager = TaskManager()
+        task_store = TaskStore(_database_path("AGENCY_TASKS_DB", "data/tasks.db"))
+        await task_store.initialize()
+        application.state.task_store = task_store
+        if os.environ.get("AGENCY_TASKS_RECOVER", "").strip() == "1":
+            requeued = await task_store.requeue_running(note="requeued after restart")
+            if requeued:
+                log.info("api.tasks_recovered", requeued=requeued)
+
+        application.state.task_manager = TaskManager(task_store)
         application.state.agent_registry = AgentRegistry()
         application.state.runtime_registry = RuntimeAgentRegistry()
         application.state.risk_engine = RiskEngine()
@@ -160,6 +180,13 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         # Record ownership before exposing the borrowed handle or running hooks.
         lease = await acquire_lattice()
         application.state.lattice = lease.lattice
+
+        # Full execution stack: the dispatcher inside the orchestrator drains
+        # the shared task queue (same file as the butler server), so tasks
+        # submitted over this API actually execute in parallel.
+        orchestrator = AgencyOrchestrator()
+        application.state.orchestrator = orchestrator
+        await orchestrator.start()
 
         kernel_registry = getattr(application.state, "agent_registry", None)
         if kernel_registry is None:
@@ -229,12 +256,16 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         async def cleanup() -> BaseException | None:
             error: BaseException | None = None
             closers = []
+            if orchestrator is not None:
+                closers.append(orchestrator.stop)
             if lease is not None:
                 closers.append(lease.release)
             if evidence_store is not None:
                 closers.append(evidence_store.close)
             if memory_store is not None:
                 closers.append(memory_store.close)
+            if task_store is not None:
+                closers.append(task_store.close)
             for close in closers:
                 try:
                     await close()
@@ -270,11 +301,17 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Owner-issued bearer tokens (agency.api.auth). ``None`` keeps every
+    # authed route at 503 — the default-deny posture is unchanged.
+    application.state.token_registry = TokenRegistry.from_env()
 
     @application.middleware("http")
     async def deny_unverified_authority(request: Request, call_next: Any) -> Any:
         # The ASGI path can include root_path when mounted behind a prefix.
-        # Only GET health is public; every other path/method fails closed.
+        # Public: GET health. Enabled + authenticated: ENABLED_AUTHED_PREFIXES
+        # (route dependencies authenticate; the middleware refuses to route
+        # them at all when no token registry is configured). Everything else
+        # fails closed exactly as before.
         path = request.scope["path"]
         root = request.scope.get("root_path", "")
         if root and path.startswith(root + "/"):
@@ -282,12 +319,17 @@ def create_app() -> FastAPI:
         # Signed ballots carry their own authority (Ed25519 envelope verified
         # by PeerAuthority); they must reach the router to be verified.
         is_ballot = path == "/v1/governance/ballot"
-        if (request.method != "GET" or path != "/v1/health") and not is_ballot:
-            return JSONResponse(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                content={"detail": "Peer authorization is unavailable."},
-            )
-        return await call_next(request)
+        if (request.method == "GET" and path == "/v1/health") or is_ballot:
+            return await call_next(request)
+        if any(
+            path == prefix or path.startswith(prefix + "/")
+            for prefix in ENABLED_AUTHED_PREFIXES
+        ) and getattr(application.state, "token_registry", None) is not None:
+            return await call_next(request)
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "Peer authorization is unavailable."},
+        )
 
     application.include_router(tasks_router.router, prefix="/v1/tasks")
     application.include_router(agents_router.router, prefix="/v1/agents")

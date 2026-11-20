@@ -4,25 +4,33 @@ Tasks are the unit of work in the Agency. A task carries an ordered queue of
 structured :class:`TaskMessage` objects (SPEC §19 — no uncontrolled free-form
 agent-to-agent communication) and transitions through :class:`TaskStatus`.
 
-The :class:`TaskManager` is the deterministic, in-process coordinator for the
-task workflow. It is deliberately async so it can be embedded in the same
-event loop as the audit log.
+The :class:`TaskManager` is the deterministic coordinator for the task
+workflow. It is deliberately async so it can be embedded in the same event
+loop as the audit log. Without a :class:`~agency.kernel.task_store.TaskStore`
+it is purely in-process (in-memory). With a store, SQLite becomes
+authoritative: tasks survive restarts and are visible to every process
+sharing the database file, and ``take_next_pending`` claims are atomic across
+processes.
 """
 
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from dataclasses import dataclass, replace
 from dataclasses import field as dc_field
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agency.kernel.identity import utcnow
+
+if TYPE_CHECKING:
+    from agency.kernel.task_store import TaskStore
 
 
 class TaskStatus(str, Enum):
@@ -106,15 +114,21 @@ class _PendingEntry:
 
 
 class TaskManager:
-    """Coordinates task lifecycle in-process.
+    """Coordinates task lifecycle.
 
-    The manager keeps tasks in memory and orders pending work by priority
-    (high first) with FIFO tie-breaking. All public operations are async and
-    serialized by an internal lock so they are safe to call from any task in
-    the event loop.
+    The manager orders pending work by priority (high first) with FIFO
+    tie-breaking. All public operations are async and serialized by an
+    internal lock so they are safe to call from any task in the event loop.
+
+    With ``store`` set, SQLite is authoritative: tasks persist across
+    restarts, every process sharing the database file sees the same queue,
+    and ``take_next_pending`` claims atomically via the store. Without a
+    store the manager is purely in-memory (original behaviour, used by
+    unit tests and embedded library callers).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, store: TaskStore | None = None) -> None:
+        self._store = store
         self._tasks: dict[str, Task] = {}
         self._pending: list[_PendingEntry] = []
         self._sequence = 0
@@ -162,7 +176,13 @@ class TaskManager:
             if task.task_id in self._tasks:
                 raise ValueError(f"task {task.task_id!r} already exists")
             self._tasks[task.task_id] = task
-            if task.status is TaskStatus.PENDING:
+            if self._store is not None:
+                try:
+                    await self._store.insert_task(task)
+                except sqlite3.IntegrityError as exc:
+                    del self._tasks[task.task_id]
+                    raise ValueError(f"task {task.task_id!r} already exists") from exc
+            if task.status is TaskStatus.PENDING and self._store is None:
                 self._enqueue(task)
         self._log.info(
             "task.created", task_id=task.task_id, created_by=created_by, priority=priority
@@ -170,25 +190,58 @@ class TaskManager:
         return task
 
     async def get_task(self, task_id: str) -> Task | None:
-        """Fetch a task by id, or ``None`` if it does not exist."""
+        """Fetch a task by id, or ``None`` if it does not exist.
+
+        With a store, reads come from SQLite (fresh across processes) and are
+        cached in memory.
+        """
+        if self._store is not None:
+            task = await self._store.get_task(task_id)
+            if task is not None:
+                async with self._lock:
+                    self._tasks.setdefault(task_id, task)
+            return task
         async with self._lock:
             return self._tasks.get(task_id)
 
-    async def list_tasks(self, status: TaskStatus | None = None) -> list[Task]:
-        """Return tasks, optionally filtered by :class:`TaskStatus`.
+    async def list_tasks(
+        self,
+        status: TaskStatus | None = None,
+        created_by: str | None = None,
+    ) -> list[Task]:
+        """Return tasks, optionally filtered by :class:`TaskStatus` and creator.
 
-        Results are ordered by creation time (earliest first).
+        Results are ordered by creation time (earliest first). ``created_by``
+        filters to one submitter's tasks (scoped reads); with a store the
+        filter reflects tasks submitted by every process sharing the file.
         """
+        if self._store is not None:
+            tasks = await self._store.list_tasks(status=status, created_by=created_by)
+            async with self._lock:
+                for task in tasks:
+                    self._tasks.setdefault(task.task_id, task)
+            return tasks
         async with self._lock:
             tasks = list(self._tasks.values())
         if status is not None:
             tasks = [task for task in tasks if task.status is status]
+        if created_by is not None:
+            tasks = [task for task in tasks if task.created_by == created_by]
         return sorted(tasks, key=lambda task: task.created_at)
 
     async def update_status(
-        self, task_id: str, status: TaskStatus, *, error: str | None = None
+        self,
+        task_id: str,
+        status: TaskStatus,
+        *,
+        error: str | None = None,
+        output: dict[str, Any] | None = None,
     ) -> Task:
         """Transition a task into a new lifecycle state.
+
+        ``output`` populates the task's final result payload (written
+        alongside the status change so pollers never observe COMPLETED
+        without its result). ``error`` is recorded when provided.
 
         Raises
         ------
@@ -197,20 +250,34 @@ class TaskManager:
         ValueError:
             On illegal transitions (e.g. COMPLETED -> RUNNING).
         """
+        current = await self.get_task(task_id)
+        if current is None:
+            raise KeyError(f"unknown task {task_id!r}")
+        self._assert_transition(current.status, status)
         async with self._lock:
             task = self._tasks.get(task_id)
-            if task is None:
-                raise KeyError(f"unknown task {task_id!r}")
-            self._assert_transition(task.status, status)
-            self._drop_from_pending(task_id)
-            task.status = status
-            if error is not None:
-                task.error = error
-            task.updated_at = utcnow()
-            if status is TaskStatus.PENDING:
-                self._enqueue(task)
+            if task is not None:
+                self._drop_from_pending(task_id)
+                task.status = status
+                if error is not None:
+                    task.error = error
+                if output is not None:
+                    task.output = output
+                task.updated_at = utcnow()
+                if status is TaskStatus.PENDING and self._store is None:
+                    self._enqueue(task)
+            if self._store is not None:
+                updated = await self._store.update_task(
+                    task_id,
+                    status=status,
+                    error=error,
+                    output=output,
+                    set_error=error is not None,
+                )
+                if not updated:
+                    raise KeyError(f"unknown task {task_id!r}")
         self._log.info("task.status", task_id=task_id, status=status.value)
-        return task
+        return await self.get_task(task_id) or current
 
     # ------------------------------------------------------------------ #
     # Messaging
@@ -222,22 +289,38 @@ class TaskManager:
         If the message uses ``task_id=""`` it is bound to ``task_id`` at
         insert time.
         """
+        current = await self.get_task(task_id)
+        if current is None:
+            raise KeyError(f"unknown task {task_id!r}")
+        bound = message
+        if bound.task_id == "":
+            bound = replace(message, task_id=task_id)
+        else:
+            if bound.task_id != task_id:
+                raise ValueError("message.task_id does not match the target task")
         async with self._lock:
             task = self._tasks.get(task_id)
-            if task is None:
-                raise KeyError(f"unknown task {task_id!r}")
-            bound = message
-            if bound.task_id == "":
-                bound = replace(message, task_id=task_id)
-            else:
-                if bound.task_id != task_id:
-                    raise ValueError("message.task_id does not match the target task")
-            task.add_message(bound)
+            if task is not None:
+                task.add_message(bound)
+            if self._store is not None:
+                await self._store.insert_message(task_id, bound)
         self._log.info("task.message", task_id=task_id, msg_type=bound.type, by=bound.created_by)
         return bound
 
     async def take_next_pending(self) -> Task | None:
-        """Pop the highest-priority pending task, or ``None`` if the queue is empty."""
+        """Pop the highest-priority pending task, or ``None`` if the queue is empty.
+
+        With a store the claim is an atomic SQLite transaction, safe across
+        concurrent dispatcher processes; without one it pops from the
+        in-process priority queue.
+        """
+        if self._store is not None:
+            task = await self._store.claim_next_pending()
+            if task is not None:
+                async with self._lock:
+                    self._tasks[task.task_id] = task
+                self._log.info("task.taken", task_id=task.task_id, priority=task.priority)
+            return task
         async with self._lock:
             if not self._pending:
                 return None
