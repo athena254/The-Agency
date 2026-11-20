@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Send, Square } from 'lucide-react'
+import { Send } from 'lucide-react'
 import { api, type ChatResponse, type SessionResponse } from '../api/client'
 
 interface Message {
@@ -92,7 +92,12 @@ export function IdePage() {
           <span className="mc-value text-[11px] text-text-3">in-session context</span>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto px-5 py-4"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+        >
           {messages.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center text-center">
               <div className="text-sm text-text-2">Start a conversation</div>
@@ -113,7 +118,7 @@ export function IdePage() {
                     }`}
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="mc-label mb-1">{m.role === 'user' ? 'you' : 'remex'}</div>
+                    <div className="mc-label mb-1">{m.role === 'user' ? 'you' : 'Butler'}</div>
                     {m.pending ? (
                       <div className="flex items-center gap-2 text-sm text-text-3">
                         <span className="mc-status-dot bg-signal animate-pulse" />
@@ -131,10 +136,21 @@ export function IdePage() {
         </div>
 
         <div className="border-t border-line p-4">
-          {error ? <div className="mb-2 text-xs text-red">{error}</div> : null}
+          {error ? (
+            <div className="mb-2 text-xs text-red" role="alert">
+              {error}
+            </div>
+          ) : null}
+          <label htmlFor="mc-ide-input" className="sr-only">
+            Message the Butler
+          </label>
+          <p id="mc-ide-input-hint" className="sr-only">
+            Press Enter to send, Shift+Enter to add a new line.
+          </p>
           <div className="flex items-end gap-2">
             <textarea
-              className="mc-input min-h-[68px] flex-1 resize-y"
+              id="mc-ide-input"
+              className="mc-textarea flex-1"
               placeholder="Message the Butler…"
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -144,15 +160,18 @@ export function IdePage() {
                   void send()
                 }
               }}
+              aria-busy={busy}
+              aria-describedby="mc-ide-input-hint"
             />
             <button
               type="button"
               className="mc-btn mc-btn-primary flex-none"
               onClick={() => void send()}
               disabled={busy || !input.trim()}
+              aria-label="Send message"
             >
-              {busy ? <Square size={13} /> : <Send size={13} />}
-              Send
+              <Send size={13} aria-hidden="true" />
+              {busy ? 'Sending…' : 'Send'}
             </button>
           </div>
         </div>

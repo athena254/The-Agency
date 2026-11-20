@@ -41,6 +41,44 @@
 }
 
 @layer base {
+  :root {
+    /* Semantic state tokens — always prefer these over raw colours. */
+    --mc-success: var(--color-green);
+    --mc-warning: var(--color-amber);
+    --mc-danger: var(--color-red);
+    --mc-info: #7aa7ff;
+    --mc-disabled: var(--color-ink-4);
+
+    --mc-space-1: 4px;
+    --mc-space-2: 8px;
+    --mc-space-3: 12px;
+    --mc-space-4: 16px;
+    --mc-space-5: 20px;
+    --mc-space-6: 24px;
+    --mc-space-8: 32px;
+    --mc-space-10: 40px;
+    --mc-space-12: 48px;
+
+    --mc-text-xs: 11px;
+    --mc-text-sm: 12px;
+    --mc-text-base: 13px;
+    --mc-text-md: 14px;
+    --mc-text-lg: 16px;
+    --mc-text-xl: 20px;
+    --mc-text-2xl: 26px;
+
+    --mc-shadow-overlay: 0 12px 32px rgba(0, 0, 0, 0.45);
+
+    --mc-z-base: 0;
+    --mc-z-sticky: 20;
+    --mc-z-drawer: 40;
+    --mc-z-overlay: 50;
+    --mc-z-toast: 60;
+
+    --mc-transition-fast: 120ms ease;
+    --mc-transition-base: 180ms ease;
+  }
+
   html,
   body,
   #root {
@@ -52,7 +90,7 @@
     background: var(--color-ink-1);
     color: var(--color-text-1);
     font-family: var(--font-sans);
-    font-size: 14px;
+    font-size: var(--mc-text-md);
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -70,6 +108,12 @@
   ::selection {
     background: var(--color-signal-dim);
     color: var(--color-text-1);
+  }
+
+  /* One visible focus treatment for every interactive element. */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-signal);
+    outline-offset: 2px;
   }
 
   /* Quiet scrollbars that match the console. */
@@ -104,6 +148,39 @@
     border-radius: var(--radius-panel);
   }
 
+  /* Typography scale — deliberate hierarchy, no oversized display type. */
+  .mc-page-title {
+    font-size: var(--mc-text-xl);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    color: var(--color-text-1);
+  }
+
+  .mc-section-title {
+    font-size: var(--mc-text-lg);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+    color: var(--color-text-1);
+  }
+
+  .mc-card-title {
+    font-size: var(--mc-text-base);
+    font-weight: 600;
+    color: var(--color-text-1);
+  }
+
+  .mc-body {
+    font-size: var(--mc-text-base);
+    color: var(--color-text-2);
+  }
+
+  .mc-caption {
+    font-size: var(--mc-text-sm);
+    color: var(--color-text-3);
+  }
+
   .mc-label {
     font-family: var(--font-mono);
     font-size: 10.5px;
@@ -117,23 +194,31 @@
     font-variant-numeric: tabular-nums;
   }
 
+  .mc-divider {
+    height: 1px;
+    background: var(--color-line);
+    border: 0;
+  }
+
   .mc-btn {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 6px;
+    min-height: 30px;
     padding: 6px 12px;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--mc-text-sm);
     letter-spacing: 0.02em;
     color: var(--color-text-1);
     background: var(--color-ink-3);
     border: 1px solid var(--color-line-strong);
     border-radius: var(--radius-control);
     cursor: pointer;
-    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+    transition: background var(--mc-transition-fast), border-color var(--mc-transition-fast), color var(--mc-transition-fast);
   }
 
-  .mc-btn:hover {
+  .mc-btn:hover:not(:disabled) {
     background: var(--color-ink-4);
     border-color: var(--color-signal);
   }
@@ -143,35 +228,96 @@
     outline-offset: 2px;
   }
 
+  .mc-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
   .mc-btn-primary {
     background: var(--color-signal-dim);
     border-color: var(--color-signal);
     color: var(--color-signal-strong);
   }
 
-  .mc-btn-primary:hover {
+  .mc-btn-primary:hover:not(:disabled) {
     background: rgba(79, 209, 197, 0.2);
   }
 
-  .mc-btn-danger:hover {
-    border-color: var(--color-red);
-    color: var(--color-red);
+  .mc-btn-danger:hover:not(:disabled) {
+    border-color: var(--mc-danger);
+    color: var(--mc-danger);
   }
 
-  .mc-input {
+  .mc-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    flex: none;
+    color: var(--color-text-2);
+    background: transparent;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-control);
+    cursor: pointer;
+    transition: background var(--mc-transition-fast), color var(--mc-transition-fast);
+  }
+
+  .mc-icon-btn:hover:not(:disabled) {
+    background: var(--color-ink-3);
+    color: var(--color-text-1);
+  }
+
+  .mc-icon-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .mc-input,
+  .mc-select,
+  .mc-textarea {
     width: 100%;
     padding: 7px 10px;
     font-family: var(--font-mono);
-    font-size: 13px;
+    font-size: var(--mc-text-base);
     color: var(--color-text-1);
     background: var(--color-ink-0);
     border: 1px solid var(--color-line-strong);
     border-radius: var(--radius-control);
   }
 
-  .mc-input:focus {
+  .mc-textarea {
+    min-height: 72px;
+    resize: vertical;
+    line-height: 1.5;
+  }
+
+  .mc-input::placeholder,
+  .mc-select::placeholder,
+  .mc-textarea::placeholder {
+    color: var(--color-text-3);
+  }
+
+  .mc-input:disabled,
+  .mc-select:disabled,
+  .mc-textarea:disabled {
+    color: var(--color-text-3);
+    background: var(--color-ink-1);
+    cursor: not-allowed;
+  }
+
+  .mc-input:focus,
+  .mc-select:focus,
+  .mc-textarea:focus {
     outline: none;
     border-color: var(--color-signal);
+  }
+
+  .mc-input:focus-visible,
+  .mc-select:focus-visible,
+  .mc-textarea:focus-visible {
+    outline: 2px solid var(--color-signal);
+    outline-offset: 2px;
   }
 
   .mc-nav-item {
@@ -203,6 +349,104 @@
     height: 7px;
     border-radius: 9999px;
     flex: none;
+  }
+
+  .mc-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    line-height: 1.4;
+    color: var(--color-text-2);
+    background: var(--color-ink-1);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-control);
+    white-space: nowrap;
+  }
+
+  .mc-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px;
+    font-size: var(--mc-text-sm);
+    line-height: 1.5;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-control);
+    background: var(--color-ink-1);
+    color: var(--color-text-2);
+  }
+
+  .mc-notice-info {
+    border-color: rgba(122, 167, 255, 0.3);
+    background: rgba(122, 167, 255, 0.08);
+    color: var(--mc-info);
+  }
+
+  .mc-notice-warning {
+    border-color: rgba(240, 168, 72, 0.3);
+    background: rgba(240, 168, 72, 0.1);
+    color: var(--mc-warning);
+  }
+
+  .mc-notice-danger {
+    border-color: rgba(229, 100, 95, 0.3);
+    background: rgba(229, 100, 95, 0.1);
+    color: var(--mc-danger);
+  }
+
+  .mc-notice-success {
+    border-color: rgba(76, 195, 138, 0.3);
+    background: rgba(76, 195, 138, 0.1);
+    color: var(--mc-success);
+  }
+
+  .mc-skeleton {
+    background: var(--color-ink-3);
+    border-radius: var(--radius-control);
+  }
+
+  .mc-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .mc-link {
+    color: var(--color-signal-strong);
+    text-decoration: underline;
+    text-decoration-color: rgba(79, 209, 197, 0.35);
+    text-underline-offset: 3px;
+  }
+
+  .mc-link:hover {
+    text-decoration-color: var(--color-signal);
+  }
+
+  .mc-skip-link {
+    position: fixed;
+    top: var(--mc-space-2);
+    left: var(--mc-space-2);
+    z-index: var(--mc-z-toast);
+    padding: 8px 12px;
+    font-family: var(--font-mono);
+    font-size: var(--mc-text-sm);
+    color: var(--color-ink-0);
+    background: var(--color-signal-strong);
+    border-radius: var(--radius-control);
+    transform: translateY(-200%);
+  }
+
+  .mc-skip-link:focus {
+    transform: translateY(0);
+  }
+
+  .mc-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: var(--mc-z-drawer);
+    background: rgba(0, 0, 0, 0.6);
   }
 }
 
