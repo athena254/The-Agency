@@ -68,6 +68,7 @@ from agency.skills.registry import SkillRegistry
 from agency.skills.tool import SkillInvokeTool
 from agency.tools.base import BetaPrincipal, ToolContext
 from agency.tools.builtin import register_all as register_builtin_tools
+from agency.tools.builtin.delegate import DelegateTaskTool
 from agency.tools.driver import ToolDriver
 from agency.tools.registry import ToolRegistry
 
@@ -310,6 +311,9 @@ class AgencyOrchestrator:
         registry = ToolRegistry(audit=self._audit_log)
         register_builtin_tools(registry)
         registry.register(SkillInvokeTool(self.execute_skill))
+        # Agent-to-agent delegation: available to every tool-capable agent;
+        # depth/cycle guards live in delegate_task itself.
+        registry.register(DelegateTaskTool(self.delegate_task))
         try:
             from agency.tools.external import register_external_tools
 
