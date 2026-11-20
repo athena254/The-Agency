@@ -178,6 +178,8 @@ def start(
             str(port),
             "--log-level",
             log_level,
+            "--workers",
+            str(workers),
         ]
         if reload:
             cmd.append("--reload")
@@ -360,7 +362,6 @@ def agent_propose(
         "name": name,
         "domain": domain,
         "capabilities": capability or [],
-        "proposer": proposer,
         "quorum": quorum,
         "ttl": ttl,
     }
@@ -1281,3 +1282,143 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+@app.command("consensus-abci-host")
+def consensus_abci_host(
+    genesis: str = typer.Option(..., "--genesis", help="Path to genesis.json."),
+    peer_id: str = typer.Option(..., "--peer-id", help="This node's peer id."),
+    port: int = typer.Option(26658, "--port", help="TCP port to bind."),
+    host: str = typer.Option("127.0.0.1", "--host", help="Interface to bind."),
+    peer_log: str | None = typer.Option(None, "--peer-log", help="Optional PeerLog path for durable results."),
+) -> None:
+    """Run the ABCI socket host for CometBFT."""
+    from agency.consensus.abci.host import ABCIHost
+    from agency.consensus.app import AgencyApplication
+    from agency.consensus.genesis import load_genesis
+
+    try:
+        membership = load_genesis(genesis)
+    except (ValueError, OSError) as exc:
+        _fail(f"invalid genesis: {exc}")
+
+    app = AgencyApplication(membership)
+
+    log = None
+    adapter = None
+    if peer_log:
+        from agency.consensus.actions import ActionRegistry
+        from agency.consensus.engine_adapter import EngineAdapter
+        from agency.consensus.grants import GrantLedger
+        from agency.peers.identities import PeerIdentity
+        from agency.peers.log import PeerLog
+
+        log = PeerLog(
+            peer_log,
+            peer_id=peer_id,
+            genesis={"epoch": membership.epoch, "membership_root": membership.root, "policy_version": membership.policy_version},
+            expected_genesis_root=membership.root,
+            check_same_thread=False,
+        )
+        log.open()
+        key_path = Path(peer_log).with_name("issuer.key")
+        if not key_path.exists():
+            _fail(f"missing issuer key file: {key_path}")
+        import base64
+
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+        raw = base64.b64decode(key_path.read_text(encoding="utf-8").strip())
+        issuer = PeerIdentity.from_private_key(Ed25519PrivateKey.from_private_bytes(raw))
+        ledger = GrantLedger(membership=membership)
+        registry = ActionRegistry()
+        adapter = EngineAdapter(
+            app=app,
+            ledger=ledger,
+            issuer=issuer,
+            membership=membership,
+            logs={peer_id: log},
+            registry=registry,
+            affected_consumers=[],
+            bft_time_ms=0,
+        )
+
+    abci_host = ABCIHost(app, host=host, port=port)
+    abci_host.start()
+    console.print(f"[green]ABCI host listening[/green] on {host}:{abci_host.port}")
+
+    if adapter is not None and log is not None:
+
+        def on_block(result: Any, ctx: Any) -> None:
+            adapter.process_result(result, ctx, {}, [])
+
+        abci_host.on_block = on_block
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        abci_host.stop()
+        if log is not None:
+            try:
+                log.close()
+            except Exception:  # noqa: BLE001
+                console.print("[dim]peer log close failed[/dim]")
+        console.print("[yellow]ABCI host stopped[/yellow]")
+
+@app.command("consensus-sign-proposal")
+def consensus_sign_proposal(
+    genesis: str = typer.Option(..., "--genesis", help="Path to genesis.json."),
+    key: str = typer.Option(..., "--key", help="Base64 raw Ed25519 private key."),
+    action: str = typer.Option("echo", "--action"),
+    resource: str = typer.Option("res", "--resource"),
+    output_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Build a signed proposal envelope (dev helper)."""
+    import base64
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from agency.consensus.genesis import load_genesis
+    from agency.peers.identities import PeerIdentity
+    from agency.peers.proposal_builder import build_proposal_envelope
+
+    membership = load_genesis(genesis)
+    raw = base64.b64decode(key.strip())
+    issuer = PeerIdentity.from_private_key(Ed25519PrivateKey.from_private_bytes(raw))
+    wire = build_proposal_envelope(issuer, membership, action_type=action, resource=resource, params={})
+    if output_json:
+        _print_json({"wire_hex": wire.hex()})
+    else:
+        console.print(wire.hex())
+
+
+@app.command("consensus-sign-ballot")
+def consensus_sign_ballot(
+    genesis: str = typer.Option(..., "--genesis", help="Path to genesis.json."),
+    key: str = typer.Option(..., "--key", help="Base64 raw Ed25519 private key."),
+    proposal_id: str = typer.Option(..., "--proposal-id"),
+    decision: str = typer.Option("approve", "--decision"),
+    seq: int = typer.Option(1, "--seq"),
+    output_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Build a signed ballot envelope (dev helper)."""
+    import base64
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from agency.consensus.genesis import load_genesis
+    from agency.peers.authority import PeerAuthority
+    from agency.peers.identities import PeerIdentity
+    from agency.peers.proposal_builder import build_ballot_wire
+
+    membership = load_genesis(genesis)
+    raw = base64.b64decode(key.strip())
+    issuer = PeerIdentity.from_private_key(Ed25519PrivateKey.from_private_bytes(raw))
+    authority = PeerAuthority(membership)
+    wire = build_ballot_wire(authority, issuer, proposal_id=proposal_id, decision=decision, monotonic_seq=seq)
+    if output_json:
+        _print_json({"wire_hex": wire.hex()})
+    else:
+        console.print(wire.hex())
+

@@ -141,6 +141,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         "memory_store",
         "memory_retrieval",
         "lattice",
+        "peer_authority",
     )
     for name in state_names:
         setattr(application.state, name, None)
@@ -289,7 +290,8 @@ def create_app() -> FastAPI:
         # Signed ballots carry their own authority (Ed25519 envelope verified
         # by PeerAuthority); they must reach the router to be verified.
         is_ballot = path == "/v1/governance/ballot"
-        if (request.method != "GET" or path != "/v1/health") and not is_ballot:
+        is_root = request.method == "GET" and path == "/"
+        if (request.method != "GET" or path != "/v1/health") and not is_ballot and not is_root:
             return JSONResponse(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 content={"detail": "Peer authorization is unavailable."},

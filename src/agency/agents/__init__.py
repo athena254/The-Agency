@@ -19,7 +19,6 @@ _EXPORTS = {
     "Observation": ("agency.agents.loop", "Observation"),
     "Reflection": ("agency.agents.loop", "Reflection"),
     "StepResult": ("agency.agents.loop", "StepResult"),
-    "Thought": ("agency.agents.loop", "Thought"),
     "AgentPlanner": ("agency.agents.planner", "AgentPlanner"),
     "PlanStatus": ("agency.agents.planner", "PlanStatus"),
     "PlanSummary": ("agency.agents.planner", "PlanSummary"),

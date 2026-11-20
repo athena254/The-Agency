@@ -490,6 +490,7 @@ class PeerLog:
         peer_id: str,
         genesis: Mapping[str, Any] | None = None,
         expected_genesis_root: str | None = None,
+        check_same_thread: bool = True,
     ) -> None:
         validate_peer_id(peer_id, "peer_id")
         self._path = Path(path)
@@ -501,6 +502,7 @@ class PeerLog:
             else None
         )
         self._conn: sqlite3.Connection | None = None
+        self._check_same_thread = check_same_thread
         self._healthy = True
 
     # -- lifecycle ---------------------------------------------------- #
@@ -550,7 +552,7 @@ class PeerLog:
             return
         self._check_genesis_input()
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self._path, timeout=30.0, isolation_level=None)
+        conn = sqlite3.connect(self._path, timeout=30.0, isolation_level=None, check_same_thread=self._check_same_thread)
         try:
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA journal_mode=WAL")
