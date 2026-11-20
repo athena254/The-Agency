@@ -182,12 +182,19 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
                     error_type=type(exc).__name__,
                 )
             try:
+                from agency.factory.prompts import PromptRegistry
+                from agency.factory.prompts_builtin import ensure_builtin_prompts
+
+                blacksmith_prompts = PromptRegistry(":memory:")
+                ensure_builtin_prompts(blacksmith_prompts)
                 activate_blacksmith(
                     AgentFactory(
                         ":memory:",
                         kernel_registry=kernel_registry,
                         runtime_registry=runtime_registry,
                         allowed_capabilities={"forge"},
+                        is_prompt_published=blacksmith_prompts.is_published,
+                        prompt_resolver=blacksmith_prompts,
                     )
                 )
             except BaseException as exc:  # noqa: BLE001 - startup must not crash
