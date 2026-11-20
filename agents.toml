@@ -1,0 +1,13 @@
+[agents.coding-agent]
+name = "Coding Agent"
+version = "1.0.0"
+domain = "coding"
+prompt_id = "coding-agent"
+path = ".agent-prompts/agents/coding-agent.md"
+
+[agents.blacksmith]
+name = "blacksmith"
+version = "1.0.0"
+domain = "forge"
+prompt_id = "blacksmith"
+path = "docs/agents/blacksmith.md"
