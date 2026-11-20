@@ -11,6 +11,8 @@ from agency.agents.planner import AgentPlanner
 from agency.agents.registry import AgentRegistry
 from agency.autonomy.engine import run_autonomous
 from agency.autonomy.strategies import forge_build_strategy
+from agency.factory.prompts import PromptRegistry
+from agency.factory.prompts_builtin import ensure_builtin_prompts
 from agency.factory.service import AgentFactory
 from agency.forge.external_agent import ExternalAgentReport
 from agency.forge.inspection import InspectionReport
@@ -66,11 +68,15 @@ def test_default_strategy_unchanged() -> None:
 def test_engine_spawns_blacksmith_for_build_task() -> None:
     reg = AgentRegistry()
     kernels = KernelRegistry()
+    prompts = PromptRegistry(":memory:")
+    ensure_builtin_prompts(prompts)
     factory = AgentFactory(
         ":memory:",
         kernel_registry=kernels,
         runtime_registry=reg,
         allowed_capabilities={"forge"},
+        is_prompt_published=prompts.is_published,
+        prompt_resolver=prompts,
     )
     planner = AgentPlanner(reg, strategy=forge_build_strategy)
     try:
