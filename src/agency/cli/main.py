@@ -1331,3 +1331,59 @@ def consensus_abci_host(
                 console.print("[dim]peer log close failed[/dim]")
         console.print("[yellow]ABCI host stopped[/yellow]")
 
+@app.command("consensus-sign-proposal")
+def consensus_sign_proposal(
+    genesis: str = typer.Option(..., "--genesis", help="Path to genesis.json."),
+    key: str = typer.Option(..., "--key", help="Base64 raw Ed25519 private key."),
+    action: str = typer.Option("echo", "--action"),
+    resource: str = typer.Option("res", "--resource"),
+    output_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Build a signed proposal envelope (dev helper)."""
+    import base64
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from agency.consensus.genesis import load_genesis
+    from agency.peers.identities import PeerIdentity
+    from agency.peers.proposal_builder import build_proposal_envelope
+
+    membership = load_genesis(genesis)
+    raw = base64.b64decode(key.strip())
+    issuer = PeerIdentity.from_private_key(Ed25519PrivateKey.from_private_bytes(raw))
+    wire = build_proposal_envelope(issuer, membership, action_type=action, resource=resource, params={})
+    if output_json:
+        _print_json({"wire_hex": wire.hex()})
+    else:
+        console.print(wire.hex())
+
+
+@app.command("consensus-sign-ballot")
+def consensus_sign_ballot(
+    genesis: str = typer.Option(..., "--genesis", help="Path to genesis.json."),
+    key: str = typer.Option(..., "--key", help="Base64 raw Ed25519 private key."),
+    proposal_id: str = typer.Option(..., "--proposal-id"),
+    decision: str = typer.Option("approve", "--decision"),
+    seq: int = typer.Option(1, "--seq"),
+    output_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Build a signed ballot envelope (dev helper)."""
+    import base64
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from agency.consensus.genesis import load_genesis
+    from agency.peers.authority import PeerAuthority
+    from agency.peers.identities import PeerIdentity
+    from agency.peers.proposal_builder import build_ballot_wire
+
+    membership = load_genesis(genesis)
+    raw = base64.b64decode(key.strip())
+    issuer = PeerIdentity.from_private_key(Ed25519PrivateKey.from_private_bytes(raw))
+    authority = PeerAuthority(membership)
+    wire = build_ballot_wire(authority, issuer, proposal_id=proposal_id, decision=decision, monotonic_seq=seq)
+    if output_json:
+        _print_json({"wire_hex": wire.hex()})
+    else:
+        console.print(wire.hex())
+
