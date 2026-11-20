@@ -197,6 +197,8 @@ class SkillRegistry:
             if str(parent) and not parent.exists():
                 parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS skills ("
             "skill_id TEXT NOT NULL, "
