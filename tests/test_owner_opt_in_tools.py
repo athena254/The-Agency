@@ -76,6 +76,27 @@ async def test_default_flags_are_off_and_tools_disabled(concrete):
             "guard": "B-05",
             "reason": "opt_in_disabled",
         }
+        assert status["external_tools"] == {
+            "enabled": False,
+            "guard": "TOOLS-IMPORT",
+            "reason": "opt_in_disabled",
+            "tools": ["web_scrape", "last30days"],
+        }
+    finally:
+        await service.stop()
+
+
+async def test_enable_external_tools_registers_and_allows(concrete):
+    c = concrete
+    service = _make_service(c, enable_external_tools=True)
+    try:
+        await service.start()
+        caps = await service.capabilities(c["owner"])
+        assert "web_scrape" in caps.tools
+        assert "last30days" in caps.tools
+        status = await service.tool_status(c["owner"])
+        assert status["external_tools"]["enabled"] is True
+        assert status["external_tools"]["reason"] == "configured"
     finally:
         await service.stop()
 

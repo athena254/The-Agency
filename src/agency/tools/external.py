@@ -97,6 +97,8 @@ class GoogleWorkspaceTool:
         risk=ToolRisk.READ_ONLY,
     )
 
+    _READ_ONLY_VERBS = frozenset({"list", "get", "search", "describe", "info", "status", "schema"})
+
     async def run(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
         del ctx
         import time
@@ -105,7 +107,22 @@ class GoogleWorkspaceTool:
         raw_args = args.get("args")
         if not isinstance(raw_args, list) or not all(isinstance(a, str) for a in raw_args):
             return ToolResult(tool="google_workspace", ok=False, error="'args' must be a list of strings")
+        # Read-only guard: deny mutating verbs even if the CLI is invoked directly.
+        lowered = " ".join(raw_args).lower()
+        if any(verb in lowered.split() for verb in ("send", "delete", "create", "update", "modify", "remove", "put", "post", "patch")):
+            return ToolResult(
+                tool="google_workspace",
+                ok=False,
+                error="google_workspace is read-only: mutating verbs denied",
+                duration_ms=int((time.perf_counter() - start) * 1000),
+            )
         if shutil.which("gws") is None:
+            return ToolResult(
+                tool="google_workspace",
+                ok=False,
+                error="gws CLI not found; install via `npm i -g @googleworkspace/cli`",
+                duration_ms=int((time.perf_counter() - start) * 1000),
+            )
             return ToolResult(
                 tool="google_workspace",
                 ok=False,
