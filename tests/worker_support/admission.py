@@ -66,8 +66,15 @@ def admission_worker(
     bootstrap_deadline: float,
     *,
     mutant: bool = False,
+    stall_bootstrap: Any = None,
 ) -> None:
-    """Initialize actual dependencies before arming; never dispatch on expiry."""
+    """Initialize actual dependencies before arming; never dispatch on expiry.
+
+    ``stall_bootstrap`` is a hermetic fault-injection hook for the Q-18 failure
+    mode. When supplied, real dependencies are still initialized but
+    ``bootstrap_complete`` is withheld so the parent must enforce its unchanged
+    aggregate deadline. It is never set on the default protocol path.
+    """
     phase = "bootstrap"
 
     def emit(event: str, **data: Any) -> None:
@@ -144,6 +151,13 @@ def admission_worker(
             BetaAuditLog.has_pending_calls = synchronized_check
             if mutant:
                 BetaAuditLog.claim_intent = split_claim
+            if stall_bootstrap is not None:
+                # Dependencies are genuinely initialized; withhold completion so
+                # the parent's real 60s aggregate deadline expires. No gate opens.
+                await asyncio.to_thread(
+                    stall_bootstrap.wait, max(0.0, bootstrap_deadline - time.monotonic()) + 30
+                )
+                return
             emit(
                 "bootstrap_complete",
                 support=str(Path(__file__).resolve()),
@@ -184,7 +198,9 @@ def admission_worker(
         raise
 
 
-def run_admission_race(path: str, *, mutant: bool = False, context: Any = None) -> dict[str, Any]:
+def run_admission_race(
+    path: str, *, mutant: bool = False, context: Any = None, stall_bootstrap: Any = None
+) -> dict[str, Any]:
     """Parent assertions shared by the real race and its two-ran mutation test."""
     ctx = context if context is not None else multiprocessing.get_context("spawn")
     arm, start, release = ctx.Event(), ctx.Event(), ctx.Event()
@@ -257,7 +273,7 @@ def run_admission_race(path: str, *, mutant: bool = False, context: Any = None) 
             worker = ctx.Process(
                 target=admission_worker,
                 args=(path, arm, start, release, barrier, messages, bootstrap_deadline),
-                kwargs={"mutant": mutant},
+                kwargs={"mutant": mutant, "stall_bootstrap": stall_bootstrap},
             )
             workers.append(worker)
             worker.start()
