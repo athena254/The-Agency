@@ -164,12 +164,15 @@ def activate_for_caps(
     registry: Any = None,
     domain: str = AUTO_DOMAIN,
     name: str | None = None,
+    prompt_refs: tuple[tuple[str, str], ...] | None = None,
 ) -> str:
     """Auto-approve + activate a blueprint for ``caps``; return agent id.
 
     ``factory`` is an :class:`AgentFactory`. For compatibility with
     ``(caps, registry)`` call styles, ``registry`` may instead be the
-    factory when ``factory`` is omitted. Idempotent: repeated calls with
+    factory when ``factory`` is omitted. ``prompt_refs`` pins published
+    prompt segments on the blueprint (factory must have prompt callbacks
+    configured; fails closed otherwise). Idempotent: repeated calls with
     the same capabilities return the same agent id.
     """
     resolved = factory if factory is not None else registry
@@ -190,14 +193,17 @@ def activate_for_caps(
     if isinstance(allowed, frozenset) and not set(normalized) <= allowed:
         resolved._allowed = frozenset(set(allowed) | set(normalized))
     try:
-        resolved.create(
-            blueprint_id,
-            AUTO_VERSION,
-            agent_name,
-            domain=domain or AUTO_DOMAIN,
-            capabilities=list(normalized),
-            creator=AUTO_CREATOR,
-        )
+        create_kwargs: dict[str, Any] = {
+            "blueprint_id": blueprint_id,
+            "version": AUTO_VERSION,
+            "name": agent_name,
+            "domain": domain or AUTO_DOMAIN,
+            "capabilities": list(normalized),
+            "creator": AUTO_CREATOR,
+        }
+        if prompt_refs:
+            create_kwargs["prompt_refs"] = list(prompt_refs)
+        resolved.create(**create_kwargs)
     except (ValueError, TypeError):
         existing = None
         try:
