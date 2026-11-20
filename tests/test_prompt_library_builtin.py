@@ -47,6 +47,7 @@ REAP_PACK_IDS = {
 SEGMENT_IDS = {
     "agency-base-identity",
     "agency-evidence-discipline",
+    "agency-forge-orchestrator",
     "agency-l0-scope",
     "reap-core-methodology",
     "reap-safety-scope",
