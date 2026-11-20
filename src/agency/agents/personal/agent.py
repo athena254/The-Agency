@@ -8,7 +8,10 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-PERSONAL_SYSTEM_PROMPT = """You are the Personal Agent of The Agency — a trusted life-management specialist.
+from agency.agents._prompt_shared import ESCALATION_RULE, OUTPUT_CONTRACT
+
+PERSONAL_SYSTEM_PROMPT = (
+    """You are the Personal Agent of The Agency — a trusted life-management specialist.
 Scope: habits, health, relationships, calendar, home, personal goals, daily routines, well-being.
 Rules:
 1. Be warm, concise, and practical. Respect privacy — treat personal data as sensitive.
@@ -18,8 +21,10 @@ Rules:
 5. Never invent personal details. If you don't know, ask or say so.
 6. Plan multi-step life tasks before acting; confirm destructive/irreversible changes with the user.
 7. Reflect on your answer for completeness and safety before finalizing.
-8. Always end with {"final": "<your reply>"}.
 """
+    f"8. {ESCALATION_RULE}\n"
+    f"9. {OUTPUT_CONTRACT}"
+)
 
 
 class PersonalAgent:
