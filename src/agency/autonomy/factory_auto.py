@@ -165,20 +165,15 @@ def activate_for_caps(
     domain: str = AUTO_DOMAIN,
     name: str | None = None,
     prompt_refs: list[tuple[str, str]] | None = None,
-    skill_refs: list[tuple[str, str]] | None = None,
 ) -> str:
     """Auto-approve + activate a blueprint for ``caps``; return agent id.
 
     ``factory`` is an :class:`AgentFactory`. For compatibility with
     ``(caps, registry)`` call styles, ``registry`` may instead be the
-    factory when ``factory`` is omitted. Idempotent: repeated calls with
+    factory when ``factory`` is omitted. ``prompt_refs`` pins published
+    prompt segments on the blueprint (factory must have prompt callbacks
+    configured; fails closed otherwise). Idempotent: repeated calls with
     the same capabilities return the same agent id.
-
-    Optional ``prompt_refs``/``skill_refs`` pin versioned refs on the
-    blueprint. When prompt refs are requested and the factory has no
-    prompt resolver, an in-memory builtin prompt library is attached
-    (deterministic seed data; same additive style as the capability
-    allowlist admission below). The human approval path is unaffected.
     """
     resolved = factory if factory is not None else registry
     if resolved is None:
@@ -191,31 +186,26 @@ def activate_for_caps(
     normalized = _normalize_caps(caps)
     blueprint_id = blueprint_id_for_caps(normalized)
     agent_name = (name or f"apprentice-{'-'.join(normalized)}")[:200]
+    if prompt_refs and getattr(resolved, "_prompt_resolver", None) is None:
+        raise ValueError("prompt_refs pinned but no prompt resolver configured (fail closed).")
     # Auto-activation admits the requested (already bounded, L0-string) caps
     # into the factory allowlist so a default-constructed factory works for
     # arbitrary engine caps. The human approval path is unaffected.
     allowed = getattr(resolved, "_allowed", None)
     if isinstance(allowed, frozenset) and not set(normalized) <= allowed:
         resolved._allowed = frozenset(set(allowed) | set(normalized))
-    if prompt_refs and getattr(resolved, "_prompt_resolver", None) is None:
-        from agency.factory.prompts import PromptRegistry
-        from agency.factory.prompts_builtin import ensure_builtin_prompts
-
-        prompts = PromptRegistry(":memory:")
-        ensure_builtin_prompts(prompts)
-        resolved._prompt_resolver = prompts
-        resolved._is_prompt_published = prompts.is_published
     try:
-        resolved.create(
-            blueprint_id,
-            AUTO_VERSION,
-            agent_name,
-            domain=domain or AUTO_DOMAIN,
-            capabilities=list(normalized),
-            skill_refs=list(skill_refs or ()),
-            prompt_refs=list(prompt_refs or ()),
-            creator=AUTO_CREATOR,
-        )
+        create_kwargs: dict[str, Any] = {
+            "blueprint_id": blueprint_id,
+            "version": AUTO_VERSION,
+            "name": agent_name,
+            "domain": domain or AUTO_DOMAIN,
+            "capabilities": list(normalized),
+            "creator": AUTO_CREATOR,
+        }
+        if prompt_refs:
+            create_kwargs["prompt_refs"] = list(prompt_refs)
+        resolved.create(**create_kwargs)
     except (ValueError, TypeError):
         existing = None
         try:

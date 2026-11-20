@@ -23,7 +23,12 @@ BLACKSMITH_PROMPT_REFS: tuple[tuple[str, str], ...] = (
 
 
 def activate_blacksmith(factory: AgentFactory) -> str:
-    """Activate the Blacksmith (idempotent). Returns the runtime agent id."""
+    """Activate the Blacksmith (idempotent). Returns the runtime agent id.
+
+    The factory must have prompt callbacks configured (``is_prompt_published``
+    + ``prompt_resolver``) so the pinned segments can be validated; otherwise
+    activation fails closed.
+    """
     return activate_for_caps(
         ["forge"],
         factory,
