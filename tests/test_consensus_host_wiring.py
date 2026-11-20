@@ -9,9 +9,9 @@ from typer.testing import CliRunner
 
 from agency.cli.main import app
 from agency.consensus.abci.host import ABCIHost
-from agency.consensus.genesis import load_genesis
-from tests.test_consensus_app_state import ballot, context, proposal
-from tests.test_consensus_grants import BFT_TIME_MS, consumers, setup4 as grants_setup4
+from tests.test_consensus_app_state import ballot, proposal
+from tests.test_consensus_grants import BFT_TIME_MS, consumers
+from tests.test_consensus_grants import setup4 as grants_setup4
 
 
 def _recv(sock, n):
