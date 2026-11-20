@@ -106,10 +106,25 @@ class GoogleWorkspaceTool:
         start = time.perf_counter()
         raw_args = args.get("args")
         if not isinstance(raw_args, list) or not all(isinstance(a, str) for a in raw_args):
-            return ToolResult(tool="google_workspace", ok=False, error="'args' must be a list of strings")
+            return ToolResult(
+                tool="google_workspace", ok=False, error="'args' must be a list of strings"
+            )
         # Read-only guard: deny mutating verbs even if the CLI is invoked directly.
         lowered = " ".join(raw_args).lower()
-        if any(verb in lowered.split() for verb in ("send", "delete", "create", "update", "modify", "remove", "put", "post", "patch")):
+        if any(
+            verb in lowered.split()
+            for verb in (
+                "send",
+                "delete",
+                "create",
+                "update",
+                "modify",
+                "remove",
+                "put",
+                "post",
+                "patch",
+            )
+        ):
             return ToolResult(
                 tool="google_workspace",
                 ok=False,

@@ -148,7 +148,11 @@ class OwnerPilotService:
                     raise ValueError
             except (ValueError, TypeError, AttributeError):
                 raise PilotError("invalid_request") from None
-        if type(enable_memory_tools) is not bool or type(enable_web_fetch) is not bool or type(enable_external_tools) is not bool:
+        if (
+            type(enable_memory_tools) is not bool
+            or type(enable_web_fetch) is not bool
+            or type(enable_external_tools) is not bool
+        ):
             raise PilotError("invalid_request")
         if type(memory_db_path) is not str and memory_db_path is not None:
             raise PilotError("invalid_request")
