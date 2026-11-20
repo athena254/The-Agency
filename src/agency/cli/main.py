@@ -51,6 +51,7 @@ from agency.autonomy.loop_workers import (
     ExternalWorker,
     OpencodeWorker,
     PiWorker,
+    striker_label,
 )
 from agency.forge.external_agent import run_external_agent
 from agency.forge.tool_catalog import get_tool, is_available, list_tools
@@ -1103,7 +1104,7 @@ def loop_run(
         _fail(str(exc))
         return
 
-    worker_obj.name = "sticker"
+    worker_obj.name = striker_label(worker_obj)
 
     config = LoopConfig(
         session_id=session_id,
@@ -1172,7 +1173,7 @@ def loop_resume(
         except typer.BadParameter as exc:
             _fail(str(exc))
             return
-        worker_obj.name = "sticker"
+        worker_obj.name = striker_label(worker_obj)
         config = LoopConfig(
             session_id=session_id,
             goal=state.goal,

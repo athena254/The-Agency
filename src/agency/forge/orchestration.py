@@ -1,7 +1,7 @@
 """BlacksmithOps — the Blacksmith's Forge job lifecycle (manager, not coder).
 
-Deterministic state machine over the EXISTING Forge entry points: sticker
-workers build via :func:`run_external_agent`, tool builds go through
+Deterministic state machine over the EXISTING Forge entry points: striker
+workers (external CLI agents) build via :func:`run_external_agent`, tool builds go through
 :func:`agency.autonomy.forge_auto.build_tool`. Every transition is persisted
 (append-only events) and reported to an optional audit sink. A PASS lands in
 the merge queue awaiting human approval; nothing here authorizes merge or

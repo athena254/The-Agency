@@ -393,6 +393,16 @@ class NoopWorker:
         return WorkerResult(gate="PASS", changed_paths=(), detail="noop")
 
 
+def striker_label(worker: ExternalWorker) -> str:
+    """Role-prefixed worker label that keeps the real executable identity.
+
+    External CLI workers are the Forge's *strikers* (the blacksmith's
+    sledge-swinging assistants). Evidence must still name what actually ran,
+    so the label is ``striker:<executable>`` — never a bare role name.
+    """
+    return f"striker:{worker.name}"
+
+
 __all__ = [
     "ClaudeCodeWorker",
     "CodexWorker",
@@ -404,4 +414,5 @@ __all__ = [
     "OpencodeWorker",
     "PiWorker",
     "build_task_prompt",
+    "striker_label",
 ]
