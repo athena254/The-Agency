@@ -326,6 +326,34 @@ def _one_round(
     return score, findings, tests_note
 
 
+_REVIEW_BODY_LIMIT = 6000
+_REVIEW_TRUNCATION_MARK = "...[change set truncated for review]"
+
+_REVIEW_PROMPT_HEADER = (
+    "You are a code reviewer for a software factory. Given the change set and "
+    "automated findings below, produce a JSON object with keys: "
+    '"score" (integer 0-5), "findings" (list of objects with keys path, line, '
+    "rule_id, severity (low/medium/high/critical), message, resolved (bool)), "
+    '"summary" (short string). Score 5 means clean. High/critical findings '
+    "block. Respond with JSON only.\n\n"
+    "Severity rubric: low = style or naming only; medium = missing validation "
+    "or error handling; high = security or correctness bug in the changed "
+    "paths; critical = secret leak, injection, or protected-path edit. Every "
+    "finding must cite the exact path and line it applies to. If you are "
+    "uncertain about a piece of the change, lower the score and name what is "
+    "unverified in the summary. Do not invent files, lines, or findings that "
+    "are not supported by the change set below.\n\n"
+)
+
+
+def _review_prompt(findings_summary: dict[str, Any]) -> str:
+    """Render the deterministic review LLM prompt from one findings snapshot."""
+    body = json.dumps(findings_summary, indent=2)
+    if len(body) > _REVIEW_BODY_LIMIT:
+        body = body[:_REVIEW_BODY_LIMIT] + "\n" + _REVIEW_TRUNCATION_MARK
+    return f"{_REVIEW_PROMPT_HEADER}CHANGE SET:\n{body}"
+
+
 def _llm_review_one_round(
     llm: Any,
     root: Path,
@@ -389,15 +417,7 @@ def _llm_review_one_round(
                 tests_info = "error"
         findings_summary["tests"] = tests_info
 
-        prompt = (
-            "You are a code reviewer for a software factory. Given the change set and "
-            "automated findings below, produce a JSON object with keys: "
-            '"score" (integer 0-5), "findings" (list of objects with keys path, line, '
-            "rule_id, severity (low/medium/high/critical), message, resolved (bool)), "
-            '"summary" (short string). Score 5 means clean. High/critical findings '
-            "block. Respond with JSON only.\n\n"
-            f"CHANGE SET:\n{json.dumps(findings_summary, indent=2)[:6000]}"
-        )
+        prompt = _review_prompt(findings_summary)
     except Exception as exc:  # noqa: BLE001
         logger.warning("forge.review_llm_evidence_error", error_class=type(exc).__name__)
         raise _LLMReviewError from None
