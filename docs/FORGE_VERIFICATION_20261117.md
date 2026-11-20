@@ -1,6 +1,6 @@
 # Forge hardening — live verification (2026-11-17)
 
-Worktree: `C:\Users\PC\The-Agency-worktrees\forge-hardening` (branch `forge-hardening`).
+Worktree at verification time: `C:\Users\PC\The-Agency-worktrees\forge-hardening` (branch `forge-hardening`). That worktree and branch were retired after the work was merged into `main`; this is a historical record.
 All Python commands use `uv run` against the synced `.venv`. Scratch repos/data live only
 under `C:\Users\PC\AppData\Local\Temp\opencode\forge-verify` and are not part of the repo.
 

@@ -1,6 +1,6 @@
 # ADR: Optional Honcho memory mirror
 
-- Status: accepted on `feat/memory-honcho`
+- Status: accepted; merged into `main` at `e44fab2` (2026-11-20)
 - Date: 2026-11-20
 
 ## Context
