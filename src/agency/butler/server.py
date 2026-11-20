@@ -15,22 +15,29 @@ Run with::
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from secrets import token_hex
-from typing import Any
+from typing import Annotated, Any
 
 import structlog
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from agency import __version__
+from agency.api.auth import Principal, TokenRegistry, principal_dependency
 from agency.butler.config import ButlerConfig
 from agency.butler.service import ButlerService
+from agency.kernel.task_store import TaskStore
+from agency.kernel.tasks import TaskManager
 from agency.orchestrator import AgencyOrchestrator
+
+
+def _database_path(env_var: str, default: str) -> str:
+    return os.environ.get(env_var, default)
 
 log = structlog.get_logger(__name__)
 
@@ -137,16 +144,26 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     """Build the orchestrator + ButlerService on startup; stop them on shutdown."""
     config = getattr(application.state, "butler_config", None) or ButlerConfig()
     service = getattr(application.state, "butler", None)
+    task_store: TaskStore | None = None
     if service is None:
         orchestrator = getattr(application.state, "orchestrator", None)
         if orchestrator is None:
-            orchestrator = AgencyOrchestrator()
+            # Store-backed queue shared with the api server (same file), so
+            # tasks submitted anywhere execute via the dispatcher here.
+            task_store = TaskStore(_database_path("AGENCY_TASKS_DB", "data/tasks.db"))
+            await task_store.initialize()
+            application.state.task_store = task_store
+            orchestrator = AgencyOrchestrator(task_manager=TaskManager(task_store))
             application.state.orchestrator = orchestrator
         llm = _build_llm_callable(config)
         service = ButlerService(config=config, orchestrator=orchestrator, llm=llm)
         application.state.butler = service
     try:
         await service.start()
+        if orchestrator is not None:
+            # Server-owned queue consumer: chat turns flow through the shared
+            # dispatcher (library ButlerService callers stay inline).
+            await orchestrator.start_dispatcher()
     except Exception:
         log.exception("butler.startup_failed")
         raise
@@ -158,6 +175,11 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             await service.stop()
         except Exception:
             log.exception("butler.shutdown_failed")
+        if task_store is not None:
+            try:
+                await task_store.close()
+            except Exception:
+                log.exception("butler.task_store_close_failed")
         log.info("butler.api_shutdown")
 
 
@@ -170,6 +192,9 @@ def create_app(config: ButlerConfig | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.butler_config = config or ButlerConfig()
+    # Owner-issued bearer tokens (agency.api.auth). ``None`` keeps /v1/message
+    # at 503 — the default-deny posture is unchanged.
+    application.state.token_registry = TokenRegistry.from_env()
     application.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -180,44 +205,46 @@ def create_app(config: ButlerConfig | None = None) -> FastAPI:
 
     @application.middleware("http")
     async def deny_unverified_authority(request: Request, call_next: Any) -> Any:
-        # A mounted child receives a root-prefixed ASGI path. Only GET health
-        # is public until peer identity and scoped reads are implemented.
+        # A mounted child receives a root-prefixed ASGI path. GET health is
+        # public; /v1/message is served to authenticated callers (route
+        # dependency) when a token registry is configured. Everything else
+        # fails closed until peer identity and scoped reads are implemented.
         path = request.scope["path"]
         root = request.scope.get("root_path", "")
         if root and path.startswith(root + "/"):
             path = path[len(root) :]
-        if request.method != "GET" or path != "/v1/health":
-            return JSONResponse(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                content={"detail": "Peer authorization is unavailable."},
-            )
-        return await call_next(request)
+        if request.method == "GET" and path == "/v1/health":
+            return await call_next(request)
+        if (
+            path == "/v1/message"
+            and getattr(application.state, "token_registry", None) is not None
+        ):
+            return await call_next(request)
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "Peer authorization is unavailable."},
+        )
 
     @application.post(
         "/v1/message", response_model=MessageResponse, tags=["butler"], summary="Send a message"
     )
-    async def post_message(payload: MessageRequest, request: Request) -> MessageResponse:
+    async def post_message(
+        payload: MessageRequest,
+        request: Request,
+        principal: Annotated[Principal, Depends(principal_dependency("chat:send"))],
+    ) -> MessageResponse:
         service = _get_service(request)
-        # This public endpoint accepts a caller-supplied sender; until it has
-        # authentication, it must not expose owner-scoped thread histories.
-        if "thread_id" in payload.context:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Thread selection requires an authenticated channel.",
-            )
         if len(payload.message) > service.config.max_message_length:
             raise HTTPException(
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 detail=f"message exceeds {service.config.max_message_length} chars.",
             )
-        # Sender and context are untrusted on this unauthenticated endpoint.
-        # Use a one-turn identity; do not recall or persist sender memory.
-        anonymous_sender = f"http-anonymous-{token_hex(16)}"
-        route_context = {"sender": anonymous_sender}
-        agent = await service.route(payload.message, route_context)
-        response = await service.handle_message(
-            payload.message, anonymous_sender, {}, memory_enabled=False
-        )
+        # Authenticated channel: the caller's identity is bound server-side
+        # (never to the request body), so thread selection and sender-scoped
+        # memory recall are safe to enable.
+        sender = principal.caller_id
+        agent = await service.route(payload.message, {"sender": sender})
+        response = await service.handle_message(payload.message, sender, payload.context)
         return MessageResponse(
             response=response, agent_id=agent.id, agent_name=agent.name, domain=agent.domain
         )

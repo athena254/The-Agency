@@ -108,15 +108,17 @@ def _server_url(value: str | None = None) -> str:
     return base
 
 
-def _headers() -> dict[str, str]:
-    token = os.environ.get("AGENCY_API_TOKEN")
-    if token:
-        return {"Authorization": f"Bearer {token}"}
+def _headers(token: str | None = None) -> dict[str, str]:
+    value = token or os.environ.get("AGENCY_API_TOKEN")
+    if value:
+        return {"Authorization": f"Bearer {value}"}
     return {}
 
 
-def _client(base: str, timeout: float = 15.0) -> httpx.Client:
-    return httpx.Client(base_url=base, timeout=timeout, headers=_headers())
+def _client(
+    base: str, timeout: float = 15.0, headers: dict[str, str] | None = None
+) -> httpx.Client:
+    return httpx.Client(base_url=base, timeout=timeout, headers=headers or _headers())
 
 
 def _fail(message: str, *, code: int = 1) -> None:
@@ -457,14 +459,24 @@ def agent_capabilities(
 @task_app.command("create")
 def task_create(
     title: str = typer.Option(..., "--title", "-t", help="Short task title."),
-    created_by: str = typer.Option(..., "--created-by", help="Creator agent/operator id."),
+    created_by: str = typer.Option(
+        "",
+        "--created-by",
+        help="Creator id (owners only; other callers are bound to their token identity).",
+    ),
+    agent_id: str | None = typer.Option(
+        None, "--agent", help="Registered agent that should execute the task."
+    ),
     priority: int = typer.Option(0, "--priority", "-p", min=0, max=10),
     input_json: str = typer.Option("{}", "--input", "-i", help="JSON input payload."),
     parent_id: str | None = typer.Option(None, "--parent-id", help="Parent task id."),
     server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    token: str | None = typer.Option(
+        None, "--token", help="Bearer token (overrides AGENCY_API_TOKEN)."
+    ),
     output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
 ) -> None:
-    """Create a new task."""
+    """Submit a task for dispatcher execution."""
     try:
         task_input = json.loads(input_json)
     except json.JSONDecodeError as exc:
@@ -479,10 +491,12 @@ def task_create(
         "priority": priority,
         "input": task_input,
     }
+    if agent_id:
+        body["agent_id"] = agent_id
     if parent_id:
         body["parent_id"] = parent_id
     base = _server_url(server_url)
-    with _client(base) as client:
+    with _client(base, headers=_headers(token)) as client:
         payload = _handle_response(client.post("/v1/tasks", json=body))
     if output_json:
         _print_json(payload)
@@ -501,14 +515,17 @@ def task_list(
     server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
     status_filter: str | None = typer.Option(None, "--status", "-s", help="Filter by status."),
     limit: int = typer.Option(100, "--limit", min=1, max=1000),
+    token: str | None = typer.Option(
+        None, "--token", help="Bearer token (overrides AGENCY_API_TOKEN)."
+    ),
     output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
 ) -> None:
-    """List tasks, optionally filtered by status."""
+    """List your tasks, optionally filtered by status."""
     base = _server_url(server_url)
     params: dict[str, Any] = {"limit": limit}
     if status_filter:
         params["status"] = status_filter
-    with _client(base) as client:
+    with _client(base, headers=_headers(token)) as client:
         payload = _handle_response(client.get("/v1/tasks", params=params))
     if output_json:
         _print_json(payload)
@@ -530,13 +547,30 @@ def task_list(
 @task_app.command("get")
 def task_get(
     task_id: str = typer.Argument(..., help="Task id."),
+    wait: bool = typer.Option(
+        False, "--wait", help="Poll until the task reaches a terminal state."
+    ),
+    wait_timeout: float = typer.Option(
+        300.0, "--wait-timeout", min=1, help="Seconds to wait with --wait."
+    ),
     server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    token: str | None = typer.Option(
+        None, "--token", help="Bearer token (overrides AGENCY_API_TOKEN)."
+    ),
     output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
 ) -> None:
-    """Fetch a single task by id."""
+    """Fetch a task and its result; with --wait, poll until it finishes."""
     base = _server_url(server_url)
-    with _client(base) as client:
+    headers = _headers(token)
+    deadline = time.monotonic() + wait_timeout
+    with _client(base, headers=headers) as client:
         payload = _handle_response(client.get(f"/v1/tasks/{task_id}"))
+        if wait:
+            while isinstance(payload, dict) and payload.get("status") in ("pending", "running"):
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(0.5)
+                payload = _handle_response(client.get(f"/v1/tasks/{task_id}"))
     if output_json:
         _print_json(payload)
         return
@@ -545,6 +579,12 @@ def task_get(
     for key in ("task_id", "title", "status", "priority", "created_by"):
         table.add_row(key, str(task.get(key, "-")))
     table.add_row("input", str(task.get("input", "-"))[:120])
+    output = task.get("output") or {}
+    if isinstance(output, dict) and output:
+        table.add_row("result", str(output.get("summary", ""))[:2000])
+        table.add_row("verification", str(output.get("verification", "-")))
+    if task.get("error"):
+        table.add_row("error", str(task.get("error")))
     console.print(table)
 
 
@@ -552,15 +592,18 @@ def task_get(
 def task_status(
     task_id: str = typer.Argument(..., help="Task id."),
     status_value: str = typer.Argument(
-        ..., help="New lifecycle state (e.g. queued, running, done, failed)."
+        ..., help="New lifecycle state (e.g. pending, running, blocked, failed)."
     ),
     error: str | None = typer.Option(None, "--error", help="Optional error message."),
     server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    token: str | None = typer.Option(
+        None, "--token", help="Bearer token (overrides AGENCY_API_TOKEN)."
+    ),
     output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
 ) -> None:
     """Transition a task into a new lifecycle state."""
     base = _server_url(server_url)
-    with _client(base) as client:
+    with _client(base, headers=_headers(token)) as client:
         payload = _handle_response(
             client.patch(
                 f"/v1/tasks/{task_id}/status",

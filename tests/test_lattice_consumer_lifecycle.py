@@ -464,7 +464,9 @@ async def test_real_api_and_orchestrator_release_independently(owners, api_first
         assert app.state.lattice is shared
         row = await shared.create_node("task", {"synthetic": True})
         generation = factory._manager.generation
-        assert len(generation.tokens) == 2
+        # External orchestrator + the api app's own lease + the in-app
+        # orchestrator whose dispatcher executes submitted tasks.
+        assert len(generation.tokens) == 3
         assert not generation.legacy_pin
         memory, evidence = app.state.memory_store, app.state.evidence_store
         if not api_first:

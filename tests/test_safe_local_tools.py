@@ -36,9 +36,10 @@ from agency.tools.driver import ToolDriver
 from agency.tools.registry import ToolRegistry
 
 _LEGACY_TOOLS = ("memory_query", "memory_write", "sandbox_exec", "web_fetch", "web_search")
-# The orchestrator's open registry adds the governed skill tool on top of the
-# legacy builtins; the opt-in local tools remain excluded.
-_ORCHESTRATOR_TOOLS = _LEGACY_TOOLS + ("agency_skill",)
+# The orchestrator's open registry adds the governed skill tool and the
+# depth-guarded agent-to-agent delegation tool on top of the legacy builtins;
+# the opt-in local tools remain excluded.
+_ORCHESTRATOR_TOOLS = _LEGACY_TOOLS + ("agency_skill", "delegate_task")
 _NEW_TOOLS = ("calculator", "utc_time", "forge_read")
 
 # Fixed error vocabulary: callers get a stable message, never their input.

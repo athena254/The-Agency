@@ -37,6 +37,7 @@ from agency.agents.prompts import issued_system_prompt
 from agency.agents.registry import AgentRegistry as RuntimeAgentRegistry
 from agency.agents.verifier import AgentVerifier
 from agency.bridges.coordinator import ExternalCoordinator
+from agency.dispatch import TaskDispatcher
 from agency.evidence.store.models import (
     Finding,
     Severity,
@@ -68,6 +69,7 @@ from agency.skills.registry import SkillRegistry
 from agency.skills.tool import SkillInvokeTool
 from agency.tools.base import BetaPrincipal, ToolContext
 from agency.tools.builtin import register_all as register_builtin_tools
+from agency.tools.builtin.delegate import DelegateTaskTool
 from agency.tools.driver import ToolDriver
 from agency.tools.registry import ToolRegistry
 
@@ -81,6 +83,25 @@ TOOL_CAPABLE_DOMAINS = frozenset(
 _TOOL_ITERATIONS: dict[str, int] = {"research": 6, "general": 4}
 
 _DEFAULT_MEMORY_DB = "data/memory.db"
+
+
+def _int_setting(
+    config_value: Any,
+    env_value: str | None,
+    *,
+    default: int,
+    minimum: int,
+) -> int:
+    """Resolve an int setting: explicit config > env > default (fail to default)."""
+
+    for raw in (config_value, env_value):
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            continue
+        try:
+            return max(minimum, int(raw))
+        except (TypeError, ValueError):
+            continue
+    return default
 
 
 async def _finish_cleanup(task: asyncio.Task[BaseException | None]) -> None:
@@ -146,6 +167,7 @@ class AgencyOrchestrator:
         memory_db_path: str | None = None,
         skill_db_path: str | None = None,
         skill_operations: OperationRegistry | None = None,
+        task_manager: TaskManager | None = None,
         blacksmith_ops: BlacksmithOps | None = None,
     ) -> None:
         self._config = config or {}
@@ -175,8 +197,27 @@ class AgencyOrchestrator:
         # Kernel
         self._identity_registry = AgentRegistry()
         self._policy_engine = PolicyEngine()
-        self._task_manager = TaskManager()
+        # Injected manager lets server processes share one store-backed queue;
+        # default keeps the historical in-memory behaviour for library users.
+        self._task_manager = task_manager or TaskManager()
         self._audit_log = AuditLog(":memory:")
+
+        # Dispatcher — the queue consumer; started/stopped with the
+        # orchestrator lifecycle. Concurrency is bounded per process.
+        self._max_concurrent_tasks = _int_setting(
+            self._config.get("max_concurrent_tasks"),
+            os.environ.get("AGENCY_MAX_CONCURRENT_TASKS"),
+            default=2,
+            minimum=1,
+        )
+        self._max_delegation_depth = _int_setting(
+            self._config.get("max_delegation_depth"),
+            os.environ.get("AGENCY_MAX_DELEGATION_DEPTH"),
+            default=2,
+            minimum=1,
+        )
+        self._dispatcher: TaskDispatcher | None = None
+        self._task_locks: dict[str, asyncio.Lock] = {}
 
         # Agents
         self._runtime_registry = RuntimeAgentRegistry()
@@ -288,7 +329,9 @@ class AgencyOrchestrator:
             self._lattice = self._lattice_lease.lattice
             self._build_tool_layer()
             self._started = True
-            self._log.info("orchestrator_started")
+            self._log.info(
+                "orchestrator_started", max_concurrent_tasks=self._max_concurrent_tasks
+            )
         except BaseException:
             # Cancellation also requires rollback; cleanup must not mask it.
             try:
@@ -297,6 +340,19 @@ class AgencyOrchestrator:
                 with suppress(BaseException):
                     self._log.warning("orchestrator_rollback_failed", error_type=type(exc).__name__)
             raise
+
+    async def start_dispatcher(self) -> None:
+        """Launch the queue consumer (server lifespans call this after ``start()``).
+
+        Deliberately not started by ``start()`` itself: library callers use
+        the submit → inline-execute pattern, and a background consumer would
+        race them for pending tasks. Only server processes that own a queue
+        (api/butler over the shared SQLite store) opt in.
+        """
+        if not self._started:
+            raise RuntimeError("start the orchestrator before starting the dispatcher")
+        async with self._lifecycle_lock:
+            self._start_dispatcher_locked()
 
     def _build_tool_layer(self) -> None:
         """Wire the tool registry with live services (idempotent).
@@ -310,12 +366,144 @@ class AgencyOrchestrator:
         registry = ToolRegistry(audit=self._audit_log)
         register_builtin_tools(registry)
         registry.register(SkillInvokeTool(self.execute_skill))
+        # Agent-to-agent delegation: available to every tool-capable agent;
+        # depth/cycle guards live in delegate_task itself.
+        registry.register(DelegateTaskTool(self.delegate_task))
         self._tool_registry = registry
         self._tool_driver = ToolDriver(registry=registry, llm=self._llm_adapter)
         self._log.info(
             "tool_layer_ready",
             tools=[s.name for s in registry.list_specs()],
         )
+
+    def _start_dispatcher_locked(self) -> None:
+        """Own the queue consumer for this orchestrator's task manager.
+
+        The dispatcher is the single execution authority for queued tasks;
+        inline callers (``execute_task``) and dispatcher executions are
+        mutually excluded per task via ``_task_locks``.
+        """
+        if self._dispatcher is not None:
+            return
+        self._dispatcher = TaskDispatcher(
+            self._task_manager,
+            self.execute_task,
+            max_concurrency=self._max_concurrent_tasks,
+        )
+        self._dispatcher.start()
+
+    @property
+    def has_dispatcher(self) -> bool:
+        """True once ``start()`` launched the queue consumer."""
+
+        return self._dispatcher is not None
+
+    async def wait_task_result(self, task_id: str, *, timeout: float | None = None) -> Task:
+        """Wait until a queued task reaches a terminal state; return its final state.
+
+        Requires a started dispatcher (``await orchestrator.start()``);
+        raises ``RuntimeError`` for library callers that execute tasks inline.
+        """
+        dispatcher = self._dispatcher
+        if dispatcher is None:
+            raise RuntimeError(
+                "no dispatcher: start the orchestrator before waiting on queued tasks"
+            )
+        return await dispatcher.wait(task_id, timeout=timeout)
+
+    async def delegate_task(
+        self,
+        parent_task_id: str,
+        target_agent_id: str,
+        *,
+        title: str = "",
+        description: str = "",
+        priority: int = 0,
+        timeout: float = 300.0,
+    ) -> Task:
+        """Assign a child task to another registered agent and await its result.
+
+        The child joins the shared dispatcher queue — it executes in parallel
+        with everything else — while the caller blocks (bounded by
+        ``timeout``) until the child reaches a terminal state. Depth is
+        bounded by ``max_delegation_depth`` (default 2) so delegation chains
+        cannot recurse without limit.
+        """
+        target = self._identity_registry.get(target_agent_id)
+        if target is None or target.revoked:
+            raise ValueError(f"unknown or revoked target agent {target_agent_id!r}")
+        parent = await self._task_manager.get_task(parent_task_id)
+        if parent is None:
+            raise ValueError(f"unknown parent task {parent_task_id!r}")
+        depth = await self._delegation_depth(parent)
+        if depth >= self._max_delegation_depth:
+            raise ValueError(
+                f"delegation depth limit reached ({self._max_delegation_depth})"
+            )
+        child = await self._task_manager.create_task(
+            title=(title or f"Delegated: {parent.title}")[:200],
+            created_by=target.id,
+            input={"description": description},
+            parent_id=parent_task_id,
+            priority=priority,
+        )
+        self._log.info(
+            "task_delegated",
+            parent_task_id=parent_task_id,
+            child_task_id=child.task_id,
+            target_agent_id=target.id,
+        )
+        try:
+            return await self.wait_task_result(child.task_id, timeout=timeout)
+        except TimeoutError:  # asyncio.TimeoutError aliases TimeoutError
+            # Cancel only work that has not started; running children keep
+            # going and their result stays visible via the task API.
+            if child.status is TaskStatus.PENDING:
+                with suppress(ValueError):
+                    await self._task_manager.update_status(
+                        child.task_id, TaskStatus.BLOCKED, error="delegation wait timed out"
+                    )
+            raise
+
+    async def _delegation_depth(self, task: Task) -> int:
+        """Count ancestors of ``task``; cycle-safe (a repeated id stops the walk)."""
+        depth = 0
+        seen: set[str] = {task.task_id}
+        current: Task | None = task
+        while current is not None and current.parent_id:
+            if current.parent_id in seen:
+                break
+            seen.add(current.parent_id)
+            current = await self._task_manager.get_task(current.parent_id)
+            depth += 1
+        return depth
+
+    def _resolve_execution_agent(self, task: Task) -> str | None:
+        """Which registered agent should execute this task.
+
+        Order: explicit ``input.agent_id`` (validated upstream), else the
+        submitting agent when ``created_by`` is registered, else the first
+        registered general-domain agent (external submitters have no agent
+        identity of their own). ``None`` only when nothing is registered.
+        """
+        requested = task.input.get("agent_id")
+        if isinstance(requested, str) and requested.strip():
+            agent = self._identity_registry.get(requested.strip())
+            if agent is not None and not agent.revoked:
+                return agent.id
+        if task.created_by:
+            agent = self._identity_registry.get(task.created_by)
+            if agent is not None and not agent.revoked:
+                return agent.id
+        fallbacks = [
+            agent
+            for agent in self._identity_registry.list_agents()
+            if not agent.revoked
+        ]
+        for agent in fallbacks:
+            if agent.domain == "general":
+                return agent.id
+        return fallbacks[0].id if fallbacks else None
 
     def _tool_context(
         self, agent_id: str, task_id: str, *, beta_principal: BetaPrincipal | None = None
@@ -346,12 +534,19 @@ class AgencyOrchestrator:
         self._started = False
         self._tool_registry = None
         self._tool_driver = None
+        # Stop consuming the queue and drain in-flight executions before any
+        # store they touch is closed.
+        dispatcher = self._dispatcher
+        self._dispatcher = None
         lease = self._lattice_lease
         self._lattice = None
 
         async def cleanup() -> BaseException | None:
             error: BaseException | None = None
-            closers = [self._memory_lifecycle.stop_periodic]
+            closers = []
+            if dispatcher is not None:
+                closers.append(dispatcher.stop)
+            closers.append(self._memory_lifecycle.stop_periodic)
             if lease is not None:
                 closers.append(lease.release)
             closers.extend(
@@ -537,12 +732,21 @@ class AgencyOrchestrator:
         title: str,
         description: str,
         agent_id: str | None = None,
+        context: dict[str, Any] | None = None,
     ) -> Task:
-        """Create and route a task."""
+        """Create and route a task.
+
+        ``context`` (chat-turn data such as sender and thread references) is
+        stored on the task so a dispatcher execution can replay the same
+        context an inline ``execute_task`` call would have passed.
+        """
+        task_input: dict[str, Any] = {"description": description}
+        if context is not None:
+            task_input["context"] = context
         task = await self._task_manager.create_task(
             title=title,
             created_by=agent_id or "system",
-            input={"description": description},
+            input=task_input,
         )
 
         # Create task in Lattice if available
@@ -696,29 +900,50 @@ class AgencyOrchestrator:
             # This registry is legacy-open. A typed identity is not a grant;
             # refuse before task lookup/status, model, memory, or tool work.
             raise RuntimeError("beta execution disabled: policy, budget and audit gates missing")
+        # Malformed caller-supplied recall context is rejected before any task
+        # lookup or store effect (contract: no side effects on bad input).
         recalled_context = _render_recalled_context(context)
         task = await self._task_manager.get_task(task_id)
         if task is None:
             raise ValueError(f"Task not found: {task_id}")
+        if context is None:
+            # Dispatcher executions carry the submitter's turn context on the
+            # task itself (submit_task stored it) so memory recall and prompt
+            # grounding match the inline path.
+            stored_context = task.input.get("context")
+            if isinstance(stored_context, dict):
+                context = stored_context
 
-        agent_model: str | None = None
-        if task.created_by:
-            agent_model = self._agent_model(self._identity_registry.get(task.created_by))
+        # External submitters have no agent identity: execution is routed to
+        # input.agent_id, the submitter's identity when registered, or the
+        # default general-domain agent. The submitter stays in created_by.
+        execution_agent_id = self._resolve_execution_agent(task)
+        agent_model = self._agent_model(
+            self._identity_registry.get(execution_agent_id) if execution_agent_id else None
+        )
         if agent_model:
             context = {**(context or {}), "model": agent_model}
 
-        # Update status
-        await self._task_manager.update_status(task_id, TaskStatus.RUNNING)
-
-        try:
-            return await self._execute_running(task, context, recalled_context)
-        except (Exception, asyncio.CancelledError):
-            # COMPLETED is terminal. Keep RUNNING until required writes finish;
-            # cleanup failure must not replace the original exception/cancellation.
-            with suppress(Exception, asyncio.CancelledError):
-                if task.status is TaskStatus.RUNNING:
-                    await self._task_manager.update_status(task_id, TaskStatus.FAILED)
-            raise
+        task_lock = self._task_locks.setdefault(task_id, asyncio.Lock())
+        if task_lock.locked():
+            raise ValueError(f"task {task_id!r} is already executing")
+        async with task_lock:
+            try:
+                # The dispatcher claims tasks RUNNING before calling us;
+                # direct callers transition PENDING -> RUNNING here.
+                if task.status is not TaskStatus.RUNNING:
+                    task = await self._task_manager.update_status(task_id, TaskStatus.RUNNING)
+                return await self._execute_running(task, context, recalled_context)
+            except (Exception, asyncio.CancelledError):
+                # COMPLETED is terminal. Keep RUNNING until required writes finish;
+                # cleanup failure must not replace the original exception/cancellation.
+                with suppress(Exception, asyncio.CancelledError):
+                    current = await self._task_manager.get_task(task_id)
+                    if current is not None and current.status is TaskStatus.RUNNING:
+                        await self._task_manager.update_status(task_id, TaskStatus.FAILED)
+                raise
+            finally:
+                self._task_locks.pop(task_id, None)
 
     async def _execute_forge(self, task: Task) -> ExecutionResult:
         """Forge-domain work is managed by BlacksmithOps — never the chat path.
@@ -818,7 +1043,10 @@ class AgencyOrchestrator:
         # Tool-capable agents run the tool-driver loop instead of a single
         # LLM call: the agent plans with tools (search/fetch/memory), acts,
         # and returns a final answer with aggregated evidence.
-        tool_ctx_agent = self._identity_registry.get(task.created_by)
+        execution_agent_id = self._resolve_execution_agent(task) or task.created_by
+        tool_ctx_agent = (
+            self._identity_registry.get(execution_agent_id) if execution_agent_id else None
+        )
         agent_domain = tool_ctx_agent.domain if tool_ctx_agent else None
         issued_prompt = issued_system_prompt(tool_ctx_agent)
         if issued_prompt:
@@ -901,7 +1129,7 @@ class AgencyOrchestrator:
                         "To invoke one, use agency_skill with its exact ID, version, and inputs."
                     )
 
-            tool_ctx = self._tool_context(task.created_by, task_id)
+            tool_ctx = self._tool_context(execution_agent_id, task_id)
             loop_result = await tool_driver.run(
                 task=description,
                 system_prompt=system_prompt,
@@ -949,7 +1177,7 @@ class AgencyOrchestrator:
             # override); caller context also carries prompt-side data such as
             # memory_context/sender, which the strict ExecutionContext forbids.
             exec_context: dict[str, Any] = {
-                "agent_id": task.created_by,
+                "agent_id": execution_agent_id,
                 "subtask_id": subtask.subtask_id,
             }
             if context and context.get("model"):
@@ -1009,7 +1237,7 @@ class AgencyOrchestrator:
             await self._audit_log.append(
                 AuditEntry(
                     timestamp=datetime.now(UTC),
-                    agent=task.created_by,
+                    agent=execution_agent_id,
                     task=task_id,
                     target=task.title,
                     authorization="policy_engine",
@@ -1047,7 +1275,7 @@ class AgencyOrchestrator:
                     title=task.title,
                     description=description,
                     status="completed",
-                    agent_id=task.created_by,
+                    agent_id=execution_agent_id,
                     subtask_outputs=list(outputs),
                     tool_steps=skill_tool_steps,
                 )
@@ -1064,7 +1292,7 @@ class AgencyOrchestrator:
         # the blueprint for factory-issued agents that completed this task.
         if (
             self._requested_agent_service is not None
-            and self._requested_agent_service.is_factory_issued(task.created_by)
+            and self._requested_agent_service.is_factory_issued(execution_agent_id)
             and all_completed
             and final_status is TaskStatus.COMPLETED
         ):
@@ -1074,12 +1302,12 @@ class AgencyOrchestrator:
                     title=task.title,
                     description=description,
                     status="completed",
-                    agent_id=task.created_by,
+                    agent_id=execution_agent_id,
                     subtask_outputs=list(outputs),
                     tool_steps=skill_tool_steps,
                 )
                 improvement = self._requested_agent_service.improve_agent(
-                    task.created_by, improve_trace
+                    execution_agent_id, improve_trace
                 )
                 self._log.info(
                     "requested_agent.improved",
@@ -1108,7 +1336,7 @@ class AgencyOrchestrator:
         if all_completed:
             await self._memory_store.store(
                 MemoryItem(
-                    agent_id=task.created_by,
+                    agent_id=execution_agent_id,
                     content=(
                         f"Task '{task.title}' [execution=completed; checks={report.verification.value}; "
                         f"risk={report.risk_status}; independently_verified=false] → {final_output[:500]}"
@@ -1118,7 +1346,19 @@ class AgencyOrchestrator:
                     tags=["task", "execution"],
                 )
             )
-        await self._task_manager.update_status(task_id, final_status)
+        # The result payload lands atomically with the terminal status so a
+        # poller never observes COMPLETED without its result.
+        await self._task_manager.update_status(
+            task_id,
+            final_status,
+            output={
+                "summary": final_output,
+                "execution_status": "completed" if all_completed else "failed",
+                "subtasks": len(assessments),
+                "verification": str(report.verification.value),
+                "risk": str(report.risk_status),
+            },
+        )
 
         self._log.info(
             "task_executed",
