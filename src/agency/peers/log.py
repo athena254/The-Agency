@@ -75,6 +75,7 @@ RECORD_KINDS: Final = frozenset(
         "grant",
         "intent",
         "outcome",
+        "result",
         "reconciliation",
         "executed_grant",
         "recovery",
