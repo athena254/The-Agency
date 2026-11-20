@@ -63,6 +63,7 @@ __all__ = [
     "GrantVerification",
     "VoterCertificate",
     "VoterInputRef",
+    "grant_from_payload",
     "issue_format_grant",
     "issue_grant",
     "revoke_grant",
@@ -880,3 +881,55 @@ def verify_at_actuator(
     """
 
     return ledger.verify(grant, bft_time_ms=bft_time_ms)
+
+
+def grant_from_payload(payload: Any) -> ExecutionGrant:
+    """Reconstruct an ExecutionGrant from a canonical wire payload.
+
+    Fail-closed: only the exact pinned field set is accepted; all validation
+    runs through ExecutionGrant.__post_init__.
+    """
+    if not isinstance(payload, Mapping):
+        raise GrantError("grant payload must be an object")
+    expected = {
+        "proposal_id", "task_id", "issuer_peer_id", "membership_epoch", "membership_root",
+        "nonce", "issued_at_ms", "expires_at_ms", "affected_consumers", "attestation", "signature",
+    }
+    if set(payload) != expected:
+        raise GrantError("grant payload field set does not match the pinned schema")
+    attestation_payload = payload.get("attestation")
+    attestation: AffectedSetAttestation | None = None
+    if attestation_payload is not None:
+        if not isinstance(attestation_payload, Mapping) or set(attestation_payload) != {
+            "attestor_peer_id", "signature"
+        }:
+            raise GrantError("attestation payload field set does not match the pinned schema")
+        signature = attestation_payload["signature"]
+        if isinstance(signature, str):
+            try:
+                signature = bytes.fromhex(signature)
+            except ValueError as exc:
+                raise GrantError("invalid attestation signature encoding") from exc
+        attestation = AffectedSetAttestation(
+            str(attestation_payload["attestor_peer_id"]), signature
+        )
+    signature = payload["signature"]
+    if isinstance(signature, str):
+        try:
+            signature = bytes.fromhex(signature)
+        except ValueError as exc:
+            raise GrantError("invalid grant signature encoding") from exc
+    return ExecutionGrant(
+        proposal_id=str(payload["proposal_id"]),
+        task_id=str(payload["task_id"]),
+        issuer_peer_id=str(payload["issuer_peer_id"]),
+        membership_epoch=int(payload["membership_epoch"]),
+        membership_root=str(payload["membership_root"]),
+        nonce=str(payload["nonce"]),
+        issued_at_ms=int(payload["issued_at_ms"]),
+        expires_at_ms=int(payload["expires_at_ms"]),
+        affected_consumers=tuple(str(c) for c in payload["affected_consumers"]),
+        attestation=attestation,
+        signature=signature,
+    )
+

@@ -41,7 +41,7 @@ from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 import structlog
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -50,6 +50,7 @@ from agency import __version__
 from agency.agents.coding_bootstrap import bootstrap_coding_agent
 from agency.agents.registry import AgentRegistry as RuntimeAgentRegistry
 from agency.api.auth import TokenRegistry
+from agency.api.authority import require_peer_authority
 from agency.api.routers import agents as agents_router
 from agency.api.routers import bridges as bridges_router
 from agency.api.routers import evidence as evidence_router
@@ -154,6 +155,9 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         "lattice",
         "peer_authority",
         "orchestrator",
+        "peer_membership",
+        "grant_ledger",
+        "grant_bft_time_ms",
     )
     for name in state_names:
         setattr(application.state, name, None)
@@ -234,6 +238,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             try:
                 from agency.factory.github_skills import grant_manifest_capabilities
 
+<<<<<<< HEAD
                 grant_manifest_capabilities(kernel_registry)
             except BaseException as exc:  # noqa: BLE001 - startup must not crash
                 log.warning(
@@ -250,6 +255,30 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
                     "api.startup.installed_agents_failed",
                     error_type=type(exc).__name__,
                 )
+
+        # Wire peer authority from a pinned genesis if available (opens the
+        # ballot route and the grant-verifying HTTP dependency).
+        try:
+            from agency.consensus.genesis import load_genesis
+            from agency.consensus.grants import GrantLedger
+            from agency.peers.authority import PeerAuthority, PeerRegistry
+
+            genesis_path = os.environ.get("AGENCY_GENESIS_PATH", "data/consensus/genesis.json")
+            if os.path.exists(genesis_path):
+                membership = load_genesis(genesis_path)
+                registry = PeerRegistry()
+                for member in membership.members:
+                    registry.register_public_key(member.peer_id, member.public_key)
+                application.state.peer_authority = PeerAuthority(membership, registry)
+                application.state.peer_membership = membership
+                application.state.grant_ledger = GrantLedger(membership=membership)
+                application.state.grant_bft_time_ms = int(
+                    os.environ.get("AGENCY_GRANT_BFT_TIME_MS", "1000")
+                )
+                log.info("api.startup.peer_authority_loaded", path=genesis_path)
+        except BaseException as exc:  # noqa: BLE001 - startup must not crash
+            application.state.peer_authority = None
+            log.warning("api.startup.peer_authority_failed", error_type=type(exc).__name__)
 
         log.info("api.startup", version=__version__)
         yield
@@ -327,8 +356,14 @@ def create_app() -> FastAPI:
             path = path[len(root) :]
         # Signed ballots carry their own authority (Ed25519 envelope verified
         # by PeerAuthority); they must reach the router to be verified.
+        from agency.api.authority import _is_read_scope, _writes_open
+
         is_ballot = path == "/v1/governance/ballot"
-        if (request.method == "GET" and path == "/v1/health") or is_ballot:
+        is_health = request.method == "GET" and path == "/v1/health"
+        scope = f"{request.method} {path}"
+        is_scoped_read = request.method == "GET" and _is_read_scope(scope)
+        is_scoped_write = _writes_open() and path.startswith("/v1/")
+        if is_health or is_ballot or is_scoped_read or is_scoped_write:
             return await call_next(request)
         if any(
             path == prefix or path.startswith(prefix + "/")
@@ -370,6 +405,7 @@ def create_app() -> FastAPI:
         response_model=RiskReportResponse,
         tags=["risk"],
         summary="Get risk assessment",
+        dependencies=[Depends(require_peer_authority)],
     )
     async def get_risk(finding_id: str, request: Request) -> RiskReportResponse:
         """Compute the risk vector and category for a finding."""

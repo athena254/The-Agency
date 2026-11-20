@@ -71,6 +71,23 @@ class PeerRegistry:
             self._conn.commit()
         return pub
 
+    def register_public_key(self, peer_id: str, fingerprint: str) -> PeerPublicKey:
+        """Register a pinned public key (genesis bootstrap, no private key needed)."""
+        pub = PeerPublicKey.from_fingerprint(fingerprint)
+        if pub.peer_id != peer_id:
+            raise AuthorityError("peer_id fingerprint mismatch")
+        existing = self._keys.get(peer_id)
+        if existing is not None and existing.fingerprint != fingerprint:
+            raise AuthorityError("peer_id fingerprint mismatch")
+        self._keys[peer_id] = pub
+        if self._conn is not None:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO peer_registry (peer_id, fingerprint) VALUES (?, ?)",
+                (peer_id, fingerprint),
+            )
+            self._conn.commit()
+        return pub
+
     def get(self, peer_id: str) -> PeerPublicKey | None:
         return self._keys.get(peer_id)
 
