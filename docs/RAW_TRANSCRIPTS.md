@@ -1,7 +1,7 @@
 # Raw Transcripts Archive (Complete)
 
 This file contains ALL verbatim extracts from forwarded texts about The Agency/Athens system.
-Referenced by: docs/ARCHITECTURE.md, docs/SPECIFICATION.md, docs/COMPLETE_REFERENCE.md
+Historical source extract retained for provenance; no current normative document references it directly.
 
 ---
 

@@ -4,7 +4,7 @@ October 19, 2026. Additive implementation refinement of SPEC_OWNER_PILOT_M2_M3_2
 
 ## Ownership and order
 
-F2a owns existing admission/budget.py, llm/metered.py, tools/base.py, tools/registry.py, tools/driver.py; NEW admission/policy.py, tests/test_owner_policy.py, tests/test_owner_runtime.py; docs/HANDOFF_OWNER_CORE_20261019.md. No service/orchestrator/Butler/API/source adapter edits. These remain next dependent slice AFTER F2a tests/delivery. Foundation models/store/auth and effective snapshot already exist: use their real classes, no private replacements. No changes to legacy BetaBudgetStore, beta authorizations, privileged ingress or governance.
+F2a owns existing admission/budget.py, llm/metered.py, tools/base.py, tools/registry.py, tools/driver.py; NEW admission/policy.py, tests/test_owner_policy.py, tests/test_owner_runtime.py; docs/HANDOFF_OWNER_FOUNDATION_20261019.md (the F2a-specific handoff was not committed). No service/orchestrator/Butler/API/source adapter edits. These remain next dependent slice AFTER F2a tests/delivery. Foundation models/store/auth and effective snapshot already exist: use their real classes, no private replacements. No changes to legacy BetaBudgetStore, beta authorizations, privileged ingress or governance.
 
 ## Explicit small additive shared interfaces
 

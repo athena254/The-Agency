@@ -47,7 +47,7 @@ State: PARTIAL/OPEN. These are scope boundaries, not defects, but they must not 
 
 Observed: the Lattice is a single-process SQLite/in-memory prototype with process-local proposal state, best-effort mirroring, a `user` override and no membership epoch. `/v1/*` business routes are closed with HTTP 503 except `GET /v1/health`. Signed peer-envelope primitives and a historical four-process CometBFT loopback lab exist, but no Agency task grants, affected-consumer input, human attestation, membership changes or actuator enforcement are implemented.
 
-State: OPEN (core production blocker). The owner decisions D-01–D-05 are approved and the migration path is specified in `SPEC_KNOWN_PEER_PROTOCOL.md` §18 and `SPEC_PEER_LATTICE_GOVERNANCE.md`, but no peer application implementation exists. It is slated for Wave 1 in `docs/PLAN_V1_FULLY_WORKING.md`. Do not describe the Lattice, the pilot or the CometBFT lab as decentralized authority.
+State: OPEN (core production blocker). The owner decisions D-01–D-05 are approved and the migration path is specified in `SPEC_KNOWN_PEER_PROTOCOL.md` §18 and `SPEC_PEER_LATTICE_GOVERNANCE.md`, but no peer application implementation exists. The remaining A4-A7 gates are tracked in `CURRENT_STATE.md`. Do not describe the Lattice, the pilot or the CometBFT lab as decentralized authority.
 
 ## KI-08 — POSIX private-mode check failed owner-recovery tests (test harness, not product)
 

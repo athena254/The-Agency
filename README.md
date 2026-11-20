@@ -1,6 +1,6 @@
 # The Agency — Governed Multi-Agent Execution System
 
-**Current checkpoint — November 9, 2026:** pre-production prototype, not daily-driver-qualified or a deployed decentralized runtime. [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) is the authoritative status for the current revision; start there, with [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the artifact contract. The bounded owner pilot, persistent task workspace, local pilot UI and Mission Control console are implemented local surfaces; beta model/tool ingress remains disabled and legacy HTTP business routes remain closed. The uncommitted `feat/dual-tui-agency-forge` branch adds bounded foundations — a Textual dual TUI (`agency tui`, `forge`), a durable Ralph-style autonomous loop (`agency loop run|resume|status`) and the `forge` entry point — none of which are production-qualified or covered by the recorded gates. Historical passing totals below are not current release evidence. The browser surfaces are local prototypes, not a deployed production GUI.
+**Current checkpoint — November 20, 2026:** pre-production prototype, not daily-driver-qualified or a deployed decentralized runtime. [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) is the authoritative status for the current revision; start there, with [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the artifact contract. The bounded owner pilot, persistent task workspace, local pilot UI and Mission Control console are implemented local surfaces; beta model/tool ingress remains disabled and legacy HTTP business routes remain closed. Local `main` includes the merged Blacksmith forge specialist/orchestration work, SMS embeddings and the optional pinned Honcho memory mirror (see [`docs/HONCHO_ADAPTER.md`](docs/HONCHO_ADAPTER.md)); it is ahead of `origin/main` and unpushed. The dual TUI, autonomous loop and `forge` entry point are already merged, not production-qualified or covered by a fresh full gate run. Historical passing totals below are not current release evidence. The browser surfaces are local prototypes, not a deployed production GUI.
 
 > Target: Human ↔ Butler ↔ the Lattice-connected Agency peers. Butler is the human gateway, not a validator or unilateral authority. The in-process orchestrator diagram below shows prototype implementation, not the decentralized target.
 > Agent Factory has a narrow v1 foundation; Forge v2 is a bounded, human-gated
@@ -99,7 +99,7 @@ GitHub workflows and the box deployment scripts) are documented in
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ```bash
-# Install (extras defined in pyproject.toml: dev, neo4j, qdrant, ollama, llm)
+# Install (extras defined in pyproject.toml: dev, neo4j, qdrant, ollama, llm, memory, honcho)
 pip install -e ".[dev]"
 
 # CLI entry point (defined as agency = "agency.cli:main" in pyproject.toml)
@@ -139,12 +139,23 @@ historical/superseded rather than deleting them.
 
 | Document | Purpose |
 |----------|---------|
-| `docs/SOURCE_CONSOLIDATED_BRIEF.md` | Preserved source of truth — target architecture/product direction (normative for goals) |
-| `docs/SPEC_AGENCY_CORE_RECONCILIATION.md` | Preserved reconciliation spec — code-backed gap matrix, build slice, acceptance gates |
+| `docs/CURRENT_STATE.md` | Authoritative current state, verification boundaries and merge history |
+| `docs/SOURCE_CONSOLIDATED_BRIEF.md` | Normative target architecture/product direction |
+| `docs/SPEC_AGENCY_CORE_RECONCILIATION.md` | Code-backed gap matrix, build slice and acceptance gates |
 | `docs/ARCHITECTURE.md` | Canonical current architecture + labeled historical diagrams |
-| `docs/ROADMAP.md` | Honest implemented / partial / planned roadmap |
-| `docs/HEALTH.md` | Honest project health assessment |
+| `docs/ROADMAP.md`, `docs/HEALTH.md` | Honest roadmap and project health assessment |
+| `docs/PRODUCTION_READINESS_PLAN.md` | Gated production-readiness plan |
+| `docs/DEPLOYMENT.md` | Deployment artifact contract |
+| `docs/OWNER_DECISIONS_D01_D05.md`, `docs/OWNER_DECISIONS_D06_SLICE_A_CONTRACT.md` | Approved owner policy inputs |
+| `docs/KNOWN_ISSUES.md` | Active tracked gaps |
+| `docs/HONCHO_ADAPTER.md`, `docs/ADR-honcho-memory-adapter.md` | Optional pinned Honcho memory mirror: configuration and ADR |
+| `docs/BRANCH_CLEANUP.md` | Branch/worktree consolidation checkpoints |
 | `docs/SPECIFICATION.md`, `docs/SPEC_*.md` | Historical specifications (preserved; superseded where they conflict with the brief) |
+| `docs/HANDOFF_*.md`, `docs/RESEARCH_*.md`, `docs/QUALIFICATION_*.md`, `docs/research-evidence/` | Dated historical evidence and qualification records |
+
+The November 20, 2026 documentation pass retired superseded WIP/plan checkpoints and a
+duplicate draft; the remaining dated records are retained as historical evidence, not
+as current status claims.
 
 ## Notes and non-goals
 

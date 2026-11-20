@@ -1037,36 +1037,11 @@ These are design goals and architectural differentiators, not claims that the im
 
 # 23. Repository Documentation
 
-The documentation should eventually include or update:
-
-```text
-README.md
-
-docs/
-  ARCHITECTURE.md
-  SPECIFICATION.md
-  SPEC_SUMMARY.md
-  SPEC_GATEWAY.md
-  SPEC_BUDDY.md
-  SPEC_SANDBOX.md
-  SPEC_ADVERSARIAL.md
-  ROADMAP.md
-  HEALTH.md
-
-Potential new documents:
-
-  AGENCY_MODEL.md
-  AGENT_FACTORY.md
-  SKILLS.md
-  WORKFLOWS.md
-  FORGE.md
-  BUTLER.md
-  GOVERNANCE.md
-  SECURITY.md
-  MEMORY.md
-  COMPETITIVE_POSITIONING.md
-  DEVELOPMENT_MODEL.md
-```
+The current documentation set is listed in the root `README.md` table, with
+`docs/CURRENT_STATE.md` as the authoritative status document. Dated handoffs,
+research notes, qualification records and historical specs are retained under
+`docs/` as evidence; superseded WIP checkpoints and duplicate drafts were
+retired in the November 20, 2026 documentation pass.
 
 Documentation should describe the architecture that actually exists.
 
