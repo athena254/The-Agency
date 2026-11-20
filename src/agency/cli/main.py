@@ -892,6 +892,9 @@ def forge_code(
     run_tests: bool = typer.Option(False, "--run-tests", help="Run repository tests after edits."),
     test_path: str = typer.Option("", "--test-path", help="Test path(s) to run (comma-separated)."),
     cleanup: bool = typer.Option(False, "--cleanup", help="Remove the worktree after the run."),
+    work_order: str = typer.Option(
+        "", "--work-order", help="Path to a rendered striker work order; overrides <task>."
+    ),
     output_json: bool = typer.Option(False, "--json", help="Emit the full report as JSON."),
 ) -> None:
     """Run a coding agent in an isolated worktree, then Forge gates."""
@@ -904,6 +907,12 @@ def forge_code(
     if agent != "opencode":
         _fail(f"unsupported agent: {agent}")
         return
+    if work_order:
+        order_path = Path(work_order)
+        if not order_path.is_file():
+            _fail(f"work order not found: {order_path}")
+            return
+        task = order_path.read_text(encoding="utf-8")
     cmd = ["opencode", "run", "--auto", "--dir", "{workdir}", "--model", model]
     test_paths = [p.strip() for p in test_path.split(",") if p.strip()] if test_path else []
     report = run_external_agent(
