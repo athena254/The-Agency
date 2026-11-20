@@ -195,6 +195,25 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
                     "api.startup.blacksmith_failed",
                     error_type=type(exc).__name__,
                 )
+            try:
+                from agency.factory.github_skills import grant_manifest_capabilities
+
+                grant_manifest_capabilities(kernel_registry)
+            except BaseException as exc:  # noqa: BLE001 - startup must not crash
+                log.warning(
+                    "api.startup.external_skill_attachments_failed",
+                    error_type=type(exc).__name__,
+                )
+            try:
+                from agency.agents.bootstrap import ensure_installed_agents
+                from agency.factory.manager import AgentManager
+
+                ensure_installed_agents(AgentManager(), kernel_registry)
+            except BaseException as exc:  # noqa: BLE001 - startup must not crash
+                log.warning(
+                    "api.startup.installed_agents_failed",
+                    error_type=type(exc).__name__,
+                )
 
         log.info("api.startup", version=__version__)
         yield

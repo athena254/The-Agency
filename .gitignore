@@ -52,6 +52,8 @@ sandbox-workspaces/
 # Mutable runtime data stays local; preserve the directory in fresh clones.
 data/*
 !data/.gitkeep
+!data/agents/
+!data/agents/agents.yaml
 
 # Temporary coding-agent inputs and tool caches
 .agent-input/

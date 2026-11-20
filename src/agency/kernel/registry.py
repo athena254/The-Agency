@@ -170,6 +170,14 @@ class AgentRegistry:
     # Revocation
     # ------------------------------------------------------------------ #
 
+    def deregister(self, agent_id: str) -> bool:
+        """Deregister an agent identity; returns whether it was registered."""
+        with self._lock:
+            if agent_id in self._agents:
+                self._agents.pop(agent_id)
+                return True
+        return False
+
     def revoke(self, agent_id: str) -> Agent:
         """Revoke an agent identity in place; the record is retained.
 

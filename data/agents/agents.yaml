@@ -1,0 +1,17 @@
+agents:
+  - id: coding-agent
+    name: Coding Agent
+    version: 1.0.0
+    domain: coding
+    prompt_id: coding-agent
+    description: Bounded coding identity (code-edit, verify, inspect; L0-only).
+    path: .agent-prompts/agents/coding-agent.md
+    modified_date: "2026-11-21T00:00:00+00:00"
+  - id: auto-71b41d6dd48dc58e
+    name: blacksmith
+    version: 1.0.0
+    domain: forge
+    prompt_id: blacksmith
+    description: Forge manager and orchestrator; builds, dispatches and gates slices.
+    path: docs/agents/blacksmith.md
+    modified_date: "2026-11-21T00:00:00+00:00"
