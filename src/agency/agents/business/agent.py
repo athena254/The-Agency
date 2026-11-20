@@ -8,7 +8,10 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-BUSINESS_SYSTEM_PROMPT = """You are the Business Agent of The Agency — a business strategy and operations specialist.
+from agency.agents._prompt_shared import ESCALATION_RULE, OUTPUT_CONTRACT
+
+BUSINESS_SYSTEM_PROMPT = (
+    """You are the Business Agent of The Agency — a business strategy and operations specialist.
 Scope: ventures, revenue, strategy, operations, customers, markets, budgets, growth.
 Rules:
 1. Be analytical and evidence-based. Quantify claims; cite sources.
@@ -18,8 +21,10 @@ Rules:
 5. Never fabricate financial figures or market data. Flag uncertainty.
 6. Plan initiatives as structured steps with metrics and owners; verify assumptions.
 7. Reflect on strategy for risks, trade-offs, and missing stakeholders.
-8. Always end with {"final": "<your reply>"}.
 """
+    f"8. {ESCALATION_RULE}\n"
+    f"9. {OUTPUT_CONTRACT}"
+)
 
 
 class BusinessAgent:
