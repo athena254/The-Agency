@@ -149,12 +149,24 @@ def validate_whole_timeout(value: float) -> float:
     return timeout
 
 
-def validate_inputs(binary: str, output: str, whole_timeout: float, abci_app: str = "persistent_kvstore", abci_port: int = 26658) -> Inputs:
+def validate_inputs(
+    binary: str,
+    output: str,
+    whole_timeout: float,
+    abci_app: str = "persistent_kvstore",
+    abci_port: int = 26658,
+) -> Inputs:
     """Validate every CLI input; returns the frozen validated bundle."""
     whole = validate_whole_timeout(whole_timeout)
     binary_path = validate_binary_arg(binary)
     output_path = prepare_output_dir(output)
-    return Inputs(binary=binary_path, output=output_path, whole_timeout=whole, abci_app=abci_app, abci_port=abci_port)
+    return Inputs(
+        binary=binary_path,
+        output=output_path,
+        whole_timeout=whole,
+        abci_app=abci_app,
+        abci_port=abci_port,
+    )
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -501,8 +513,19 @@ class RpcClient:
         return value
 
 
-def node_argv(binary: Path, node: NodeSpec, persistent_peers: str, *, abci_app: str = "persistent_kvstore", abci_port: int = 26658) -> list[str]:
-    proxy_app = "persistent_kvstore" if abci_app == "persistent_kvstore" else "tcp://127.0.0.1:" + str(abci_port)
+def node_argv(
+    binary: Path,
+    node: NodeSpec,
+    persistent_peers: str,
+    *,
+    abci_app: str = "persistent_kvstore",
+    abci_port: int = 26658,
+) -> list[str]:
+    proxy_app = (
+        "persistent_kvstore"
+        if abci_app == "persistent_kvstore"
+        else "tcp://127.0.0.1:" + str(abci_port)
+    )
     return [
         str(binary),
         "start",
@@ -618,7 +641,10 @@ def start_node(
     log_name = f"{node.name}.log"
     handle = (output / log_name).open("ab")
     try:
-        proc = hooks.popen(node_argv(binary, node, persistent_peers, abci_app=abci_app, abci_port=abci_port), handle)
+        proc = hooks.popen(
+            node_argv(binary, node, persistent_peers, abci_app=abci_app, abci_port=abci_port),
+            handle,
+        )
     except Exception:
         handle.close()
         raise
@@ -968,8 +994,13 @@ class LabRunner:
         for node in self.nodes:
             peers = build_persistent_peers(self.nodes, node.index)
             self.processes[node.index] = start_node(
-                self.hooks, self.inputs.binary, node, peers, self.inputs.output,
-                abci_app=self.inputs.abci_app, abci_port=self.inputs.abci_port,
+                self.hooks,
+                self.inputs.binary,
+                node,
+                peers,
+                self.inputs.output,
+                abci_app=self.inputs.abci_app,
+                abci_port=self.inputs.abci_port,
             )
         heights = self.wait_heights(
             list(range(VALIDATOR_COUNT)), 1, "start4: all 4 peers at height >= 1"
@@ -1024,8 +1055,13 @@ class LabRunner:
         node = self.nodes[3]
         peers = build_persistent_peers(self.nodes, node.index)
         self.processes[3] = start_node(
-            self.hooks, self.inputs.binary, node, peers, self.inputs.output,
-            abci_app=self.inputs.abci_app, abci_port=self.inputs.abci_port,
+            self.hooks,
+            self.inputs.binary,
+            node,
+            peers,
+            self.inputs.output,
+            abci_app=self.inputs.abci_app,
+            abci_port=self.inputs.abci_port,
         )
         self.compare_app_hash("restart", self.tx3_height + 1, list(range(VALIDATOR_COUNT)))
         restarted_value = read_kvstore_value(self.rpc(3).query_value(PROBE_KEY))
@@ -1084,8 +1120,13 @@ class LabRunner:
         for index in (2, 3):
             peers = build_persistent_peers(self.nodes, index)
             self.processes[index] = start_node(
-                self.hooks, self.inputs.binary, self.nodes[index], peers, self.inputs.output,
-                abci_app=self.inputs.abci_app, abci_port=self.inputs.abci_port,
+                self.hooks,
+                self.inputs.binary,
+                self.nodes[index],
+                peers,
+                self.inputs.output,
+                abci_app=self.inputs.abci_app,
+                abci_port=self.inputs.abci_port,
             )
         nodes = list(range(VALIDATOR_COUNT))
         observed = self.quorum_loss.get("observed_heights") or {}
@@ -1316,7 +1357,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point: 0 pass, 1 incomplete/error/timeout, 2 usage error."""
     args = parse_args(argv)
     try:
-        inputs = validate_inputs(args.binary, args.output, args.whole_timeout, args.abci_app, args.abci_port)
+        inputs = validate_inputs(
+            args.binary, args.output, args.whole_timeout, args.abci_app, args.abci_port
+        )
     except UsageError as exc:
         print(f"usage error: {exc}", file=sys.stderr)
         return 2

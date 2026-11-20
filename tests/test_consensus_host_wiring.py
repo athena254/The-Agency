@@ -45,7 +45,11 @@ def test_host_wiring_durable_result(tmp_path):
     log = PeerLog(
         tmp_path / "peer.log",
         peer_id=ids[0].peer_id,
-        genesis={"epoch": membership.epoch, "membership_root": membership.root, "policy_version": membership.policy_version},
+        genesis={
+            "epoch": membership.epoch,
+            "membership_root": membership.root,
+            "policy_version": membership.policy_version,
+        },
         expected_genesis_root=membership.root,
         check_same_thread=False,
     )
@@ -72,8 +76,24 @@ def test_host_wiring_durable_result(tmp_path):
     def on_block(result, ctx):
         try:
             pid = proposal("a")
-            spec = ActionSpec(proposal_id=pid, task_id="task-1", name="calculator", args={"op": "add", "a": 2, "b": 3}, affected_consumers=tuple(consumer_ids))
-            inputs = [__import__("agency.consensus.consumer_input", fromlist=["ConsumerInput"]).ConsumerInput(consumer_id=c, proposal_id=pid, attestation_digest="0" * 64, gateway_peer_id=ids[0].peer_id) for c in consumer_ids]
+            spec = ActionSpec(
+                proposal_id=pid,
+                task_id="task-1",
+                name="calculator",
+                args={"op": "add", "a": 2, "b": 3},
+                affected_consumers=tuple(consumer_ids),
+            )
+            inputs = [
+                __import__(
+                    "agency.consensus.consumer_input", fromlist=["ConsumerInput"]
+                ).ConsumerInput(
+                    consumer_id=c,
+                    proposal_id=pid,
+                    attestation_digest="0" * 64,
+                    gateway_peer_id=ids[0].peer_id,
+                )
+                for c in consumer_ids
+            ]
             adapter.process_result(result, ctx, {pid: spec}, inputs)
         except Exception as e:  # noqa: BLE001
             errors.append(repr(e))
@@ -114,5 +134,7 @@ def test_host_wiring_durable_result(tmp_path):
 
 def test_cli_abci_host_missing_genesis():
     runner = CliRunner()
-    result = runner.invoke(app, ["consensus-abci-host", "--genesis", "nope.json", "--peer-id", "peer_x"])
+    result = runner.invoke(
+        app, ["consensus-abci-host", "--genesis", "nope.json", "--peer-id", "peer_x"]
+    )
     assert result.exit_code != 0

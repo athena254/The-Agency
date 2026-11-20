@@ -47,7 +47,8 @@ def build_proposal_envelope(
             "params_digest": digest_json(dict(params)),
             "params_schema_version": "v1",
         },
-        "affected_snapshot": affected_snapshot or {
+        "affected_snapshot": affected_snapshot
+        or {
             "graph_root_digest": _zero_digest(),
             "epoch": membership.epoch,
             "membership_root": membership.root,

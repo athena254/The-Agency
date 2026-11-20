@@ -1282,13 +1282,17 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
 @app.command("consensus-abci-host")
 def consensus_abci_host(
     genesis: str = typer.Option(..., "--genesis", help="Path to genesis.json."),
     peer_id: str = typer.Option(..., "--peer-id", help="This node's peer id."),
     port: int = typer.Option(26658, "--port", help="TCP port to bind."),
     host: str = typer.Option("127.0.0.1", "--host", help="Interface to bind."),
-    peer_log: str | None = typer.Option(None, "--peer-log", help="Optional PeerLog path for durable results."),
+    peer_log: str | None = typer.Option(
+        None, "--peer-log", help="Optional PeerLog path for durable results."
+    ),
 ) -> None:
     """Run the ABCI socket host for CometBFT."""
     from agency.consensus.abci.host import ABCIHost
@@ -1314,7 +1318,11 @@ def consensus_abci_host(
         log = PeerLog(
             peer_log,
             peer_id=peer_id,
-            genesis={"epoch": membership.epoch, "membership_root": membership.root, "policy_version": membership.policy_version},
+            genesis={
+                "epoch": membership.epoch,
+                "membership_root": membership.root,
+                "policy_version": membership.policy_version,
+            },
             expected_genesis_root=membership.root,
             check_same_thread=False,
         )
@@ -1366,6 +1374,7 @@ def consensus_abci_host(
                 console.print("[dim]peer log close failed[/dim]")
         console.print("[yellow]ABCI host stopped[/yellow]")
 
+
 @app.command("consensus-sign-proposal")
 def consensus_sign_proposal(
     genesis: str = typer.Option(..., "--genesis", help="Path to genesis.json."),
@@ -1386,7 +1395,9 @@ def consensus_sign_proposal(
     membership = load_genesis(genesis)
     raw = base64.b64decode(key.strip())
     issuer = PeerIdentity.from_private_key(Ed25519PrivateKey.from_private_bytes(raw))
-    wire = build_proposal_envelope(issuer, membership, action_type=action, resource=resource, params={})
+    wire = build_proposal_envelope(
+        issuer, membership, action_type=action, resource=resource, params={}
+    )
     if output_json:
         _print_json({"wire_hex": wire.hex()})
     else:
@@ -1416,9 +1427,10 @@ def consensus_sign_ballot(
     raw = base64.b64decode(key.strip())
     issuer = PeerIdentity.from_private_key(Ed25519PrivateKey.from_private_bytes(raw))
     authority = PeerAuthority(membership)
-    wire = build_ballot_wire(authority, issuer, proposal_id=proposal_id, decision=decision, monotonic_seq=seq)
+    wire = build_ballot_wire(
+        authority, issuer, proposal_id=proposal_id, decision=decision, monotonic_seq=seq
+    )
     if output_json:
         _print_json({"wire_hex": wire.hex()})
     else:
         console.print(wire.hex())
-

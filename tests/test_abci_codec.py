@@ -142,7 +142,7 @@ def test_finalize_block_response_shape() -> None:
     encoded = encode_response(response)
     field_number, payload = split_frame(encoded)
     assert field_number == 21
-    assert encoded[0] == 0xaa
+    assert encoded[0] == 0xAA
     decoded = decode_finalize_payload(payload)
     assert len(decoded.tx_results) == 2
     assert decoded.tx_results[0].code == 0

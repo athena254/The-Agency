@@ -552,7 +552,12 @@ class PeerLog:
             return
         self._check_genesis_input()
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self._path, timeout=30.0, isolation_level=None, check_same_thread=self._check_same_thread)
+        conn = sqlite3.connect(
+            self._path,
+            timeout=30.0,
+            isolation_level=None,
+            check_same_thread=self._check_same_thread,
+        )
         try:
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA journal_mode=WAL")

@@ -153,7 +153,9 @@ class ABCIHost:
                 data="agency",
                 app_version=info.app_version,
                 last_block_height=info.last_block_height,
-                last_block_app_hash=info.last_block_app_hash.encode() if isinstance(info.last_block_app_hash, str) else info.last_block_app_hash,
+                last_block_app_hash=info.last_block_app_hash.encode()
+                if isinstance(info.last_block_app_hash, str)
+                else info.last_block_app_hash,
             )
         if kind == "init_chain":
             return ResponseInitChain()
@@ -177,14 +179,22 @@ class ABCIHost:
             ev = env.extend_vote
             height = ev.height if ev else 0
             raw_hash = ev.hash if ev else b""
-            app_hash = raw_hash.decode("utf-8", "replace") if isinstance(raw_hash, (bytes, bytearray)) else str(raw_hash or "")
+            app_hash = (
+                raw_hash.decode("utf-8", "replace")
+                if isinstance(raw_hash, (bytes, bytearray))
+                else str(raw_hash or "")
+            )
             ext = app.extend_vote(height, app_hash)
             return ResponseExtendVote(vote_extension=ext.encode() if isinstance(ext, str) else ext)
         if kind == "verify_vote_extension":
             vv = env.verify_vote_extension
             height = vv.height if vv else 0
             raw_hash = vv.hash if vv else b""
-            app_hash = raw_hash.decode("utf-8", "replace") if isinstance(raw_hash, (bytes, bytearray)) else str(raw_hash or "")
+            app_hash = (
+                raw_hash.decode("utf-8", "replace")
+                if isinstance(raw_hash, (bytes, bytearray))
+                else str(raw_hash or "")
+            )
             ext = vv.vote_extension if vv else b""
             verdict = app.verify_vote_extension(height, app_hash, ext)
             status = VERIFY_ACCEPT if verdict == "ACCEPT" else (0 if verdict == "UNKNOWN" else 2)
@@ -204,7 +214,9 @@ class ABCIHost:
                 except Exception:  # noqa: BLE001, S110
                     pass
             raw_hash1: object = result.app_hash
-            app_hash_bytes = cast(bytes, raw_hash1.encode() if isinstance(raw_hash1, str) else raw_hash1)
+            app_hash_bytes = cast(
+                bytes, raw_hash1.encode() if isinstance(raw_hash1, str) else raw_hash1
+            )
             return ResponseFinalizeBlock(tx_results=tx_results, app_hash=app_hash_bytes)
         if kind == "commit":
             app.commit()

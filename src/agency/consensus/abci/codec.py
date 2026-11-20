@@ -82,8 +82,8 @@ _REQ_PREPARE_PROPOSAL: Final = 16  # types.proto:55 Request.prepare_proposal = 1
 _REQ_PROCESS_PROPOSAL: Final = 17  # types.proto:56 Request.process_proposal = 17
 _REQ_EXTEND_VOTE: Final = 18  # types.proto:57 Request.extend_vote = 18
 _REQ_VERIFY_VOTE_EXTENSION: Final = 19  # types.proto:58 verify_vote_extension = 19
-_REQ_FINALIZE_BLOCK: Final = 20 
-  # types.proto:59 Request.finalize_block = 20
+_REQ_FINALIZE_BLOCK: Final = 20
+# types.proto:59 Request.finalize_block = 20
 
 # --- Response oneof members (types.proto:200-217, v0.38.26) ------------------
 _RES_EXCEPTION: Final = 1  # types.proto:201 Response.exception = 1
