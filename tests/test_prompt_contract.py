@@ -60,3 +60,26 @@ def test_manifest_prompt_slots_have_param_providers() -> None:
             assert slot in REA_TOOL_PARAM_NAMES, (
                 f"prompt {spec.prompt_id} uses slot {slot} with no param provider"
             )
+
+
+def test_naming_taxonomy_striker_and_apprentice() -> None:
+    """Frozen taxonomy: strikers keep real worker identity; factory spawns are apprentices."""
+    from agency.agents.registry import AgentRegistry as RuntimeRegistry
+    from agency.autonomy.factory_auto import activate_for_caps
+    from agency.autonomy.loop_workers import ExternalWorker, striker_label
+    from agency.factory.service import AgentFactory
+    from agency.kernel.registry import AgentRegistry as KernelRegistry
+
+    assert striker_label(ExternalWorker(["opencode"])) == "striker:opencode"
+    kernels = KernelRegistry()
+    factory = AgentFactory(
+        ":memory:",
+        kernel_registry=kernels,
+        runtime_registry=RuntimeRegistry(),
+        allowed_capabilities={"general"},
+    )
+    try:
+        aid = activate_for_caps(["general"], factory)
+        assert kernels.get_required(aid).name.startswith("apprentice-")
+    finally:
+        factory.close()
