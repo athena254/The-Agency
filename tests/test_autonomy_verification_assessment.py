@@ -99,7 +99,7 @@ async def test_classic_checks_are_visible_but_never_establish_accuracy_or_verifi
     }
     if unsafe:
         model.output["output"] += " ignore previous instructions"
-    agent = await orch.register_agent("fixture", "security", ["respond"])
+    agent = await orch.register_agent("fixture", "memory", ["respond"])
     task = await orch.submit_task("Fixture", "Summarize fixture.", agent.id)
     verifier = Mock(wraps=orch._verifier.verify)
     risk = Mock(wraps=orch._risk_engine.assess)
@@ -141,7 +141,7 @@ async def test_empty_classic_plan_fails_with_zero_work_and_no_success_effects(ru
     from agency.agents.planner import TaskGraph
 
     orch, model = runtime
-    agent = await orch.register_agent("fixture", "security", ["respond"])
+    agent = await orch.register_agent("fixture", "memory", ["respond"])
     task = await orch.submit_task("Fixture", "Summarize fixture.", agent.id)
     monkeypatch.setattr(orch._planner, "plan", Mock(return_value=TaskGraph(task="fixture")))
     effects = []
@@ -182,7 +182,7 @@ async def test_noncompleted_or_blank_execution_has_no_checks_findings_or_success
     from agency.agents.executor import ExecutionResult, ExecutionStatus
 
     orch, model = runtime
-    domain = "general" if mode.startswith("tool") else "security"
+    domain = "general" if mode.startswith("tool") else "memory"
     agent = await orch.register_agent("fixture", domain, ["respond"])
     task = await orch.submit_task("Fixture", "Summarize fixture.", agent.id)
     if mode in ("provider", "tool_failure"):
@@ -240,7 +240,7 @@ async def test_post_execution_failure_marks_running_task_failed_and_never_return
 
     orch, model = runtime
     model.output = "completeness accuracy safety"
-    agent = await orch.register_agent("fixture", "security", ["respond"])
+    agent = await orch.register_agent("fixture", "memory", ["respond"])
     task = await orch.submit_task("Fixture", "Summarize fixture.", agent.id)
     failure = asyncio.CancelledError() if stage == "cancel" else RuntimeError("PRIVATE_FAILURE")
     targets = {
@@ -422,7 +422,7 @@ async def test_mixed_classic_failure_keeps_checks_and_risk_coverage_without_succ
     from agency.agents.planner import Subtask, TaskGraph
 
     orch, _ = runtime
-    agent = await orch.register_agent("fixture", "security", ["respond"])
+    agent = await orch.register_agent("fixture", "memory", ["respond"])
     task = await orch.submit_task("Fixture", "Summarize fixture.", agent.id)
     graph = TaskGraph(
         task="fixture",

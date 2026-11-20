@@ -44,10 +44,8 @@ def test_detect_domains() -> None:
 async def test_router_routes_to_correct_agent(service: ButlerService) -> None:
     agent = await service.route("check the firewall for intrusions", {"sender": "t"})
     assert agent.domain == "security"
-    agent = await service.route("recall our conversation history", {"sender": "t"})
-    assert agent.domain == "memory"
-    agent = await service.route("collect the forensic artifacts", {"sender": "t"})
-    assert agent.domain == "evidence"
+    agent = await service.route("research the latest AI news", {"sender": "t"})
+    assert agent.domain == "research"
 
 
 # ------------------------------------------------------------------ #

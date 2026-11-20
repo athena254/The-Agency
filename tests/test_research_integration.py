@@ -98,8 +98,8 @@ class TestOrchestratorToolBranch:
         orch = AgencyOrchestrator(llm=fake)
         await orch.start()
         try:
-            # security is a non-tool-capable domain (tools are research/general)
-            agent = await orch.register_agent("sec", "security", ["respond"])
+            # memory is a non-tool-capable domain (tools are research/general/personal/work/business/security)
+            agent = await orch.register_agent("mem", "memory", ["respond"])
             task = await orch.submit_task(
                 title="Chat", description="hello there", agent_id=agent.id
             )

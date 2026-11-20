@@ -135,7 +135,7 @@ async def test_instruction_like_nickname_is_only_quoted_data_in_both_prompt_path
     orch = AgencyOrchestrator(llm=llm, memory_db_path=":memory:")
     await orch.start()
     try:
-        classic = await orch.register_agent("security-probe", "security", ["inspect"])
+        classic = await orch.register_agent("memory-probe", "memory", ["inspect"])
         task = await orch.submit_task("identity", "hello", classic.id)
         result = await orch.execute_task(
             task.task_id,
