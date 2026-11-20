@@ -270,16 +270,6 @@
       "provenance": "builtin:https://github.com/JoasASantos/REA-Prompts@ccb02b89721dd7d466beb17004a89d6bc25f5b02 (MIT)"
     },
     {
-      "id": "agency-forge-orchestrator",
-      "version": "1.0.0",
-      "name": "Forge Orchestrator (Blacksmith)",
-      "description": "Blacksmith role segment: forge manager identity, striker dispatch contract, evidence discipline, and the Agency work rules.",
-      "domain": "forge",
-      "kind": "BASE",
-      "file": "segments/agency-forge-orchestrator.md",
-      "provenance": "builtin:agency-factory/segments/agency-forge-orchestrator"
-    },
-    {
       "id": "agency-base-identity",
       "version": "1.0.0",
       "name": "Agency Base Identity",
