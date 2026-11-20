@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from agency.agents.registry import AgentRegistry as RuntimeRegistry
-from agency.autonomy.blacksmith import PROMPT_REFS, activate_blacksmith
+from agency.autonomy.blacksmith import BLACKSMITH_PROMPT_REFS, activate_blacksmith
 from agency.autonomy.factory_auto import AUTO_VERSION, blueprint_id_for_caps
 from agency.factory.prompts import PromptRegistry
 from agency.factory.prompts_builtin import ensure_builtin_prompts
@@ -36,8 +36,8 @@ def test_blacksmith_pins_four_prompt_refs_and_composes_prompt() -> None:
     agent_id = activate_blacksmith(factory)
     bp = factory.get(blueprint_id_for_caps(["forge"]), AUTO_VERSION)
     assert bp.status is BlueprintStatus.ACTIVE
-    assert tuple(bp.prompt_refs) == PROMPT_REFS
-    assert len(PROMPT_REFS) == 4
+    assert tuple(bp.prompt_refs) == BLACKSMITH_PROMPT_REFS
+    assert len(BLACKSMITH_PROMPT_REFS) == 4
     record = next(r for r in runtimes.find_agents_by_capability("forge") if r.agent_id == agent_id)
     prompt = record.agent.metadata["system_prompt"]
     assert "do not write code" in prompt

@@ -164,7 +164,7 @@ def activate_for_caps(
     registry: Any = None,
     domain: str = AUTO_DOMAIN,
     name: str | None = None,
-    prompt_refs: tuple[tuple[str, str], ...] | None = None,
+    prompt_refs: list[tuple[str, str]] | None = None,
 ) -> str:
     """Auto-approve + activate a blueprint for ``caps``; return agent id.
 
@@ -185,7 +185,9 @@ def activate_for_caps(
         raise TypeError("factory must expose create/activate (AgentFactory).")
     normalized = _normalize_caps(caps)
     blueprint_id = blueprint_id_for_caps(normalized)
-    agent_name = (name or f"autonomy-{'-'.join(normalized)}")[:200]
+    agent_name = (name or f"apprentice-{'-'.join(normalized)}")[:200]
+    if prompt_refs and getattr(resolved, "_prompt_resolver", None) is None:
+        raise ValueError("prompt_refs pinned but no prompt resolver configured (fail closed).")
     # Auto-activation admits the requested (already bounded, L0-string) caps
     # into the factory allowlist so a default-constructed factory works for
     # arbitrary engine caps. The human approval path is unaffected.
