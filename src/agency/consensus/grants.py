@@ -30,6 +30,7 @@ from agency.peers.canonical import (
     SchemaError,
     digest_hex,
     digest_json,
+    validate_closed,
     validate_consumer_id,
     validate_digest,
     validate_peer_id,
@@ -39,18 +40,30 @@ from agency.peers.canonical import (
     validate_u64,
 )
 from agency.peers.identities import PeerIdentity, PeerPublicKey
-from agency.peers.membership import Membership
+from agency.peers.membership import (
+    APPROVAL_DENOMINATOR,
+    APPROVAL_NUMERATOR,
+    Membership,
+    find_member,
+)
 
 __all__ = [
+    "GRANT_SIGNER_THRESHOLD",
+    "GRANT_VALIDATOR_COUNT",
     "MAX_GRANT_LIFETIME_MS",
     "NONCE_HEX_CHARS",
     "AffectedSetAttestation",
     "ExecutionGrant",
+    "GrantAction",
     "GrantError",
     "GrantLedger",
     "GrantRejection",
     "GrantRevocation",
+    "GrantSigner",
     "GrantVerification",
+    "VoterCertificate",
+    "VoterInputRef",
+    "issue_format_grant",
     "issue_grant",
     "revoke_grant",
     "verify_at_actuator",
@@ -60,13 +73,23 @@ __all__ = [
 
 MAX_GRANT_LIFETIME_MS: Final = 60 * 60 * 1000
 NONCE_HEX_CHARS: Final = 32
+GRANT_SIGNER_THRESHOLD: Final = APPROVAL_NUMERATOR
+GRANT_VALIDATOR_COUNT: Final = APPROVAL_DENOMINATOR
 
 _NONCE_RE: Final = re.compile(r"[0-9a-f]{32}\Z")
 _SIG_BYTES: Final = 64
 _ZERO_DIGEST: Final = "0" * 64
 _GRANT_SIG_PREFIX: Final = PREFIX + b"task-grant-v1|"
+_FORMAT_SIG_PREFIX: Final = PREFIX + b"task-grant-format-v1|"
+_FORMAT_DOMAIN: Final = "task-grant-format-v1"
+_FORMAT_NONCE_DOMAIN: Final = "grant-format-nonce-v1"
 _ATTEST_SIG_PREFIX: Final = PREFIX + b"affected-set-v1|"
 _REVOKE_SIG_PREFIX: Final = PREFIX + b"grant-revoke-v1|"
+_ACTION_KEYS: Final = frozenset(
+    {"action_type", "resource", "params_digest", "params_schema_version"}
+)
+_VOTER_CERT_KEYS: Final = frozenset({"decision_certificate_digest", "input_refs"})
+_INPUT_REF_KEYS: Final = frozenset({"consumer_id", "input_digest"})
 
 
 class GrantError(ValueError):
@@ -85,6 +108,8 @@ class GrantRejection(str, Enum):
     MISSING_ATTESTATION = "missing_attestation"
     REVOKED = "revoked"
     UNAUTHORIZED_ISSUER = "unauthorized_issuer"
+    INSUFFICIENT_SIGNERS = "insufficient_signers"
+    MISSING_COVERAGE = "missing_coverage"
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +168,90 @@ class AffectedSetAttestation:
 
 
 @dataclass(frozen=True, slots=True)
+class GrantAction:
+    """Bounded §12.1 action descriptor: operation, resource and content-addressed params."""
+
+    action_type: str
+    resource: str
+    params_digest: str
+    params_schema_version: str
+
+    def __post_init__(self) -> None:
+        validate_string(self.action_type, "action_type", maximum=64)
+        validate_string(self.resource, "resource", maximum=256)
+        validate_digest(self.params_digest, "params_digest")
+        validate_string(self.params_schema_version, "params_schema_version", maximum=64)
+
+    def body(self) -> dict[str, Any]:
+        return {
+            "action_type": self.action_type,
+            "resource": self.resource,
+            "params_digest": self.params_digest,
+            "params_schema_version": self.params_schema_version,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class VoterInputRef:
+    """Reference to one externally-produced affected-consumer input digest."""
+
+    consumer_id: str
+    input_digest: str
+
+    def __post_init__(self) -> None:
+        validate_consumer_id(self.consumer_id, "consumer_id")
+        validate_digest(self.input_digest, "input_digest")
+
+    def body(self) -> dict[str, Any]:
+        return {"consumer_id": self.consumer_id, "input_digest": self.input_digest}
+
+
+@dataclass(frozen=True, slots=True)
+class VoterCertificate:
+    """Closed §12.2 coverage certificate by digest only; no votes or attestations embedded."""
+
+    decision_certificate_digest: str
+    input_refs: tuple[VoterInputRef, ...]
+
+    def __post_init__(self) -> None:
+        validate_digest(self.decision_certificate_digest, "decision_certificate_digest")
+        if type(self.input_refs) is not tuple:
+            raise SchemaError("input_refs must be a tuple")
+        if len(self.input_refs) > MAX_MEMBERS:
+            raise SchemaError("input_refs exceeds its bound")
+        seen: set[str] = set()
+        for index, ref in enumerate(self.input_refs):
+            if not isinstance(ref, VoterInputRef):
+                raise SchemaError(f"input_refs[{index}] is not a VoterInputRef")
+            if ref.consumer_id in seen:
+                raise SchemaError("duplicate input_refs consumer")
+            seen.add(ref.consumer_id)
+
+    @property
+    def consumer_ids(self) -> tuple[str, ...]:
+        return tuple(ref.consumer_id for ref in self.input_refs)
+
+    def body(self) -> dict[str, Any]:
+        return {
+            "decision_certificate_digest": self.decision_certificate_digest,
+            "input_refs": [ref.body() for ref in self.input_refs],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class GrantSigner:
+    """One pinned validator's signature over the canonical §12 grant body."""
+
+    peer_id: str
+    signature: bytes
+
+    def __post_init__(self) -> None:
+        validate_peer_id(self.peer_id, "peer_id")
+        if type(self.signature) is not bytes or len(self.signature) != _SIG_BYTES:
+            raise SchemaError("invalid grant signer signature")
+
+
+@dataclass(frozen=True, slots=True)
 class ExecutionGrant:
     """A signed, short-lived grant for one task under one pinned membership."""
 
@@ -157,6 +266,12 @@ class ExecutionGrant:
     affected_consumers: tuple[str, ...]
     attestation: AffectedSetAttestation | None
     signature: bytes
+    action: GrantAction | None = None
+    idempotency_key: str | None = None
+    expected_current: int | None = None
+    next_token: int | None = None
+    grant_signers: tuple[GrantSigner, ...] | None = None
+    voter_certificate: VoterCertificate | None = None
 
     def __post_init__(self) -> None:
         validate_proposal_id_format(self.proposal_id, "proposal_id")
@@ -201,10 +316,24 @@ class ExecutionGrant:
             affected_consumers=sorted(self.affected_consumers),
         )
 
-    def body(self) -> dict[str, Any]:
-        """Canonical signed projection; excludes the signature itself."""
+    @property
+    def is_format(self) -> bool:
+        return any(
+            field is not None
+            for field in (
+                self.action,
+                self.idempotency_key,
+                self.expected_current,
+                self.next_token,
+                self.grant_signers,
+                self.voter_certificate,
+            )
+        )
 
-        return {
+    def body(self) -> dict[str, Any]:
+        """Canonical signed projection; excludes signatures, includes §12 fields."""
+
+        result: dict[str, Any] = {
             "domain": "task-grant-v1",
             "proposal_id": self.proposal_id,
             "task_id": self.task_id,
@@ -218,6 +347,25 @@ class ExecutionGrant:
             "affected_set_digest": self.affected_set_digest(),
             "attestation_digest": self.attestation_digest(),
         }
+        if self.is_format:
+            result["format"] = _FORMAT_DOMAIN
+            result["action"] = (
+                self.action.body() if isinstance(self.action, GrantAction) else self.action
+            )
+            result["idempotency_key"] = self.idempotency_key
+            result["expected_current"] = self.expected_current
+            result["next_token"] = self.next_token
+            result["grant_signers"] = (
+                [signer.peer_id for signer in self.grant_signers]
+                if self.grant_signers is not None
+                else None
+            )
+            result["voter_certificate"] = (
+                self.voter_certificate.body()
+                if isinstance(self.voter_certificate, VoterCertificate)
+                else self.voter_certificate
+            )
+        return result
 
     @property
     def digest(self) -> str:
@@ -269,6 +417,69 @@ def _derive_nonce(*, issuer_peer_id: str, proposal_id: str, task_id: str, issued
             "proposal_id": proposal_id,
             "task_id": task_id,
             "issued_at_ms": issued_at_ms,
+        }
+    )[:NONCE_HEX_CHARS]
+
+
+def _validate_format_fields(grant: ExecutionGrant) -> None:
+    values = (
+        grant.action,
+        grant.idempotency_key,
+        grant.expected_current,
+        grant.next_token,
+        grant.grant_signers,
+        grant.voter_certificate,
+    )
+    present = [value is not None for value in values]
+    if any(present) and not all(present):
+        raise SchemaError("partial §12 grant format")
+    if not any(present):
+        return
+    action = grant.action
+    if not isinstance(action, GrantAction):
+        raise SchemaError("invalid action")
+    validate_closed(action.body(), _ACTION_KEYS, "action")
+    validate_string(grant.idempotency_key, "idempotency_key", maximum=256)
+    expected_current = validate_u64(grant.expected_current, "expected_current")
+    next_token = validate_u64(grant.next_token, "next_token")
+    if next_token != expected_current + 1:
+        raise SchemaError("next_token must be expected_current + 1")
+    signers = grant.grant_signers
+    if signers is None or type(signers) is not tuple:
+        raise SchemaError("grant_signers must be a tuple")
+    if not GRANT_SIGNER_THRESHOLD <= len(signers) <= GRANT_VALIDATOR_COUNT:
+        raise SchemaError("grant_signers exceeds the pinned threshold bounds")
+    seen: set[str] = set()
+    for index, signer in enumerate(signers):
+        if not isinstance(signer, GrantSigner):
+            raise SchemaError(f"grant_signers[{index}] is not a GrantSigner")
+        if signer.peer_id in seen:
+            raise SchemaError("duplicate grant signer")
+        seen.add(signer.peer_id)
+    certificate = grant.voter_certificate
+    if not isinstance(certificate, VoterCertificate):
+        raise SchemaError("invalid voter_certificate")
+    body = validate_closed(certificate.body(), _VOTER_CERT_KEYS, "voter_certificate")
+    for index, ref in enumerate(body["input_refs"]):
+        validate_closed(ref, _INPUT_REF_KEYS, f"voter_certificate.input_refs[{index}]")
+
+
+def _derive_format_nonce(
+    *,
+    issuer_peer_id: str,
+    proposal_id: str,
+    task_id: str,
+    issued_at_ms: int,
+    format_digest: str,
+) -> str:
+    return digest_json(
+        {
+            "domain": _FORMAT_NONCE_DOMAIN,
+            "issuer_peer_id": issuer_peer_id,
+            "proposal_id": proposal_id,
+            "task_id": task_id,
+            "issued_at_ms": issued_at_ms,
+            "format_digest": format_digest,
         }
     )[:NONCE_HEX_CHARS]
 
@@ -332,10 +543,100 @@ def issue_grant(
     return replace(provisional, signature=issuer.key.sign(provisional._signing_bytes()))
 
 
+def issue_format_grant(
+    issuer: PeerIdentity,
+    *,
+    membership: Membership,
+    proposal_id: str,
+    task_id: str,
+    issued_at_ms: int,
+    expires_at_ms: int,
+    affected_consumers: Sequence[str],
+    action: GrantAction,
+    idempotency_key: str,
+    expected_current: int,
+    voter_certificate: VoterCertificate,
+    signers: Sequence[PeerIdentity],
+    nonce: str | None = None,
+) -> ExecutionGrant:
+    """Build and sign one §12-format grant with a pinned-validator threshold."""
+
+    if not membership.has_member(issuer.peer_id):
+        raise GrantError("issuer is not a member of the pinned epoch")
+    consumers = tuple(sorted(affected_consumers))
+    current = validate_u64(expected_current, "expected_current")
+    next_token = validate_u64(current + 1, "next_token")
+    if set(voter_certificate.consumer_ids) != set(consumers):
+        raise GrantError("voter_certificate does not cover the affected consumers")
+    unique: dict[str, PeerIdentity] = {}
+    for signer in signers:
+        member = find_member(membership, signer.peer_id)
+        if member is None or "validator" not in member.roles:
+            raise GrantError("grant signer is not a pinned validator")
+        unique[signer.peer_id] = signer
+    ordered = tuple(unique[peer_id] for peer_id in sorted(unique))
+    if not GRANT_SIGNER_THRESHOLD <= len(ordered) <= GRANT_VALIDATOR_COUNT:
+        raise GrantError("grant signer count violates the pinned threshold")
+    format_digest = digest_json(
+        {
+            "action": action.body(),
+            "idempotency_key": idempotency_key,
+            "expected_current": current,
+            "next_token": next_token,
+            "grant_signers": [signer.peer_id for signer in ordered],
+            "voter_certificate": voter_certificate.body(),
+        }
+    )
+    nonce_value = nonce or _derive_format_nonce(
+        issuer_peer_id=issuer.peer_id,
+        proposal_id=proposal_id,
+        task_id=task_id,
+        issued_at_ms=issued_at_ms,
+        format_digest=format_digest,
+    )
+    attestation = _sign_attestation(
+        issuer,
+        proposal_id=proposal_id,
+        task_id=task_id,
+        affected_consumers=consumers,
+    )
+    provisional = ExecutionGrant(
+        proposal_id=proposal_id,
+        task_id=task_id,
+        issuer_peer_id=issuer.peer_id,
+        membership_epoch=membership.epoch,
+        membership_root=membership.root,
+        nonce=nonce_value,
+        issued_at_ms=issued_at_ms,
+        expires_at_ms=expires_at_ms,
+        affected_consumers=consumers,
+        attestation=attestation,
+        signature=b"\x00" * _SIG_BYTES,
+        action=action,
+        idempotency_key=idempotency_key,
+        expected_current=current,
+        next_token=next_token,
+        grant_signers=tuple(
+            GrantSigner(signer.peer_id, b"\x00" * _SIG_BYTES) for signer in ordered
+        ),
+        voter_certificate=voter_certificate,
+    )
+    _validate_format_fields(provisional)
+    signing_bytes = _FORMAT_SIG_PREFIX + bytes.fromhex(provisional.digest)
+    signed = replace(
+        provisional,
+        grant_signers=tuple(
+            replace(entry, signature=signer.key.sign(signing_bytes))
+            for entry, signer in zip(provisional.grant_signers or (), ordered, strict=True)
+        ),
+    )
+    return replace(signed, signature=issuer.key.sign(signed._signing_bytes()))
+
+
 def _safe_digest(grant: ExecutionGrant) -> str:
     try:
         return grant.digest
-    except (EnvelopeError, SchemaError, TypeError, ValueError):
+    except (AttributeError, EnvelopeError, SchemaError, TypeError, ValueError):
         return _ZERO_DIGEST
 
 
@@ -348,6 +649,7 @@ def verify_grant(
     pinned_issuers: Mapping[str, PeerPublicKey],
     used_nonces: Container[str] = (),
     revoked_digests: Container[str] = (),
+    pinned_validators: Mapping[str, PeerPublicKey] | None = None,
 ) -> GrantVerification:
     """Verify a grant against pinned inputs. Fail closed; never raise on bad data."""
 
@@ -359,9 +661,14 @@ def verify_grant(
     attestation = grant.attestation
     if attestation is None or attestation.attestor_peer_id != grant.issuer_peer_id:
         return fail(GrantRejection.MISSING_ATTESTATION)
+    if grant.is_format:
+        try:
+            _validate_format_fields(grant)
+        except (AttributeError, EnvelopeError, SchemaError, TypeError, ValueError):
+            return fail(GrantRejection.MALFORMED)
     try:
         canonical_body = canonical_json(grant.body())
-    except (EnvelopeError, SchemaError, TypeError, ValueError):
+    except (AttributeError, EnvelopeError, SchemaError, TypeError, ValueError):
         return fail(GrantRejection.MALFORMED)
 
     issuer_key = pinned_issuers.get(grant.issuer_peer_id)
@@ -387,6 +694,27 @@ def verify_grant(
         )
     except (InvalidSignature, ValueError, TypeError):
         return fail(GrantRejection.INVALID_SIGNATURE)
+
+    if grant.is_format:
+        validators = pinned_validators if pinned_validators is not None else pinned_issuers
+        if len(validators) < GRANT_VALIDATOR_COUNT:
+            return fail(GrantRejection.MALFORMED)
+        signing_bytes = _FORMAT_SIG_PREFIX + bytes.fromhex(digest_hex(canonical_body))
+        valid_signers: set[str] = set()
+        for signer in grant.grant_signers or ():
+            key = validators.get(signer.peer_id)
+            if key is None:
+                return fail(GrantRejection.INSUFFICIENT_SIGNERS)
+            try:
+                key.public_key().verify(signer.signature, signing_bytes)
+            except (InvalidSignature, ValueError, TypeError):
+                return fail(GrantRejection.INVALID_SIGNATURE)
+            valid_signers.add(signer.peer_id)
+        if len(valid_signers) < GRANT_SIGNER_THRESHOLD:
+            return fail(GrantRejection.INSUFFICIENT_SIGNERS)
+        certificate = grant.voter_certificate
+        if certificate is None or set(certificate.consumer_ids) != set(grant.affected_consumers):
+            return fail(GrantRejection.MISSING_COVERAGE)
 
     if grant.membership_epoch != expected_epoch or grant.membership_root != expected_root:
         return fail(GrantRejection.WRONG_EPOCH)
@@ -441,12 +769,21 @@ class GrantLedger:
             member.peer_id: PeerPublicKey.from_fingerprint(member.public_key)
             for member in membership.members
         }
+        self._validators: dict[str, PeerPublicKey] = {
+            member.peer_id: PeerPublicKey.from_fingerprint(member.public_key)
+            for member in membership.members
+            if "validator" in member.roles
+        }
         self._used_nonces: set[str] = set()
         self._revoked_digests: set[str] = set()
 
     @property
     def pinned_issuers(self) -> Mapping[str, PeerPublicKey]:
         return dict(self._pinned)
+
+    @property
+    def pinned_validators(self) -> Mapping[str, PeerPublicKey]:
+        return dict(self._validators)
 
     def issue(
         self,
@@ -470,6 +807,38 @@ class GrantLedger:
             nonce=nonce,
         )
 
+    def issue_format(
+        self,
+        issuer: PeerIdentity,
+        *,
+        proposal_id: str,
+        task_id: str,
+        issued_at_ms: int,
+        expires_at_ms: int,
+        affected_consumers: Sequence[str],
+        action: GrantAction,
+        idempotency_key: str,
+        expected_current: int,
+        voter_certificate: VoterCertificate,
+        signers: Sequence[PeerIdentity],
+        nonce: str | None = None,
+    ) -> ExecutionGrant:
+        return issue_format_grant(
+            issuer,
+            membership=self._membership,
+            proposal_id=proposal_id,
+            task_id=task_id,
+            issued_at_ms=issued_at_ms,
+            expires_at_ms=expires_at_ms,
+            affected_consumers=affected_consumers,
+            action=action,
+            idempotency_key=idempotency_key,
+            expected_current=expected_current,
+            voter_certificate=voter_certificate,
+            signers=signers,
+            nonce=nonce,
+        )
+
     def verify(self, grant: ExecutionGrant, *, bft_time_ms: int) -> GrantVerification:
         return verify_grant(
             grant,
@@ -479,6 +848,7 @@ class GrantLedger:
             pinned_issuers=self._pinned,
             used_nonces=self._used_nonces,
             revoked_digests=self._revoked_digests,
+            pinned_validators=self._validators,
         )
 
     def record_used(self, grant: ExecutionGrant) -> None:

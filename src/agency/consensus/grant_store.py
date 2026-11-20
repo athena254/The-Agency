@@ -19,8 +19,10 @@ from typing import Any, Final, Self
 
 from agency.consensus.grants import (
     ExecutionGrant,
+    GrantAction,
     GrantLedger,
     GrantRevocation,
+    VoterCertificate,
     revoke_grant,
     verify_revocation,
 )
@@ -176,6 +178,39 @@ class DurableGrantStore(GrantLedger):
             issued_at_ms=issued_at_ms,
             expires_at_ms=expires_at_ms,
             affected_consumers=affected_consumers,
+            nonce=nonce,
+        )
+        self.record_issued(grant)
+        return grant
+
+    def issue_format(
+        self,
+        issuer: PeerIdentity,
+        *,
+        proposal_id: str,
+        task_id: str,
+        issued_at_ms: int,
+        expires_at_ms: int,
+        affected_consumers: Sequence[str],
+        action: GrantAction,
+        idempotency_key: str,
+        expected_current: int,
+        voter_certificate: VoterCertificate,
+        signers: Sequence[PeerIdentity],
+        nonce: str | None = None,
+    ) -> ExecutionGrant:
+        grant = super().issue_format(
+            issuer,
+            proposal_id=proposal_id,
+            task_id=task_id,
+            issued_at_ms=issued_at_ms,
+            expires_at_ms=expires_at_ms,
+            affected_consumers=affected_consumers,
+            action=action,
+            idempotency_key=idempotency_key,
+            expected_current=expected_current,
+            voter_certificate=voter_certificate,
+            signers=signers,
             nonce=nonce,
         )
         self.record_issued(grant)
