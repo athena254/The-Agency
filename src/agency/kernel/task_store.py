@@ -19,6 +19,14 @@ process's running tasks are left alone. Safe multi-process recovery therefore
 requires every claiming process to run a lease-aware build; a live process
 running pre-lease code still has its tasks requeued after the lease TTL.
 
+Status updates are compare-and-set, not last-writer-wins: :meth:`update_task`
+guards its UPDATE with the caller's expected status (``BEGIN IMMEDIATE``
+holds the write lock across guard check and write), refuses rows that already
+reached an immutable terminal state (COMPLETED/FAILED; BLOCKED stays
+re-openable per the transition matrix), and returns a typed
+:class:`~agency.kernel.tasks.TaskWriteResult` so a late writer observes the
+stored record and yields instead of overwriting it.
+
 Single-process deployments may still call :meth:`requeue_running` with
 ``expired_only=False`` (the historical behaviour) on boot
 (``AGENCY_TASKS_RECOVER=1``).
@@ -39,7 +47,7 @@ import aiosqlite
 import structlog
 
 from agency.kernel.identity import utcnow
-from agency.kernel.tasks import Task, TaskMessage, TaskStatus
+from agency.kernel.tasks import Task, TaskMessage, TaskStatus, TaskWriteResult
 
 log = structlog.get_logger(__name__)
 
@@ -84,6 +92,15 @@ _TASK_COLUMNS = (
 )
 
 _TERMINAL_STATUSES = frozenset({TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.BLOCKED})
+
+#: Rows the compare-and-set guard treats as immutable: no legal transition
+#: leaves them (``TaskManager._assert_transition`` is the authority), so a
+#: late write to such a row must observe the stored record and yield. BLOCKED
+#: is terminal for waiters but deliberately re-openable (BLOCKED -> PENDING
+#: is the documented requeue path), so BLOCKED rows stay writable.
+_IMMUTABLE_STATUSES = frozenset({TaskStatus.COMPLETED, TaskStatus.FAILED})
+
+_IMMUTABLE_PLACEHOLDERS = ", ".join("?" for _ in _IMMUTABLE_STATUSES)
 
 
 def _resolve_lease_seconds(lease_seconds: int | None) -> int:
@@ -297,35 +314,95 @@ class TaskStore:
         error: str | None = None,
         output: dict[str, Any] | None = None,
         set_error: bool = False,
-    ) -> bool:
-        """Update mutable task fields. ``False`` when the task does not exist.
+        expected_status: TaskStatus | None = None,
+    ) -> TaskWriteResult:
+        """Update mutable task fields under a status compare-and-set.
+
+        The UPDATE runs inside a ``BEGIN IMMEDIATE`` transaction (the same
+        discipline as :meth:`claim_next_pending`) with a status guard in the
+        WHERE clause, so two processes sharing the database file cannot
+        silently overwrite each other's transition: a write whose guard does
+        not match is refused, never applied blind.
+
+        ``expected_status`` is the caller's compare-and-set guard — the write
+        applies only when the stored status still equals it. Without a guard
+        the write still refuses any row that already reached an immutable
+        terminal state. COMPLETED/FAILED rows are immutable either way (no
+        legal transition leaves them; BLOCKED stays re-openable): a late
+        writer gets ``YIELDED_TERMINAL`` and must observe the stored terminal
+        record instead of overwriting it.
 
         ``set_error`` distinguishes "leave error untouched" from "clear it"
         (``error=None`` + ``set_error=True``).
+
+        Returns the typed outcome: ``APPLIED``, ``YIELDED_TERMINAL``,
+        ``STALE`` (row exists at a different non-terminal status), or
+        ``MISSING``.
         """
 
         await self.initialize()
-        conn = self.connection
-        assignments: list[str] = ["updated_at = ?"]
-        params: list[Any] = [_iso(utcnow())]
-        if status is not None:
-            assignments.append("status = ?")
-            params.append(status.value)
-            if status in _TERMINAL_STATUSES:
-                # The lease has served its purpose; keep terminal rows tidy.
-                assignments.append("lease_owner = NULL")
-                assignments.append("lease_expires_at = NULL")
-        if set_error:
-            assignments.append("error = ?")
-            params.append(error)
-        if output is not None:
-            assignments.append("output = ?")
-            params.append(_dump(output))
-        params.append(task_id)
-        cursor = await conn.execute(
-            f"UPDATE tasks SET {', '.join(assignments)} WHERE task_id = ?", params
-        )
-        return cursor.rowcount > 0
+        async with self._transaction() as conn:
+            assignments: list[str] = ["updated_at = ?"]
+            params: list[Any] = [_iso(utcnow())]
+            if status is not None:
+                assignments.append("status = ?")
+                params.append(status.value)
+                if status in _TERMINAL_STATUSES:
+                    # The lease has served its purpose; keep terminal rows tidy.
+                    assignments.append("lease_owner = NULL")
+                    assignments.append("lease_expires_at = NULL")
+            if set_error:
+                assignments.append("error = ?")
+                params.append(error)
+            if output is not None:
+                assignments.append("output = ?")
+                params.append(_dump(output))
+            if expected_status is not None:
+                if expected_status in _IMMUTABLE_STATUSES:
+                    # CAS against an immutable row is a write to it.
+                    log.warning(
+                        "task_store.terminal_write_refused",
+                        task_id=task_id,
+                        expected=expected_status.value,
+                        attempted=status.value if status else None,
+                    )
+                    return TaskWriteResult.YIELDED_TERMINAL
+                guard, guard_params = "AND status = ?", [expected_status.value]
+            else:
+                # Unguarded writes still never touch immutable rows.
+                guard, guard_params = (
+                    f"AND status NOT IN ({_IMMUTABLE_PLACEHOLDERS})",
+                    [terminal.value for terminal in _IMMUTABLE_STATUSES],
+                )
+            cursor = await conn.execute(
+                f"UPDATE tasks SET {', '.join(assignments)} WHERE task_id = ? {guard}",
+                [*params, task_id, *guard_params],
+            )
+            if cursor.rowcount and cursor.rowcount > 0:
+                return TaskWriteResult.APPLIED
+            # Refused: classify honestly for the caller (we hold the write
+            # lock, so this read sees the row that caused the refusal).
+            cursor = await conn.execute("SELECT status FROM tasks WHERE task_id = ?", (task_id,))
+            row = await cursor.fetchone()
+            if row is None:
+                return TaskWriteResult.MISSING
+            current = TaskStatus(row["status"])
+            if current in _IMMUTABLE_STATUSES:
+                log.warning(
+                    "task_store.terminal_write_refused",
+                    task_id=task_id,
+                    current=current.value,
+                    attempted=status.value if status else None,
+                )
+                return TaskWriteResult.YIELDED_TERMINAL
+            log.warning(
+                "task_store.stale_write_refused",
+                task_id=task_id,
+                current=current.value,
+                expected=expected_status.value if expected_status else None,
+                attempted=status.value if status else None,
+            )
+            return TaskWriteResult.STALE
 
     async def claim_next_pending(self) -> Task | None:
         """Atomically pop the highest-priority pending task and mark it RUNNING.

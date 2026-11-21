@@ -52,6 +52,29 @@ _TERMINAL_STATUSES: Final[frozenset[TaskStatus]] = frozenset(
 )
 
 
+class TaskWriteResult(str, Enum):
+    """Outcome of a conditional task-record write against the shared store.
+
+    Status updates are compare-and-set, not last-writer-wins: a write only
+    applies when the stored record still matches the caller's expectation
+    (:meth:`TaskManager.update_status` guards every write with the status it
+    read), and a record that reached COMPLETED or FAILED is immutable.
+
+    ``APPLIED`` — the write took.
+    ``YIELDED_TERMINAL`` — the record already reached an immutable terminal
+    state (COMPLETED/FAILED); the stored record is final and the late writer
+    must observe it and yield (no exception, the outcome is logged).
+    ``STALE`` — the row exists but moved to another writable status before
+    the write; refused (fail closed) instead of overwriting blind.
+    ``MISSING`` — no such task row.
+    """
+
+    APPLIED = "applied"
+    YIELDED_TERMINAL = "yielded_terminal"
+    STALE = "stale"
+    MISSING = "missing"
+
+
 @dataclass(frozen=True, slots=True)
 class TaskMessage:
     """A single structured message within a task conversation.
@@ -254,6 +277,15 @@ class TaskManager:
         alongside the status change so pollers never observe COMPLETED
         without its result). ``error`` is recorded when provided.
 
+        With a store the write is a compare-and-set guarded by the status
+        read here, so two processes sharing the database file cannot
+        silently overwrite each other (no last-writer-wins). A record that
+        already reached an immutable terminal state (COMPLETED/FAILED) is
+        final: the late writer's CAS fails, the stored record stands, the
+        outcome is logged (``task.status_write_yielded``) and the stored
+        record is returned — no exception, and no duplicate parent
+        notification.
+
         When the task is a child (``parent_id`` set) and the target state is
         terminal, the result is also recorded on the parent's task record as
         a ``child_result`` message, so the submitter sees the delegated
@@ -264,37 +296,69 @@ class TaskManager:
         KeyError:
             If the task does not exist.
         ValueError:
-            On illegal transitions (e.g. COMPLETED -> RUNNING).
+            On illegal transitions (e.g. COMPLETED -> RUNNING) and on stale
+            writes (the stored status moved between the read here and the
+            CAS — fail closed, never overwrite blind).
         """
         current = await self.get_task(task_id)
         if current is None:
             raise KeyError(f"unknown task {task_id!r}")
         self._assert_transition(current.status, status)
+        applied = False
         async with self._lock:
-            task = self._tasks.get(task_id)
-            if task is not None:
-                self._drop_from_pending(task_id)
-                task.status = status
-                if error is not None:
-                    task.error = error
-                if output is not None:
-                    task.output = output
-                task.updated_at = utcnow()
-                if status is TaskStatus.PENDING and self._store is None:
-                    self._enqueue(task)
             if self._store is not None:
-                updated = await self._store.update_task(
+                outcome = await self._store.update_task(
                     task_id,
                     status=status,
                     error=error,
                     output=output,
                     set_error=error is not None,
+                    expected_status=current.status,
                 )
-                if not updated:
+                if outcome is TaskWriteResult.MISSING:
                     raise KeyError(f"unknown task {task_id!r}")
-        self._log.info("task.status", task_id=task_id, status=status.value)
-        if status in _TERMINAL_STATUSES:
-            await self._notify_parent_of_result(task_id, status)
+                if outcome is TaskWriteResult.STALE:
+                    fresh = await self._store.get_task(task_id)
+                    actual = fresh.status.value if fresh is not None else "gone"
+                    raise ValueError(
+                        f"stale task write: {task_id!r} is {actual!r}, not "
+                        f"{current.status.value!r}; transition to "
+                        f"{status.value!r} refused"
+                    )
+                applied = outcome is TaskWriteResult.APPLIED
+                if not applied:
+                    # YIELDED_TERMINAL: another process terminalized the task
+                    # first; its record stands and this writer yields.
+                    self._log.warning(
+                        "task.status_write_yielded",
+                        task_id=task_id,
+                        attempted=status.value,
+                    )
+            else:
+                applied = True
+                task = self._tasks.get(task_id)
+                if task is not None and task.status is not current.status:
+                    # Without a store, ``current`` is the live cached object;
+                    # its status moved while we awaited the lock (the store
+                    # path is covered by the CAS above). Re-validate instead
+                    # of overwriting blind.
+                    self._assert_transition(task.status, status)
+            if applied:
+                task = self._tasks.get(task_id)
+                if task is not None:
+                    self._drop_from_pending(task_id)
+                    task.status = status
+                    if error is not None:
+                        task.error = error
+                    if output is not None:
+                        task.output = output
+                    task.updated_at = utcnow()
+                    if status is TaskStatus.PENDING and self._store is None:
+                        self._enqueue(task)
+        if applied:
+            self._log.info("task.status", task_id=task_id, status=status.value)
+            if status in _TERMINAL_STATUSES:
+                await self._notify_parent_of_result(task_id, status)
         return await self.get_task(task_id) or current
 
     async def heartbeat_many(self, task_ids: list[str]) -> int:
