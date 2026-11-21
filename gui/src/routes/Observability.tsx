@@ -31,7 +31,8 @@ import {
 import { useCsrf } from '../api/pilot'
 import { useAuth } from '../stores/auth'
 import { Chip, LoadingBlock, PanelRow, PilotErrorNote, PilotGate, StateChip } from './PilotShared'
-import { stateTone, type Tone } from '../components/tones'
+
+type Tone = 'signal' | 'muted' | 'amber' | 'green' | 'red'
 
 type SectionState =
   | { kind: 'loading' }
@@ -248,7 +249,16 @@ function MemoriesBody({ view }: { view: MemoryView }) {
 }
 
 function severityTone(severity: string): Tone {
-  return stateTone(severity)
+  switch (severity.toLowerCase()) {
+    case 'critical':
+      return 'red'
+    case 'high':
+      return 'amber'
+    case 'medium':
+      return 'signal'
+    default:
+      return 'muted'
+  }
 }
 
 function EvidenceBody({ view }: { view: RiskView }) {
@@ -435,17 +445,12 @@ export function ObservabilityPage() {
         </div>
         <button
           type="button"
-          className="mc-icon-btn"
+          className="mc-btn flex-none"
           onClick={refresh}
           disabled={overview.isFetching}
-          aria-label="Refresh observability data"
-          title="Refresh observability data"
         >
-          <RefreshCw
-            size={13}
-            className={overview.isFetching ? 'animate-spin' : ''}
-            aria-hidden="true"
-          />
+          <RefreshCw size={13} className={overview.isFetching ? 'animate-spin' : ''} />
+          Refresh
         </button>
       </div>
 
@@ -467,11 +472,9 @@ export function ObservabilityPage() {
 
       <PilotGate>
         {overview.isLoading ? (
-          <div aria-live="polite">
-            <LoadingBlock label="Reading local runtime state…" />
-          </div>
+          <LoadingBlock label="Reading local runtime state…" />
         ) : overview.error ? (
-          <div className="mc-panel p-4" aria-live="polite">
+          <div className="mc-panel p-4">
             <PilotErrorNote error={overview.error} />
           </div>
         ) : !data ? null : (
@@ -550,7 +553,7 @@ export function ObservabilityPage() {
                 {tools.data ? <ToolsBody view={tools.data} /> : null}
               </Section>
             </div>
-            <div className="mc-label text-right" role="status">
+            <div className="mc-label text-right">
               collected {data.collected_at} · read-only · no write controls
             </div>
           </div>

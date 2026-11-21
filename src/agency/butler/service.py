@@ -512,13 +512,7 @@ class ButlerService:
             raise PilotError("conflict")
         return ButlerReply(text, result.status.value, assessment, result.task_id)
 
-    async def handle_isolated_message(
-        self,
-        message: str,
-        sender: str,
-        *,
-        history: list[dict[str, str]] | None = None,
-    ) -> ButlerReply:
+    async def handle_isolated_message(self, message: str, sender: str) -> ButlerReply:
         """Run a read-only, tool-free, memory-free turn for a local caller.
 
         Unlike :meth:`handle_message`, this path deliberately does **not**:
@@ -530,11 +524,6 @@ class ButlerService:
         * mirror the private text to the Lattice,
         * read or write per-owner threads,
         * accept caller-supplied context, scope or privilege.
-
-        ``history`` — when the local adapter passes it — is the adapter's own
-        in-memory record of earlier turns of the same local chat session. It
-        is embedded in the model prompt for continuity only and is never
-        written anywhere.
 
         Only the fixed ``sender`` chosen by the local adapter is forwarded. A
         :class:`ButlerReply` carries the real execution status so the caller
@@ -577,9 +566,7 @@ class ButlerService:
         task_id = None
         try:
             result = await asyncio.wait_for(
-                self._orchestrator.converse_isolated(
-                    text, agent.id, context=merged, history=history
-                ),
+                self._orchestrator.converse_isolated(text, agent.id, context=merged),
                 timeout=self._config.timeout,
             )
             status = str(result.status.value)

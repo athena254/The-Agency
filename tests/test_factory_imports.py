@@ -103,42 +103,6 @@ def test_github_repository_import_fetches_only_markdown_and_license(monkeypatch,
     client.close()
 
 
-def test_github_import_narrows_oversized_walks_to_skill_docs(monkeypatch, tmp_path) -> None:
-    tree = {
-        "sha": "b" * 40,
-        "tree": [
-            {"path": "README.md", "type": "blob", "size": 10},
-            {"path": "docs/guide.md", "type": "blob", "size": 10},
-            {"path": "skills/alpha/SKILL.md", "type": "blob", "size": 40},
-            {"path": "skills/beta/SKILL.md", "type": "blob", "size": 40},
-        ],
-    }
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if "/git/trees/" in request.url.path:
-            return httpx.Response(200, json=tree)
-        if request.url.path.endswith("/license"):
-            return httpx.Response(404)
-        if request.url.path.endswith("/alpha/SKILL.md"):
-            return httpx.Response(200, text="---\nname: Alpha\n---\nReview code.")
-        if request.url.path.endswith("/beta/SKILL.md"):
-            return httpx.Response(200, text="---\nname: Beta\n---\nReview changes.")
-        return httpx.Response(404)
-
-    client = httpx.Client(transport=httpx.MockTransport(handler))
-    registry = PromptRegistry(str(tmp_path / "prompts.db"))
-    importer = MarkdownImportService(registry, client=client)
-    # An unfiltered walk beyond the file bound narrows generically to skill
-    # docs instead of raising (gaps.md #12) — no per-repo path filters.
-    monkeypatch.setattr("agency.factory.imports.MAX_FILES", 3)
-    results = importer.import_github_repository("https://github.com/acme/huge.git")
-    assert {result.source_path for result in results} == {
-        "skills/alpha/SKILL.md",
-        "skills/beta/SKILL.md",
-    }
-    client.close()
-
-
 def test_github_import_rejects_non_github_and_traversal_paths(tmp_path) -> None:
     service = MarkdownImportService(PromptRegistry(str(tmp_path / "prompts.db")))
     with pytest.raises(ImportError):

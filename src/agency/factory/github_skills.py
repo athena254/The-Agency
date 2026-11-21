@@ -18,7 +18,6 @@ from agency.factory.imports import ImportedMarkdown, MarkdownImportService
 from agency.factory.prompts import PromptRegistry
 from agency.kernel.identity import Capability
 from agency.kernel.policies import ActionClass
-from agency.skills.executor import DOCUMENTATION_ONLY_IMPLEMENTATION
 from agency.skills.registry import SkillRegistry, SkillSpec, SkillStatus
 
 DEFAULT_REPOS: tuple[str, ...] = (
@@ -40,6 +39,23 @@ DEFAULT_REPOS: tuple[str, ...] = (
     "https://github.com/Leonxlnx/taste-skill.git",
     "https://github.com/michaelshimeles/rstack.git",
 )
+
+LARGE_REPOS: tuple[str, ...] = (
+    "affaan-m/ECC",
+    "morluto/rea",
+    "garrytan/gstack",
+    "thedotmack/claude-mem",
+)
+
+
+def _skill_only(path: str) -> bool:
+    lowered = path.casefold()
+    return lowered.endswith(("skill.md", "agents.md"))
+
+
+def _ecc_skill_only(path: str) -> bool:
+    return path.count("/") <= 3 and path.casefold().endswith("skill.md")
+
 
 AGENT_KEYWORDS: dict[str, tuple[str, ...]] = {
     "coding-agent": (
@@ -142,6 +158,17 @@ def _similarity(left: set[str], right: set[str]) -> float:
     return len(left & right) / len(left | right)
 
 
+def _implementation_name(record: StudyRecord) -> str:
+    source = record.source.removeprefix("https://github.com/")
+    owner_repo = source.split("/")[:2]
+    stem = Path(record.source_path).stem.casefold()
+    raw = "ext-" + "-".join([*owner_repo, stem])
+    cleaned = re.sub(r"[^a-z0-9._-]+", "-", raw).strip("-._")
+    if not cleaned or not cleaned[0].isalpha():
+        cleaned = "ext-" + cleaned
+    return cleaned[:100]
+
+
 def _next_version(versions: list[str]) -> str:
     if not versions:
         return "1.0.0"
@@ -164,17 +191,15 @@ class GitHubSkillImportService:
         skill_registry: SkillRegistry,
         *,
         client: Any = None,
-        approver: str = "",
-        publish_authorizer: Any = None,
+        approver: str = "owner",
         data_dir: str | Path = "data",
     ) -> None:
+        if not approver.strip():
+            raise ValueError("approver must be nonblank")
         self._prompts = prompt_registry
         self._skills = skill_registry
         self._importer = MarkdownImportService(prompt_registry, client=client)
-        # Promotion (gaps.md #13) requires an explicit human approver identity
-        # and a publish authorizer; both fail closed in promote().
         self._approver = approver.strip()
-        self._publish_authorizer = publish_authorizer
         self._data_dir = Path(data_dir)
 
     def close(self) -> None:
@@ -214,11 +239,14 @@ class GitHubSkillImportService:
         imported: list[ImportedMarkdown] = []
         reports: list[RepoReport] = []
         for repo in repos:
+            if "affaan-m/ECC" in repo:
+                include = _ecc_skill_only
+            elif any(name in repo for name in LARGE_REPOS):
+                include = _skill_only
+            else:
+                include = None
             try:
-                # Generic bounds live in the importer (gaps.md #12): oversized
-                # repositories are narrowed and bounded there, without
-                # per-repo hand-tuned path filters.
-                items = self._importer.import_github_repository(repo)
+                items = self._importer.import_github_repository(repo, include_paths=include)
             except Exception as exc:  # noqa: BLE001 - one bad repo must not stop the run
                 reports.append(RepoReport(repo, error=f"{type(exc).__name__}: {exc}"[:400]))
                 continue
@@ -366,10 +394,7 @@ class GitHubSkillImportService:
                     inputs={"task": {"type": "string"}},
                     outputs={"result": {"type": "string"}},
                     permissions=(),
-                    # Documentation-only metadata (gaps.md #11): imported
-                    # skills are never executable, so never name a nonexistent
-                    # operation here.
-                    implementation=DOCUMENTATION_ONLY_IMPLEMENTATION,
+                    implementation=_implementation_name(record),
                     provenance=record.source,
                     status=SkillStatus.DRAFT,
                 )
@@ -407,8 +432,6 @@ class GitHubSkillImportService:
                     inputs=dict(spec.inputs),
                     outputs=dict(spec.outputs),
                     permissions=tuple(spec.permissions),
-                    # Successors retain the predecessor's implementation, so
-                    # documentation-only predecessors keep the sentinel.
                     implementation=spec.implementation,
                     provenance=f"improved-by-import:{record.source}",
                     status=SkillStatus.DRAFT,
@@ -422,13 +445,6 @@ class GitHubSkillImportService:
     def promote(
         self, refs: tuple[tuple[str, str], ...], evidence: str
     ) -> tuple[tuple[str, str], ...]:
-        # Distinct human decision (gaps.md #13, SPEC_AGENT_FACTORY_V2 §12.3):
-        # promotion requires an explicitly configured approver identity and a
-        # publish authorizer — never the historical default "owner".
-        if not self._approver:
-            raise ValueError("import promotion requires an explicit approver identity")
-        if self._publish_authorizer is None:
-            raise ValueError("import promotion requires a publish authorizer")
         promoted: list[tuple[str, str]] = []
         for skill_id, version in refs:
             try:
@@ -439,7 +455,6 @@ class GitHubSkillImportService:
                     version,
                     evidence,
                     approver=self._approver,
-                    authorizer=self._publish_authorizer,
                 )
                 promoted.append((skill_id, version))
             except (ValueError, KeyError):

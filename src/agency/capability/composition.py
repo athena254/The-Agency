@@ -1,15 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from agency.capability.contract import CapabilityError, CapabilityRef, CapabilityType
 from agency.capability.resolver import CapabilityResolver, ResolvedCapabilityGraph
-
-if TYPE_CHECKING:
-    # Annotation-only: keeps capability importable without dragging the factory
-    # package in (capability <-> factory cycle, gaps.md #1).
-    from agency.factory.service import AgentFactory, Blueprint
+from agency.factory.service import AgentFactory, Blueprint
 
 _MAX_REFS = 32
 

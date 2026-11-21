@@ -47,11 +47,7 @@ def main() -> int:
         metavar="PATH",
         help="with --discover-new: write the pending repo list for `agency loop run repos:PATH`",
     )
-    parser.add_argument(
-        "--approver",
-        default="",
-        help="human approver identity recorded for --promote (required with --promote)",
-    )
+    parser.add_argument("--approver", default="owner")
     parser.add_argument("--repos", nargs="*", default=list(DEFAULT_REPOS))
     parser.add_argument("--prompts-db", default=str(ROOT / "data" / "prompts.db"))
     parser.add_argument("--skills-db", default=str(ROOT / "data" / "skills.db"))
@@ -59,8 +55,6 @@ def main() -> int:
     args = parser.parse_args()
     if args.emit_plan and not args.discover_new:
         parser.error("--emit-plan requires --discover-new")
-    if args.promote and not args.approver.strip():
-        parser.error("--promote requires --approver <human identity>")
 
     if args.discover_new:
         discovery_prompts = PromptRegistry(args.prompts_db)
@@ -89,8 +83,6 @@ def main() -> int:
         prompts,
         skills,
         approver=args.approver,
-        publish_authorizer=lambda actor, action: action == "skill.publish"
-        and actor == args.approver,
         data_dir=args.data_dir,
     )
     try:

@@ -1,30 +1,30 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Code, Lock } from 'lucide-react'
 import {
   fetchCodingReceipt,
   fetchCodingStatus,
+  fetchTask,
   fetchThreads,
   isPilotAuthFailure,
   pilotErrorMessage,
   submitCodingTask,
   useCsrf,
   type CodingReceiptView,
+  type OwnerTaskView,
 } from '../api/pilot'
-import { useTaskSettle } from '../api/useTaskSettle'
 import { useAuth } from '../stores/auth'
-import { EmptyState } from '../components/ui'
-import { useToast } from '../components/toast'
-import { stateTone } from '../components/tones'
+import { EmptyState } from './Dashboard'
 import { LockedPanel } from './Locked'
 import { Chip, LoadingBlock, PanelRow, PilotErrorNote, PilotGate, StateChip } from './PilotShared'
+
+const TERMINAL = new Set(['COMPLETED', 'FAILED', 'DENIED', 'CANCELLED', 'UNCERTAIN'])
 
 export function CodingPage() {
   const token = useAuth((s) => s.ownerToken)
   const setOwnerToken = useAuth((s) => s.setOwnerToken)
   const setAuthNotice = useAuth((s) => s.setAuthNotice)
   const csrf = useCsrf()
-  const toast = useToast()
 
   const [requestId, setRequestId] = useState(() => `ui-${Date.now()}`)
   const [threadId, setThreadId] = useState('')
@@ -32,7 +32,10 @@ export function CodingPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [view, setView] = useState<OwnerTaskView | null>(null)
+  const [receipt, setReceipt] = useState<CodingReceiptView | null>(null)
   const [taskId, setTaskId] = useState<string | null>(null)
+  const [pollNonce, setPollNonce] = useState(0)
 
   const status = useQuery({
     queryKey: ['pilot-coding-status', token],
@@ -48,27 +51,6 @@ export function CodingPage() {
     refetchInterval: 15_000,
   })
 
-  const handleAuthFailure = useCallback(
-    (message: string) => {
-      setAuthNotice(message)
-      setOwnerToken(null)
-    },
-    [setAuthNotice, setOwnerToken],
-  )
-
-  const settleReceipt = useCallback(
-    (id: string) => fetchCodingReceipt(csrf, id),
-    [csrf],
-  )
-
-  const { view, settled: receipt, error: pollError } = useTaskSettle<CodingReceiptView>({
-    csrf,
-    taskId,
-    intervalMs: 1500,
-    settle: settleReceipt,
-    onAuthFailure: handleAuthFailure,
-  })
-
   const submit = useCallback(async () => {
     const id = requestId.trim()
     const text = task.trim()
@@ -76,6 +58,7 @@ export function CodingPage() {
     setSubmitting(true)
     setError(null)
     setNotice(null)
+    setReceipt(null)
     try {
       const next = await submitCodingTask(csrf, {
         request_id: id,
@@ -83,23 +66,65 @@ export function CodingPage() {
         profile_id: 'literal-assignment-v1',
         task: text,
       })
+      setView(next)
       setTaskId(next.task_id)
+      setPollNonce((n) => n + 1)
       setRequestId(`ui-${Date.now()}`)
       setNotice(
         next.replayed
           ? 'Replayed: this request ID already produced the coding task.'
           : 'Coding task accepted.',
       )
-      toast('Coding task submitted', 'success')
     } catch (err) {
       if (isPilotAuthFailure(err)) {
-        handleAuthFailure(pilotErrorMessage(err))
+        setAuthNotice(pilotErrorMessage(err))
+        setOwnerToken(null)
       }
       setError(pilotErrorMessage(err))
     } finally {
       setSubmitting(false)
     }
-  }, [requestId, threadId, task, submitting, csrf, handleAuthFailure, toast])
+  }, [requestId, threadId, task, submitting, csrf, setAuthNotice, setOwnerToken])
+
+  useEffect(() => {
+    if (!taskId) return
+    let cancelled = false
+    let timer: number | undefined
+    let attempts = 0
+
+    const tick = async () => {
+      attempts += 1
+      try {
+        const next = await fetchTask(csrf, taskId)
+        if (cancelled) return
+        setView(next)
+        if (TERMINAL.has(next.state)) {
+          const row = await fetchCodingReceipt(csrf, next.task_id)
+          if (!cancelled) setReceipt(row)
+          return
+        }
+      } catch (err) {
+        if (cancelled) return
+        if (isPilotAuthFailure(err)) {
+          setAuthNotice(pilotErrorMessage(err))
+          setOwnerToken(null)
+        }
+        setError(pilotErrorMessage(err))
+        return
+      }
+      if (attempts >= 30) {
+        if (!cancelled) setError('Timed out waiting for the coding task to settle.')
+        return
+      }
+      timer = window.setTimeout(tick, 1500)
+    }
+
+    timer = window.setTimeout(tick, 800)
+    return () => {
+      cancelled = true
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [taskId, csrf, pollNonce, setAuthNotice, setOwnerToken])
 
   const threadList = threads.data?.threads ?? []
   const available = status.data?.available ?? false
@@ -202,7 +227,6 @@ export function CodingPage() {
                 <button
                   type="submit"
                   className="mc-btn mc-btn-primary w-full justify-center"
-                  aria-busy={submitting}
                   disabled={
                     submitting || !csrf || !threadId || !requestId.trim() || !task.trim()
                   }
@@ -211,22 +235,19 @@ export function CodingPage() {
                 </button>
               </form>
 
-              {error || pollError ? (
-                <div className="mt-3" role="alert">
-                  <PilotErrorNote error={error ?? pollError} />
+              {error ? (
+                <div className="mt-3">
+                  <PilotErrorNote error={error} />
                 </div>
               ) : null}
               {notice ? (
-                <div
-                  className="mt-3 rounded-control border border-green/30 bg-green/10 px-3 py-2 text-xs text-green"
-                  role="status"
-                >
+                <div className="mt-3 rounded-control border border-green/30 bg-green/10 px-3 py-2 text-xs text-green">
                   {notice}
                 </div>
               ) : null}
             </section>
 
-            <section className="mc-panel flex flex-col p-5" aria-live="polite">
+            <section className="mc-panel flex flex-col p-5">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-text-1">
                   <Code size={14} className="text-text-3" /> Receipt &amp; evidence
@@ -288,9 +309,7 @@ function ReceiptBody({ data }: { data: CodingReceiptView }) {
         <PanelRow label="Task">{data.task_id}</PanelRow>
         <PanelRow label="Execution">{data.execution_state}</PanelRow>
         <PanelRow label="Reason">
-          <Chip tone={stateTone(data.reason === 'available' ? 'passed' : 'uncertain')}>
-            {data.reason}
-          </Chip>
+          <Chip tone={data.reason === 'available' ? 'green' : 'amber'}>{data.reason}</Chip>
         </PanelRow>
       </dl>
 
@@ -300,7 +319,7 @@ function ReceiptBody({ data }: { data: CodingReceiptView }) {
             <div className="mc-label mb-2">Coding receipt</div>
             <dl className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
               <PanelRow label="Objective">
-                <Chip tone={stateTone(receipt.objective_status)}>
+                <Chip tone={objectiveTone(receipt.objective_status)}>
                   {receipt.objective_status}
                 </Chip>
               </PanelRow>
@@ -359,4 +378,15 @@ function ReceiptBody({ data }: { data: CodingReceiptView }) {
 
 function Hash({ value }: { value: string | null }) {
   return <span className="mc-value text-[11.5px] text-text-1">{value ?? '—'}</span>
+}
+
+function objectiveTone(status: string): 'green' | 'red' | 'amber' {
+  switch (status) {
+    case 'passed':
+      return 'green'
+    case 'failed':
+      return 'red'
+    default:
+      return 'amber'
+  }
 }
