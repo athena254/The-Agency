@@ -30,7 +30,7 @@ class OpenAIProvider(BaseProvider):
         if self._client is not None:
             return self._client
         try:
-            from openai import AsyncOpenAI  # type: ignore[import-not-found]
+            from openai import AsyncOpenAI
         except ImportError as exc:
             raise RuntimeError(
                 "The 'openai' package is required for OpenAIProvider. Install with: pip install openai"

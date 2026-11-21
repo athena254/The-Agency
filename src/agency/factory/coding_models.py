@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 
 from agency.core.hashing import canonical_sha256  # neutral module; re-exported (gaps.md #1)
 
+__all__ = ["canonical_sha256"]
+
 
 class _Frozen(BaseModel):
     model_config = ConfigDict(

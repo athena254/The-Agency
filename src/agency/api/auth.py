@@ -179,7 +179,7 @@ async def require_principal(request: Request, *required_scopes: str) -> Principa
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Peer authorization is unavailable.",
         )
-    principal = registry.authenticate(request.headers.get("authorization"))
+    principal: Principal = registry.authenticate(request.headers.get("authorization"))
     missing = next((s for s in required_scopes if not principal.has_scopes(s)), None)
     if missing is not None:
         raise HTTPException(

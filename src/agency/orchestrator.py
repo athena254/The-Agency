@@ -13,6 +13,7 @@ import asyncio
 import json
 import os
 import re
+from collections.abc import Callable, Coroutine
 from contextlib import suppress
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -646,7 +647,7 @@ class AgencyOrchestrator:
 
         async def cleanup() -> BaseException | None:
             error: BaseException | None = None
-            closers = []
+            closers: list[Callable[[], Coroutine[Any, Any, None]]] = []
             if dispatcher is not None:
                 closers.append(dispatcher.stop)
             closers.append(self._memory_lifecycle.stop_periodic)

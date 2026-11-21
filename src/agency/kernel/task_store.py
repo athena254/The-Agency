@@ -345,7 +345,7 @@ class TaskStore:
             cursor = await conn.execute(
                 "SELECT task_id FROM tasks WHERE status = ?", (TaskStatus.RUNNING.value,)
             )
-            rows = await cursor.fetchall()
+            rows = list(await cursor.fetchall())
             if not rows:
                 return 0
             now = _iso(utcnow())

@@ -33,9 +33,11 @@ def _provider_retry_delay(response: Any, attempt: int) -> float:
     """Seconds to wait before re-posting; a parseable Retry-After wins."""
 
     try:
-        return max(0.0, min(float(response.headers.get("retry-after")), _PROVIDER_BACKOFF_CAP_S))
+        retry_after: float = float(response.headers.get("retry-after"))
+        return max(0.0, min(retry_after, _PROVIDER_BACKOFF_CAP_S))
     except (TypeError, ValueError):
-        return max(0.0, min(_PROVIDER_BACKOFF_BASE_S * (2**attempt), _PROVIDER_BACKOFF_CAP_S))
+        backoff: float = _PROVIDER_BACKOFF_BASE_S * (2**attempt)
+        return max(0.0, min(backoff, _PROVIDER_BACKOFF_CAP_S))
 
 
 _INCEPTION_PROVIDERS = {
