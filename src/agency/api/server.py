@@ -238,7 +238,6 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             try:
                 from agency.factory.github_skills import grant_manifest_capabilities
 
-<<<<<<< HEAD
                 grant_manifest_capabilities(kernel_registry)
             except BaseException as exc:  # noqa: BLE001 - startup must not crash
                 log.warning(

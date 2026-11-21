@@ -86,11 +86,13 @@ def test_write_route_closed_without_owner_policy(tmp_path, monkeypatch):
 
     with TestClient(create_app()) as client:
         ledger = client.app.state.grant_ledger
-        header = _grant_header(ledger, ids[0], "POST /v1/tasks")
+        # /v1/tasks writes stay bearer-token gated (main's intake posture);
+        # the grant+finality path is exercised on a grant-gated write route.
+        header = _grant_header(ledger, ids[0], "POST /v1/governance/propose")
         response = client.post(
-            "/v1/tasks",
+            "/v1/governance/propose",
             headers={"X-Agency-Grant": header},
-            json={"title": "t", "created_by": "peer"},
+            json={"name": "t"},
         )
         assert response.status_code == 503
         assert "Finality policy" in response.json()["detail"]
@@ -105,14 +107,14 @@ def test_write_route_with_finality_policy(tmp_path, monkeypatch):
 
     with TestClient(create_app()) as client:
         ledger = client.app.state.grant_ledger
-        header = _grant_header(ledger, ids[0], "POST /v1/tasks")
+        header = _grant_header(ledger, ids[0], "POST /v1/governance/propose")
         response = client.post(
-            "/v1/tasks",
+            "/v1/governance/propose",
             headers={
                 "X-Agency-Grant": header,
                 "X-Agency-Finality": '{"height": 1, "app_hash": "abc"}',
             },
-            json={"title": "t", "created_by": "peer"},
+            json={"name": "t"},
         )
         assert response.status_code in (200, 201)
 
