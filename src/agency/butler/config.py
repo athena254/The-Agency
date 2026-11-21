@@ -12,6 +12,8 @@ All values can be supplied via environment variables (prefixed with
     BUTLER_TIMEOUT=60.0
     BUTLER_DECISION_PROVIDER=jev
     BUTLER_JEV_MODEL=jev-latest
+    BUTLER_PERSONA_ENABLED=1
+    BUTLER_PERSONA_MAX_OUTPUT=20000
 """
 
 from __future__ import annotations
@@ -63,6 +65,16 @@ class ButlerConfig(BaseSettings):
         ge=0.0,
         le=1.0,
         description="Judgment probability below which the judgment is a definite no (defer).",
+    )
+    persona_enabled: bool = Field(
+        default=True,
+        description="Frame completed replies through the Butler persona (SOUL/IDENTITY docs).",
+    )
+    persona_max_output: int = Field(
+        default=20000,
+        ge=1,
+        le=1_000_000,
+        description="Hard cap on the framed reply length in chars (adds a truncation marker).",
     )
 
     @field_validator("decision_provider")

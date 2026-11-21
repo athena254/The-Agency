@@ -6,7 +6,9 @@
 2. Route to an :class:`Agent` (Jev decision model when configured, else
    LLM decision, else keyword).
 3. Execute via :class:`AgencyOrchestrator` (submit + execute a task).
-4. Audit-log every step and persist the turn in memory.
+4. Frame the completed reply through the persona (LLM-voiced, or verbatim
+   when no LLM/framing is available — presentation-only, never execution).
+5. Audit-log every step and persist the turn in memory.
 """
 
 from __future__ import annotations
@@ -32,6 +34,8 @@ from agency.butler.commands import CommandError, ThreadCommands
 from agency.butler.config import ButlerConfig
 from agency.butler.context import ThreadContextEngine
 from agency.butler.decision import JevDecisionModel, RoutingDecision, TypeSafeJevClient
+from agency.butler.documents import DocumentError, load_base
+from agency.butler.persona import PersonaFraming
 from agency.butler.router import MessageRouter
 from agency.butler.threads import Thread, ThreadMessage, ThreadStore, Workspace
 from agency.kernel.audit import AuditEntry, AuditLog
@@ -120,6 +124,8 @@ class ButlerService:
         self._lattice: Lattice | None = None  # Will be set from orchestrator
         self._llm = llm
         self._decision_model: JevDecisionModel | None = None
+        self._persona: PersonaFraming | None = None
+        self._persona_disabled = False
         self._log = structlog.get_logger(__name__)
         self._started = False
         self._seeded = False
@@ -400,6 +406,23 @@ class ButlerService:
             result = "failed"
             self._log.warning("butler.execute_failed", error_type=type(exc).__name__)
 
+        # Persona framing is presentation-only and applies to successful agent
+        # outputs only — timeout/failure replies are already the Butler's own
+        # voice. The framed response is what gets audited, persisted, returned.
+        framing = "disabled"
+        if result == "completed" and self._config.persona_enabled:
+            persona = self._ensure_persona()
+            if persona is not None:
+                framing_meta: dict[str, Any] = {}
+                response = await persona.frame(
+                    response,
+                    message=text,
+                    agent_name=agent.name,
+                    thread_context=thread_id is not None,
+                    evidence=framing_meta,
+                )
+                framing = str(framing_meta.get("framing", "verbatim"))
+
         await self._audit_append(
             agent=agent.id,
             action="butler.handle_message",
@@ -409,6 +432,7 @@ class ButlerService:
                 "message_length": len(text),
                 "response_length": len(response),
                 "duration_s": (datetime.now(UTC) - started).total_seconds(),
+                "framing": framing,
             },
         )
         if thread_id is not None and engine is not None:
@@ -744,6 +768,37 @@ class ButlerService:
         except Exception as exc:  # noqa: BLE001 — decision failures fall back, never fail the turn.
             self._log.warning("butler.decision_failed", error_type=type(exc).__name__)
             return None
+
+    # ------------------------------------------------------------------ #
+    # Persona framing (presentation-only)
+    # ------------------------------------------------------------------ #
+
+    def _ensure_persona(self) -> PersonaFraming | None:
+        """Build the persona framer lazily, exactly once.
+
+        Unusable documents disable framing permanently (fail-open to the
+        verbatim relay — never crash the service). A missing SOUL.md, the
+        persona contract, is a deployment problem and is logged loudly.
+        """
+        if self._persona_disabled:
+            return None
+        if self._persona is None:
+            try:
+                documents = load_base()
+            except DocumentError as exc:
+                self._persona_disabled = True
+                detail = str(exc)
+                if "SOUL.md" in detail and "missing" in detail:
+                    self._log.warning("butler.persona_soul_missing", error_type=type(exc).__name__)
+                else:
+                    self._log.warning("butler.persona_docs_unusable", error_type=type(exc).__name__)
+                return None
+            self._persona = PersonaFraming(
+                self._llm or self._build_llm_from_config(),
+                documents,
+                max_output=self._config.persona_max_output,
+            )
+        return self._persona
 
     async def execute(
         self,
