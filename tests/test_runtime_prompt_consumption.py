@@ -137,6 +137,49 @@ async def test_converse_isolated_prefixes_factory_prompt() -> None:
 
 
 @pytest.mark.asyncio
+async def test_converse_isolated_embeds_session_history_as_context() -> None:
+    recorder = _RecordingLLM()
+    orch = AgencyOrchestrator(llm=recorder, memory_db_path=":memory:")
+    await orch.start()
+    try:
+        agent = _factory_agent()
+        orch._identity_registry.register(agent)
+
+        history = [
+            {"role": "user", "content": "My name is Kestrel."},
+            {"role": "assistant", "content": "Understood, Kestrel."},
+        ]
+        await orch.converse_isolated("What is my name?", agent.id, history=history)
+
+        assert recorder.prompts
+        prompt = recorder.prompts[-1]
+        assert "My name is Kestrel." in prompt
+        assert "Understood, Kestrel." in prompt
+        assert "context only" in prompt
+        assert "[Current message]\nWhat is my name?" in prompt
+    finally:
+        await orch.stop()
+
+
+@pytest.mark.asyncio
+async def test_converse_isolated_without_history_stays_single_turn() -> None:
+    recorder = _RecordingLLM()
+    orch = AgencyOrchestrator(llm=recorder, memory_db_path=":memory:")
+    await orch.start()
+    try:
+        agent = _factory_agent()
+        orch._identity_registry.register(agent)
+
+        await orch.converse_isolated("alpha-turn-one", agent.id)
+        await orch.converse_isolated("beta-turn-two", agent.id)
+
+        assert len(recorder.prompts) == 2
+        assert "alpha-turn-one" not in recorder.prompts[1]
+    finally:
+        await orch.stop()
+
+
+@pytest.mark.asyncio
 async def test_malformed_issued_prompt_fails_closed() -> None:
     orch = AgencyOrchestrator(memory_db_path=":memory:")
     await orch.start()

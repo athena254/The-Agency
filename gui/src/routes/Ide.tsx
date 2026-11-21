@@ -22,6 +22,7 @@ export function IdePage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const csrfRef = useRef<string | null>(null)
+  const sessionIdRef = useRef(crypto.randomUUID())
   const endRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -55,7 +56,7 @@ export function IdePage() {
           'Content-Type': 'application/json',
           ...(token ? { 'X-Prototype-CSRF': token } : {}),
         },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, session_id: sessionIdRef.current }),
       })
       if (!result.ok) {
         if (result.status === 403) csrfRef.current = null
@@ -86,9 +87,9 @@ export function IdePage() {
         <div className="flex items-center justify-between border-b border-line px-5 py-3">
           <div>
             <h2 className="text-sm font-semibold text-text-1">Isolated chat</h2>
-            <div className="mc-label mt-0.5">model-only · no tools · no memory</div>
+            <div className="mc-label mt-0.5">model-only · no tools · no memory store</div>
           </div>
-          <span className="mc-value text-[11px] text-text-3">mercury-3</span>
+          <span className="mc-value text-[11px] text-text-3">in-session context</span>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
@@ -98,6 +99,8 @@ export function IdePage() {
               <div className="mt-1 max-w-sm text-xs text-text-3">
                 This is the isolated prototype path: it runs the model without tools, memory,
                 or Lattice mirroring. The governed task path arrives with peer authority.
+                Replies can see the earlier turns of this page session (kept in memory only,
+                gone on reload).
               </div>
             </div>
           ) : (

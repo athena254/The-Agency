@@ -135,7 +135,7 @@ export function DashboardPage() {
             <FeedItem
               icon={Sparkles}
               title="Model path verified"
-              detail="Inception mercury-3 responded"
+              detail="static placeholder — the runtime publishes no live activity events"
               time="1m"
             />
             <FeedItem
