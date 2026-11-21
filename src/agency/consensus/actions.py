@@ -8,8 +8,10 @@ activated when a provider is configured.
 
 from __future__ import annotations
 
+import asyncio
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -93,6 +95,22 @@ def make_agent_executor_adapter(executor: Any) -> Executor:
             spec.args.get("task", spec.name),
             task_id=spec.task_id,
         )
+        # AgentExecutor.execute is async while ABCI block processing is
+        # synchronous; bridge the coroutine with the repo's established
+        # sync-bridge idiom (agency.agents.coding_flow._call_run_task).
+        if isinstance(result, Coroutine):
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    with ThreadPoolExecutor(max_workers=1) as pool:
+                        result = pool.submit(asyncio.run, result).result()
+                else:
+                    result = loop.run_until_complete(result)
+            except RuntimeError:
+                result = asyncio.run(result)
+        if hasattr(result, "model_dump"):
+            # ExecutionResult (pydantic): JSON-safe dict for the PeerLog record.
+            return result.model_dump(mode="json")
         return getattr(result, "value", result)
 
     return _run
