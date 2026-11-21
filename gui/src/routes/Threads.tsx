@@ -10,7 +10,9 @@ import {
   useCsrf,
 } from '../api/pilot'
 import { useAuth } from '../stores/auth'
-import { EmptyState } from './Dashboard'
+import { EmptyState } from '../components/ui'
+import { useToast } from '../components/toast'
+import { formatDateTime } from '../lib/format'
 import { LoadingBlock, PilotErrorNote, PilotGate, StateChip } from './PilotShared'
 
 export function ThreadsPage() {
@@ -18,6 +20,7 @@ export function ThreadsPage() {
   const setOwnerToken = useAuth((s) => s.setOwnerToken)
   const setAuthNotice = useAuth((s) => s.setAuthNotice)
   const csrf = useCsrf()
+  const toast = useToast()
   const [selected, setSelected] = useState<string | null>(null)
   const [requestId, setRequestId] = useState(() => `ui-${Date.now()}`)
   const [title, setTitle] = useState('')
@@ -52,6 +55,7 @@ export function ThreadsPage() {
           ? 'Replayed: this request ID already produced the thread.'
           : 'Thread created.',
       )
+      toast(result.request.replayed ? 'Thread request replayed' : 'Thread created', 'success')
       setTitle('')
       setRequestId(`ui-${Date.now()}`)
       setSelected(result.thread.id)
@@ -191,7 +195,9 @@ export function ThreadsPage() {
                             : ''}
                         </div>
                         <div className="mc-value mt-0.5 text-[10.5px] text-text-3">
-                          {thread.updated_at}
+                          <span title={thread.updated_at ?? undefined}>
+                            updated {formatDateTime(thread.updated_at)}
+                          </span>
                         </div>
                       </button>
                     </li>
@@ -254,8 +260,11 @@ export function ThreadsPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="mc-label">{message.role}</span>
-                          <span className="mc-value text-[10.5px] text-text-3">
-                            {message.created_at}
+                          <span
+                            className="mc-value text-[10.5px] text-text-3"
+                            title={message.created_at}
+                          >
+                            {formatDateTime(message.created_at, true)}
                           </span>
                         </div>
                         <div className="mt-1 whitespace-pre-wrap text-sm text-text-1">

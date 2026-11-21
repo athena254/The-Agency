@@ -173,19 +173,23 @@ resource.setrlimit(resource.RLIMIT_NOFILE, (1024, 1024))
 resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
 
 # 2. Install import hook
-ALLOWED_IMPORTS = ['math', 'json', 'os', 'sys', 'datetime', ...]
+ALLOWED_IMPORTS = ["math", "json", "os", "sys", "datetime", ...]
 _original_import = builtins.__import__
+
+
 def safe_import(name, *args, **kwargs):
-    if name.split('.')[0] not in ALLOWED_IMPORTS:
+    if name.split(".")[0] not in ALLOWED_IMPORTS:
         raise ImportError(f"Import of '{name}' is not allowed")
     return _original_import(name, *args, **kwargs)
+
+
 builtins.__import__ = safe_import
 
 # 3. Execute user code
 code_path = Path(__file__).parent / "agent_code.py"
 agent_globals = {"__builtins__": builtins.__dict__}
 try:
-    exec(compile(code_path.read_text(), str(code_path), 'exec'), agent_globals)
+    exec(compile(code_path.read_text(), str(code_path), "exec"), agent_globals)
     result = agent_globals.get("result")
     print(f"__AGENT_RESULT__\n{repr(result)}")
 except Exception as e:
@@ -242,6 +246,7 @@ class ResourceLimits:
     max_open_files: int = 1024
     runtime_seconds: int = 300
 
+
 @dataclass
 class AthenaMirrorConfig:
     include: bool = False
@@ -260,6 +265,7 @@ class AthenaMirrorConfig:
     persistent_after_test: bool = False
     ttl_hours: int = 24
 
+
 @dataclass
 class SandboxResult:
     success: bool
@@ -270,6 +276,7 @@ class SandboxResult:
     duration_ms: float = 0.0
     memory_peak_mb: float = 0.0
     error_message: Optional[str] = None
+
 
 @dataclass
 class SandboxStats:
@@ -299,9 +306,7 @@ class SandboxManager:
 Each subject (agent) gets their own semaphore. When limit reached, requests queue:
 ```python
 async def _acquire(self, subject: str):
-    sem = self._subject_semaphores.setdefault(
-        subject, asyncio.Semaphore(self._max_per_subject)
-    )
+    sem = self._subject_semaphores.setdefault(subject, asyncio.Semaphore(self._max_per_subject))
     await sem.acquire()
     return sem
 ```
@@ -334,12 +339,11 @@ CMD ["sleep", "infinity"]
 ```python
 # scripts/build_image.py
 import subprocess
-subprocess.run([
-    "docker", "build",
-    "-f", "Dockerfile.base",
-    "-t", "theagency-sandbox-base:latest",
-    "."
-], check=True)
+
+subprocess.run(
+    ["docker", "build", "-f", "Dockerfile.base", "-t", "theagency-sandbox-base:latest", "."],
+    check=True,
+)
 ```
 
 ---

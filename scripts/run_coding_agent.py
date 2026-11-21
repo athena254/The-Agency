@@ -16,7 +16,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from agency.agents.coding import AgencyCodingAgent  # noqa: E402
+from agency.agents.coding import AgencyCodingAgent
 
 
 def _load_edits(path: Path) -> list[dict]:
@@ -35,11 +35,27 @@ def main() -> None:
         prog="run_coding_agent.py",
         description="Run the Agency coding agent against a branch with a JSON file of edits.",
     )
-    parser.add_argument("--branch", required=True, help="Branch name to use for the isolated worktree.")
-    parser.add_argument("--edits", type=Path, default=None, help="Path to a JSON file containing the list of edits.")
-    parser.add_argument("--skill", type=Path, default=None, help="Optional path to a skill markdown file to verify first.")
-    parser.add_argument("--workspace", type=Path, default=None, help="Optional workspace/repository root.")
-    parser.add_argument("--store", type=Path, default=None, help="Optional SQLite store path for persisting the report.")
+    parser.add_argument(
+        "--branch", required=True, help="Branch name to use for the isolated worktree."
+    )
+    parser.add_argument(
+        "--edits", type=Path, default=None, help="Path to a JSON file containing the list of edits."
+    )
+    parser.add_argument(
+        "--skill",
+        type=Path,
+        default=None,
+        help="Optional path to a skill markdown file to verify first.",
+    )
+    parser.add_argument(
+        "--workspace", type=Path, default=None, help="Optional workspace/repository root."
+    )
+    parser.add_argument(
+        "--store",
+        type=Path,
+        default=None,
+        help="Optional SQLite store path for persisting the report.",
+    )
     args = parser.parse_args()
 
     edits_path = args.edits.resolve() if args.edits is not None else None

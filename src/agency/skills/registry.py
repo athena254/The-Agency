@@ -197,6 +197,8 @@ class SkillRegistry:
             if str(parent) and not parent.exists():
                 parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path)
+        # WAL so readers don't block the writer; one writer connection per
+        # process (gaps.md #9).
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute(

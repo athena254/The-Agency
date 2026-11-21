@@ -65,7 +65,7 @@ async def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     evidence = EvidenceStore(tmp_path / "evidence.db")
     butler_audit = AuditLog(tmp_path / "butler-audit.db")
     monkeypatch.setattr(orchestrator_module, "AuditLog", lambda *_: audit)
-    monkeypatch.setattr(orchestrator_module, "EvidenceStore", lambda: evidence)
+    monkeypatch.setattr(orchestrator_module, "EvidenceStore", lambda *_: evidence)
     monkeypatch.setattr(butler_module, "AuditLog", lambda *_: butler_audit)
     orch = AgencyOrchestrator(memory_db_path=str(tmp_path / "memory.db"))
     probes = {

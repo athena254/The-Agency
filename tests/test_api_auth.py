@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from fastapi import HTTPException
@@ -68,7 +69,9 @@ def test_empty_registry_fails_closed() -> None:
 
 
 def test_load_rejects_bad_files(tmp_path: Path) -> None:
-    short = _write_tokens(tmp_path / "short.json", [{"token": "abc", "caller_id": "x", "role": "agent"}])
+    short = _write_tokens(
+        tmp_path / "short.json", [{"token": "abc", "caller_id": "x", "role": "agent"}]
+    )
     with pytest.raises(ValueError, match="token missing/short"):
         TokenRegistry.load(short)
     dup = _write_tokens(
@@ -120,7 +123,7 @@ async def test_require_principal_dependency(tmp_path: Path) -> None:
 
     class FakeRequest:
         app = FakeApp()
-        headers = {"authorization": f"Bearer {VALID_TOKEN}"}
+        headers: ClassVar[dict[str, str]] = {"authorization": f"Bearer {VALID_TOKEN}"}
         state = type("State", (), {})()
 
     request = FakeRequest()
@@ -142,7 +145,7 @@ async def test_dependency_without_registry_is_503() -> None:
 
     class FakeRequest:
         app = FakeApp()
-        headers: dict[str, str] = {}
+        headers: ClassVar[dict[str, str]] = {}
         state = type("State", (), {})()
 
     with pytest.raises(HTTPException) as denied:

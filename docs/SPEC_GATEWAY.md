@@ -71,17 +71,17 @@ User → ButlerBuddy (single process) → Domain Agents
 ```python
 async def route_message(message: Message, sender: str) -> None:
     """Route incoming message to correct destination."""
-    
+
     # 1. Check if message explicitly targets Buddy
     if message.target == "buddy" or message.command.startswith("/buddy"):
         await route_to_buddy_conversation(message)
         return
-    
+
     # 2. Check if message targets a specific agent
     if message.target and message.target.startswith("@"):
         await route_to_domain_agent(message)
         return
-    
+
     # 3. Default: route to Buddy conversation
     await route_to_buddy_conversation(message)
 
@@ -90,12 +90,15 @@ async def route_response_to_buddy(message: Message) -> None:
     """Route domain agent response to Buddy for rendering."""
     if message.has_rendering_hint and message.render_via == "buddy":
         # Forward to Buddy via Lattice
-        await lattice.send_to_agent("buddy", {
-            "type": "domain_render_request",
-            "original_message": message,
-            "component": message.component,
-            "data": message.data,
-        })
+        await lattice.send_to_agent(
+            "buddy",
+            {
+                "type": "domain_render_request",
+                "original_message": message,
+                "component": message.component,
+                "data": message.data,
+            },
+        )
 ```
 
 ---
@@ -106,28 +109,28 @@ async def route_response_to_buddy(message: Message) -> None:
 ```python
 class GatewayAgent:
     """Core gateway logic shared across all modes."""
-    
+
     async def receive_message(self, message: Message) -> None:
         """Receive message from any interface adapter."""
         await self._validate_message(message)
         await self._log_message(message)
         await route_message(message, sender=message.source)
-    
+
     async def send_response(self, response: Response, destination: str) -> None:
         """Send response back through the interface."""
         adapter = self._get_adapter(destination)
         await adapter.send(response)
-    
+
     async def check_health(self) -> HealthStatus:
         """Monitor system health."""
         return HealthStatus(
             cpu_percent=psutil.cpu_percent(),
             memory_mb=psutil.virtual_memory().used / 1024 / 1024,
-            disk_gb=psutil.disk_usage('/').free / 1024 / 1024 / 1024,
+            disk_gb=psutil.disk_usage("/").free / 1024 / 1024 / 1024,
             agent_count=await lattice.get_agent_count(),
             lattice_status=await lattice.get_status(),
         )
-    
+
     async def handle_governance(self, proposal: Proposal) -> None:
         """Handle voting, escalation, and system healing."""
         if proposal.type == "agent_restart":
@@ -222,34 +225,37 @@ class DiscordAdapter:
 ```python
 class GatewayLauncher:
     """Unified entry point — reads config, launches correct mode."""
-    
+
     def __init__(self, config_path: str = "config/gateway_modes.yaml"):
         self._config = self._load_config(config_path)
         self._mode = self._config.get("mode", "separate")
-    
+
     def launch(self) -> None:
         """Launch the configured gateway mode."""
         if self._mode == "butler-only":
             from .butler_only import ButlerOnly
+
             gateway = ButlerOnly(self._config)
         elif self._mode == "separate":
             from .butler_separate import ButlerSeparate
+
             gateway = ButlerSeparate(self._config)
         elif self._mode == "merged":
             from .butler_merged import ButlerMerged
+
             gateway = ButlerMerged(self._config)
         else:
             raise ValueError(f"Unknown mode: {self._mode}")
-        
+
         asyncio.run(gateway.start())
-    
+
     def _load_config(self, path: str) -> dict:
         """Load YAML config or read from env var."""
         config_path = Path(path)
         if config_path.exists():
             with open(config_path) as f:
                 return yaml.safe_load(f)
-        
+
         # Fallback to env var
         mode = os.getenv("NEXUS_GATEWAY_MODE", "separate")
         return {"mode": mode}
@@ -356,29 +362,32 @@ class ButlerOnly:
 ```python
 class ButlerSeparate:
     """Mode 2: Butler + Buddy as separate processes (RECOMMENDED)."""
-    
+
     def __init__(self, config: dict):
         self._gateway = GatewayAgent(config)
         self._buddy_url = config["modes"]["separate"]["buddy_url"]
         self._adapters: list[InterfaceAdapter] = []
-    
+
     async def start(self) -> None:
         """Start Butler-separate gateway."""
         # Initialize adapters
         self._init_adapters()
-        
+
         # Start all adapters
         await asyncio.gather(*[a.start() for a in self._adapters])
-        
+
         # Start Buddy as separate subprocess
         buddy_process = await asyncio.create_subprocess_exec(
-            "python", "-m", "theagency.gateways.buddy.node",
-            "--port", str(self._buddy_port),
+            "python",
+            "-m",
+            "theagency.gateways.buddy.node",
+            "--port",
+            str(self._buddy_port),
         )
-        
+
         # Process messages
         await self._process_messages()
-    
+
     async def _process_messages(self) -> None:
         """Route messages to Buddy or domain agents."""
         while True:
@@ -386,34 +395,40 @@ class ButlerSeparate:
                 async for message in adapter.receive():
                     # Use routing decision tree
                     await route_message(message, adapter.name)
-    
+
     async def route_to_buddy_conversation(self, message: Message) -> None:
         """Send message to Buddy via Lattice."""
-        await lattice.send_to_agent("buddy", {
-            "type": "user_input",
-            "text": message.text,
-            "source": message.source,
-        })
-    
+        await lattice.send_to_agent(
+            "buddy",
+            {
+                "type": "user_input",
+                "text": message.text,
+                "source": message.source,
+            },
+        )
+
     async def route_to_domain_agent(self, message: Message) -> None:
         """Send message directly to domain agent."""
         agent_id = message.target.lstrip("@")
         response = await lattice.send_and_wait(agent_id, message)
-        
+
         # Check if response should be rendered by Buddy
         if response.render_via == "buddy":
             await self.route_response_to_buddy(response)
         else:
             await adapter.send(Response(text=response.text))
-    
+
     async def route_response_to_buddy(self, response: Response) -> None:
         """Forward domain agent response to Buddy for rendering."""
-        await lattice.send_to_agent("buddy", {
-            "type": "domain_render_request",
-            "component": response.component,
-            "data": response.data,
-            "text": response.text,
-        })
+        await lattice.send_to_agent(
+            "buddy",
+            {
+                "type": "domain_render_request",
+                "component": response.component,
+                "data": response.data,
+                "text": response.text,
+            },
+        )
 ```
 
 ---
@@ -491,33 +506,34 @@ class HealthStatus:
     lattice_status: str
     timestamp: datetime = field(default_factory=datetime.utcnow)
 
+
 class HealthMonitor:
     """Continuous health monitoring."""
-    
+
     def __init__(self, interval_seconds: float = 30.0):
         self._interval = interval_seconds
         self._history: list[HealthStatus] = []
-    
+
     async def start(self) -> None:
         """Start monitoring loop."""
         while True:
             status = await self._check()
             self._history.append(status)
-            
+
             # Check thresholds
             if status.cpu_percent > 90:
                 await self._alert("CPU usage critical")
             if status.memory_mb > 8000:
                 await self._alert("Memory usage critical")
-            
+
             await asyncio.sleep(self._interval)
-    
+
     async def _check(self) -> HealthStatus:
         """Gather current system health."""
         return HealthStatus(
             cpu_percent=psutil.cpu_percent(),
             memory_mb=psutil.virtual_memory().used / 1024 / 1024,
-            disk_gb=psutil.disk_usage('/').free / 1024 / 1024 / 1024,
+            disk_gb=psutil.disk_usage("/").free / 1024 / 1024 / 1024,
             agent_count=await lattice.get_agent_count(),
             lattice_status=await lattice.get_status(),
         )

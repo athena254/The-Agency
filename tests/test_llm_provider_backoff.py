@@ -30,7 +30,9 @@ def _adapter() -> LLMAdapter:
 
 def _ok() -> httpx.Response:
     return httpx.Response(
-        200, json={"choices": [{"message": {"content": "pong"}}]}, request=httpx.Request("POST", "x")
+        200,
+        json={"choices": [{"message": {"content": "pong"}}]},
+        request=httpx.Request("POST", "x"),
     )
 
 

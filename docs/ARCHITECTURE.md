@@ -473,8 +473,8 @@ Task status: completed
 @dataclass
 class TaskMessage:
     task_id: str
-    type: str                    # "code_generation", "analysis", etc.
-    content: str                 # The actual task description
+    type: str  # "code_generation", "analysis", etc.
+    content: str  # The actual task description
     metadata: dict = field(default_factory=dict)
     # metadata contains: source, agent_role, company_id, priority, budget
     created_by: str = "system"
@@ -488,7 +488,7 @@ class TaskMessage:
 class ResultMessage:
     task_id: str
     bridge_type: str
-    status: str                  # "completed", "failed", "timeout"
+    status: str  # "completed", "failed", "timeout"
     output: str
     artifacts: list[str] = field(default_factory=list)
     usage: dict = field(default_factory=dict)
@@ -505,7 +505,7 @@ class ResultMessage:
 @dataclass
 class CapabilityAdvertisement:
     bridge_type: str
-    capabilities: list[str]      # ["code_generation", "analysis", ...]
+    capabilities: list[str]  # ["code_generation", "analysis", ...]
     supported_task_types: list[str]
     supports_streaming: bool
     supports_tools: bool

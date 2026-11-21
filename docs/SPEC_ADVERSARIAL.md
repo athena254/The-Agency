@@ -15,16 +15,16 @@ The **QA Critic** addon is a **quality enforcement system** (NOT red teaming) th
 
 ```python
 class QualityDimension(Enum):
-    CORRECTNESS = "correctness"          # Logic errors, wrong answers
-    SECURITY = "security"                # API keys, passwords, injection
-    COMPLETENESS = "completeness"        # Missing steps, incomplete analysis
-    CONSISTENCY = "consistency"          # Contradictions in reasoning
-    SAFETY = "safety"                    # Harmful outputs, dangerous code
-    PERFORMANCE = "performance"          # Inefficient algorithms, timeouts
-    USABILITY = "usability"              # Hard-to-read output, poor formatting
+    CORRECTNESS = "correctness"  # Logic errors, wrong answers
+    SECURITY = "security"  # API keys, passwords, injection
+    COMPLETENESS = "completeness"  # Missing steps, incomplete analysis
+    CONSISTENCY = "consistency"  # Contradictions in reasoning
+    SAFETY = "safety"  # Harmful outputs, dangerous code
+    PERFORMANCE = "performance"  # Inefficient algorithms, timeouts
+    USABILITY = "usability"  # Hard-to-read output, poor formatting
     MAINTAINABILITY = "maintainability"  # Spaghetti code, no comments
-    COMPLIANCE = "compliance"            # Policy violations, license issues
-    ROBUSTNESS = "robustness"            # Edge cases, error handling
+    COMPLIANCE = "compliance"  # Policy violations, license issues
+    ROBUSTNESS = "robustness"  # Edge cases, error handling
 ```
 
 ---
@@ -55,19 +55,21 @@ QUALITY_THRESHOLDS = {
 
 ### 3.3 Score Computation
 ```python
-def compute_quality_score(total_rules: int, violations: list[Violation]) -> tuple[float, QualityLevel]:
+def compute_quality_score(
+    total_rules: int, violations: list[Violation]
+) -> tuple[float, QualityLevel]:
     if total_rules == 0:
         return 1.0, QualityLevel.EXCELLENT
-    
+
     total_weight = sum(SEVERITY_WEIGHTS[v.severity] for v in violations)
     max_possible = total_rules * SEVERITY_WEIGHTS[Severity.CRITICAL]
-    
+
     score = max(0.0, 1.0 - (total_weight / max_possible))
-    
+
     for level, threshold in QUALITY_THRESHOLDS.items():
         if score >= threshold:
             return score, level
-    
+
     return score, QualityLevel.FAILING
 ```
 
@@ -77,13 +79,13 @@ def compute_quality_score(total_rules: int, violations: list[Violation]) -> tupl
 
 ```python
 class EnforcementAction(Enum):
-    ALLOW = "allow"                          # Continue normally
-    ALLOW_WITH_WARNING = "allow_with_warning" # Continue but note issue
-    REQUIRE_APPROVAL = "require_approval"     # Pause for human review
-    BLOCK = "block"                          # Stop and discard output
-    RETRY = "retry"                          # Re-run with instructions to fix
-    ESCALATE = "escalate"                    # Escalate to higher authority
-    QUARANTINE = "quarantine"                # Isolate agent, something wrong
+    ALLOW = "allow"  # Continue normally
+    ALLOW_WITH_WARNING = "allow_with_warning"  # Continue but note issue
+    REQUIRE_APPROVAL = "require_approval"  # Pause for human review
+    BLOCK = "block"  # Stop and discard output
+    RETRY = "retry"  # Re-run with instructions to fix
+    ESCALATE = "escalate"  # Escalate to higher authority
+    QUARANTINE = "quarantine"  # Isolate agent, something wrong
 ```
 
 ### 4.1 Policy Packs
@@ -137,9 +139,10 @@ SENSITIVE_PATTERNS = [
     r'(password|passwd|pwd)\s*[=:]\s*["\'][^"\']+["\']',
     r'(secret[_\s]?key|secretkey)\s*[=:]\s*["\'][\w\-]+["\']',
     r'(token|access[_\s]?token)\s*[=:]\s*["\'][\w\-]+["\']',
-    r'ssh-rsa\s+AAAA[^\s]+',
-    r'-----BEGIN\s+(RSA|DSA|EC|OPENSSH)\s+PRIVATE\s+KEY-----',
+    r"ssh-rsa\s+AAAA[^\s]+",
+    r"-----BEGIN\s+(RSA|DSA|EC|OPENSSH)\s+PRIVATE\s+KEY-----",
 ]
+
 
 async def check_no_sensitive_leak(context: dict) -> Optional[Violation]:
     output = context.get("output", "")
@@ -310,29 +313,40 @@ class Scenario(ABC):
     @abstractmethod
     async def run(self, context: dict) -> ScenarioResult: ...
 
+
 class JailbreakScenario(Scenario):
     """Tests if agent ignores instructions under prompt injection."""
+
     async def run(self, context: dict) -> ScenarioResult:
         # Step 1: Normal request
         # Step 2: Injection attempt
         # Step 3: Check compliance
         pass
 
+
 class PromptInjectionScenario(Scenario):
     """Tests if agent reveals system prompt."""
+
     async def run(self, context: dict) -> ScenarioResult: ...
+
 
 class DataExfiltrationScenario(Scenario):
     """Tests if agent leaks sensitive context data."""
+
     async def run(self, context: dict) -> ScenarioResult: ...
+
 
 class ToolMisuseScenario(Scenario):
     """Tests if agent misuses available tools."""
+
     async def run(self, context: dict) -> ScenarioResult: ...
+
 
 class BoundaryScenario(Scenario):
     """Tests edge cases and boundary conditions."""
+
     async def run(self, context: dict) -> ScenarioResult: ...
+
 
 class ScenarioRunner:
     async def run_suite(
@@ -485,6 +499,7 @@ class QARule:
     config: dict = field(default_factory=dict)
     check_fn: Optional[Callable] = None
 
+
 @dataclass
 class Violation:
     rule_id: str
@@ -493,6 +508,7 @@ class Violation:
     evidence: dict = field(default_factory=dict)
     dimension: QualityDimension = QualityDimension.CORRECTNESS
     timestamp: datetime = field(default_factory=datetime.utcnow)
+
 
 @dataclass
 class QAReview:
@@ -509,6 +525,7 @@ class QAReview:
     rules_passed: int = 0
     rules_failed: int = 0
     rules_skipped: int = 0
+
 
 @dataclass
 class EnforcementDecision:

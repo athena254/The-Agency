@@ -57,28 +57,28 @@ Sections 3–6, configuration and the historical file/test/migration sketches pr
 
 ```python
 class NodeType(str, Enum):
-    AGENT = "agent"           # An agent instance
-    TASK = "task"             # A unit of work
+    AGENT = "agent"  # An agent instance
+    TASK = "task"  # A unit of work
     DELIVERABLE = "deliverable"  # Output of a task
-    EVIDENCE = "evidence"     # Proof attached to a claim
-    DECISION = "decision"     # A governance decision
-    POLICY = "policy"         # An active policy rule
-    WING = "wing"             # Per-agent storage namespace
-    EVENT = "event"           # Audit log entry (special)
+    EVIDENCE = "evidence"  # Proof attached to a claim
+    DECISION = "decision"  # A governance decision
+    POLICY = "policy"  # An active policy rule
+    WING = "wing"  # Per-agent storage namespace
+    EVENT = "event"  # Audit log entry (special)
 ```
 
 ### 3.2 Edge Types
 
 ```python
 class EdgeType(str, Enum):
-    DEPENDS_ON = "depends_on"     # Task A needs Task B
-    PRODUCED_BY = "produced_by"   # Deliverable created by Task
-    EVIDENCE_FOR = "evidence_for" # Evidence supports Deliverable/Claim
-    VOTED_ON = "voted_on"         # Agent voted on Decision
-    GOVERNS = "governs"           # Policy controls Agent/Task
-    MEMBER_OF = "member_of"       # Agent belongs to Wight/Wing
-    TRUSTS = "trusts"             # Agent reputation link
-    SUPERSEDES = "supersedes"     # Decision replaces prior decision
+    DEPENDS_ON = "depends_on"  # Task A needs Task B
+    PRODUCED_BY = "produced_by"  # Deliverable created by Task
+    EVIDENCE_FOR = "evidence_for"  # Evidence supports Deliverable/Claim
+    VOTED_ON = "voted_on"  # Agent voted on Decision
+    GOVERNS = "governs"  # Policy controls Agent/Task
+    MEMBER_OF = "member_of"  # Agent belongs to Wight/Wing
+    TRUSTS = "trusts"  # Agent reputation link
+    SUPERSEDES = "supersedes"  # Decision replaces prior decision
 ```
 
 ### 3.3 Event Model (Immutable)
@@ -86,12 +86,12 @@ class EdgeType(str, Enum):
 ```python
 @dataclass(frozen=True)
 class LatticeEvent:
-    event_id: str           # ULID
-    timestamp: datetime     # UTC
-    event_type: str         # "node_created", "edge_added", "node_updated"
-    actor: str              # Agent/system that caused the event
-    target_id: str          # Node or edge affected
-    payload: dict           # Event-specific data
+    event_id: str  # ULID
+    timestamp: datetime  # UTC
+    event_type: str  # "node_created", "edge_added", "node_updated"
+    actor: str  # Agent/system that caused the event
+    target_id: str  # Node or edge affected
+    payload: dict  # Event-specific data
     prior_state: dict | None  # For updates: what it was before
 ```
 
@@ -100,30 +100,32 @@ class LatticeEvent:
 ```python
 @dataclass
 class Vote:
-    voter_id: str           # Agent that voted
-    proposal_id: str        # What is being voted on
-    decision: str           # "approve", "deny", "abstain"
-    evidence: list[str]     # Evidence IDs supporting the vote
-    weight: float           # Reputation-weighted vote strength
+    voter_id: str  # Agent that voted
+    proposal_id: str  # What is being voted on
+    decision: str  # "approve", "deny", "abstain"
+    evidence: list[str]  # Evidence IDs supporting the vote
+    weight: float  # Reputation-weighted vote strength
     timestamp: datetime
+
 
 @dataclass
 class Reputation:
     agent_id: str
-    score: float            # 0.0 - 1.0
+    score: float  # 0.0 - 1.0
     tasks_completed: int
     tasks_failed: int
     peer_ratings: list[float]  # Rolling window
     last_updated: datetime
 
+
 @dataclass
 class ConsensusProposal:
     proposal_id: str
     proposer_id: str
-    proposal_type: str      # "spawn_agent", "replace_agent", "policy_change"
+    proposal_type: str  # "spawn_agent", "replace_agent", "policy_change"
     quorum_required: float  # 0.0 - 1.0
     votes: list[Vote]
-    status: str             # "open", "passed", "denied", "expired"
+    status: str  # "open", "passed", "denied", "expired"
     expires_at: datetime
 ```
 
@@ -134,28 +136,27 @@ class ConsensusProposal:
 ### 4.1 Node Operations
 
 ```python
-async def create_node(
-    node_type: NodeType,
-    properties: dict,
-    actor: str = "system"
-) -> str: """Returns node ID, logs event"""
+async def create_node(node_type: NodeType, properties: dict, actor: str = "system") -> str:
+    """Returns node ID, logs event"""
+
 
 async def get_node(node_id: str) -> dict | None: ...
 
-async def update_node(
-    node_id: str,
-    properties: dict,
-    actor: str = "system"
-) -> bool: """Merge update, log event with prior_state"""
+
+async def update_node(node_id: str, properties: dict, actor: str = "system") -> bool:
+    """Merge update, log event with prior_state"""
+
 
 async def delete_node(node_id: str, actor: str = "system") -> bool: ...
+
 
 async def find_nodes(
     node_type: NodeType | None = None,
     filters: dict | None = None,
     limit: int = 100,
-    offset: int = 0
-) -> list[dict]: """Type + property filter"""
+    offset: int = 0,
+) -> list[dict]:
+    """Type + property filter"""
 ```
 
 ### 4.2 Edge Operations
@@ -166,14 +167,17 @@ async def add_edge(
     target_id: str,
     edge_type: EdgeType,
     properties: dict | None = None,
-    actor: str = "system"
-) -> str: """Returns edge ID"""
+    actor: str = "system",
+) -> str:
+    """Returns edge ID"""
+
 
 async def get_edges(
     node_id: str,
     direction: str = "both",  # "in", "out", "both"
-    edge_type: EdgeType | None = None
+    edge_type: EdgeType | None = None,
 ) -> list[dict]: ...
+
 
 async def remove_edge(edge_id: str, actor: str = "system") -> bool: ...
 ```
@@ -182,21 +186,21 @@ async def remove_edge(edge_id: str, actor: str = "system") -> bool: ...
 
 ```python
 async def traverse(
-    start_node: str,
-    edge_type: EdgeType | None = None,
-    max_depth: int = 3,
-    direction: str = "out"
-) -> list[str]: """Return node IDs reachable within depth"""
+    start_node: str, edge_type: EdgeType | None = None, max_depth: int = 3, direction: str = "out"
+) -> list[str]:
+    """Return node IDs reachable within depth"""
 
-async def find_path(
-    source: str,
-    target: str,
-    max_depth: int = 5
-) -> list[str] | None: """Shortest path between nodes"""
 
-async def get_dependencies(task_id: str) -> list[str]: """All tasks this task depends on"""
+async def find_path(source: str, target: str, max_depth: int = 5) -> list[str] | None:
+    """Shortest path between nodes"""
 
-async def get_dependents(task_id: str) -> list[str]: """All tasks depending on this task"""
+
+async def get_dependencies(task_id: str) -> list[str]:
+    """All tasks this task depends on"""
+
+
+async def get_dependents(task_id: str) -> list[str]:
+    """All tasks depending on this task"""
 ```
 
 ### 4.4 Vector Search (when Qdrant is available)
@@ -207,19 +211,18 @@ async def upsert_vector(
     vectors: list[tuple[str, list[float], dict]],  # (id, vector, payload)
 ) -> bool: ...
 
+
 async def search_vectors(
-    collection: str,
-    query_vector: list[float],
-    limit: int = 10,
-    filters: dict | None = None
-) -> list[dict]: """Returns {id, score, payload}"""
+    collection: str, query_vector: list[float], limit: int = 10, filters: dict | None = None
+) -> list[dict]:
+    """Returns {id, score, payload}"""
+
 
 async def search_by_text(
-    collection: str,
-    text: str,
-    embedder: callable,
-    limit: int = 10
-) -> list[dict]: """Embed text then search"""
+    collection: str, text: str, embedder: callable, limit: int = 10
+) -> list[dict]:
+    """Embed text then search"""
+
 
 async def delete_vectors(collection: str, ids: list[str]) -> bool: ...
 ```
@@ -232,25 +235,26 @@ async def submit_proposal(
     proposal_type: str,
     payload: dict,
     quorum: float = 0.5,
-    ttl_seconds: int = 3600
-) -> str: """Returns proposal ID"""
+    ttl_seconds: int = 3600,
+) -> str:
+    """Returns proposal ID"""
+
 
 async def cast_vote(
-    voter_id: str,
-    proposal_id: str,
-    decision: str,
-    evidence: list[str] | None = None
+    voter_id: str, proposal_id: str, decision: str, evidence: list[str] | None = None
 ) -> bool: ...
+
 
 async def get_proposal_status(proposal_id: str) -> ConsensusProposal: ...
 
+
 async def update_reputation(
-    agent_id: str,
-    success: bool,
-    peer_rating: float | None = None
+    agent_id: str, success: bool, peer_rating: float | None = None
 ) -> Reputation: ...
 
+
 async def get_reputation(agent_id: str) -> Reputation: ...
+
 
 async def check_quorum(proposal_id: str) -> bool: ...
 ```
@@ -262,15 +266,17 @@ async def get_events(
     target_id: str | None = None,
     event_type: str | None = None,
     actor: str | None = None,
-    limit: int = 100
+    limit: int = 100,
 ) -> list[LatticeEvent]: ...
+
 
 async def replay_events(
-    from_timestamp: datetime,
-    to_timestamp: datetime | None = None
+    from_timestamp: datetime, to_timestamp: datetime | None = None
 ) -> list[LatticeEvent]: ...
 
-async def get_audit_trail(node_id: str) -> list[LatticeEvent]: """All events for a node"""
+
+async def get_audit_trail(node_id: str) -> list[LatticeEvent]:
+    """All events for a node"""
 ```
 
 ### 4.7 Health & Status
@@ -288,6 +294,7 @@ async def get_status() -> dict:
         "last_event_at": str | None,
         "storage_size_mb": float,
     }
+
 
 async def get_agent_count() -> int: ...
 async def get_active_tasks() -> list[dict]: ...

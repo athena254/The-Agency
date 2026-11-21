@@ -39,18 +39,21 @@ __all__ = [
     "VERIFY_ACCEPT",
     "VERIFY_REJECT",
     "VERIFY_UNKNOWN",
+    "CheckTx",
+    "Commit",
     "CommitInfo",
     "Echo",
     "ExecTxResult",
     "ExtendVote",
     "FinalizeBlock",
     "Flush",
-    "Header",
     "Info",
     "InitChain",
     "PrepareProposal",
     "ProcessProposal",
+    "Query",
     "RequestEnvelope",
+    "ResponseCheckTx",
     "ResponseCommit",
     "ResponseEcho",
     "ResponseEnvelope",
@@ -62,6 +65,7 @@ __all__ = [
     "ResponseInitChain",
     "ResponsePrepareProposal",
     "ResponseProcessProposal",
+    "ResponseQuery",
     "ResponseVerifyVoteExtension",
     "Timestamp",
     "VerifyVoteExtension",
@@ -77,7 +81,10 @@ _UINT64_MASK: Final = (1 << 64) - 1
 _REQ_ECHO: Final = 1  # types.proto:44 Request.echo = 1
 _REQ_FLUSH: Final = 2  # types.proto:45 Request.flush = 2
 _REQ_INFO: Final = 3  # types.proto:46 Request.info = 3
+_REQ_QUERY: Final = 6  # Request.query = 6 (field 4/7 reserved in v0.38)
 _REQ_INIT_CHAIN: Final = 5  # types.proto:47 Request.init_chain = 5
+_REQ_CHECK_TX: Final = 8  # Request.check_tx = 8
+_REQ_COMMIT: Final = 11  # Request.commit = 11
 _REQ_PREPARE_PROPOSAL: Final = 16  # types.proto:55 Request.prepare_proposal = 16
 _REQ_PROCESS_PROPOSAL: Final = 17  # types.proto:56 Request.process_proposal = 17
 _REQ_EXTEND_VOTE: Final = 18  # types.proto:57 Request.extend_vote = 18
@@ -91,6 +98,8 @@ _RES_ECHO: Final = 2  # types.proto:202 Response.echo = 2
 _RES_FLUSH: Final = 3  # types.proto:203 Response.flush = 3
 _RES_INFO: Final = 4  # types.proto:204 Response.info = 4
 _RES_INIT_CHAIN: Final = 6  # types.proto:205 Response.init_chain = 6
+_RES_QUERY: Final = 7  # Response.query = 7
+_RES_CHECK_TX: Final = 9  # Response.check_tx = 9
 _RES_PREPARE_PROPOSAL: Final = 17  # types.proto:213 Response.prepare_proposal = 17
 _RES_PROCESS_PROPOSAL: Final = 18  # types.proto:214 Response.process_proposal = 18
 _RES_EXTEND_VOTE: Final = 19  # types.proto:215 Response.extend_vote = 19
@@ -130,12 +139,8 @@ class CommitInfo:
 
 
 @dataclass(frozen=True, slots=True)
-class Header:
-    """Agency header carried in ``FinalizeBlock`` (chain_id, height, time)."""
-
-    chain_id: str = ""
-    height: int = 0
-    time: Timestamp | None = None
+class Commit:
+    """``RequestCommit`` (types.proto:112-112): no fields."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +168,24 @@ class InitChain:
     initial_height: int = 0  # types.proto:84 RequestInitChain.initial_height = 6
     app_state_bytes: bytes = b""  # types.proto:83 RequestInitChain.app_state_bytes = 5
     validators: bytes = b""  # types.proto:82 RequestInitChain.validators = 4 (opaque)
+
+
+@dataclass(frozen=True, slots=True)
+class Query:
+    """``RequestQuery`` (types.proto:87-94)."""
+
+    data: bytes = b""  # types.proto:88 data = 1
+    path: str = ""  # types.proto:89 path = 2
+    height: int = 0  # types.proto:90 height = 3
+    prove: bool = False  # types.proto:91 prove = 4
+
+
+@dataclass(frozen=True, slots=True)
+class CheckTx:
+    """``RequestCheckTx`` (types.proto:99-102)."""
+
+    tx: bytes = b""  # types.proto:100 tx = 1
+    type: int = 0  # types.proto:101 type = 2 (CHECK_TX_TYPE_NEW = 0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,7 +224,7 @@ class FinalizeBlock:
     hash: bytes = b""  # types.proto:188 hash = 4
     height: int = 0  # types.proto:189 height = 5
     time: Timestamp | None = None  # types.proto:190 time = 6
-    header: Header | None = None  # Agency header carried in FinalizeBlock
+    decided_last_commit: CommitInfo = CommitInfo()  # types.proto:185 decided_last_commit = 2
     misbehavior: tuple[bytes, ...] = ()  # types.proto:186 = 3 (opaque)
 
 
@@ -214,6 +237,9 @@ class RequestEnvelope:
     flush: Flush | None = None
     info: Info | None = None
     init_chain: InitChain | None = None
+    query: Query | None = None
+    check_tx: CheckTx | None = None
+    commit: Commit | None = None
     prepare_proposal: PrepareProposal | None = None
     process_proposal: ProcessProposal | None = None
     extend_vote: ExtendVote | None = None
@@ -244,6 +270,31 @@ class ResponseInfo:
 class ResponseInitChain:
     validators: bytes = b""  # types.proto:245 validators = 2 (opaque)
     app_hash: bytes = b""  # types.proto:246 app_hash = 3
+
+
+@dataclass(frozen=True, slots=True)
+class ResponseQuery:
+    """``ResponseQuery`` (types.proto:249-261): minimal deterministic answer."""
+
+    code: int = 0  # types.proto:250 code = 1
+    log: str = ""  # types.proto:252 log = 3
+    info: str = ""  # types.proto:253 info = 4
+    index: int = 0  # types.proto:254 index = 5
+    key: bytes = b""  # types.proto:255 key = 6
+    value: bytes = b""  # types.proto:256 value = 7
+    height: int = 0  # types.proto:258 height = 9
+
+
+@dataclass(frozen=True, slots=True)
+class ResponseCheckTx:
+    """``ResponseCheckTx`` (types.proto:262-278)."""
+
+    code: int = 0  # types.proto:263 code = 1
+    data: bytes = b""  # types.proto:264 data = 2
+    log: str = ""  # types.proto:265 log = 3
+    info: str = ""  # types.proto:266 info = 4
+    gas_wanted: int = 0  # types.proto:267 gas_wanted = 5
+    gas_used: int = 0  # types.proto:268 gas_used = 6
 
 
 @dataclass(frozen=True, slots=True)
@@ -300,6 +351,8 @@ ResponseEnvelope: TypeAlias = (
     | ResponseFlush
     | ResponseInfo
     | ResponseInitChain
+    | ResponseQuery
+    | ResponseCheckTx
     | ResponsePrepareProposal
     | ResponseProcessProposal
     | ResponseExtendVote
@@ -353,21 +406,6 @@ def _decode_commit_info(payload: bytes) -> CommitInfo:
         ):
             round_number = _as_int64(value)
     return CommitInfo(round=round_number)
-
-
-def _decode_header(payload: bytes) -> Header:
-    chain_id = ""
-    height = 0
-    time: Timestamp | None = None
-    for field_number, wire_type, value in iter_fields(payload):
-        if wire_type == WIRE_LENGTH_DELIMITED and isinstance(value, bytes):
-            if field_number == 2:  # chain_id
-                chain_id = _text(value)
-            elif field_number == 4:  # time
-                time = _decode_timestamp(value)
-        elif field_number == 3 and wire_type == WIRE_VARINT and isinstance(value, int):
-            height = _as_int64(value)  # height
-    return Header(chain_id, height, time)
 
 
 def _decode_info(payload: bytes) -> Info:
@@ -451,20 +489,49 @@ def _decode_verify_vote_extension(payload: bytes) -> VerifyVoteExtension:
     return VerifyVoteExtension(hash_bytes, validator_address, height, vote_extension)
 
 
+def _decode_query(payload: bytes) -> Query:
+    data = b""
+    path = ""
+    height = 0
+    prove = False
+    for field_number, wire_type, value in iter_fields(payload):
+        if wire_type == WIRE_LENGTH_DELIMITED and isinstance(value, bytes):
+            if field_number == 1:  # types.proto:88 data = 1
+                data = value
+            elif field_number == 2:  # types.proto:89 path = 2
+                path = _text(value)
+        elif field_number == 3 and wire_type == WIRE_VARINT and isinstance(value, int):
+            height = _as_int64(value)  # types.proto:90 height = 3
+        elif field_number == 4 and wire_type == WIRE_VARINT and isinstance(value, int):
+            prove = bool(value)  # types.proto:91 prove = 4
+    return Query(data, path, height, prove)
+
+
+def _decode_check_tx(payload: bytes) -> CheckTx:
+    tx = b""
+    kind = 0
+    for field_number, wire_type, value in iter_fields(payload):
+        if field_number == 1 and wire_type == WIRE_LENGTH_DELIMITED and isinstance(value, bytes):
+            tx = value  # types.proto:100 tx = 1
+        elif field_number == 2 and wire_type == WIRE_VARINT and isinstance(value, int):
+            kind = _as_int64(value)  # types.proto:101 type = 2
+    return CheckTx(tx, kind)
+
+
 def decode_finalize_request(payload: bytes) -> FinalizeBlock:
     """Decode a ``RequestFinalizeBlock`` body (types.proto:183-194)."""
     txs: list[bytes] = []
     hash_bytes = b""
     height = 0
     time: Timestamp | None = None
-    header: Header | None = None
+    decided_last_commit = CommitInfo()
     misbehavior: list[bytes] = []
     for field_number, wire_type, value in iter_fields(payload):
         if wire_type == WIRE_LENGTH_DELIMITED and isinstance(value, bytes):
             if field_number == 1:  # types.proto:184 txs = 1
                 txs.append(value)
-            elif field_number == 2:  # header
-                header = _decode_header(value)
+            elif field_number == 2:  # types.proto:185 decided_last_commit = 2
+                decided_last_commit = _decode_commit_info(value)
             elif field_number == 3:  # types.proto:186 misbehavior = 3 (opaque)
                 misbehavior.append(value)
             elif field_number == 4:  # types.proto:188 hash = 4
@@ -473,7 +540,9 @@ def decode_finalize_request(payload: bytes) -> FinalizeBlock:
                 time = _decode_timestamp(value)
         elif field_number == 5 and wire_type == WIRE_VARINT and isinstance(value, int):
             height = _as_int64(value)  # types.proto:189 height = 5
-    return FinalizeBlock(tuple(txs), hash_bytes, height, time, header, tuple(misbehavior))
+    return FinalizeBlock(
+        tuple(txs), hash_bytes, height, time, decided_last_commit, tuple(misbehavior)
+    )
 
 
 def decode_request(data: bytes) -> RequestEnvelope:
@@ -490,6 +559,12 @@ def decode_request(data: bytes) -> RequestEnvelope:
         return RequestEnvelope(kind="info", info=_decode_info(payload))
     if field_number == _REQ_INIT_CHAIN:
         return RequestEnvelope(kind="init_chain", init_chain=_decode_init_chain(payload))
+    if field_number == _REQ_QUERY:
+        return RequestEnvelope(kind="query", query=_decode_query(payload))
+    if field_number == _REQ_CHECK_TX:
+        return RequestEnvelope(kind="check_tx", check_tx=_decode_check_tx(payload))
+    if field_number == _REQ_COMMIT:
+        return RequestEnvelope(kind="commit", commit=Commit())
     if field_number == _REQ_PREPARE_PROPOSAL:
         proposal = PrepareProposal(txs=_decode_repeated_bytes(payload, 2))
         for inner_field, inner_type, value in iter_fields(payload):
@@ -603,6 +678,38 @@ def encode_response(response: ResponseEnvelope) -> bytes:
         if response.app_hash:
             out += encode_bytes_field(3, response.app_hash)
         return encode_message_field(_RES_INIT_CHAIN, bytes(out))
+    if isinstance(response, ResponseQuery):
+        out = bytearray()
+        if response.code:
+            out += encode_uint64_field(1, response.code)
+        if response.log:
+            out += encode_string_field(3, response.log)
+        if response.info:
+            out += encode_string_field(4, response.info)
+        if response.index:
+            out += encode_uint64_field(5, response.index)
+        if response.key:
+            out += encode_bytes_field(6, response.key)
+        if response.value:
+            out += encode_bytes_field(7, response.value)
+        if response.height:
+            out += encode_uint64_field(9, response.height)
+        return encode_message_field(_RES_QUERY, bytes(out))
+    if isinstance(response, ResponseCheckTx):
+        out = bytearray()
+        if response.code:
+            out += encode_uint64_field(1, response.code)
+        if response.data:
+            out += encode_bytes_field(2, response.data)
+        if response.log:
+            out += encode_string_field(3, response.log)
+        if response.info:
+            out += encode_string_field(4, response.info)
+        if response.gas_wanted:
+            out += encode_uint64_field(5, response.gas_wanted)
+        if response.gas_used:
+            out += encode_uint64_field(6, response.gas_used)
+        return encode_message_field(_RES_CHECK_TX, bytes(out))
     if isinstance(response, ResponsePrepareProposal):
         out = bytearray()
         for tx in response.txs:

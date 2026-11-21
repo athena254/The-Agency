@@ -6,7 +6,14 @@
     /v1/*      — main API surface (port 8000); business routes are closed
                  behind peer authorization until P2 lands, so the UI treats
                  them as "locked" and shows honest empty/locked states.
+
+  The in-memory owner bearer (see stores/auth.ts) is attached to /api reads
+  when set: in pilot-configured mode the prototype app requires it even for
+  /api/health and /api/agents, and a wrong bearer on a non-pilot surface is
+  simply ignored. The token never leaves this module's callers' headers.
 */
+
+import { useAuth } from '../stores/auth'
 
 export class ApiError extends Error {
   status: number
@@ -20,9 +27,14 @@ export class ApiError extends Error {
   }
 }
 
+function authHeaders(): Record<string, string> {
+  const { ownerToken } = useAuth.getState()
+  return ownerToken ? { Authorization: `Bearer ${ownerToken}` } : {}
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
-    headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
+    headers: { Accept: 'application/json', ...authHeaders(), ...(init?.headers ?? {}) },
     ...init,
   })
   const text = await res.text()

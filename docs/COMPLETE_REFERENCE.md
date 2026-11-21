@@ -289,17 +289,17 @@ dependencies:
 ```python
 # Create agent from template
 agent = factory.create(
-    template_name="market_analyst",
-    domain="finance",
-    instance_id="market_analyst_001"
+    template_name="market_analyst", domain="finance", instance_id="market_analyst_001"
 )
 
 # AgentBuilder for complex construction
-agent = AgentBuilder(factory) \
-    .with_template('doctor', 'personal') \
-    .with_override('model.temperature', 0.2) \
-    .with_tool('check_symptoms') \
+agent = (
+    AgentBuilder(factory)
+    .with_template("doctor", "personal")
+    .with_override("model.temperature", 0.2)
+    .with_tool("check_symptoms")
     .build()
+)
 ```
 
 ### Dynamic Routing
@@ -307,34 +307,42 @@ agent = AgentBuilder(factory) \
 ```python
 class PersonalAgent:
     CHILD_AGENT_SPECIALIZATIONS = {
-        'health': {
-            'template': 'doctor',
-            'keywords': ['symptoms', 'pain', 'headache', 'fever', 'sick', 'medical'],
-            'tools': ['check_symptoms', 'log_health_metric', 'get_health_history', 'suggest_wellness_actions']
+        "health": {
+            "template": "doctor",
+            "keywords": ["symptoms", "pain", "headache", "fever", "sick", "medical"],
+            "tools": [
+                "check_symptoms",
+                "log_health_metric",
+                "get_health_history",
+                "suggest_wellness_actions",
+            ],
         },
-        'fitness': {
-            'template': 'fitness',
-            'keywords': ['workout', 'exercise', 'gym', 'running', 'weight', 'muscle'],
-            'tools': ['get_workout_history', 'suggest_exercises', 'log_workout', 'calculate_progression']
+        "fitness": {
+            "template": "fitness",
+            "keywords": ["workout", "exercise", "gym", "running", "weight", "muscle"],
+            "tools": [
+                "get_workout_history",
+                "suggest_exercises",
+                "log_workout",
+                "calculate_progression",
+            ],
         },
         # ...
     }
-    
+
     def _determine_specializations(self, query: str) -> list[str]:
         """Analyze query → return only relevant specializations"""
         query_lower = query.lower()
         matched = []
         for spec, config in self.CHILD_AGENT_SPECIALIZATIONS.items():
-            if any(kw in query_lower for kw in config['keywords']):
+            if any(kw in query_lower for kw in config["keywords"]):
                 matched.append(spec)
         return matched
-    
+
     async def analyze(self, query: str) -> str:
         specs = self._determine_specializations(query)
         # "headache" → only spawns ['health'], not all 6
-        results = await asyncio.gather(*[
-            self._spawn_child_agent(spec, query) for spec in specs
-        ])
+        results = await asyncio.gather(*[self._spawn_child_agent(spec, query) for spec in specs])
         return self._synthesize(query, results)
 ```
 
@@ -400,8 +408,8 @@ SENSITIVE_PATTERNS = [
     r'(password|passwd|pwd)\s*[=:]\s*["\'][^"\']+["\']',
     r'(secret[_\s]?key|secretkey)\s*[=:]\s*["\'][\w\-]+["\']',
     r'(token|access[_\s]?token)\s*[=:]\s*["\'][\w\-]+["\']',
-    r'ssh-rsa\s+AAAA[^\s]+',
-    r'-----BEGIN\s+(RSA|DSA|EC|OPENSSH)\s+PRIVATE\s+KEY-----',
+    r"ssh-rsa\s+AAAA[^\s]+",
+    r"-----BEGIN\s+(RSA|DSA|EC|OPENSSH)\s+PRIVATE\s+KEY-----",
 ]
 ```
 
@@ -534,8 +542,8 @@ class BridgeResult:
     backend: str
     status: Literal["completed", "failed", "timeout", "cancelled"]
     output: str
-    artifacts: list[str]      # Created/modified files
-    usage: dict               # {prompt_tokens, completion_tokens, cost}
+    artifacts: list[str]  # Created/modified files
+    usage: dict  # {prompt_tokens, completion_tokens, cost}
     duration_seconds: float
     error: Optional[str] = None
 ```

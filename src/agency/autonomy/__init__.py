@@ -6,7 +6,7 @@ is a pure function of declared rules + registry state.
 """
 
 from agency.autonomy.decisions import Decision, DecisionRecord, decide
-from agency.autonomy.engine import RunResult, run_autonomous
+from agency.autonomy.engine import DispatchOutcome, RunResult, dispatch_assignments, run_autonomous
 from agency.autonomy.loop_driver import (
     GateResult,
     GateRunner,
@@ -67,6 +67,7 @@ __all__ = [
     "CursorWorker",
     "Decision",
     "DecisionRecord",
+    "DispatchOutcome",
     "EditingWorker",
     "ExternalWorker",
     "ForgeGateRunner",
@@ -101,6 +102,7 @@ __all__ = [
     "decide_spawn",
     "decide_tool_gap",
     "detect_cycle",
+    "dispatch_assignments",
     "from_backlog",
     "load_queue",
     "parse_github_issues",

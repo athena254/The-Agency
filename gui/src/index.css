@@ -20,8 +20,8 @@
   --color-line-strong: #2f3a4a;
 
   --color-text-1: #e8eef6;
-  --color-text-2: #93a1b3;
-  --color-text-3: #5d6b7d;
+  --color-text-2: #a5b2c2;
+  --color-text-3: #86929f; /* ≥4.5:1 on ink-1/ink-2 — WCAG AA for small text */
 
   /* Signal — the single accent. Teal reads as "live system", not marketing. */
   --color-signal: #4fd1c5;

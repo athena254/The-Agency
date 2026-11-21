@@ -5,6 +5,11 @@ selector view (``list_agents`` / ``list_active_agents`` / ``get_agent_by_id``
 / ``get_agent_paths``) that bootstrap/install flows use. ``InstalledAgent``
 records may reference a factory blueprint id via ``prompt_id`` +
 ``version``.
+
+``data/agents/agents.yaml`` is the single source of the installed-agent
+registry (gaps.md #16): the duplicate ``agents.toml`` artifact is derived
+via :meth:`AgentManager.to_toml` / :meth:`AgentManager.write_toml` and is
+never hand-edited.
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ from agency.factory.service import AgentFactory, Blueprint, BlueprintStatus
 
 DEFAULT_AGENTS_DIR = Path("data/agents")
 AGENTS_FILE = DEFAULT_AGENTS_DIR / "agents.yaml"
+AGENTS_TOML_FILE = Path("agents.toml")
 
 
 @dataclass(frozen=True)
@@ -81,6 +87,31 @@ def _newer(a: str, b: str) -> bool:
         return datetime.fromisoformat(a) > datetime.fromisoformat(b)
     except ValueError:
         return False
+
+
+_TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_TOML_FIELDS = ("name", "version", "domain", "prompt_id", "path")
+
+
+def _toml_string(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _toml_key(key: str) -> str:
+    if _TOML_BARE_KEY_RE.match(key):
+        return key
+    return _toml_string(key)
+
+
+def _agents_toml(agents: Iterable[InstalledAgent]) -> str:
+    """Render the manifest as the derived ``agents.toml`` artifact (gaps.md #16)."""
+    blocks = []
+    for agent in agents:
+        lines = [f"[agents.{_toml_key(agent.id)}]"]
+        lines.extend(f"{field} = {_toml_string(getattr(agent, field))}" for field in _TOML_FIELDS)
+        blocks.append("\n".join(lines))
+    rendered = "\n\n".join(blocks)
+    return f"{rendered}\n" if rendered else ""
 
 
 class AgentManager:
@@ -166,6 +197,14 @@ class AgentManager:
         agents.sort(key=lambda a: a.name)
         self.save(agents)
 
+    def to_toml(self) -> str:
+        """Render the manifest as the derived ``agents.toml`` artifact (gaps.md #16)."""
+        return _agents_toml(self.load())
+
+    def write_toml(self, path: Path = AGENTS_TOML_FILE) -> None:
+        """Regenerate the duplicate ``agents.toml`` artifact from the manifest."""
+        Path(path).write_text(self.to_toml(), encoding="utf-8")
+
     def remove(self, agent_id: str) -> None:
         self.save([agent for agent in self.load() if agent.id != agent_id])
 
@@ -180,6 +219,7 @@ def _now() -> str:
 
 __all__ = [
     "AGENTS_FILE",
+    "AGENTS_TOML_FILE",
     "DEFAULT_AGENTS_DIR",
     "AgentManager",
     "Blueprint",

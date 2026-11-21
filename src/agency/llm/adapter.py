@@ -33,11 +33,12 @@ def _provider_retry_delay(response: Any, attempt: int) -> float:
     """Seconds to wait before re-posting; a parseable Retry-After wins."""
 
     try:
-        return max(0.0, min(float(response.headers.get("retry-after")), _PROVIDER_BACKOFF_CAP_S))
+        retry_after: float = float(response.headers.get("retry-after"))
+        return max(0.0, min(retry_after, _PROVIDER_BACKOFF_CAP_S))
     except (TypeError, ValueError):
-        return max(
-            0.0, min(_PROVIDER_BACKOFF_BASE_S * (2**attempt), _PROVIDER_BACKOFF_CAP_S)
-        )
+        backoff: float = _PROVIDER_BACKOFF_BASE_S * (2**attempt)
+        return max(0.0, min(backoff, _PROVIDER_BACKOFF_CAP_S))
+
 
 _INCEPTION_PROVIDERS = {
     "inception",
@@ -402,10 +403,7 @@ class LLMAdapter:
                 # timescales: back off and retry before surfacing the failure.
                 response = getattr(exc, "response", None)
                 status = response.status_code if response is not None else None
-                if (
-                    status not in _PROVIDER_RETRY_STATUSES
-                    or attempt + 1 >= _PROVIDER_MAX_ATTEMPTS
-                ):
+                if status not in _PROVIDER_RETRY_STATUSES or attempt + 1 >= _PROVIDER_MAX_ATTEMPTS:
                     # Never log the exception body: provider errors can echo the
                     # request payload (private prompt/chat content). The class
                     # name and status are enough to diagnose without leaking text.

@@ -42,5 +42,5 @@ service degrades to SMS; it never breaks the default runtime.
   compose example.
 - Upgrade via a dedicated PR: contract tests (`tests/test_memory_honcho.py`),
   isolation tests, then a live smoke test against the pinned stack. Record
-  evidence under `docs/research-evidence/`.
+  evidence under `docs/archive/research-evidence/`.
 - Do not track upstream `main`; Honcho is not forked.

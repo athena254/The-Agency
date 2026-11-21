@@ -3,17 +3,35 @@
 Fully internal: no external input mid-run. Decomposition reuses
 AgentPlanner; assignment uses router; spawn uses deterministic
 rules; tool gaps go to Forge; every step appends to ProofBundle.
+
+``run_autonomous`` plans and assigns; :func:`dispatch_assignments` is the
+materialisation leg (gap #20): it turns each planner-assigned subtask into a
+delegated child task through a caller-supplied delegate (the orchestrator
+binds :meth:`AgencyOrchestrator.delegate_task`, so depth limits, per-child
+deadlines and metering stay the existing ones), records the durable
+assignment lifecycle in the A5 :class:`AssignmentJournal` when one is
+supplied, and appends honest proof events. Journal errors fail closed;
+delegation outcomes are never faked.
 """
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from typing import Any
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from hashlib import sha256
+from typing import Any, Final, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
-from agency.agents.planner import AgentPlanner
+from agency.agents.planner import AgentPlanner, Subtask
 from agency.agents.registry import AgentRegistry
+from agency.autonomy.assignment_journal import (
+    AssignmentJournal,
+    AssignmentJournalError,
+    AssignmentRecord,
+)
 from agency.autonomy.blacksmith import activate_blacksmith
 from agency.autonomy.decisions import decide
 from agency.autonomy.proof import ProofBundle
@@ -23,6 +41,7 @@ from agency.autonomy.toolforge import decide_tool_gap
 from agency.factory.service import AgentFactory
 from agency.forge.orchestration import BlacksmithOps
 from agency.kernel.identity import Agent, Capability
+from agency.peers.canonical import digest_json
 
 
 class RunResult(BaseModel):
@@ -32,6 +51,59 @@ class RunResult(BaseModel):
     spawns: list[dict[str, object]]
     tool_gaps: list[dict[str, object]]
     proof: ProofBundle
+    dispatches: list[dict[str, object]] = Field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class DispatchOutcome:
+    """Honest result of one delegated child task.
+
+    ``failed`` means the child was rejected or terminally failed before/while
+    executing; ``uncertain`` means a child may still be running (never
+    auto-resumed). The engine maps any delegate exception to ``uncertain``
+    because the child's fate is unknown from here.
+    """
+
+    status: Literal["completed", "failed", "uncertain"]
+    child_task_id: str | None = None
+    detail: str = ""
+
+
+AssignmentDelegate = Callable[[Subtask, str], Awaitable[DispatchOutcome]]
+"""Materialises one engine assignment: called with ``(subtask, agent_id)``.
+
+The orchestrator binds :meth:`AgencyOrchestrator.delegate_task` (depth-bounded,
+deadline-bounded, metered); hermetic tests bind fakes. The delegate itself is
+responsible for precise pre-creation vs post-creation failure mapping; the
+engine treats a raising delegate as ``uncertain``.
+"""
+
+
+def _epoch_now() -> int:
+    """Integer seconds for journal timestamps (the journal reads no clock)."""
+    return int(datetime.now(UTC).timestamp())
+
+
+def _journal_id(prefix: str, *parts: str) -> str:
+    """Deterministic journal id (``[a-z]{2,16}_[0-9a-f]{32}``) for real ids.
+
+    The journal only stores bounded identifiers, so engine/plan/subtask/agent
+    ids are hashed into that scheme; the real ids stay in the proof bundle and
+    the returned dispatch records.
+    """
+    digest = sha256(":".join(parts).encode("utf-8")).hexdigest()[:32]
+    return f"{prefix}_{digest}"
+
+
+def _bounded(text: str) -> str:
+    return text[:200]
+
+
+_JOURNAL_TERMINAL: Final = {
+    "completed": ("COMPLETED", True),
+    "failed": ("FAILED", False),
+    "uncertain": ("UNCERTAIN", False),
+}
 
 
 def _spawn_agent(
@@ -214,4 +286,157 @@ def run_autonomous(
         spawns=spawns,
         tool_gaps=gaps,
         proof=proof,
+    )
+
+
+async def dispatch_assignments(
+    result: RunResult,
+    planner: AgentPlanner,
+    *,
+    delegate: AssignmentDelegate,
+    journal: AssignmentJournal | None = None,
+) -> RunResult:
+    """Materialise every planner-assigned subtask as a delegated child task.
+
+    For each subtask the engine assigned (``subtask.assigned_agent_id``), the
+    ``delegate`` (the orchestrator's ``delegate_task`` binding) creates and
+    awaits one depth-bounded child task. With a ``journal``, the assignment
+    lifecycle is durably recorded first (ASSIGNED -> RUNNING -> terminal) in
+    the journal's own id scheme; a record that already progressed past
+    ASSIGNED is never re-dispatched, so UNCERTAIN/RUNNING work is never
+    auto-resumed. Outcomes and skips are honest: nothing is invented, journal
+    errors fail closed by propagating.
+    """
+    graph = planner.get_plan(result.plan_id)
+    if graph is None:
+        raise ValueError(f"unknown plan {result.plan_id!r}")
+    dispatches: list[dict[str, object]] = []
+    for sub in graph.subtasks:
+        agent_id = sub.assigned_agent_id
+        if agent_id is None:
+            detail = "no assigned agent; nothing to dispatch"
+            result.proof.append("dispatch", "dispatch_skipped", {"subtask": sub.subtask_id})
+            dispatches.append(
+                {
+                    "subtask_id": sub.subtask_id,
+                    "agent_id": None,
+                    "status": "skipped",
+                    "child_task_id": None,
+                    "detail": detail,
+                    "assignment_id": None,
+                }
+            )
+            continue
+        assignment_id = _journal_id("assign", result.plan_id, sub.subtask_id)
+        generation = 0
+        if journal is not None:
+            record = _journal_assign(journal, result.plan_id, sub.subtask_id, agent_id)
+            generation = record.generation
+            if record.state != "ASSIGNED":
+                # Already dispatched (or terminal) under this assignment id:
+                # never duplicate the work, never resume uncertain work.
+                detail = f"assignment already {record.state}; not re-dispatched"
+                result.proof.append("dispatch", "dispatch_skipped", {"subtask": sub.subtask_id})
+                dispatches.append(
+                    {
+                        "subtask_id": sub.subtask_id,
+                        "agent_id": agent_id,
+                        "status": "skipped",
+                        "child_task_id": None,
+                        "detail": detail,
+                        "assignment_id": assignment_id,
+                    }
+                )
+                continue
+            journal.transition(
+                assignment_id=assignment_id,
+                generation=generation,
+                state="RUNNING",
+                at=_epoch_now(),
+            )
+        outcome = await _delegate_one(delegate, sub, agent_id)
+        journal_assignment_id = assignment_id if journal is not None else None
+        if journal is not None:
+            _journal_terminal(journal, assignment_id, generation, outcome)
+        action = {
+            "completed": "dispatched",
+            "failed": "dispatch_failed",
+            "uncertain": "dispatch_uncertain",
+        }[outcome.status]
+        result.proof.append(
+            "dispatch",
+            action,
+            {
+                "subtask": sub.subtask_id,
+                "agent": agent_id,
+                "child_task_id": outcome.child_task_id,
+                "detail": _bounded(outcome.detail),
+            },
+        )
+        dispatches.append(
+            {
+                "subtask_id": sub.subtask_id,
+                "agent_id": agent_id,
+                "status": outcome.status,
+                "child_task_id": outcome.child_task_id,
+                "detail": _bounded(outcome.detail),
+                "assignment_id": journal_assignment_id,
+            }
+        )
+    return result.model_copy(update={"dispatches": dispatches})
+
+
+async def _delegate_one(
+    delegate: AssignmentDelegate, sub: Subtask, agent_id: str
+) -> DispatchOutcome:
+    """Await one delegate call; a raising delegate means the outcome is unknown."""
+    try:
+        return await delegate(sub, agent_id)
+    except Exception as exc:  # noqa: BLE001 — unknown child fate maps to UNCERTAIN
+        return DispatchOutcome(
+            status="uncertain",
+            child_task_id=None,
+            detail=f"delegate error: {type(exc).__name__}",
+        )
+
+
+def _journal_assign(
+    journal: AssignmentJournal, plan_id: str, subtask_id: str, agent_id: str
+) -> AssignmentRecord:
+    """Create (or fetch) the durable ASSIGNED record for one engine assignment."""
+    assignment_id = _journal_id("assign", plan_id, subtask_id)
+    try:
+        return journal.get(assignment_id)
+    except AssignmentJournalError:
+        pass
+    journal.assign(
+        assignment_id=assignment_id,
+        task_id=_journal_id("task", plan_id, subtask_id),
+        worker_id=_journal_id("worker", agent_id),
+        generation=0,
+        at=_epoch_now(),
+    )
+    return journal.get(assignment_id)
+
+
+def _journal_terminal(
+    journal: AssignmentJournal, assignment_id: str, generation: int, outcome: DispatchOutcome
+) -> None:
+    """Record the honest terminal state of one delegated child."""
+    state, wants_digest = _JOURNAL_TERMINAL[outcome.status]
+    result_digest = None
+    if wants_digest:
+        result_digest = digest_json(
+            {
+                "child_task_id": outcome.child_task_id,
+                "detail": _bounded(outcome.detail),
+                "status": outcome.status,
+            }
+        )
+    journal.transition(
+        assignment_id=assignment_id,
+        generation=generation,
+        state=state,
+        at=_epoch_now(),
+        result_digest=result_digest,
     )

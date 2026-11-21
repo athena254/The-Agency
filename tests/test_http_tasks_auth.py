@@ -164,9 +164,7 @@ async def test_agent_id_validated_and_stored(app_and_state) -> None:
             headers=_auth(AGENT1_TOKEN),
         )
         ok = await _submit(client, AGENT1_TOKEN, agent_id="danny-scout")
-        registered = {
-            agent.id for agent in app.state.agent_registry.list_agents()
-        }
+        registered = {agent.id for agent in app.state.agent_registry.list_agents()}
         stored_agent = ok["input"].get("agent_id")
     assert unknown.status_code == 422
     assert stored_agent in registered

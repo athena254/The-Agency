@@ -18,7 +18,7 @@ Buddy is the **user-facing UI agent** in The Agency. It's a fork of [agent0ai/sp
 ```python
 class SpaceAgentNode(BaseAgent):
     """Buddy's core node implementation."""
-    
+
     def __init__(self, config: dict):
         super().__init__(config)
         self._capabilities = {
@@ -29,7 +29,7 @@ class SpaceAgentNode(BaseAgent):
         }
         self._registry = ComponentRegistry()
         self._router = MessageRouter()
-    
+
     async def handle_message(self, msg: Message) -> None:
         """Handle incoming messages from Butler."""
         if msg.type == "user_input":
@@ -38,32 +38,34 @@ class SpaceAgentNode(BaseAgent):
             await self._handle_domain_render(msg)
         elif msg.type == "tool_call":
             await self._handle_tool_call(msg)
-    
+
     async def _handle_user_input(self, msg: Message) -> None:
         """Handle user conversation messages."""
         # Route to appropriate domain agent
         response = await self._router.route_to_agent(msg)
-        
+
         # Render response
         if response.render_via == "buddy":
             rendered = await self._render_component(response)
             await self._send_to_websocket(rendered)
         else:
             await self._send_to_websocket(Response(text=response.text))
-    
+
     async def _handle_domain_render(self, msg: Message) -> None:
         """Handle domain agent render requests."""
         component = msg.data.get("component")
         data = msg.data.get("data")
-        
+
         rendered = await self._registry.render(component, data)
-        
-        await self._send_to_websocket({
-            "type": "buddy_render",
-            "component": component,
-            "html": rendered,
-            "original_agent": msg.data.get("agent_id"),
-        })
+
+        await self._send_to_websocket(
+            {
+                "type": "buddy_render",
+                "component": component,
+                "html": rendered,
+                "original_agent": msg.data.get("agent_id"),
+            }
+        )
 ```
 
 ### 2.2 BuddyAdapter
@@ -189,15 +191,19 @@ def render_chart_bar(data: dict) -> str:
     values = data.get("values", [])
     orientation = data.get("orientation", "vertical")
     title = data.get("title", "")
-    
+
     # Generate SVG
     if orientation == "horizontal":
         # Horizontal bars
         bars = ""
         for i, (label, value) in enumerate(zip(labels, values)):
             width = (value / max(values)) * 300 if values else 0
-            bars += f'<rect x="80" y="{i * 30 + 20}" width="{width}" height="25" fill="steelblue" />'
-            bars += f'<text x="75" y="{i * 30 + 37}" text-anchor="end" font-size="12">{label}</text>'
+            bars += (
+                f'<rect x="80" y="{i * 30 + 20}" width="{width}" height="25" fill="steelblue" />'
+            )
+            bars += (
+                f'<text x="75" y="{i * 30 + 37}" text-anchor="end" font-size="12">{label}</text>'
+            )
         svg_width = 400
         svg_height = len(labels) * 30 + 40
     else:
@@ -206,11 +212,13 @@ def render_chart_bar(data: dict) -> str:
         for i, (label, value) in enumerate(zip(labels, values)):
             height = (value / max(values)) * 200 if values else 0
             x = i * 50 + 50
-            bars += f'<rect x="{x}" y="{250 - height}" width="40" height="{height}" fill="steelblue" />'
+            bars += (
+                f'<rect x="{x}" y="{250 - height}" width="40" height="{height}" fill="steelblue" />'
+            )
             bars += f'<text x="{x + 20}" y="270" text-anchor="middle" font-size="10">{label}</text>'
         svg_width = len(labels) * 50 + 50
         svg_height = 300
-    
+
     return f"""
     <div class="buddy-chart buddy-chart-bar">
         <h4>{title}</h4>
@@ -254,13 +262,24 @@ def render_chart_pie(data: dict) -> str:
     labels = data.get("labels", [])
     values = data.get("values", [])
     title = data.get("title", "")
-    
+
     if not values:
         return "<div>No data</div>"
-    
+
     # Generate conic-gradient
     total = sum(values)
-    colors = ["#4e79a7", "#f28e2b", "#e15759", "#76b7b2", "#59a14f", "#edc948", "#b07aa1", "#ff9da7", "#9c755f", "#bab0ac"]
+    colors = [
+        "#4e79a7",
+        "#f28e2b",
+        "#e15759",
+        "#76b7b2",
+        "#59a14f",
+        "#edc948",
+        "#b07aa1",
+        "#ff9da7",
+        "#9c755f",
+        "#bab0ac",
+    ]
     gradient = ""
     current_angle = 0
     for i, value in enumerate(values):
@@ -268,12 +287,12 @@ def render_chart_pie(data: dict) -> str:
         color = colors[i % len(colors)]
         gradient += f"{color} {current_angle}deg {current_angle + angle}deg, "
         current_angle += angle
-    
+
     return f"""
     <div class="buddy-chart buddy-chart-pie">
         <h4>{title}</h4>
         <div style="width: 200px; height: 200px; border-radius: 50%; 
-                    background: conic-gradient({gradient.rstrip(', ')});"></div>
+                    background: conic-gradient({gradient.rstrip(", ")});"></div>
     </div>
     """
 ```
@@ -308,13 +327,13 @@ def render_card(data: dict) -> str:
     content = data.get("content", "")
     subtitle = data.get("subtitle", "")
     metadata = data.get("metadata", {})
-    
+
     meta_html = "".join(f'<span class="meta">{k}: {v}</span>' for k, v in metadata.items())
-    
+
     return f"""
     <div class="buddy-card">
         <h4>{title}</h4>
-        {f'<p class="subtitle">{subtitle}</p>' if subtitle else ''}
+        {f'<p class="subtitle">{subtitle}</p>' if subtitle else ""}
         <div class="content">{content}</div>
         {meta_html}
     </div>
@@ -328,16 +347,18 @@ def render_form(data: dict) -> str:
     fields = data.get("fields", [])
     submit_label = data.get("submit_label", "Submit")
     title = data.get("title", "")
-    
+
     fields_html = ""
     for field in fields:
         field_type = field.get("type", "text")
         field_name = field.get("name", "")
         field_label = field.get("label", field_name)
         required = "required" if field.get("required") else ""
-        
+
         if field_type == "select":
-            options = "".join(f'<option value="{opt}">{opt}</option>' for opt in field.get("options", []))
+            options = "".join(
+                f'<option value="{opt}">{opt}</option>' for opt in field.get("options", [])
+            )
             fields_html += f"""
                 <label>{field_label}</label>
                 <select name="{field_name}">{options}</select>
@@ -352,7 +373,7 @@ def render_form(data: dict) -> str:
                 <label>{field_label}</label>
                 <input type="{field_type}" name="{field_name}" {required}>
             """
-    
+
     return f"""
     <div class="buddy-form">
         <h4>{title}</h4>
@@ -412,8 +433,8 @@ Domain agents request Buddy rendering via response format:
     "data": {
         "labels": ["Jan", "Feb", "Mar"],
         "values": [100, 150, 200],
-        "title": "Quarterly Spending"
-    }
+        "title": "Quarterly Spending",
+    },
 }
 ```
 
@@ -449,42 +470,50 @@ git subtree push --prefix=theagency/gateways/buddy buddy-fork main
 import subprocess
 from datetime import datetime
 
+
 def sync_buddy():
     """Pull latest Space-Agent updates and merge into Buddy subtree."""
-    
+
     # Fetch upstream
     subprocess.run(["git", "fetch", "buddy-upstream"], check=True)
-    
+
     # Merge subtree
     result = subprocess.run(
-        ["git", "subtree", "pull", "--prefix=theagency/gateways/buddy",
-         "buddy-upstream", "main", "--squash"],
+        [
+            "git",
+            "subtree",
+            "pull",
+            "--prefix=theagency/gateways/buddy",
+            "buddy-upstream",
+            "main",
+            "--squash",
+        ],
         capture_output=True,
         text=True,
     )
-    
+
     if result.returncode != 0:
         print(f"Merge conflict! Manual resolution needed: {result.stderr}")
         return False
-    
+
     # Run tests to verify merge didn't break anything
     test_result = subprocess.run(
         ["pytest", "theagency/gateways/buddy/tests/", "-v"],
         capture_output=True,
         text=True,
     )
-    
+
     if test_result.returncode != 0:
         print(f"Tests failed after merge! {test_result.stdout}")
         return False
-    
+
     # Commit merge
     subprocess.run(["git", "add", "."], check=True)
     subprocess.run(
         ["git", "commit", "-m", f"Sync Buddy with upstream — {datetime.utcnow().isoformat()}"],
         check=True,
     )
-    
+
     return True
 ```
 
@@ -495,18 +524,19 @@ def sync_buddy():
 ```python
 class BuddyWebSocketServer:
     """WebSocket server connecting browser UI to Buddy's inbox/outbox."""
-    
+
     def __init__(self, host: str = "localhost", port: int = 3002):
         self._host = host
         self._port = port
         self._connections: list = []
-    
+
     async def start(self) -> None:
         """Start WebSocket server."""
         import websockets
+
         async with websockets.serve(self._handler, self._host, self._port):
             await asyncio.Future()  # Run forever
-    
+
     async def _handler(self, websocket, path):
         """Handle new WebSocket connection."""
         self._connections.append(websocket)
@@ -514,21 +544,19 @@ class BuddyWebSocketServer:
             async for message in websocket:
                 # Parse incoming message
                 msg = json.loads(message)
-                
+
                 # Route to Buddy's handle_message
                 response = await self._node.handle_message(Message(**msg))
-                
+
                 # Send response back
                 await websocket.send(json.dumps(response.to_dict()))
         finally:
             self._connections.remove(websocket)
-    
+
     async def broadcast(self, message: dict) -> None:
         """Broadcast message to all connected clients."""
         if self._connections:
-            await asyncio.gather(
-                *[conn.send(json.dumps(message)) for conn in self._connections]
-            )
+            await asyncio.gather(*[conn.send(json.dumps(message)) for conn in self._connections])
 ```
 
 ---

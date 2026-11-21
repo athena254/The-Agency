@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Eye, EyeOff } from 'lucide-react'
 import { api, type HealthResponse } from '../api/client'
 import { useAuth } from '../stores/auth'
-import { Header } from './Memories'
+import { Row, PageHeader as Header } from '../components/ui'
 
 export function SettingsPage() {
   const { ownerToken, setOwnerToken, setAuthNotice } = useAuth()
@@ -85,8 +85,8 @@ export function SettingsPage() {
       <section className="mc-panel px-5 py-4">
         <div className="mc-label mb-3">Runtime</div>
         <dl className="grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
-          <Row label="Status" value={health.data?.status ?? '—'} />
-          <Row label="Version" value={health.data?.version ?? '0.1.0'} />
+          <Row label="Status" value={health.isPending ? '—' : (health.data?.status ?? 'unavailable')} />
+          <Row label="Version" value={health.data?.version ?? 'not reported'} />
           <Row label="Butler" value={health.data?.butler ?? '—'} />
           <Row label="Agents reported" value={String(health.data?.agents ?? 0)} />
         </dl>
@@ -109,15 +109,6 @@ export function SettingsPage() {
           </li>
         </ul>
       </section>
-    </div>
-  )
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <dt className="mc-label">{label}</dt>
-      <dd className="mc-value text-[11.5px] text-text-1">{value}</dd>
     </div>
   )
 }

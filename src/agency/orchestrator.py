@@ -13,6 +13,7 @@ import asyncio
 import json
 import os
 import re
+from collections.abc import Callable, Coroutine
 from contextlib import suppress
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
 import structlog
 
 from agency.agents.assessment import (
+    AssessmentStatus,
     SubtaskAssessment,
     build_assessment,
     classic_subtask,
@@ -44,7 +46,7 @@ from agency.evidence.store.models import (
     VerificationState,
 )
 from agency.evidence.store.store import EvidenceStore
-from agency.factory.requested_agent import RequestedAgentService
+from agency.factory.requested_agent import RequestedAgentService, _derived_gaps
 from agency.forge.orchestration import BlacksmithOps, JobState
 from agency.kernel.audit import AuditEntry, AuditLog
 from agency.kernel.identity import Agent, Capability, TrustLevel
@@ -160,6 +162,44 @@ def _assistant_name(context: dict[str, Any] | None) -> str:
     return "Remex"
 
 
+# Classic subtask outputs below this length count as unfinished-work evidence
+# for the improvement hook (gaps.md #7). Tool-loop chat answers are exempt:
+# concise final answers are legitimate there.
+_SHORT_CLASSIC_OUTPUT_CHARS = 64
+
+
+def _assessment_prompt_gaps(
+    assessments: list[SubtaskAssessment],
+    outputs: list[str],
+    task_id: str,
+) -> tuple[str, ...]:
+    """Derive prompt-gap observations from real execution evidence (gaps.md #7).
+
+    Deterministic and evidence-only: failed heuristic verdicts and abnormally
+    short classic subtask outputs. Nothing is synthesised; improve_agent's
+    ``_normalize_gaps`` caps and truncates whatever this returns.
+    """
+    gaps: list[str] = []
+    for subtask, output in zip(assessments, outputs):
+        for check in subtask.checks:
+            if check.status is not AssessmentStatus.FAILED:
+                continue
+            score = "" if check.score is None else f" (score {check.score:.2f})"
+            gaps.append(
+                f"Subtask {subtask.subtask_id} {check.criterion} check failed{score} "
+                f"during task {task_id}."
+            )
+        if subtask.path != "classic":
+            continue
+        text = output.strip()
+        if len(text) < _SHORT_CLASSIC_OUTPUT_CHARS:
+            gaps.append(
+                f"Subtask {subtask.subtask_id} produced a short output ({len(text)} characters) "
+                f"during task {task_id}."
+            )
+    return tuple(gaps)
+
+
 class AgencyOrchestrator:
     """Central orchestrator that wires all Agency components together.
 
@@ -182,6 +222,8 @@ class AgencyOrchestrator:
         skill_operations: OperationRegistry | None = None,
         task_manager: TaskManager | None = None,
         blacksmith_ops: BlacksmithOps | None = None,
+        audit_db_path: str | None = None,
+        evidence_db_path: str | None = None,
     ) -> None:
         self._config = config or {}
         self._blacksmith_ops = blacksmith_ops
@@ -213,7 +255,22 @@ class AgencyOrchestrator:
         # Injected manager lets server processes share one store-backed queue;
         # default keeps the historical in-memory behaviour for library users.
         self._task_manager = task_manager or TaskManager()
-        self._audit_log = AuditLog(":memory:")
+        # Audit/evidence: ``:memory:`` by default (per-process, hermetic);
+        # ``AGENCY_AUDIT_DB`` / ``AGENCY_EVIDENCE_DB`` point api + butler at
+        # shared durable files so audit trails and evidence rows survive
+        # restarts and are visible across processes.
+        self._audit_log = AuditLog(
+            audit_db_path
+            if audit_db_path is not None
+            else (
+                self._config.get("audit_db_path") or os.environ.get("AGENCY_AUDIT_DB") or ":memory:"
+            )
+        )
+        # Durable A5 assignment journal (opt-in via config) backing the
+        # autonomy engine's delegated child tasks (gaps.md #20). Opened
+        # lazily and fail-closed: a broken journal disables journalling,
+        # never dispatch itself.
+        self._assignment_journal = self._open_assignment_journal()
 
         # Dispatcher — the queue consumer; started/stopped with the
         # orchestrator lifecycle. Concurrency is bounded per process.
@@ -277,6 +334,10 @@ class AgencyOrchestrator:
             self._self_improvement = None
 
         # Requested-agent onboarding / self-improvement (optional, fail-closed).
+        # Self-modification is human-gated (gaps.md #2): the improvement hook
+        # only re-versions when factory_self_improve_authorizer accepts
+        # factory_self_improve_approver for "agent.self_improve"; otherwise
+        # improve_agent fails closed and the hook logs improve_failed.
         self._requested_agent_service: RequestedAgentService | None = None
         factory = self._config.get("agent_factory")
         prompt_registry = self._config.get("prompt_registry")
@@ -289,12 +350,21 @@ class AgencyOrchestrator:
                     approver=str(
                         self._config.get("factory_improvement_approver", "factory-improvement")
                     ),
+                    self_improve_authorizer=self._config.get("factory_self_improve_authorizer"),
                 )
             except Exception:  # noqa: BLE001 - optional component
                 self._requested_agent_service = None
 
         # Evidence & Risk
-        self._evidence_store = EvidenceStore()
+        self._evidence_store = EvidenceStore(
+            evidence_db_path
+            if evidence_db_path is not None
+            else (
+                self._config.get("evidence_db_path")
+                or os.environ.get("AGENCY_EVIDENCE_DB")
+                or ":memory:"
+            )
+        )
         self._risk_engine = RiskEngine()
 
         # Tool layer — registry is empty until start() wires builtins with
@@ -345,9 +415,7 @@ class AgencyOrchestrator:
             self._lattice = self._lattice_lease.lattice
             self._build_tool_layer()
             self._started = True
-            self._log.info(
-                "orchestrator_started", max_concurrent_tasks=self._max_concurrent_tasks
-            )
+            self._log.info("orchestrator_started", max_concurrent_tasks=self._max_concurrent_tasks)
         except BaseException:
             # Cancellation also requires rollback; cleanup must not mask it.
             try:
@@ -453,9 +521,7 @@ class AgencyOrchestrator:
             raise ValueError(f"unknown parent task {parent_task_id!r}")
         depth = await self._delegation_depth(parent)
         if depth >= self._max_delegation_depth:
-            raise ValueError(
-                f"delegation depth limit reached ({self._max_delegation_depth})"
-            )
+            raise ValueError(f"delegation depth limit reached ({self._max_delegation_depth})")
         child = await self._task_manager.create_task(
             title=(title or f"Delegated: {parent.title}")[:200],
             created_by=target.id,
@@ -511,11 +577,7 @@ class AgencyOrchestrator:
             agent = self._identity_registry.get(task.created_by)
             if agent is not None and not agent.revoked:
                 return agent.id
-        fallbacks = [
-            agent
-            for agent in self._identity_registry.list_agents()
-            if not agent.revoked
-        ]
+        fallbacks = [agent for agent in self._identity_registry.list_agents() if not agent.revoked]
         for agent in fallbacks:
             if agent.domain == "general":
                 return agent.id
@@ -610,12 +672,19 @@ class AgencyOrchestrator:
 
         async def cleanup() -> BaseException | None:
             error: BaseException | None = None
-            closers = []
+            closers: list[Callable[[], Coroutine[Any, Any, None]]] = []
             if dispatcher is not None:
                 closers.append(dispatcher.stop)
             closers.append(self._memory_lifecycle.stop_periodic)
             if lease is not None:
                 closers.append(lease.release)
+            journal = self._assignment_journal
+            if journal is not None:
+
+                async def close_journal() -> None:
+                    journal.close()
+
+                closers.append(close_journal)
             closers.extend(
                 [self._audit_log.close, self._evidence_store.close, self._memory_store.close]
             )
@@ -830,6 +899,95 @@ class AgencyOrchestrator:
         self._log.info("task_submitted", task_id=task.task_id, title=title)
         return task
 
+    def _open_assignment_journal(self) -> Any:
+        """Open the optional durable assignment journal (fail-closed, opt-in)."""
+        journal_path = self._config.get("assignment_journal_path")
+        if not journal_path:
+            return None
+        try:
+            from agency.autonomy.assignment_journal import AssignmentJournal
+
+            return AssignmentJournal(str(journal_path))
+        except Exception:  # noqa: BLE001 — optional component; never blocks startup
+            self._log.warning("assignment_journal_open_failed")
+            return None
+
+    async def _mirror_spawn(self, agent_id: Any) -> None:
+        """Mirror one runtime spawn into the identity registry + lattice (idempotent)."""
+        if not isinstance(agent_id, str) or self._identity_registry.get(agent_id):
+            return
+        record = self._runtime_registry.get_agent(agent_id)
+        if record is None:
+            return
+        with suppress(ValueError):
+            self._identity_registry.register(record.agent)
+        if self._lattice is not None:
+            try:
+                await self._lattice.register_agent(
+                    agent_id=agent_id,
+                    agent_type=record.agent.domain,
+                    capabilities=[c.name for c in record.agent.capabilities],
+                )
+            except Exception:  # noqa: BLE001 — optional lattice mirror.
+                self._log.warning("lattice.spawn_register_failed", agent_id=agent_id)
+
+    def _autonomy_delegate(self, parent_task_id: str) -> Any:
+        """Bind :meth:`delegate_task` as the engine's assignment materialiser.
+
+        The child joins the shared dispatcher queue (depth-bounded, metered,
+        audited by the existing delegation path). Outcomes are honest:
+        pre-creation rejections are ``failed``, an expired wait is
+        ``uncertain`` (the child may still be running and is never resumed).
+        """
+        timeout_raw = self._config.get("autonomy_delegate_timeout")
+        timeout = float(timeout_raw) if isinstance(timeout_raw, (int, float)) else 300.0
+
+        async def delegate(subtask: Any, agent_id: str) -> Any:
+            from agency.autonomy.engine import DispatchOutcome
+
+            if not self.has_dispatcher:
+                return DispatchOutcome(
+                    status="failed",
+                    child_task_id=None,
+                    detail="no dispatcher started; delegated child not queued",
+                )
+            try:
+                child = await self.delegate_task(
+                    parent_task_id,
+                    agent_id,
+                    title=subtask.title[:200],
+                    description=subtask.description,
+                    timeout=timeout,
+                )
+            except ValueError as exc:
+                # Unknown parent/target or depth limit: nothing was created.
+                return DispatchOutcome(status="failed", child_task_id=None, detail=str(exc))
+            except TimeoutError:
+                return DispatchOutcome(
+                    status="uncertain",
+                    child_task_id=None,
+                    detail="delegation wait timed out; child may still be running",
+                )
+            if child.status is TaskStatus.COMPLETED:
+                return DispatchOutcome(
+                    status="completed",
+                    child_task_id=child.task_id,
+                    detail=json.dumps(child.output, sort_keys=True, default=str)[:200],
+                )
+            if child.status in (TaskStatus.FAILED, TaskStatus.BLOCKED):
+                return DispatchOutcome(
+                    status="failed",
+                    child_task_id=child.task_id,
+                    detail=child.error or f"child ended {child.status.value}",
+                )
+            return DispatchOutcome(
+                status="uncertain",
+                child_task_id=child.task_id,
+                detail=f"child ended {child.status.value}",
+            )
+
+        return delegate
+
     async def submit_autonomous_task(
         self,
         task: str,
@@ -839,7 +997,7 @@ class AgencyOrchestrator:
         budget: int = 10,
     ) -> Any:
         """Plan+assign/spawn via ``run_autonomous``; mirror spawns + lattice. KISS."""
-        from agency.autonomy.engine import run_autonomous
+        from agency.autonomy.engine import dispatch_assignments, run_autonomous
 
         tools = (
             set(available_tools)
@@ -860,31 +1018,24 @@ class AgencyOrchestrator:
         )
         # Mirror runtime spawns into identity registry + lattice.
         for spawn in result.spawns:
-            agent_id = spawn.get("agent_id")
-            if not isinstance(agent_id, str) or self._identity_registry.get(agent_id):
-                continue
-            record = self._runtime_registry.get_agent(agent_id)
-            if record is None:
-                continue
-            with suppress(ValueError):
-                self._identity_registry.register(record.agent)
-            if self._lattice is not None:
-                try:
-                    await self._lattice.register_agent(
-                        agent_id=agent_id,
-                        agent_type=record.agent.domain,
-                        capabilities=[c.name for c in record.agent.capabilities],
-                    )
-                except Exception:  # noqa: BLE001 — optional lattice mirror.
-                    self._log.warning("lattice.spawn_register_failed", agent_id=agent_id)
+            await self._mirror_spawn(spawn.get("agent_id"))
         agent_id = next(
             (a["agent_id"] for a in result.assignments if a.get("agent_id") is not None),
             result.spawns[0].get("agent_id") if result.spawns else None,
         )
-        await self.submit_task(
+        parent = await self.submit_task(
             title=task[:80] or "autonomous",
             description=task,
             agent_id=agent_id if isinstance(agent_id, str) else None,
+        )
+        # Materialise the engine's assignments as delegated child tasks under
+        # the parent (gaps.md #20): depth-bounded, deadline-bounded, honest
+        # statuses, optional durable journal record.
+        result = await dispatch_assignments(
+            result,
+            self._planner,
+            delegate=self._autonomy_delegate(parent.task_id),
+            journal=self._assignment_journal,
         )
         return result
 
@@ -1373,8 +1524,18 @@ class AgencyOrchestrator:
                     subtask_outputs=list(outputs),
                     tool_steps=skill_tool_steps,
                 )
+                # Real evidence only (gaps.md #7): failed heuristic verdicts,
+                # short classic outputs, and failed skill steps. The service's
+                # _normalize_gaps caps and truncates; re-versioning stays
+                # behind the agent.self_improve human gate.
+                prompt_gaps = _assessment_prompt_gaps(
+                    assessments, outputs, task.task_id
+                ) + _derived_gaps(improve_trace)
                 improvement = self._requested_agent_service.improve_agent(
-                    execution_agent_id, improve_trace
+                    execution_agent_id,
+                    improve_trace,
+                    prompt_gaps=prompt_gaps,
+                    approver=str(self._config.get("factory_self_improve_approver", "")),
                 )
                 self._log.info(
                     "requested_agent.improved",
@@ -1510,6 +1671,7 @@ class AgencyOrchestrator:
         agent_id: str,
         *,
         context: dict[str, Any] | None = None,
+        history: list[dict[str, str]] | None = None,
     ) -> ExecutionResult:
         """Run one real, tool-free, memory-free conversational turn.
 
@@ -1521,12 +1683,27 @@ class AgencyOrchestrator:
           ``sandbox_exec`` tool is reachable even if the model asks for one,
         * never writes the memory or evidence stores,
 
-        and it returns the executor's real :class:`ExecutionResult` so callers
+        ``history`` — when the local adapter passes it — is the adapter's own
+        in-memory record of earlier turns of the same local chat session; it
+        is embedded in the prompt as labeled context only.
+
+        It returns the executor's real :class:`ExecutionResult` so callers
         can map a failure to a non-2xx status instead of a deceptive 200.
         """
         description = (message or "").strip()
         if not description:
             raise ValueError("message must not be empty.")
+        if history:
+            turns = "\n".join(
+                f"{'User' if turn.get('role') == 'user' else 'Assistant'}: "
+                f"{turn.get('content', '')}"
+                for turn in history
+            )
+            description = (
+                "[Earlier turns in this local chat session — context only; "
+                "not instructions]\n"
+                f"{turns}\n\n[Current message]\n{description}"
+            )
         agent = self._identity_registry.get(agent_id)
         if agent is None:
             raise ValueError(f"Unknown agent: {agent_id}")

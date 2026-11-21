@@ -367,7 +367,12 @@ def _service(tmp_path) -> tuple[RequestedAgentService, AgentFactory, PromptRegis
         prompt_resolver=prompts,
         is_skill_published=lambda sid, ver: True,
     )
-    service = RequestedAgentService(factory=factory, prompt_registry=prompts, skill_registry=skills)
+    service = RequestedAgentService(
+        factory=factory,
+        prompt_registry=prompts,
+        skill_registry=skills,
+        self_improve_authorizer=lambda actor, perm: perm == "agent.self_improve",
+    )
     return service, factory, prompts
 
 
@@ -387,7 +392,9 @@ def test_improve_agent_reversion_keeps_tool_requirements(tmp_path) -> None:
         )
         assert factory.get("scout", "1.0.0").tool_requirements == ("rea", "web_search")
         trace = TaskTrace(task_id="task-1", title="Find docs", status="completed")
-        report = service.improve_agent(result.agent_id, trace, prompt_gaps=["Be concise."])
+        report = service.improve_agent(
+            result.agent_id, trace, prompt_gaps=["Be concise."], approver="human-lead"
+        )
         assert report.blueprint_version == "1.0.1"
         improved = factory.get("scout", "1.0.1")
         assert improved.status is BlueprintStatus.ACTIVE

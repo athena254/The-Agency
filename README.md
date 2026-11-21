@@ -1,170 +1,101 @@
-# The Agency — Governed Multi-Agent Execution System
+# The Agency
 
-**Current checkpoint — November 20, 2026:** pre-production prototype, not daily-driver-qualified or a deployed decentralized runtime. [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) is the authoritative status for the current revision; start there, with [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the artifact contract. The bounded owner pilot, persistent task workspace, local pilot UI and Mission Control console are implemented local surfaces; beta model/tool ingress remains disabled and legacy HTTP business routes remain closed. Local `main` includes the merged Blacksmith forge specialist/orchestration work, SMS embeddings and the optional pinned Honcho memory mirror (see [`docs/HONCHO_ADAPTER.md`](docs/HONCHO_ADAPTER.md)); it is ahead of `origin/main` and unpushed. The dual TUI, autonomous loop and `forge` entry point are already merged, not production-qualified or covered by a fresh full gate run. Historical passing totals below are not current release evidence. The browser surfaces are local prototypes, not a deployed production GUI.
+The Agency is a governed multi-agent execution system. A human talks to a Butler
+gateway, an orchestrator routes work to agents and tools, and every state change
+passes through kernel policies, an audit log and sandbox isolation. The point is
+autonomous work that stays bounded and provable, with a human holding the release
+decision.
 
-> Target: Human ↔ Butler ↔ the Lattice-connected Agency peers. Butler is the human gateway, not a validator or unilateral authority. The in-process orchestrator diagram below shows prototype implementation, not the decentralized target.
-> Agent Factory has a narrow v1 foundation; Forge v2 is a bounded, human-gated
-> factory (inspection + security scan + isolated tests + LLM review + composed
-> pipeline + SQLite evidence), not a released product. The Gemini 3.x LLM
-> provider (`gemini` alias, `gemini-3.5-flash-lite`, `src/agency/llm/config.py:105`)
-> is configured. These sit alongside partial thread, skill, and workflow components.
-> The full governed product is not built.
+**Status: pre-production prototype.** It is not daily-driver qualified and not a
+deployed production runtime. Beta model/tool ingress is disabled, and the legacy
+HTTP business routes return 503 by design until peer execution authorization
+exists. [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) records what is implemented,
+what was verified and at which revision. Treat everything else as planned.
 
-**Canonical direction:** `docs/SOURCE_CONSOLIDATED_BRIEF.md` (target design, all 51 sections)
-and `docs/SPEC_AGENCY_CORE_RECONCILIATION.md` (code-backed gap matrix and build slice).
-These two documents are normative for where the system is going. This README describes
-what actually exists today and labels the rest as planned.
+## What works today
 
-**Platform boundary:** ATHENA is a **separate peer platform**, not an Agency component.
-No Agency core capability depends on ATHENA. Any future ATHENA integration would be an
-explicit, optional adapter. Diagrams below that show an "ATHENA Core" inside the Agency
-are historical/superseded (see `docs/ARCHITECTURE.md`).
+- A single-owner pilot service over local HTTP: durable threads and tasks, three
+  read-only tools (calculator, utc_time, web_search), attempt quotas, and typed
+  receipts for verified work.
+- Two browser surfaces: the dependency-free pilot workspace and the Mission
+  Control console (React, built assets committed so a clone can serve it).
+- Forge, a bounded software factory. Inspection, a static security scan, isolated
+  test runs and review compose into one pipeline with SQLite evidence. Forge
+  never authorizes its own merge or release; shipping needs human approval.
+- Versioned agent, skill and workflow registries.
+- Scoped memory (SMS) with an optional pinned Honcho mirror.
+- Two terminal UIs (`agency tui` and `forge`) and a bounded autonomous loop.
 
-## Current architecture (actual)
+Isolation and security are implemented but not independently audited. Do not
+treat this codebase as production-hardened.
 
-```text
-                    HUMAN
-                      |
-                    BUTLER                human interaction + scoped context
-                      |                   (src/agency/butler/service.py;
-                      |                    sender history + optional owner-scoped
-                      |                    SQLite threads on trusted channels)
-                      v
-                ORCHESTRATOR              task submit/execute
-                      |                   (src/agency/orchestrator.py)
-        +-------------+-------------+
-        |                           |
-      AGENTS                       TOOLS
-      - research                    - registry + driver
-        (src/agency/agents/          (src/agency/tools/registry.py,
-         research/agent.py)           src/agency/tools/driver.py)
-      - general                     - web_search / web_fetch / memory /
-      - demo / planner /              sandbox_exec adapters
-        executor / verifier
-                      |
-        +-------------+-------------+
-        |             |             |
-      LATTICE       MEMORY      POLICIES / AUDIT / SANDBOX
-      coordination/ governance  scoped stores   kernel policies,
-      substrate     + retrieval audit log,      secrets, sandbox
-      (src/agency/  (src/agency/  isolation
-       lattice/)     memory/sms/) (src/agency/kernel/,
-                                   src/agency/security/sandbox/)
+## Quick start
 
-   PARTIAL: thread/workspace store, skill registry, workflow runner,
-            Agent Factory v1, Forge v2 bounded factory (inspect/scan/test/
-            review/pipeline/evidence) with human-gated local ship.
-   PLANNED: autonomous release, protected-path resolution, authenticated thread API.
-```
-
-Cross-cutting (partial, code-enforced where noted): security policies
-(`src/agency/kernel/policies.py`), audit (`src/agency/kernel/audit.py`),
-provenance/evidence (`src/agency/evidence/`), sandbox isolation
-(`src/agency/security/sandbox/`), adversarial QA critics
-(`src/agency/security/red|blue|purple/`, `src/agency/agents/verifier.py`).
-
-## Current vs planned state
-
-| Area | State | Evidence / note |
-|------|-------|-----------------|
-| Butler gateway | Partial product | Owner-scoped threads/context and private nonbeta transport commands; public legacy business HTTP is closed pending authority; see CURRENT_STATE for verified boundaries |
-| Orchestrator + task pipeline | Partial | `src/agency/orchestrator.py`, `src/agency/kernel/tasks.py` |
-| Research agent | Exists, partial | `src/agency/agents/research/agent.py`; offline integration tests exercise the route, but a live provider response is not certified by CI |
-| General/demo agents, planner, verifier | Exists, partial | `src/agency/agents/`; capability/eval coverage not claimed |
-| Lattice coordination/governance | Partial | `src/agency/lattice/api.py`, `backends/sqlite.py`, `governance.py` (in-memory proposals, best-effort backend mirror); durable vote persistence is planned |
-| Memory | Partial | `src/agency/memory/sms/`; scoped per sender, hierarchical isolation planned |
-| Sandbox / security / audit | Partial | Isolation guarantees not audited; do not treat as production-hardened |
-| CI workflow | Verified on PR #7 | Seven CI checks passed on `5c4720c` (Python 3.11/3.12 on Ubuntu/Windows, Ruff lint/format, mypy, security scan); CD and live deployment are unverified |
-| Threads / workspaces | Partial | `src/agency/butler/threads.py` persists workspaces/threads/messages; project hierarchy, authenticated API and UI remain planned |
-| Agent Factory | Partial v1 | `src/agency/factory/`: versioned blueprints, approval, L0 identity activation/revocation; no autonomous creation/evaluation or runtime restart recovery |
-| Skill registry, workflow registry/executor | Partial | `src/agency/skills/`, `src/agency/workflows/` provide versioned metadata and a bounded allowlisted runner; not yet integrated with an agent/Forge execution path |
-| Forge | Partial v2 | `src/agency/forge/` composes bounded inspection, a static security scan, an isolated test runner and LLM/static review into one pipeline (`pipeline.py:102`) with SQLite evidence (`evidence.py:98`); coding agent (`coding_agent.py`), worker loop (`autonomy/loop_driver.py`) and tool authoring (`autonomy/forge_auto.py:137`) are bounded; local ship requires human approval by default (`ship.py:113`). No auto-release. Dark/ghost factories remain separate prototypes |
-| Internal metering / local recovery | Implemented bounded seams | Request-bound strict ToolDriver wrapper and explicit OS-locked recoverable workflow APIs; beta ingress and distributed recovery remain disabled/unimplemented |
-| External bridges (Claude, Codex, Hermes, OpenClaw) | Partial adapters | `src/agency/bridges/`; optional integrations behind explicit boundaries, never architectural dependencies |
-
-Status words used here are deliberately coarse (Exists / Partial / Planned / Missing).
-No precise percentages are given because the evidence does not warrant them, and nothing
-above should be read as a production-readiness claim.
-
-## Quick Start (local commands)
-
-Only commands whose targets exist in this checkout are listed. `agency agent list`
-and `agency task list` require a running API server and are not standalone commands.
-Broken historical
-instructions (`python -m theagency.gateways.launcher`, `pip install -e ".[all]"`,
-`docker-compose -f docker-compose.sandbox.yml`) have been removed; no replacement
-commands are invented for servers or services that are not defined here.
-The supported container artifacts (`Dockerfile`, `docker-compose.yml`, the
-GitHub workflows and the box deployment scripts) are documented in
-[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+Python 3.11 or newer.
 
 ```bash
-# Install (extras defined in pyproject.toml: dev, neo4j, qdrant, ollama, llm, memory, honcho)
 pip install -e ".[dev]"
-
-# CLI entry point (defined as agency = "agency.cli:main" in pyproject.toml)
+cp .env.example .env    # then set your LLM provider, model and key
 agency --help
+```
 
+The LLM backend can be a local Ollama or any OpenAI-compatible endpoint. Set
+`AGENCY_LLM_PROVIDER`, `AGENCY_LLM_MODEL` and the matching key in `.env`. Keys
+live in `.env` only, never in code, logs or commits.
 
-# Tests
+```bash
+agency start                              # API server on http://127.0.0.1:8000
+agency tui                                # terminal UI
+forge                                     # Forge spec intake
+python -m agency.prototype.pilot_launcher # single-owner pilot + console
+```
+
+`agency agent list` and `agency task list` need the server running. The pilot
+launcher binds loopback only and creates its own owner token. Container
+artifacts and box deployment are covered in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+Tests and gates (these match CI):
+
+```bash
 python -m pytest tests/ -q
-
-# Lint / typecheck (match .github/workflows/ci.yml)
 ruff check src/ tests/
 ruff format --check src/ tests/
 python -m mypy src/
+node --test tests/*.test.mjs
 ```
 
-The offline PR smoke test and CI were verified, not a deployed PR runtime.
-Server lifecycle commands (`agency start`/`stop`/`status`, `src/agency/api/server.py`,
-Butler HTTP) are described by `agency --help` and `src/agency/cli/main.py`;
-live deployment of this PR was not verified.
+## Repository layout
 
-## What is The Agency?
+```text
+src/agency/   the package: butler, orchestrator, kernel, lattice, forge, memory, ...
+tests/        Python and Node test suites
+docs/         specs, status and guides; docs/README.md is the index
+gui/          Mission Control console source (React + Vite)
+scripts/      smoke tests, deployment helpers, bot launchers
+config/       lattice configuration
+ops/          owner trial bridges
+```
 
-The Agency is intended to become a general-purpose, governed multi-agent execution
-system: a human-facing Butler, an orchestrator over agents/skills/workflows/tools,
-a Lattice coordination/governance substrate, memory, sandboxing, audit/provenance,
-and an internal software factory (Forge). See `docs/SOURCE_CONSOLIDATED_BRIEF.md`
-sections 3–22 for the target model and `docs/SPEC_AGENCY_CORE_RECONCILIATION.md`
-for the code-backed gap matrix.
+## Where to read next
 
-Useful historical concepts retained as direction (not status claims): Butler gateway,
-sandbox modes, QA Critic/adversarial review, governance, Lattice, domain agents,
-foundation services. Historical specifications under `docs/` are preserved; where they
-contradict the platform boundary or current code, `docs/ARCHITECTURE.md` labels them
-historical/superseded rather than deleting them.
+- [Current state](docs/CURRENT_STATE.md): what exists and what was verified.
+- [Target design](docs/SOURCE_CONSOLIDATED_BRIEF.md) and the
+  [code-backed gap matrix](docs/SPEC_AGENCY_CORE_RECONCILIATION.md): where the
+  system is going and what is missing.
+- [Architecture](docs/ARCHITECTURE.md), [deployment](docs/DEPLOYMENT.md),
+  [roadmap](docs/ROADMAP.md), [known issues](docs/KNOWN_ISSUES.md).
+- [docs/archive/](docs/archive/README.md): historical handoffs, research and
+  verification records, kept for provenance.
 
-## Documentation
+## Boundaries
 
-| Document | Purpose |
-|----------|---------|
-| `docs/CURRENT_STATE.md` | Authoritative current state, verification boundaries and merge history |
-| `docs/SOURCE_CONSOLIDATED_BRIEF.md` | Normative target architecture/product direction |
-| `docs/SPEC_AGENCY_CORE_RECONCILIATION.md` | Code-backed gap matrix, build slice and acceptance gates |
-| `docs/ARCHITECTURE.md` | Canonical current architecture + labeled historical diagrams |
-| `docs/ROADMAP.md`, `docs/HEALTH.md` | Honest roadmap and project health assessment |
-| `docs/PRODUCTION_READINESS_PLAN.md` | Gated production-readiness plan |
-| `docs/DEPLOYMENT.md` | Deployment artifact contract |
-| `docs/OWNER_DECISIONS_D01_D05.md`, `docs/OWNER_DECISIONS_D06_SLICE_A_CONTRACT.md` | Approved owner policy inputs |
-| `docs/KNOWN_ISSUES.md` | Active tracked gaps |
-| `docs/HONCHO_ADAPTER.md`, `docs/ADR-honcho-memory-adapter.md` | Optional pinned Honcho memory mirror: configuration and ADR |
-| `docs/BRANCH_CLEANUP.md` | Branch/worktree consolidation checkpoints |
-| `docs/SPECIFICATION.md`, `docs/SPEC_*.md` | Historical specifications (preserved; superseded where they conflict with the brief) |
-| `docs/HANDOFF_*.md`, `docs/RESEARCH_*.md`, `docs/QUALIFICATION_*.md`, `docs/research-evidence/` | Dated historical evidence and qualification records |
-
-The November 20, 2026 documentation pass retired superseded WIP/plan checkpoints and a
-duplicate draft; the remaining dated records are retained as historical evidence, not
-as current status claims.
-
-## Notes and non-goals
-
-- `Athena-global-skills` (`https://github.com/athena254/Athena-global-skills`) is a
-  separate source of patterns and candidate capabilities, not a dependency. Nothing is
-  auto-imported from it.
-- Addons and bridges are not labeled production-ready. Prototypes (e.g. dark/ghost
-  factory) do not imply a complete Forge.
-- Agent Factory v1, Forge v2 (a bounded, human-gated factory with no auto-release), threads, skills, and workflows are **partial foundations**. Autonomous creation, autonomous release, and durable governance are not implemented.
+ATHENA is a separate peer platform, not an Agency component; no core capability
+depends on it. The
+[Athena-global-skills](https://github.com/athena254/Athena-global-skills) repo is
+a source of patterns, not a dependency; nothing is auto-imported from it. Other
+projects are consumed over HTTP, never vendored, and Forge's reviewer is
+Agency-native. The spec set lives in `docs/SPEC_*.md`; Forge treats those paths
+as protected, so changing them needs explicit human approval.
 
 ## License
 

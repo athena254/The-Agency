@@ -5,6 +5,16 @@ import { AlertTriangle, Lock } from 'lucide-react'
 import { isPilotAuthFailure, pilotErrorMessage } from '../api/pilot'
 import { useAuth } from '../stores/auth'
 
+/*
+  The generic primitives (badges, state chips, rows, loading/empty states)
+  live in components/ui.tsx; these aliases keep the historical import names
+  stable while everything renders from the single canonical implementation.
+*/
+export { LoadingBlock } from '../components/ui'
+export { Row as PanelRow } from '../components/ui'
+export { Badge as Chip } from '../components/ui'
+export { StateBadge as StateChip } from '../components/ui'
+
 /**
  * Renders a pilot failure and, for 401/403, clears the in-memory token so the
  * surface falls back to its locked state instead of retrying a dead credential.
@@ -72,60 +82,4 @@ export function PilotGate({ children }: { children: ReactNode }) {
   }
 
   return <>{children}</>
-}
-
-export function LoadingBlock({ label = 'Loading…' }: { label?: string }) {
-  return (
-    <div role="status" className="px-5 py-10 text-center text-sm text-text-3">
-      {label}
-    </div>
-  )
-}
-
-export function PanelRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <dt className="mc-label">{label}</dt>
-      <dd className="mc-value text-[11.5px] text-text-1">{children}</dd>
-    </div>
-  )
-}
-
-type ChipTone = 'signal' | 'muted' | 'amber' | 'green' | 'red'
-
-export function Chip({ children, tone = 'muted' }: { children: ReactNode; tone?: ChipTone }) {
-  const tones: Record<ChipTone, string> = {
-    signal: 'border-signal/30 bg-signal-dim text-signal-strong',
-    muted: 'border-line bg-ink-1 text-text-3',
-    amber: 'border-amber/30 bg-amber/10 text-amber',
-    green: 'border-green/30 bg-green/10 text-green',
-    red: 'border-red/30 bg-red/10 text-red',
-  }
-  return (
-    <span className={`rounded-control border px-2 py-0.5 font-mono text-[10.5px] ${tones[tone]}`}>
-      {children}
-    </span>
-  )
-}
-
-export function StateChip({ state }: { state: string }) {
-  return <Chip tone={stateTone(state)}>{state}</Chip>
-}
-
-function stateTone(state: string): ChipTone {
-  switch (state) {
-    case 'COMPLETED':
-      return 'green'
-    case 'FAILED':
-    case 'REJECTED':
-    case 'DENIED':
-      return 'red'
-    case 'RUNNING':
-    case 'ADMITTED':
-      return 'signal'
-    case 'UNCERTAIN':
-      return 'amber'
-    default:
-      return 'muted'
-  }
 }

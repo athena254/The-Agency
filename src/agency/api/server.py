@@ -7,6 +7,7 @@ GET  /v1/tasks                    List tasks (``?status=&limit=``).
 GET  /v1/tasks/{id}               Fetch one task.
 GET  /v1/agents                   List agents.
 POST /v1/agents                   Register an agent.
+POST /v1/agent-requests           Request a governed agent from a purpose.
 GET  /v1/memory/search            Full-text memory search (``?q=&agent_id=&limit=``).
 GET  /v1/evidence                 List findings with filters.
 GET  /v1/risk/{finding_id}        Risk vector + category for a finding.
@@ -36,9 +37,9 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
-from typing import Any
+from typing import Annotated, Any
 
 import structlog
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -47,9 +48,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from agency import __version__
+from agency.agents.bootstrap import (
+    AGENT_REQUEST_PERMISSION,
+    bootstrap_agents,
+    request_agent_authorized,
+)
 from agency.agents.coding_bootstrap import bootstrap_coding_agent
 from agency.agents.registry import AgentRegistry as RuntimeAgentRegistry
-from agency.api.auth import TokenRegistry
+from agency.api.auth import Principal, TokenRegistry, principal_dependency
 from agency.api.authority import require_peer_authority
 from agency.api.routers import agents as agents_router
 from agency.api.routers import bridges as bridges_router
@@ -60,6 +66,8 @@ from agency.api.routers import tasks as tasks_router
 from agency.autonomy.blacksmith import activate_blacksmith
 from agency.bridges.coordinator import ExternalCoordinator
 from agency.evidence.store.store import EvidenceStore
+from agency.factory.prompts import PromptRegistry
+from agency.factory.requested_agent import RequestedAgentRequest, RequestedAgentService
 from agency.factory.service import AgentFactory
 from agency.kernel.registry import AgentRegistry
 from agency.kernel.task_store import TaskStore
@@ -72,13 +80,22 @@ from agency.memory.sms.store import MemoryStore
 from agency.orchestrator import AgencyOrchestrator
 from agency.risk.engine.engine import RiskEngine
 from agency.risk.engine.models import RiskCategory, RiskModel
+from agency.skills.registry import SkillRegistry, SkillStatus
 
 log = structlog.get_logger(__name__)
 
 # Paths served to authenticated callers (see agency.api.auth). The middleware
 # below refuses to route them when no token file is configured (fail closed);
 # fine-grained auth + scopes are enforced by the router dependencies.
-ENABLED_AUTHED_PREFIXES = ("/v1/tasks",)
+ENABLED_AUTHED_PREFIXES = ("/v1/tasks", "/v1/agent-requests")
+
+# Requested-agent entrypoint policy (gaps.md #6). The authorizer mirrors the
+# orchestrator's ``factory_self_improve_authorizer`` config-key pattern (an
+# explicit callable; the env-representable form is the caller-id allowlist).
+AGENCY_REQUEST_ACTORS_ENV = "AGENCY_AGENT_REQUEST_ACTORS"
+AGENCY_REQUEST_DOMAINS_ENV = "AGENCY_AGENT_REQUEST_DOMAINS"
+AGENCY_REQUEST_APPROVER_ENV = "AGENCY_AGENT_REQUEST_APPROVER"
+DEFAULT_REQUEST_APPROVER = "factory-improvement"
 
 
 # --------------------------------------------------------------------------- #
@@ -107,6 +124,32 @@ class RiskReportResponse(BaseModel):
     evidence_count: int = Field(default=0)
 
 
+class AgentRequestCreateRequest(BaseModel):
+    """Payload for ``POST /v1/agent-requests`` (gaps.md #6)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    blueprint_id: str = Field(min_length=1, description="Blueprint id for the new governed agent.")
+    name: str = Field(min_length=1, description="Human-readable agent name.")
+    purpose: str = Field(min_length=1, description="Free-text purpose the agent serves.")
+    domain: str = Field(
+        default="general", description="Operational domain; must be in the allowlist."
+    )
+
+
+class AgentRequestResponse(BaseModel):
+    """Payload for a successful ``POST /v1/agent-requests``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    blueprint_id: str
+    version: str
+    agent_id: str
+    attached_skills: list[tuple[str, str]] = Field(default_factory=list)
+    prompt_refs: list[tuple[str, str]] = Field(default_factory=list)
+    note: str = ""
+
+
 # --------------------------------------------------------------------------- #
 # Application factory
 # --------------------------------------------------------------------------- #
@@ -114,6 +157,52 @@ class RiskReportResponse(BaseModel):
 
 def _database_path(env_var: str, default: str) -> str:
     return os.environ.get(env_var, default)
+
+
+def _env_agent_request_authorizer() -> Callable[[str, str], bool] | None:
+    """Build the ``agent.request`` authorizer from the caller-id allowlist.
+
+    Fail closed: an unset/blank ``AGENCY_AGENT_REQUEST_ACTORS`` returns
+    ``None`` and every request is denied by the bootstrap adapter.
+    """
+    raw = os.environ.get(AGENCY_REQUEST_ACTORS_ENV, "")
+    actors = frozenset(part.strip() for part in raw.split(",") if part.strip())
+    if not actors:
+        return None
+
+    def authorizer(actor: str, permission: str) -> bool:
+        return permission == AGENT_REQUEST_PERMISSION and actor in actors
+
+    return authorizer
+
+
+def _env_agent_request_domains() -> tuple[str, ...]:
+    """Parse the domain allowlist; empty denies every request (fail closed)."""
+    raw = os.environ.get(AGENCY_REQUEST_DOMAINS_ENV, "")
+    return tuple(dict.fromkeys(part.strip().casefold() for part in raw.split(",") if part.strip()))
+
+
+def _build_requested_agent_service(
+    kernel_registry: Any, runtime_registry: Any
+) -> RequestedAgentService:
+    """Compose the requested-agent entrypoint service from the default stores."""
+    prompts = PromptRegistry(_database_path("AGENCY_PROMPTS_DB", "data/prompts.db"))
+    skills = SkillRegistry(_database_path("AGENCY_SKILL_DB_PATH", "data/skills.db"))
+    approver = os.environ.get(AGENCY_REQUEST_APPROVER_ENV, "").strip() or DEFAULT_REQUEST_APPROVER
+    factory = AgentFactory(
+        _database_path("AGENCY_FACTORY_DB", "data/factory.db"),
+        authorizer=lambda actor, permission: permission == "agent.approve" and actor == approver,
+        kernel_registry=kernel_registry,
+        runtime_registry=runtime_registry,
+        is_prompt_published=prompts.is_published,
+        prompt_resolver=prompts,
+        is_skill_published=lambda skill_id, version: (
+            skills.get(skill_id, version).status is SkillStatus.PUBLISHED
+        ),
+    )
+    return RequestedAgentService(
+        factory=factory, prompt_registry=prompts, skill_registry=skills, approver=approver
+    )
 
 
 async def _finish_cleanup(task: asyncio.Task[BaseException | None]) -> None:
@@ -155,6 +244,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         "lattice",
         "peer_authority",
         "orchestrator",
+        "requested_agent_service",
         "peer_membership",
         "grant_ledger",
         "grant_bft_time_ms",
@@ -166,7 +256,15 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         await task_store.initialize()
         application.state.task_store = task_store
         if os.environ.get("AGENCY_TASKS_RECOVER", "").strip() == "1":
-            requeued = await task_store.requeue_running(note="requeued after restart")
+            # Lease-aware recovery: only claims whose lease expired (or
+            # pre-lease rows) are requeued, so a second live process's
+            # running tasks — leases still fresh via its dispatcher
+            # heartbeats — are left alone. Safe across processes when every
+            # claiming process runs a lease-aware build; see TaskStore
+            # module docstring for the honest limits.
+            requeued = await task_store.requeue_running(
+                note="requeued after restart (lease expired)", expired_only=True
+            )
             if requeued:
                 log.info("api.tasks_recovered", requeued=requeued)
 
@@ -193,8 +291,16 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
         # Full execution stack: the dispatcher inside the orchestrator drains
         # the shared task queue (same file as the butler server), so tasks
-        # submitted over this API actually execute in parallel.
-        orchestrator = AgencyOrchestrator(task_manager=application.state.task_manager)
+        # submitted over this API actually execute in parallel. The
+        # audit/evidence/memory paths are passed through so one process uses
+        # one durable backend per store (gaps.md #19): api + butler share
+        # rows when the same env vars point both servers at one file.
+        orchestrator = AgencyOrchestrator(
+            task_manager=application.state.task_manager,
+            audit_db_path=_database_path("AGENCY_AUDIT_DB", ":memory:"),
+            evidence_db_path=_database_path("AGENCY_EVIDENCE_DB", ":memory:"),
+            memory_db_path=_database_path("AGENCY_MEMORY_DB", ":memory:"),
+        )
         application.state.orchestrator = orchestrator
         await orchestrator.start()
         await orchestrator.start_dispatcher()
@@ -236,24 +342,29 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
                     error_type=type(exc).__name__,
                 )
             try:
-                from agency.factory.github_skills import grant_manifest_capabilities
-
-                grant_manifest_capabilities(kernel_registry)
+                # Single centralized agent bootstrap (gaps.md #14): installed
+                # agents + external-skill attachment manifest grants, shared
+                # by every entry point instead of an API-only inline grant.
+                bootstrap_agents(kernel_registry)
             except BaseException as exc:  # noqa: BLE001 - startup must not crash
                 log.warning(
-                    "api.startup.external_skill_attachments_failed",
+                    "api.startup.agent_bootstrap_failed",
                     error_type=type(exc).__name__,
                 )
-            try:
-                from agency.agents.bootstrap import ensure_installed_agents
-                from agency.factory.manager import AgentManager
-
-                ensure_installed_agents(AgentManager(), kernel_registry)
-            except BaseException as exc:  # noqa: BLE001 - startup must not crash
-                log.warning(
-                    "api.startup.installed_agents_failed",
-                    error_type=type(exc).__name__,
-                )
+            # Requested-agent entrypoint service (gaps.md #6): built only when
+            # the operator opted in via a non-empty domain allowlist; the
+            # explicit authorizer + allowlist stay fail-closed per request.
+            domains = getattr(application.state, "agent_request_domains", None) or ()
+            if domains:
+                try:
+                    application.state.requested_agent_service = _build_requested_agent_service(
+                        kernel_registry, application.state.runtime_registry
+                    )
+                except BaseException as exc:  # noqa: BLE001 - startup must not crash
+                    log.warning(
+                        "api.startup.agent_request_service_failed",
+                        error_type=type(exc).__name__,
+                    )
 
         # Wire peer authority from a pinned genesis if available (opens the
         # ballot route and the grant-verifying HTTP dependency).
@@ -341,6 +452,10 @@ def create_app() -> FastAPI:
     # Owner-issued bearer tokens (agency.api.auth). ``None`` keeps every
     # authed route at 503 — the default-deny posture is unchanged.
     application.state.token_registry = TokenRegistry.from_env()
+    # Requested-agent entrypoint policy (gaps.md #6), fail closed: an unset
+    # authorizer denies every caller; an empty allowlist denies every domain.
+    application.state.agent_request_authorizer = _env_agent_request_authorizer()
+    application.state.agent_request_domains = _env_agent_request_domains()
 
     @application.middleware("http")
     async def deny_unverified_authority(request: Request, call_next: Any) -> Any:
@@ -364,10 +479,13 @@ def create_app() -> FastAPI:
         is_scoped_write = _writes_open() and path.startswith("/v1/")
         if is_health or is_ballot or is_scoped_read or is_scoped_write:
             return await call_next(request)
-        if any(
-            path == prefix or path.startswith(prefix + "/")
-            for prefix in ENABLED_AUTHED_PREFIXES
-        ) and getattr(application.state, "token_registry", None) is not None:
+        if (
+            any(
+                path == prefix or path.startswith(prefix + "/")
+                for prefix in ENABLED_AUTHED_PREFIXES
+            )
+            and getattr(application.state, "token_registry", None) is not None
+        ):
             return await call_next(request)
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -381,6 +499,65 @@ def create_app() -> FastAPI:
     application.include_router(bridges_router.router, prefix="/v1/bridges")
     application.include_router(governance_router.router)
     application.include_router(governance_router.ballot_router)
+
+    @application.post(
+        "/v1/agent-requests",
+        response_model=AgentRequestResponse,
+        status_code=status.HTTP_201_CREATED,
+        tags=["agents"],
+        summary="Request a governed agent",
+    )
+    async def request_agent(
+        payload: AgentRequestCreateRequest,
+        request: Request,
+        principal: Annotated[Principal, Depends(principal_dependency("tasks:write"))],
+    ) -> AgentRequestResponse:
+        """Manufacture a governed agent from a free-text request (gaps.md #6).
+
+        The creator is bound server-side to the authenticated caller; the
+        explicit ``agent.request`` authorizer and the domain allowlist are
+        consulted fail-closed before the factory flow runs.
+        """
+        service = getattr(request.app.state, "requested_agent_service", None)
+        if service is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Agent-request entrypoint is not configured.",
+            )
+        authorizer = getattr(request.app.state, "agent_request_authorizer", None)
+        domains = getattr(request.app.state, "agent_request_domains", None) or ()
+        agent_request = RequestedAgentRequest(
+            blueprint_id=payload.blueprint_id,
+            name=payload.name,
+            purpose=payload.purpose,
+            creator=principal.caller_id,
+            domain=payload.domain,
+        )
+        try:
+            result = request_agent_authorized(
+                service, agent_request, authorizer=authorizer, allowed_domains=domains
+            )
+        except PermissionError as exc:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
+        log.info(
+            "api.agent_request.created",
+            agent_id=result.agent_id,
+            blueprint_id=result.blueprint_id,
+            caller=principal.caller_id,
+            role=principal.role,
+        )
+        return AgentRequestResponse(
+            blueprint_id=result.blueprint_id,
+            version=result.version,
+            agent_id=result.agent_id,
+            attached_skills=list(result.attached_skills),
+            prompt_refs=list(result.prompt_refs),
+            note=result.note,
+        )
 
     @application.get(
         "/v1/health", response_model=HealthResponse, tags=["ops"], summary="Health check"
@@ -450,4 +627,12 @@ def create_app() -> FastAPI:
 
 app: FastAPI = create_app()
 
-__all__ = ["HealthResponse", "RiskReportResponse", "app", "create_app", "lifespan"]
+__all__ = [
+    "AgentRequestCreateRequest",
+    "AgentRequestResponse",
+    "HealthResponse",
+    "RiskReportResponse",
+    "app",
+    "create_app",
+    "lifespan",
+]

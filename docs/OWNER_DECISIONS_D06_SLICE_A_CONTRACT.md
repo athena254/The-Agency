@@ -12,12 +12,12 @@ D-06 is not release authorization.
   the contract has one arithmetic table.
 - **Rationale:**
   - `OWNER_DECISIONS_D01_D05.md` D-01 already fixes 4 validators, 1 Byzantine fault and a
-    3/4 approval quorum; `RESEARCH_LATTICE_FULL_BUILD.md` §8 lists these as already decided
+    3/4 approval quorum; `archive/RESEARCH_LATTICE_FULL_BUILD.md` §8 lists these as already decided
     and not open.
   - `3f+1 = 4` with `f=1` satisfies the BFT safety sizing in
     `SPEC_KNOWN_PEER_PROTOCOL.md` §10 (Option B).
   - The liveness budget `N − Q = 1` is published, never hidden by lowering Q
-    (`RESEARCH_LATTICE_FULL_BUILD.md` §5.2).
+    (`archive/RESEARCH_LATTICE_FULL_BUILD.md` §5.2).
 - **Rejected alternative:**
   - Reopening the fault bound or validator count — D-01 is closed; §8 reserves only the nine
     items below as open.
@@ -36,7 +36,7 @@ D-06 is not release authorization.
     epochs cannot hold disjoint quorums; `eligible(old) ∩ eligible(new) ≥ 2` is the concrete
     form of that proof at this fault bound.
   - Pinning, not TOFU, and treating any key change as an alarm are the custody rules in
-    `RESEARCH_LATTICE_FULL_BUILD.md` §4.2; voter revocation is a membership reconfiguration,
+    `archive/RESEARCH_LATTICE_FULL_BUILD.md` §4.2; voter revocation is a membership reconfiguration,
     distinct from grant revocation (`SPEC_KNOWN_PEER_PROTOCOL.md` §5.4).
   - No central membership administrator: a peer cannot grant itself voting power
     (`SPEC_PEER_LATTICE_GOVERNANCE.md` invariant 1; `OWNER_DECISIONS_D01_D05.md` D-02).
@@ -61,7 +61,7 @@ D-06 is not release authorization.
   - Human attestation enabling only within-policy approval follows the "mandatory ≠ veto"
     rule (`SPEC_KNOWN_PEER_PROTOCOL.md` §9) and the no-substitution rule in §11.2.
   - Missing risk tier failing closed to the higher tier is the orchestrator rule in
-    `RESEARCH_LATTICE_FULL_BUILD.md` §6.1.
+    `archive/RESEARCH_LATTICE_FULL_BUILD.md` §6.1.
 - **Rejected alternative:**
   - A `user`-string, orchestrator or gateway override lifting a deny — rejected in
     `SPEC_KNOWN_PEER_PROTOCOL.md` §11.3 and `SPEC_PEER_LATTICE_GOVERNANCE.md` invariant 1.
@@ -79,11 +79,11 @@ D-06 is not release authorization.
     each member and a new proposal version on membership change.
   - `proposal_id` hashes `affected_snapshot` at creation time (`SPEC_KNOWN_PEER_PROTOCOL.md`
     §5.3), so the set is immutable for the proposal's life (§6).
-  - `RESEARCH_LATTICE_FULL_BUILD.md` §5.1 step 2 fixes the snapshot at proposal build time;
+  - `archive/RESEARCH_LATTICE_FULL_BUILD.md` §5.1 step 2 fixes the snapshot at proposal build time;
     §3.1 forbids non-determinism inside the application.
 - **Rejected alternative:**
   - Runtime discovery of affected consumers — non-deterministic and not replayable
-    identically by peers (`RESEARCH_LATTICE_FULL_BUILD.md` §3.1, §5.1).
+    identically by peers (`archive/RESEARCH_LATTICE_FULL_BUILD.md` §3.1, §5.1).
 
 ## D-06.5 — Independently verifiable human input (the D-03 gate)
 
@@ -96,7 +96,7 @@ D-06 is not release authorization.
     request and states gateway signatures alone are insufficient.
   - `SPEC_KNOWN_PEER_PROTOCOL.md` §9 requires independently verifiable human confirmation
     under the Byzantine model; one gateway/peer's claim is not BFT proof of human participation.
-  - `RESEARCH_LATTICE_FULL_BUILD.md` §8 item 5 names this as the open D-03 gate; a separate
+  - `archive/RESEARCH_LATTICE_FULL_BUILD.md` §8 item 5 names this as the open D-03 gate; a separate
     human-held device avoids the correlated host-compromise risk in §9.
   - Challenge binding to the four fields fixes the attestation to one proposal under one
     membership, preventing cross-proposal and cross-epoch replay (§4.4, §5.4).
@@ -109,14 +109,14 @@ D-06 is not release authorization.
 - **Decision (proposed):** All deadlines inside the application are derived exclusively from
   BFT time carried in committed headers, expressed as deterministic height/millisecond bounds.
   Wall-clock reads, floats, and hash-map iteration order are forbidden in application code
-  (per the ABCI++ determinism requirements in RESEARCH_LATTICE_FULL_BUILD.md §3.1).
+  (per the ABCI++ determinism requirements in archive/RESEARCH_LATTICE_FULL_BUILD.md §3.1).
 - **Rationale:**
-  - `RESEARCH_LATTICE_FULL_BUILD.md` §3.1 forbids randomness, wall-clock time, floating point
+  - `archive/RESEARCH_LATTICE_FULL_BUILD.md` §3.1 forbids randomness, wall-clock time, floating point
     and hash-map iteration order inside the app; §3.2 requires the app hash to match on replay.
   - `SPEC_KNOWN_PEER_PROTOCOL.md` §5.5 states wall-clock is never authoritative; §16 requires
     application transitions and input cutoffs to use engine ordering/finality, not local time.
   - A deterministic committed-time profile is a named open decision
-    (`RESEARCH_LATTICE_FULL_BUILD.md` §8 item 6; `SPEC_KNOWN_PEER_PROTOCOL.md` §10).
+    (`archive/RESEARCH_LATTICE_FULL_BUILD.md` §8 item 6; `SPEC_KNOWN_PEER_PROTOCOL.md` §10).
 - **Rejected alternative:**
   - Deriving deadlines from replica-local clocks or wall-clock reads — makes correct peers
     effectively Byzantine and halts the chain on an app-hash mismatch (§9 risks).
@@ -129,18 +129,18 @@ D-06 is not release authorization.
   out-of-band; they can never approve, widen scope or mint grants. Any key change is an alarm
   requiring explicit re-approval.
 - **Rationale:**
-  - `RESEARCH_LATTICE_FULL_BUILD.md` §4.1-4.3: CometBFT P2P uses an STS handshake and is
+  - `archive/RESEARCH_LATTICE_FULL_BUILD.md` §4.1-4.3: CometBFT P2P uses an STS handshake and is
     authenticated, and §4.3 recommends reusing it for the first milestone; add Noise/mTLS only
     if traffic leaves the engine's scope.
   - §8 item 7 names transport limits and operator recovery powers as open; the 64 KiB ceiling
-    matches the existing `MAX_WIRE_BYTES` (`RESEARCH_LATTICE_FULL_BUILD.md` §5.1 envelope).
+    matches the existing `MAX_WIRE_BYTES` (`archive/RESEARCH_LATTICE_FULL_BUILD.md` §5.1 envelope).
   - Operators never approving or minting grants follows no-central-authority
-    (`SPEC_PEER_LATTICE_GOVERNANCE.md` invariant 1; `RESEARCH_LATTICE_FULL_BUILD.md` §6.1).
+    (`SPEC_PEER_LATTICE_GOVERNANCE.md` invariant 1; `archive/RESEARCH_LATTICE_FULL_BUILD.md` §6.1).
   - Key change as an alarm requiring re-approval is the pinning rule
-    (`RESEARCH_LATTICE_FULL_BUILD.md` §4.2).
+    (`archive/RESEARCH_LATTICE_FULL_BUILD.md` §4.2).
 - **Rejected alternative:**
   - Building a second transport (Noise_XX / mTLS) now — deferred until traffic leaves engine
-    scope (`RESEARCH_LATTICE_FULL_BUILD.md` §4.3).
+    scope (`archive/RESEARCH_LATTICE_FULL_BUILD.md` §4.3).
   - Operators approving, widening scope or minting grants — violates no-central-authority.
 
 ## D-06.8 — D-05 numeric ceilings (left unpinned at D-05)
@@ -152,7 +152,7 @@ D-06 is not release authorization.
   ≤ 256; evidence retention 30 days (already D-05).
 - **Rationale:**
   - D-05 in `OWNER_DECISIONS_D01_D05.md` left limits "to be pinned in the P1 contract"
-    (line 51); `RESEARCH_LATTICE_FULL_BUILD.md` §8 item 8 names numeric ceilings as open.
+    (line 51); `archive/RESEARCH_LATTICE_FULL_BUILD.md` §8 item 8 names numeric ceilings as open.
   - One ballot per (voter, proposal version) implements the non-replaceable rule and the
     evidence-not-input treatment of a second differing ballot
     (`SPEC_KNOWN_PEER_PROTOCOL.md` §7, §14).
@@ -177,7 +177,7 @@ D-06 is not release authorization.
   - `SPEC_KNOWN_PEER_PROTOCOL.md` §16 requires pruning never to remove undecided proposals,
     unexpired grants, `executed_grants` keys, membership history or equivocation evidence.
   - Equivocation handling retains both conflicting ballots verbatim as the proof
-    (`SPEC_KNOWN_PEER_PROTOCOL.md` §14; `RESEARCH_LATTICE_FULL_BUILD.md` §5.3); silent
+    (`SPEC_KNOWN_PEER_PROTOCOL.md` §14; `archive/RESEARCH_LATTICE_FULL_BUILD.md` §5.3); silent
     replacement destroys the evidence.
   - The hash-chain head is retained and independently anchored as a precondition for any
     tamper-evidence claim (`SPEC_KNOWN_PEER_PROTOCOL.md` §16).
@@ -187,7 +187,7 @@ D-06 is not release authorization.
 
 ## Contract skeleton this decision freezes (Slice A deliverables)
 
-Condensed from `RESEARCH_LATTICE_FULL_BUILD.md` §7, Slice A:
+Condensed from `archive/RESEARCH_LATTICE_FULL_BUILD.md` §7, Slice A:
 
 - Canonical schemas for: proposal, affected-snapshot, ballot, membership, certificate, grant,
   intent, outcome, reconciliation, executed-grant, recovery.
@@ -197,7 +197,7 @@ Condensed from `RESEARCH_LATTICE_FULL_BUILD.md` §7, Slice A:
 - API surface and error enums.
 - Adversarial review of the contract.
 - Acceptance for Slice A is "written, reviewed, committed — nothing runs."
-  (`RESEARCH_LATTICE_FULL_BUILD.md:427`)
+  (`archive/RESEARCH_LATTICE_FULL_BUILD.md:427`)
 
 ## What these decisions unblock
 

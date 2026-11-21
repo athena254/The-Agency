@@ -21,7 +21,7 @@ from dataclasses import dataclass, replace
 from dataclasses import field as dc_field
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 from uuid import uuid4
 
 import structlog
@@ -44,6 +44,35 @@ class TaskStatus(str, Enum):
 
     def __str__(self) -> str:
         return self.value
+
+
+#: States a task cannot leave; dispatchers and submitters treat these as final.
+_TERMINAL_STATUSES: Final[frozenset[TaskStatus]] = frozenset(
+    {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.BLOCKED}
+)
+
+
+class TaskWriteResult(str, Enum):
+    """Outcome of a conditional task-record write against the shared store.
+
+    Status updates are compare-and-set, not last-writer-wins: a write only
+    applies when the stored record still matches the caller's expectation
+    (:meth:`TaskManager.update_status` guards every write with the status it
+    read), and a record that reached COMPLETED or FAILED is immutable.
+
+    ``APPLIED`` — the write took.
+    ``YIELDED_TERMINAL`` — the record already reached an immutable terminal
+    state (COMPLETED/FAILED); the stored record is final and the late writer
+    must observe it and yield (no exception, the outcome is logged).
+    ``STALE`` — the row exists but moved to another writable status before
+    the write; refused (fail closed) instead of overwriting blind.
+    ``MISSING`` — no such task row.
+    """
+
+    APPLIED = "applied"
+    YIELDED_TERMINAL = "yielded_terminal"
+    STALE = "stale"
+    MISSING = "missing"
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +163,11 @@ class TaskManager:
         self._sequence = 0
         self._lock = asyncio.Lock()
         self._log = structlog.get_logger(__name__)
+
+    @property
+    def store(self) -> TaskStore | None:
+        """The backing store when SQLite is authoritative, else ``None``."""
+        return self._store
 
     # ------------------------------------------------------------------ #
     # Lifecycle
@@ -243,41 +277,145 @@ class TaskManager:
         alongside the status change so pollers never observe COMPLETED
         without its result). ``error`` is recorded when provided.
 
+        With a store the write is a compare-and-set guarded by the status
+        read here, so two processes sharing the database file cannot
+        silently overwrite each other (no last-writer-wins). A record that
+        already reached an immutable terminal state (COMPLETED/FAILED) is
+        final: the late writer's CAS fails, the stored record stands, the
+        outcome is logged (``task.status_write_yielded``) and the stored
+        record is returned — no exception, and no duplicate parent
+        notification.
+
+        When the task is a child (``parent_id`` set) and the target state is
+        terminal, the result is also recorded on the parent's task record as
+        a ``child_result`` message, so the submitter sees the delegated
+        result wherever it reads task status.
+
         Raises
         ------
         KeyError:
             If the task does not exist.
         ValueError:
-            On illegal transitions (e.g. COMPLETED -> RUNNING).
+            On illegal transitions (e.g. COMPLETED -> RUNNING) and on stale
+            writes (the stored status moved between the read here and the
+            CAS — fail closed, never overwrite blind).
         """
         current = await self.get_task(task_id)
         if current is None:
             raise KeyError(f"unknown task {task_id!r}")
         self._assert_transition(current.status, status)
+        applied = False
         async with self._lock:
-            task = self._tasks.get(task_id)
-            if task is not None:
-                self._drop_from_pending(task_id)
-                task.status = status
-                if error is not None:
-                    task.error = error
-                if output is not None:
-                    task.output = output
-                task.updated_at = utcnow()
-                if status is TaskStatus.PENDING and self._store is None:
-                    self._enqueue(task)
             if self._store is not None:
-                updated = await self._store.update_task(
+                outcome = await self._store.update_task(
                     task_id,
                     status=status,
                     error=error,
                     output=output,
                     set_error=error is not None,
+                    expected_status=current.status,
                 )
-                if not updated:
+                if outcome is TaskWriteResult.MISSING:
                     raise KeyError(f"unknown task {task_id!r}")
-        self._log.info("task.status", task_id=task_id, status=status.value)
+                if outcome is TaskWriteResult.STALE:
+                    fresh = await self._store.get_task(task_id)
+                    actual = fresh.status.value if fresh is not None else "gone"
+                    raise ValueError(
+                        f"stale task write: {task_id!r} is {actual!r}, not "
+                        f"{current.status.value!r}; transition to "
+                        f"{status.value!r} refused"
+                    )
+                applied = outcome is TaskWriteResult.APPLIED
+                if not applied:
+                    # YIELDED_TERMINAL: another process terminalized the task
+                    # first; its record stands and this writer yields.
+                    self._log.warning(
+                        "task.status_write_yielded",
+                        task_id=task_id,
+                        attempted=status.value,
+                    )
+            else:
+                applied = True
+                task = self._tasks.get(task_id)
+                if task is not None and task.status is not current.status:
+                    # Without a store, ``current`` is the live cached object;
+                    # its status moved while we awaited the lock (the store
+                    # path is covered by the CAS above). Re-validate instead
+                    # of overwriting blind.
+                    self._assert_transition(task.status, status)
+            if applied:
+                task = self._tasks.get(task_id)
+                if task is not None:
+                    self._drop_from_pending(task_id)
+                    task.status = status
+                    if error is not None:
+                        task.error = error
+                    if output is not None:
+                        task.output = output
+                    task.updated_at = utcnow()
+                    if status is TaskStatus.PENDING and self._store is None:
+                        self._enqueue(task)
+        if applied:
+            self._log.info("task.status", task_id=task_id, status=status.value)
+            if status in _TERMINAL_STATUSES:
+                await self._notify_parent_of_result(task_id, status)
         return await self.get_task(task_id) or current
+
+    async def heartbeat_many(self, task_ids: list[str]) -> int:
+        """Renew store leases for tasks this process still holds RUNNING.
+
+        No-op (0) without a store; in-memory tasks have no lease to renew.
+        """
+
+        if self._store is None or not task_ids:
+            return 0
+        return await self._store.heartbeat(task_ids)
+
+    async def _notify_parent_of_result(self, task_id: str, status: TaskStatus) -> None:
+        """Record a child task's terminal result on its parent's task record.
+
+        Delegated children carry ``parent_id``; the submitter reads task
+        status through the parent (``GET /v1/tasks/{id}`` or
+        :meth:`get_task`), so the result — status, output summary, error —
+        is appended as a structured ``child_result`` message there. The
+        child's own ``output``/``error`` fields are already persisted by the
+        terminal transition itself.
+
+        Best-effort by design: if the parent is gone, or the append races a
+        store shutdown, the child's terminal state still stands (the result
+        remains readable on the child record) and the loss is logged, not
+        raised. A crash between the child's terminal write and this append
+        is honest UNCERTAIN territory — the parent may never learn the
+        result, though the child record always holds it.
+        """
+
+        child = await self.get_task(task_id)
+        if child is None or not child.parent_id:
+            return
+        summary = child.output.get("summary") if isinstance(child.output, dict) else None
+        content = {
+            "child_task_id": child.task_id,
+            "status": status.value,
+            "summary": summary if isinstance(summary, str) else None,
+            "error": child.error,
+        }
+        try:
+            await self.add_message(
+                child.parent_id,
+                TaskMessage(
+                    task_id=child.parent_id,
+                    type="child_result",
+                    content=content,
+                    created_by="task_manager",
+                ),
+            )
+        except (KeyError, ValueError) as exc:
+            self._log.warning(
+                "task.parent_result_unrecorded",
+                child_task_id=task_id,
+                parent_task_id=child.parent_id,
+                reason=type(exc).__name__,
+            )
 
     # ------------------------------------------------------------------ #
     # Messaging

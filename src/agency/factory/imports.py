@@ -85,6 +85,11 @@ def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     return raw, body
 
 
+def _is_skill_doc(path: str) -> bool:
+    lowered = path.casefold()
+    return lowered.endswith(("skill.md", "agents.md"))
+
+
 def _classify(path: str, frontmatter: dict[str, Any]) -> str:
     normalized = path.replace("\\", "/").casefold()
     name = PurePosixPath(normalized).name
@@ -296,16 +301,37 @@ class MarkdownImportService:
                 and isinstance(entry.get("path"), str)
                 and entry["path"].casefold().endswith(".md")
             ]
+            narrowed = False
             if include_paths is not None:
                 blobs = [entry for entry in blobs if include_paths(entry["path"])]
+            elif len(blobs) > MAX_FILES:
+                # Generic large-repo narrowing (gaps.md #12): a Markdown walk
+                # beyond the file bound falls back to skill/agent docs only,
+                # replacing hand-tuned per-repo path filters.
+                blobs = [entry for entry in blobs if _is_skill_doc(entry["path"])]
+                narrowed = True
             if len(blobs) > MAX_FILES:
-                raise ImportError(f"repository has more than {MAX_FILES} Markdown files")
+                if not narrowed:
+                    raise ImportError(f"repository has more than {MAX_FILES} Markdown files")
+                # Deterministic shallow-first subset for oversized skill walks.
+                blobs.sort(key=lambda entry: (entry["path"].count("/"), entry["path"]))
+                blobs = blobs[:MAX_FILES]
             try:
                 total_size = sum(int(entry.get("size", 0)) for entry in blobs)
             except (TypeError, ValueError) as exc:
                 raise ImportError("GitHub tree contains an invalid blob size") from exc
             if total_size > MAX_REPOSITORY_BYTES:
-                raise ImportError("Markdown content exceeds 5 MiB total")
+                if not narrowed:
+                    raise ImportError("Markdown content exceeds 5 MiB total")
+                kept: list[dict[str, Any]] = []
+                budget = 0
+                for entry in blobs:  # sizes validated by the sum above
+                    size = int(entry.get("size", 0))
+                    if budget + size > MAX_REPOSITORY_BYTES:
+                        break
+                    kept.append(entry)
+                    budget += size
+                blobs = kept
             out: list[ImportedMarkdown] = []
             seen_ids: set[str] = set()
             for entry in blobs:
