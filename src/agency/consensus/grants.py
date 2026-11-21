@@ -892,8 +892,17 @@ def grant_from_payload(payload: Any) -> ExecutionGrant:
     if not isinstance(payload, Mapping):
         raise GrantError("grant payload must be an object")
     expected = {
-        "proposal_id", "task_id", "issuer_peer_id", "membership_epoch", "membership_root",
-        "nonce", "issued_at_ms", "expires_at_ms", "affected_consumers", "attestation", "signature",
+        "proposal_id",
+        "task_id",
+        "issuer_peer_id",
+        "membership_epoch",
+        "membership_root",
+        "nonce",
+        "issued_at_ms",
+        "expires_at_ms",
+        "affected_consumers",
+        "attestation",
+        "signature",
     }
     if set(payload) != expected:
         raise GrantError("grant payload field set does not match the pinned schema")
@@ -901,7 +910,8 @@ def grant_from_payload(payload: Any) -> ExecutionGrant:
     attestation: AffectedSetAttestation | None = None
     if attestation_payload is not None:
         if not isinstance(attestation_payload, Mapping) or set(attestation_payload) != {
-            "attestor_peer_id", "signature"
+            "attestor_peer_id",
+            "signature",
         }:
             raise GrantError("attestation payload field set does not match the pinned schema")
         signature = attestation_payload["signature"]
@@ -932,4 +942,3 @@ def grant_from_payload(payload: Any) -> ExecutionGrant:
         attestation=attestation,
         signature=signature,
     )
-

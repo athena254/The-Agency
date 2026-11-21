@@ -17,7 +17,12 @@ from agency.peers.membership import derive_genesis_membership
 def _genesis(tmp_path: Path):
     ids = [PeerIdentity.from_private_key(Ed25519PrivateKey.generate()) for _ in range(4)]
     members = [
-        {"peer_id": i.peer_id, "public_key": i.fingerprint, "roles": ["validator"], "joined_epoch": 1}
+        {
+            "peer_id": i.peer_id,
+            "public_key": i.fingerprint,
+            "roles": ["validator"],
+            "joined_epoch": 1,
+        }
         for i in ids
     ]
     mem = derive_genesis_membership(members, policy_version="peer-policy/1")
@@ -117,4 +122,3 @@ def test_write_route_with_finality_policy(tmp_path, monkeypatch):
             json={"name": "t"},
         )
         assert response.status_code in (200, 201)
-
