@@ -52,6 +52,9 @@ honcho = ["honcho-ai==2.9.0"]
 agency = "agency.cli:main"
 forge = "agency.forge.cli:main"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/agency"]
 
