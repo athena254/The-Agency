@@ -10,15 +10,20 @@ registries so lifecycle transitions and audit events are preserved.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from agency.capability.adapters import SkillCapabilityAdapter
+from agency.capability.attestation import AttestationError
+from agency.capability.contract import CapabilityRef, CapabilityType
+from agency.core.hashing import canonical_sha256
 from agency.factory.prompts import PromptKind, PromptRegistry, PromptSpec, PromptStatus
 from agency.factory.prompts_builtin import ensure_builtin_prompts
 from agency.factory.service import AgentFactory, BlueprintStatus
-from agency.selfimprove.distiller import TaskTrace
+from agency.selfimprove.distiller import TaskTrace, _description_from_trace, _slugify
 from agency.selfimprove.loop import SelfImprovementLoop
+from agency.skills.executor import DOCUMENTATION_ONLY_IMPLEMENTATION
 from agency.skills.registry import SkillRegistry, SkillSpec, SkillStatus
 
 if TYPE_CHECKING:
@@ -31,6 +36,8 @@ MAX_BLUEPRINT_ID_LEN = 128
 MAX_GAPS = 16
 MAX_GAP_CHARS = 512
 MAX_NEW_SKILLS = 8
+MAX_LIFETIME_LEARNED_SKILLS = 32
+SELF_IMPROVE_PERMISSION = "agent.self_improve"
 MAX_ID_CHARS = 128
 
 BASE_PROMPT_REFS: tuple[tuple[str, str], ...] = (
@@ -156,21 +163,45 @@ def _derived_gaps(trace: TaskTrace) -> tuple[str, ...]:
     return tuple(gaps)
 
 
+def _normalize_description(text: str) -> str:
+    """Lowercase, collapse whitespace, and blank digit runs.
+
+    Volatile identifiers (task ids, skill versions) inside generated gap
+    descriptions must not defeat cross-cycle dedup (gaps.md #8).
+    """
+    return re.sub(r"\d+", "#", " ".join(text.lower().split()))
+
+
+def _description_key(text: str) -> str:
+    """Neutral hash of the normalized description (gaps.md #8)."""
+    return canonical_sha256(_normalize_description(text))
+
+
 def _new_gap_skill(
     registry: SkillRegistry, agent_id: str, title: str, gap: str
 ) -> SkillSpec | None:
-    slug = re.sub(r"[^a-z0-9]+", "-", gap.lower()).strip("-")[:48] or "gap-skill"
+    description = gap[:500]
+    slug = re.sub(r"[^a-z0-9]+", "-", _normalize_description(description)).strip("-")[:48]
+    slug = slug or "gap-skill"
     skill_id = f"gap-{slug}"[:64]
+    # Cross-cycle dedup: the same normalized description already registered
+    # under this id means the gap was recorded in an earlier cycle (gaps.md #8).
+    key = _description_key(description)
+    for existing in registry.list_versions(skill_id):
+        if _description_key(existing.description) == key:
+            return None
     version = _next_version([s.version for s in registry.list_versions(skill_id)])
     spec = SkillSpec(
         skill_id=skill_id,
         version=version,
         name=f"Gap: {title}"[:120],
-        description=gap[:500],
+        description=description,
         inputs={"task": {"type": "string"}},
         outputs={"result": {"type": "string"}},
         permissions=(),
-        implementation=f"learned.{slug}",
+        # Documentation-only metadata (gaps.md #4): no callable is registered
+        # for learned gap skills, so never name a nonexistent operation here.
+        implementation=DOCUMENTATION_ONLY_IMPLEMENTATION,
         provenance=f"agent-gap:{agent_id}",
         status=SkillStatus.DRAFT,
     )
@@ -178,6 +209,19 @@ def _new_gap_skill(
         return registry.register(spec)
     except (ValueError, KeyError):
         return None
+
+
+def _learned_skill_duplicate(registry: SkillRegistry, trace: TaskTrace) -> bool:
+    """True when the record ``distill_skill`` would create already exists.
+
+    Mirrors the distiller's id and description derivation so the dedup key
+    matches the record that would be registered (gaps.md #8).
+    """
+    skill_id = f"learned-{_slugify(trace.title)}"[:64]
+    key = _description_key(_description_from_trace(trace))
+    return any(
+        _description_key(item.description) == key for item in registry.list_versions(skill_id)
+    )
 
 
 class RequestedAgentService:
@@ -193,6 +237,7 @@ class RequestedAgentService:
         attestation_store: AttestationStore | None = None,
         approver: str = "factory-improvement",
         auto_promote: bool = True,
+        self_improve_authorizer: Callable[[str, str], bool] | None = None,
     ) -> None:
         self._factory = factory
         self._prompt_registry = prompt_registry
@@ -201,6 +246,12 @@ class RequestedAgentService:
         self._attestation_store = attestation_store
         self._approver = approver
         self._auto_promote = bool(auto_promote)
+        # Human gate for self-modification (gaps.md #2): prompt refinement and
+        # blueprint re-versioning are denied unless a distinct actor is
+        # accepted by this callback for ``agent.self_improve`` (fail closed).
+        self._self_improve_authorizer = self_improve_authorizer
+        # Lifetime count of learned/gap skills registered by this service.
+        self._learned_skill_count = 0
         self._loop = SelfImprovementLoop(skill_registry)
 
     def _validate_request(self, request: RequestedAgentRequest) -> None:
@@ -372,6 +423,33 @@ class RequestedAgentService:
         agent = self._kernel.get(agent_id)
         return bool(agent is not None and agent.metadata.get("factory") == "agent-factory-v1")
 
+    def _require_self_improve_approval(self, approver: str, agent_id: str) -> str:
+        """Human gate before self-modification (gaps.md #2); fails closed.
+
+        The requester — the agent being improved and this service's automated
+        identity — can never authorize its own re-versioning. A distinct actor
+        must be accepted by ``self_improve_authorizer`` for
+        ``agent.self_improve``, mirroring ``AgentFactory.approve``.
+        """
+        if not isinstance(approver, str) or not approver.strip():
+            raise ValueError("self-improvement approver must be a nonblank string.")
+        approver = approver.strip()
+        if approver == agent_id or approver == self._approver:
+            raise ValueError(
+                "self-improvement approver must differ from the requester (no self-approval)."
+            )
+        if self._self_improve_authorizer is None:
+            raise PermissionError("no authorizer configured (fail closed).")
+        try:
+            allowed = self._self_improve_authorizer(approver, SELF_IMPROVE_PERMISSION)
+        except PermissionError:
+            raise
+        except Exception as exc:
+            raise PermissionError(f"authorizer failed closed: {exc}") from exc
+        if allowed is not True:
+            raise PermissionError(f"approver {approver!r} denied for {SELF_IMPROVE_PERMISSION}.")
+        return approver
+
     def improve_agent(
         self,
         agent_id: str,
@@ -379,8 +457,14 @@ class RequestedAgentService:
         *,
         prompt_gaps: Sequence[str] | None = None,
         max_new_skills: int = MAX_NEW_SKILLS,
+        approver: str = "",
     ) -> ImprovementReport:
-        """Refine skills/prompt for a factory-issued agent, re-version its blueprint."""
+        """Refine skills/prompt for a factory-issued agent, re-version its blueprint.
+
+        Prompt refinement and blueprint re-versioning are human-gated
+        (gaps.md #2): ``approver`` must be a distinct actor authorized for
+        ``agent.self_improve`` by the configured ``self_improve_authorizer``.
+        """
         agent = self._kernel.get_required(agent_id)
         if agent.metadata.get("factory") != "agent-factory-v1":
             raise ValueError(f"agent {agent_id!r} is not factory-issued")
@@ -391,6 +475,8 @@ class RequestedAgentService:
             raise ValueError(f"blueprint {(blueprint_id, old_version)!r} is not ACTIVE")
 
         gaps = _normalize_gaps(prompt_gaps) if prompt_gaps is not None else _derived_gaps(trace)
+        if gaps and self._auto_promote:
+            approver = self._require_self_improve_approval(approver, agent_id)
 
         targets = list(_failed_skill_steps(trace))
         if gaps:
@@ -409,16 +495,24 @@ class RequestedAgentService:
 
         new_skills: list[tuple[str, str]] = []
         for gap in gaps[:max_new_skills]:
+            if self._learned_skill_count >= MAX_LIFETIME_LEARNED_SKILLS:
+                break
             spec = _new_gap_skill(self._skill_registry, agent_id, trace.title, gap)
             if spec is not None:
+                self._learned_skill_count += 1
                 key = (spec.skill_id, spec.version)
                 if key not in new_skills:
                     new_skills.append(key)
 
         distilled: list[tuple[str, str]] = []
-        if trace.status.strip().lower() == "completed":
+        if (
+            trace.status.strip().lower() == "completed"
+            and self._learned_skill_count < MAX_LIFETIME_LEARNED_SKILLS
+            and not _learned_skill_duplicate(self._skill_registry, trace)
+        ):
             spec = self._loop.distill(trace)
             if spec is not None:
+                self._learned_skill_count += 1
                 key = (spec.skill_id, spec.version)
                 if key not in new_skills and key not in distilled:
                     distilled.append(key)
@@ -466,7 +560,7 @@ class RequestedAgentService:
                 pid,
                 new_prompt_version,
                 evidence="Published for blueprint re-activation",
-                approver=self._approver,
+                approver=approver,
             )
             prompt_refined = True
             prompt_version = new_prompt_version
@@ -491,12 +585,16 @@ class RequestedAgentService:
             self._factory.approve(
                 blueprint_id,
                 new_bp_version,
-                approver=self._approver,
+                approver=approver,
                 evidence=f"Blueprint re-version for self-improvement: {gaps[0][:200]}",
             )
-            new_agent = self._factory.activate(blueprint_id, new_bp_version)
-            self._factory.revoke(
-                blueprint_id, old_version, evidence=f"Superseded by {new_bp_version}"
+            # One SQLite transaction: a crash can never leave two ACTIVE
+            # blueprints or strand the superseded identity (gaps.md #3).
+            new_agent = self._factory.reversion(
+                blueprint_id,
+                new_bp_version,
+                old_version,
+                evidence=f"Superseded by {new_bp_version}",
             )
             new_agent_id = new_agent.id
 
@@ -533,22 +631,20 @@ class RequestedAgentService:
     def publish_skill(
         self, skill_id: str, version: str, *, approver: str, evidence: str = ""
     ) -> SkillSpec:
-        from agency.capability.adapters import SkillCapabilityAdapter
-        from agency.capability.attestation import AttestationError
-        from agency.capability.contract import CapabilityRef, CapabilityType
-
         spec = self._skill_registry.get(skill_id, version)
         if spec.status is SkillStatus.PUBLISHED:
             raise ValueError("skill is already published")
-        if self._attestation_store is not None:
-            digest = (
-                SkillCapabilityAdapter(self._skill_registry).get(skill_id, version).content_digest
+        # Mandatory publication gate (gaps.md #5): an unattested skill can
+        # never be promoted DRAFT -> PUBLISHED by this service.
+        if self._attestation_store is None:
+            raise AttestationError(
+                f"publication of {(skill_id, version)!r} requires a configured "
+                "attestation store (fail closed)."
             )
-            ref = CapabilityRef(CapabilityType.SKILL, skill_id, version)
-            if self._attestation_store.get(ref, digest) is None:
-                raise AttestationError(
-                    f"publication of {(skill_id, version)!r} requires attestation"
-                )
+        digest = SkillCapabilityAdapter(self._skill_registry).get(skill_id, version).content_digest
+        ref = CapabilityRef(CapabilityType.SKILL, skill_id, version)
+        if self._attestation_store.get(ref, digest) is None:
+            raise AttestationError(f"publication of {(skill_id, version)!r} requires attestation")
         current = self._skill_registry.get(skill_id, version)
         if current.status is SkillStatus.DRAFT:
             self._skill_registry.transition(
@@ -579,9 +675,11 @@ __all__ = [
     "MAX_DOMAIN_CHARS",
     "MAX_GAPS",
     "MAX_GAP_CHARS",
+    "MAX_LIFETIME_LEARNED_SKILLS",
     "MAX_NAME_CHARS",
     "MAX_NEW_SKILLS",
     "MAX_PURPOSE_CHARS",
+    "SELF_IMPROVE_PERMISSION",
     "ImprovementReport",
     "RequestedAgentRequest",
     "RequestedAgentResult",

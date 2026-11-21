@@ -9,11 +9,11 @@ evidence. Records owning a CRITICAL finding stay quarantined even inside a
 PASS bundle. The scanner never executes the scanned markdown and this script
 never executes upstream code (AGENTS.md rule).
 
-Grouping is derived from the on-disk clones (workspace/inbox/<clone>/...),
-not from prompt-id prefixes: a record's division is the parent directory of
-its source file (agency-agents/engineering/... -> "engineering"), matched
-back to the registry through the importer's deterministic id construction
-(`factory/imports.py::_candidate_id`).
+Grouping is derived from each record's import-quarantine provenance (the
+imported source path), not from prompt-id prefixes or on-disk clone state: a
+record's division is the parent directory of its source path
+(agency-agents/engineering/... -> "engineering"), read straight from the
+registry — so every quarantined record is covered even when the clones move.
 
 Usage:
     python scripts/promote_division.py --division research [--dry-run]
@@ -23,9 +23,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import shutil
+import sqlite3
 import sys
 import tempfile
 from collections import Counter
@@ -34,78 +33,45 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from agency.factory.prompts import PromptRegistry, PromptStatus  # noqa: E402
-from agency.tools.reviewer import SkillSpectorReviewer, verdict_for_report  # noqa: E402
+from agency.factory.prompts import PromptRegistry, PromptStatus
+from agency.tools.reviewer import SkillSpectorReviewer, verdict_for_report
 
 MIN_BODY_CHARS = 500
-CHUNK = 50  # SkillSpector caps skills per scan; chunk bundles at this size  # excludes clone-pointer debris (see AGENCY_AGENTS_IMPORT_REVIEW §2)
+CHUNK = 50  # SkillSpector caps skills per scan; chunk bundles at this size
+# Non-agent content the import walk also captured (repo readmes/indexes):
+EXCLUDED_DIVISIONS = {
+    "README",
+    "AGENTS",
+    "CLAUDE",
+    "changelog",
+}  # excludes clone-pointer debris (see AGENCY_AGENTS_IMPORT_REVIEW §2)
 APPROVER = "skillspector-reviewer"
-CLONES = ("rstack", "ECC", "agency-agents", "skills")
-# Must mirror scripts/import_external_agents_skills.py REPOS — the prompt id
-# derives from sha12(f"{origin}@main|{relative}"), so origins are load-bearing.
-ORIGINS = {
-    "rstack": "https://github.com/michaelshimeles/rstack",
-    "ECC": "https://github.com/affaan-m/ECC",
-    "agency-agents": "https://github.com/msitarzewski/agency-agents",
-    "skills": "https://github.com/mattpocock/skills",
-}
 
 
-def candidate_id(source_identity: str, stem: str) -> str:
-    """Replicate ``factory/imports.py::_candidate_id`` (id = slug + sha12 of location)."""
-    slug = "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in stem.casefold())
-    slug = slug.strip("-._")[:44] or "imported-markdown"
-    identity = hashlib.sha256(source_identity.encode("utf-8")).hexdigest()[:12]
-    base = f"{slug}-{identity}"
-    cleaned = "".join(ch if ch.isalnum() or ch in "._-" else "-" for ch in base)
-    cleaned = cleaned.strip("-._")
-    if not cleaned or not cleaned[0].isalpha():
-        cleaned = f"imported-{cleaned}"
-    return cleaned[:110]
+def division_records(db_path: str, division: str) -> list[dict]:
+    """All DRAFT records of one division, grouped from provenance (source path).
 
-
-def collect_divisions(inbox: Path) -> dict[str, dict[str, list[Path]]]:
-    """Map division -> {clone: [markdown files]}, from the on-disk clones."""
-    out: dict[str, dict[str, list[Path]]] = {}
-    for clone in CLONES:
-        base = inbox / clone
-        if not base.is_dir():
+    Grouping comes from the record's own provenance JSON — the source file's
+    parent directory (``agency-agents/academic/x.md`` -> "academic") — so it
+    covers every quarantined record regardless of on-disk clone state
+    (location-derived ids go stale when clones move; provenance does not).
+    """
+    conn = sqlite3.connect(db_path)
+    out: list[dict] = []
+    query = (
+        "SELECT prompt_id, name, length(body), status, provenance FROM prompts "
+        "WHERE status = ? AND provenance LIKE 'import-quarantine:%'"
+    )
+    for pid, name, body_len, status, provenance in conn.execute(query, ("DRAFT",)):
+        payload = json.loads(provenance.split(":", 1)[1])
+        source_path = str(payload.get("path", ""))
+        parts = source_path.split("/")
+        record_division = parts[1] if len(parts) > 2 else parts[0]
+        if record_division != division:
             continue
-        for path in sorted(base.rglob("*.md")):
-            relative = path.relative_to(inbox).as_posix()
-            parts = Path(relative).parts
-            division = parts[1] if len(parts) > 2 else clone  # <clone>/<division>/file.md
-            out.setdefault(division, {}).setdefault(clone, []).append(path)
+        out.append({"prompt_id": pid, "name": name, "body_len": body_len, "status": status})
+    conn.close()
     return out
-
-
-def division_records(
-    prompts: PromptRegistry, files: dict[str, list[Path]], division: str
-) -> list[dict]:
-    """Registry rows for a division's files, via the deterministic id construction."""
-    records: list[dict] = []
-    seen_ids: set[str] = set()
-    for clone, paths in sorted(files.items()):
-        for path in paths:
-            relative = path.relative_to(ROOT / "workspace" / "inbox").as_posix()
-            source_identity = f"{ORIGINS[clone]}@main|{relative}"
-            pid = candidate_id(source_identity, Path(relative).stem)
-            if pid in seen_ids:
-                continue
-            seen_ids.add(pid)
-            try:
-                spec = prompts.get(pid, "0.0.0")
-            except (KeyError, ValueError):
-                continue
-            records.append(
-                {
-                    "prompt_id": pid,
-                    "name": spec.name,
-                    "body_len": len(spec.body),
-                    "source": relative,
-                }
-            )
-    return records
 
 
 def materialize(records: list[dict], bundle: Path, prompts: PromptRegistry) -> None:
@@ -136,19 +102,24 @@ def run_division(
     prompts: PromptRegistry,
     reviewer: SkillSpectorReviewer,
     division: str,
-    files: dict[str, list[Path]],
+    db_path: str,
     *,
     dry_run: bool,
 ) -> dict:
-    records = division_records(prompts, files, division)
+    records = division_records(db_path, division)
     eligible = [r for r in records if r["body_len"] >= MIN_BODY_CHARS]
     skipped_debris = len(records) - len(eligible)
 
-    # Dedupe by record name across clones (review finding: 746 overlaps).
+    # Dedupe by record name across clones (review finding: 746 overlaps), and
+    # keep only records still awaiting promotion — re-runs are idempotent.
     by_name: dict[str, dict] = {}
     for record in eligible:
         by_name.setdefault(record["name"].casefold(), record)
-    deduped = sorted(by_name.values(), key=lambda r: r["prompt_id"])
+    deduped = sorted(
+        (r for r in by_name.values() if r["status"] == "DRAFT"),
+        key=lambda r: r["prompt_id"],
+    )
+    already_published = len(eligible) - sum(1 for r in eligible if r["status"] == "DRAFT")
 
     result: dict = {
         "division": division,
@@ -156,6 +127,7 @@ def run_division(
         "eligible": len(eligible),
         "deduped": len(deduped),
         "skipped_debris": skipped_debris,
+        "already_published": already_published,
         "promoted": [],
         "critical_quarantined": [],
         "bundle_verdict": "",
@@ -216,18 +188,18 @@ def run_division(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--division", action="append", help="Division name (repeatable).")
-    parser.add_argument("--all", action="store_true", help="Every division found in the clones.")
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Every quarantined division in the registry (minus non-agent divisions).",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--db", default=str(ROOT / "data" / "prompts.db"))
-    parser.add_argument("--inbox", default=str(ROOT / "workspace" / "inbox"))
     args = parser.parse_args()
 
-    inbox = Path(args.inbox)
     # Always read the real registry (dry-run differs only in not writing).
     prompts = PromptRegistry(args.db)
-    reviewer = SkillSpectorReviewer(
-        extra_args=("--recursive", "--max-skills", str(CHUNK))
-    )
+    reviewer = SkillSpectorReviewer(extra_args=("--recursive", "--max-skills", str(CHUNK)))
     if not reviewer.is_available():
         print(
             "ERROR: skillspector is not available (pyproject dependency; "
@@ -237,20 +209,36 @@ def main() -> int:
         )
         return 2
 
-    clone_map = collect_divisions(inbox)
-    wanted = sorted(clone_map) if args.all else list(args.division or [])
-    unknown = [d for d in wanted if d not in clone_map]
+    # Divisions come from the registry's own provenance (source parent dirs),
+    # not from the on-disk clones — covers every quarantined record.
+    divisions: dict[str, int] = {}
+    for pid, prov in prompts._conn_required().execute(
+        "SELECT prompt_id, provenance FROM prompts WHERE status = ? "
+        "AND provenance LIKE 'import-quarantine:%'",
+        (PromptStatus.DRAFT.value,),
+    ):
+        try:
+            payload = json.loads(prov.split(":", 1)[1])
+        except (ValueError, IndexError):
+            continue
+        parts = str(payload.get("path", "")).split("/")
+        division = parts[1] if len(parts) > 2 else parts[0]
+        divisions[division] = divisions.get(division, 0) + 1
+    wanted = (
+        sorted(d for d in divisions if d not in EXCLUDED_DIVISIONS)
+        if args.all
+        else list(args.division or [])
+    )
+    unknown = [d for d in wanted if d not in divisions]
     if unknown:
-        print(f"unknown divisions: {unknown}", file=sys.stderr)
+        print(f"unknown divisions (no quarantined records): {unknown}", file=sys.stderr)
         return 2
 
     out_dir = ROOT / "data" / "promotion_results"
     out_dir.mkdir(parents=True, exist_ok=True)
     totals: Counter = Counter()
     for division in wanted:
-        result = run_division(
-            prompts, reviewer, division, clone_map[division], dry_run=args.dry_run
-        )
+        result = run_division(prompts, reviewer, division, args.db, dry_run=args.dry_run)
         totals["records"] += result["records"]
         totals["eligible"] += result["eligible"]
         totals["deduped"] += result["deduped"]

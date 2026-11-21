@@ -29,9 +29,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from agency.factory.imports import MarkdownImportService  # noqa: E402
-from agency.factory.prompts import PromptKind, PromptRegistry  # noqa: E402
-from agency.skills.registry import SkillRegistry, SkillSpec, SkillStatus  # noqa: E402
+from agency.factory.imports import MarkdownImportService
+from agency.factory.prompts import PromptRegistry
+from agency.skills.registry import SkillRegistry, SkillSpec, SkillStatus
 
 INBOX = ROOT / "workspace" / "inbox"
 
@@ -62,7 +62,7 @@ SCAN_DIRS: dict[str, tuple[str, ...] | None] = {
     "skills": ("skills",),
 }
 
-SKIP_FILENAMES = {"README.md", "CONTRIBUTING.md", "CHANGELOG.md", "LICENSE.md", "LICENSE.md"}
+SKIP_FILENAMES = {"README.md", "CONTRIBUTING.md", "CHANGELOG.md", "LICENSE.md"}
 MAX_SOURCE_BYTES = 64 * 1024
 
 
@@ -142,7 +142,7 @@ def repair_frontmatter(text: str) -> str:
         value = match.group(2)
         if value[0] in "\"'[{>|&*!%#@`" or ": " not in value:
             continue
-        escaped = value.replace("\\", "\\\\").replace("\"", "\\\"")
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
         lines[i] = f'{match.group(1)}"{escaped}"\n'
         changed = True
     if not changed:
@@ -153,19 +153,19 @@ def repair_frontmatter(text: str) -> str:
 def parse_source(
     service: MarkdownImportService, path: Path, relative: str, origin: str, license_id: str
 ):
-    kwargs = dict(
-        source_label=f"{origin}/blob/main/{relative}",
-        license_id=license_id,
-        source_path_override=relative,
-        source_identity=f"{origin}@main|{relative}",
-    )
+    kwargs = {
+        "source_label": f"{origin}/blob/main/{relative}",
+        "license_id": license_id,
+        "source_path_override": relative,
+        "source_identity": f"{origin}@main|{relative}",
+    }
     try:
-        return service._parse_markdown(path, **kwargs)  # noqa: SLF001 - deliberate reuse of parser
-    except Exception as exc:  # noqa: BLE001 - attempt repair only for YAML frontmatter failures
+        return service._parse_markdown(path, **kwargs)
+    except Exception as exc:
         if type(exc).__name__ != "ImportError" or "invalid YAML frontmatter" not in str(exc):
             raise
         repaired = repair_frontmatter(path.read_bytes().decode("utf-8-sig"))
-        return service._parse_markdown(repaired, **kwargs)  # noqa: SLF001
+        return service._parse_markdown(repaired, **kwargs)
 
 
 def impl_name(relative_path: str) -> str:

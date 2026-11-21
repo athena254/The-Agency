@@ -47,7 +47,7 @@ async def butler_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: 
         if service is not None:
             try:
                 await service.stop()
-            except Exception:  # noqa: S110 — teardown best effort
+            except Exception:  # noqa: S110, BLE001 — teardown best effort
                 pass
 
 
@@ -63,7 +63,7 @@ async def test_unauthenticated_message_is_401_when_tokens_configured(
     if service is not None:
         try:
             await service.stop()
-        except Exception:  # noqa: S110
+        except Exception:  # noqa: S110, BLE001 — teardown best effort
             pass
 
 

@@ -612,3 +612,89 @@ def test_recovery_rejects_conflicting_identity_and_blank_evidence(tmp_path) -> N
         assert runtimes.get_agent(original.id) is not None
     finally:
         fac.close()
+
+
+class _FailingRuntimeRegistry:
+    """Runtime registry whose register fails after the first call."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def register(self, agent: object) -> None:
+        self.calls += 1
+        if self.calls > 1:
+            raise RuntimeError("runtime registration unavailable")
+
+    def deregister(self, agent_id: str) -> None:
+        return None
+
+    def get_agent(self, agent_id: str) -> None:
+        return None
+
+
+def test_reversion_activates_new_and_revokes_old_atomically(tmp_path) -> None:
+    fac, kernels, runtimes = _factory(tmp_path)
+    try:
+        _draft(fac)
+        fac.approve("analyst", "1.0.0", approver="approver", evidence="e1")
+        old_agent = fac.activate("analyst", "1.0.0")
+        _draft(fac, version="1.0.1")
+        fac.approve("analyst", "1.0.1", approver="approver", evidence="e2")
+        agent = fac.reversion("analyst", "1.0.1", "1.0.0", evidence="superseded by 1.0.1")
+        assert agent.id != old_agent.id
+        assert fac.get("analyst", "1.0.1").status is BlueprintStatus.ACTIVE
+        assert fac.get("analyst", "1.0.1").runtime_agent_id == agent.id
+        assert fac.get("analyst", "1.0.0").status is BlueprintStatus.REVOKED
+        assert fac.get("analyst", "1.0.0").runtime_agent_id == old_agent.id
+        assert kernels.get_required(agent.id).metadata["blueprint_version"] == "1.0.1"
+        assert kernels.get_required(old_agent.id).revoked is True
+        assert runtimes.get_agent(agent.id) is not None
+        assert runtimes.get_agent(old_agent.id) is None
+        assert [e["to_status"] for e in fac.list_events("analyst", "1.0.1")] == [
+            "DRAFT",
+            "APPROVED",
+            "ACTIVE",
+        ]
+        last_old = fac.list_events("analyst", "1.0.0")[-1]
+        assert last_old["to_status"] == "REVOKED"
+        assert last_old["evidence"] == "superseded by 1.0.1"
+    finally:
+        fac.close()
+
+
+def test_reversion_requires_active_old_and_approved_new(tmp_path) -> None:
+    fac, _kernels, _ = _factory(tmp_path)
+    try:
+        _draft(fac)
+        fac.approve("analyst", "1.0.0", approver="approver", evidence="e1")
+        _draft(fac, version="1.0.1")
+        with pytest.raises(ValueError, match="ACTIVE old version"):
+            fac.reversion("analyst", "1.0.1", "1.0.0", evidence="superseded")
+        assert fac.get("analyst", "1.0.0").status is BlueprintStatus.APPROVED
+        assert fac.get("analyst", "1.0.1").status is BlueprintStatus.DRAFT
+        fac.activate("analyst", "1.0.0")
+        with pytest.raises(ValueError, match="APPROVED"):
+            fac.reversion("analyst", "1.0.1", "1.0.0", evidence="superseded")
+        assert fac.get("analyst", "1.0.0").status is BlueprintStatus.ACTIVE
+        assert fac.get("analyst", "1.0.1").status is BlueprintStatus.DRAFT
+    finally:
+        fac.close()
+
+
+def test_reversion_rolls_back_registration_failure_atomically(tmp_path) -> None:
+    fac, kernels, _ = _factory(tmp_path, runtime_registry=_FailingRuntimeRegistry())
+    try:
+        _draft(fac)
+        fac.approve("analyst", "1.0.0", approver="approver", evidence="e1")
+        old_agent = fac.activate("analyst", "1.0.0")
+        _draft(fac, version="1.0.1")
+        fac.approve("analyst", "1.0.1", approver="approver", evidence="e2")
+        with pytest.raises(ValueError, match="runtime registration failed closed"):
+            fac.reversion("analyst", "1.0.1", "1.0.0", evidence="superseded")
+        assert fac.get("analyst", "1.0.0").status is BlueprintStatus.ACTIVE
+        assert fac.get("analyst", "1.0.0").runtime_agent_id == old_agent.id
+        assert fac.get("analyst", "1.0.1").status is BlueprintStatus.APPROVED
+        assert fac.get("analyst", "1.0.1").runtime_agent_id is None
+        assert kernels.get_required(old_agent.id).revoked is False
+    finally:
+        fac.close()

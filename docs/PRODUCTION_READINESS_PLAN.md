@@ -1,6 +1,6 @@
 # Production readiness plan
 
-Status: **NOT PRODUCTION READY**. This is a gated engineering plan, not authorization to deploy. Owner requested October 15, 2026. Current implementation evidence is maintained in `CURRENT_STATE.md` and `research-evidence/late-review-verification.json` after integration. The 51-section source brief remains product direction; this plan does not pretend its planned features are implemented.
+Status: **NOT PRODUCTION READY**. This is a gated engineering plan, not authorization to deploy. Owner requested October 15, 2026. Current implementation evidence is maintained in `CURRENT_STATE.md` and `archive/research-evidence/late-review-verification.json` after integration. The 51-section source brief remains product direction; this plan does not pretend its planned features are implemented.
 
 ## 1. Define what will be released
 
@@ -65,7 +65,7 @@ Acceptance: real containment tests on target OS for filesystem/network/CPU/memor
 
 Dependencies: P2/P3 for authority-bearing runtime paths.
 
-Late source-review backlog (details in `LATE_REVIEW_DISPOSITION.md`): R-01 consistent owner-scoped conversation context in every routed domain; R-02 actual subtask-specific specialist dispatch/dependency outputs rather than repeated whole-task prompts; R-03 evidence/QA outcomes that are not hardcoded to passed and have the approved blocking semantics; R-04 principal-bound memory-tool resource scope/redacted errors before multiuser exposure; R-05 durable task/audit/evidence lifecycle (explicit memory aging is now started on this branch via `TieredMemoryEngine`, verify in final gate); R-06 strict authenticated/evaluated capability approval/publication. P1/P3 must close the privacy/authority subsets before any pilot that could expose them; this list does not defer a tenant leak until after deployment.
+Late source-review backlog (details in `archive/LATE_REVIEW_DISPOSITION.md`): R-01 consistent owner-scoped conversation context in every routed domain; R-02 actual subtask-specific specialist dispatch/dependency outputs rather than repeated whole-task prompts; R-03 evidence/QA outcomes that are not hardcoded to passed and have the approved blocking semantics; R-04 principal-bound memory-tool resource scope/redacted errors before multiuser exposure; R-05 durable task/audit/evidence lifecycle (explicit memory aging is now started on this branch via `TieredMemoryEngine`, verify in final gate); R-06 strict authenticated/evaluated capability approval/publication. P1/P3 must close the privacy/authority subsets before any pilot that could expose them; this list does not defer a tenant leak until after deployment.
 
 Work: close AgentFactory restart/reconciliation/evaluation gaps; bind versioned published skills/workflows to actual permitted execution and evidence. Review the proposed unified capability contract before implementation. Forge expands in independently gated slices: isolated tests -> reviewer/security evidence -> bounded coding -> immutable artifacts -> authorized release. Workspace/project/authenticated UI is separate from current local chat shell. Domain agents beyond general/research/demo need actual implementations and evaluations, not seeded names.
 

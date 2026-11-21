@@ -3,137 +3,207 @@
 Found while implementing `RequestedAgentService` (`src/agency/factory/requested_agent.py`).
 Ordered by production risk. **Avoid these patterns; all agents are free to fix them.**
 
-## 1. Capability ⇄ Factory circular import (structural)
-`src/agency/capability/contract.py:9` imports `canonical_sha256` from `agency.factory.coding_models`.
-Because importing a submodule runs `agency.factory.__init__`, any factory module that imports
-`agency.capability.*` at module load time creates a cycle. `requested_agent.py` works around it
-with lazy imports inside `publish_skill` (`src/agency/factory/requested_agent.py:514`).
-**Fix:** move `canonical_sha256` into a neutral module (e.g. `agency/core/hashing.py`) and re-export;
-then remove the lazy-import workaround. Do NOT add module-level capability imports under `agency/factory/`.
+**Status 2026-11-22 (full-gap sweep):** 16 of 20 closed — gaps 1-9, 11-16 and 20; gaps 18
+(D6 grant-verifier landed, full route swap remains), 19 (leases + shared stores, no
+last-writer-wins CAS) and 10 (live adapter + live task qualified on CentAI `hy4-flash:free`
+2026-11-22; improve leg + soak remain) are partially closed — commit references below; gap
+20's ref is on `gap/autonomy-execution`, the Tier6 refs landed on `main` (`37095b9`) and the
+consolidation line (`f981282`). Gap 17 remains open for an external reason (no real PAK
+repository to wire against); gaps 18-20 were added by the intake workstream (2026-11-20).
 
-## 2. Self-improvement can rewrite its own prompt without a distinct human gate
-`improve_agent` auto-approves the refined purpose prompt and new blueprint version using the
-service's fixed `approver` (`requested_agent.py:450-480`). The factory authorizer is consulted, but
-the same service identity performs both request and approval; there is no separate human decision
-for self-modification. **Fix:** require an explicit `authorizer(actor, "agent.self_improve")`
-callback (and a different actor) before re-versioning, mirroring `agent.approve`.
+## 1. Capability ⇄ Factory circular import (structural) — CLOSED `5399d37`
+`canonical_sha256` moved to the neutral `src/agency/core/hashing.py`; `factory.coding_models`
+re-exports it, `capability/contract.py` imports from core, `capability/composition.py` takes
+`AgentFactory`/`Blueprint` under `TYPE_CHECKING` only, and the lazy-import workaround in
+`publish_skill` is gone. Module-level capability imports inside `agency/factory/` are safe
+now; still never import factory from capability at module load time.
 
-## 3. Re-activation is not atomic
-`requested_agent.py:478-480` calls `activate(new)` then `revoke(old)` as separate SQLite
-transactions. A crash between them leaves two ACTIVE blueprints/agent identities; a failure in
-`revoke` strands the old identity. Factory rollback exists inside `activate` only.
-**Fix:** add an atomic `AgentFactory.reversion(...)` transaction, or an explicit reconciler on
-startup. Related: runtime identities are ephemeral — `recover_active()` is manual.
+## 2. Self-improvement human gate — CLOSED `1ed038f`
+`improve_agent` requires an explicit approver accepted by the service's
+`self_improve_authorizer` for `"agent.self_improve"`; the agent being improved and the
+service's own automated approver identity are rejected (no self-approval); fails closed when
+unset. The human actor is recorded on the prompt publish and the factory approve audit.
 
-## 4. Distilled / gap skills have no runnable implementation
-`_new_gap_skill` (`requested_agent.py:157`) and `selfimprove/distiller.py:66` create skills with
-opaque `implementation="learned.<slug>"`, but nothing registers a callable in `OperationRegistry`.
-Even after promotion to PUBLISHED, `SkillExecutor.run` returns "unknown operation". The self-
-improvement loop creates skills that cannot execute. **Fix:** register an implementation for each
-promoted skill, or mark them explicitly as documentation-only metadata.
+## 3. Re-activation atomicity — CLOSED `1ed038f`
+`AgentFactory.reversion()` performs activate(new) + revoke(old) inside one
+`BEGIN IMMEDIATE` SQLite transaction (both identity updates and audit events commit
+together, activate's rollback discipline preserved). A startup reconciler was intentionally
+not built (YAGNI).
 
-## 5. Publication gate is opt-in
-`publish_skill` checks `AttestationStore` only when one is configured (`requested_agent.py:514+`).
-With the default `attestation_store=None`, an improved skill can be promoted DRAFT→PUBLISHED
-automatically. **Fix:** make attestation mandatory for any skill a factory-issued agent will pin.
+## 4. Distilled / gap skills have no runnable implementation — CLOSED `36bd00f`
+Learned/gap skills are created with the `documentation-only` sentinel implementation
+(`agency.skills.executor.DOCUMENTATION_ONLY_IMPLEMENTATION`); `SkillExecutor.run` returns
+"skill is documentation-only; no executable operation" instead of "unknown operation".
+Legacy persisted `learned.*` names keep the old error (pinned by test).
 
-## 6. No external entry point to request an agent
-`RequestedAgentService.request_agent()` is only callable from Python. No CLI subcommand
-(`agency forge`/`agency`), Butler command, or HTTP route exposes "make an agent from a request".
-**Fix:** add a thin CLI/API adapter with an explicit authorizer and a purpose/policy allowlist.
+## 5. Publication gate is opt-in — CLOSED `1ed038f`
+`publish_skill` fails closed: it raises unless an attestation store is configured AND the
+store holds an attestation for the skill's `SkillCapabilityAdapter` content digest.
 
-## 7. Orchestrator improvement hook is narrow
-`orchestrator.py:965+` fires only for completed tasks and checks `is_factory_issued(task.created_by)`;
-with no failed skill steps the derived gaps are empty, so prompt refinement never runs on the
-classic (non-tool) path. **Fix:** define how prompt-gap observations are produced by the driver/LLM
-and thread them into `improve_agent(prompt_gaps=...)` from the orchestrator.
+## 6. No external entry point to request an agent — CLOSED `0078fa3`
+`POST /v1/agent-requests` (bearer-token `tasks:write` auth, creator bound server-side to the
+principal) and the `agency agent request` CLI command both go through
+`agents/bootstrap.request_agent_authorized` — an explicit `"agent.request"` authorizer plus a
+domain allowlist, both fail-closed (env: `AGENCY_AGENT_REQUEST_ACTORS`, `..._DOMAINS`,
+`..._APPROVER`; unset ⇒ all denied).
 
-## 8. Repeated improvement can create duplicate skills
-Each `improve_agent` call with gaps registers fresh `gap-*` / `learned-*` skills; only per-call
-`max_new_skills` is bounded, with no cross-cycle semantic dedup. **Fix:** dedup by description
-hash / capability index before registering, and cap lifetime skill count.
+## 7. Orchestrator improvement hook is narrow — CLOSED `36bd00f`
+`orchestrator._assessment_prompt_gaps` derives prompt-gap observations from real execution
+evidence (failed heuristic checks, short classic-path outputs) and threads them into
+`improve_agent(prompt_gaps=...)` alongside the trace-derived failed-skill-step gaps.
+Classic-path refinement demonstrably runs now (still human-gated per gap 2).
 
-## 9. Registries use SQLite without WAL / shared connection discipline
-`SkillRegistry`, `PromptRegistry`, `AgentFactory` open independent connections (default journal).
-The orchestrator's service and an external caller can hold two connections to the same DB
-(concurrent writes may lock). Forge stores use WAL; these do not. **Fix:** set WAL and document one
-writer connection per process.
+## 8. Repeated improvement creates duplicate skills — CLOSED `1ed038f`
+Gap/learned skills dedup by normalized-description hash (`canonical_sha256` over
+whitespace-collapsed, digit-blanked descriptions) against the SkillRegistry before
+registration, with a per-service lifetime cap (`MAX_LIFETIME_LEARNED_SKILLS = 32`).
 
-## 10. No live-provider qualification of this flow
-Verification was offline: 16 service tests + 1 orchestrator E2E with a mocked tool driver, plus
-factory/capability/skill/orchestrator suites (76 tests), ruff, format, mypy. No live LLM/provider
-run of request→task→improve, no multi-restart / concurrency soak. **Do not claim production
-certification** until these are exercised with the configured provider and a real agent run.
+## 9. Registries without WAL / shared-connection discipline — CLOSED `5399d37`
+`PromptRegistry`, `AgentFactory` and `SkillRegistry` set `journal_mode=WAL` +
+`synchronous=NORMAL` on their connections; one writer connection per process stands.
 
-## 11. GitHub-imported skills are metadata-only
-`scripts/import_github_skills.py` publishes `ext-*` `SkillSpec` records whose `implementation`
-names are never registered in `OperationRegistry`; `SkillExecutor.run` returns "unknown
-operation" for all of them. They are discoverable by `relevant_skills()` and attachable as L0
-capabilities, but cannot execute. **Fix:** register an operation that returns the quarantined
-prompt body, or label these skills explicitly as documentation-only.
+## 10. No live-provider qualification of this flow — PARTIALLY CLOSED (2026-11-22, live)
+Qualified live on an OpenAI-compatible provider (CentAI `api.cent-ai.dev/v1`, model
+`hy4-flash:free`, configured via `AGENCY_LLM_PROVIDER=openai` + `AGENCY_LLM_BASE_URL` +
+`AGENCY_LLM_API_KEY` in the untracked `.env`; key is never committed): (a) the Agency's own
+adapter path (dotenv → `load_config` → `LLMAdapter.generate`) returned the exact expected
+marker; (b) a real task ran through the full dispatcher pipeline — live planner (2 subtasks),
+live executor (`attempts=1`), correct result (`42`), audit entries, memory write, terminal
+`completed`, clean shutdown. The verifier scored the subtasks `0.667/failed` on a correct
+answer — the known independent-checker strictness open item, recorded honestly as findings.
+Still open: multi-restart and concurrency soak, and a second provider for comparison. The
+improve leg was qualified live the same day (2026-11-22): the offline `test_requested_agent_
+e2e` flow re-run with the live provider driving planner/executor — `request_agent` → live
+task → `improve_agent` re-versioned `scout` 1.0.0→1.0.1 (`prompt_refined=True`, atomic
+reversion, approver `human-lead` via the #2 human gate, purpose prompt 1.0.1 PUBLISHED,
+distilled skill 1.0.1 DRAFT). The Forge review gate was qualified live the same day on a
+second provider (Google, `5d91400`): with `GOOGLE_API_KEY` in the untracked `.env`,
+`build_review_llm` now prefers the Google serious model — the documented free
+`gemini-4-hydrogen` — via `load_named_provider("google")`, independent of the CentAI task
+LLM (unit-tested credential separation; the un-overridden default stays Google-only). Live
+`run_review(use_llm=True)` on a module+test fixture: inspection, security scan, the tests
+sub-gate (`rc=0`) and the LLM review round all executed, gate `PASS score 4`, sole caveat
+`not_a_human_review`. Free-tier capacity dips surface as 60s timeouts / transient 503s —
+the provider-aware backoff retries them and the gate fails closed with honest caveats when
+the provider stays unavailable (observed and verified live). Do not claim full production
+certification until the soak is exercised.
 
-## 12. Large-repo import bounds need per-repo narrowing
-`MarkdownImportService` caps tree JSON at 4 MiB, 500 Markdown files and 5 MiB total content.
-`ECC` has 1,089 `SKILL.md` files (433 at root depth) and a 1.6 MiB tree; `rea`, `gstack` and
-`claude-mem` also exceed the original 1 MiB tree bound. The service now uses per-repo path
-filters (`_ecc_skill_only`, `_skill_only`) and a `--from-registry` replay path. **Fix:** add a
-generic subtree-walk importer instead of hand-tuned filters.
+## 11. GitHub-imported skills are metadata-only — CLOSED `36bd00f`
+`ext-*` skills are created with the same documentation-only sentinel as gap 4; promotion and
+attachment behavior unchanged.
 
-## 13. Import promotion has no distinct human approver
-The `--promote` flag publishes imported drafts using automated review evidence and a default
-approver `owner`; SPEC_AGENT_FACTORY_V2 §12.3 requires promotion only after the Agency's own
-review *and approval*. There is no separate human decision recorded. **Fix:** require an
-explicit authorizer callback and a real approver identity for `skill.publish`.
+## 12. Large-repo import bounds need per-repo narrowing — CLOSED `daffe85`
+The hand-tuned `_ecc_skill_only`/`_skill_only`/`LARGE_REPOS` filters were removed;
+`MarkdownImportService` now narrows oversized unfiltered walks to skill/agent docs
+(deterministic shallowest-first subset) and bounds the content budget generically instead of
+raising for filtered walks.
 
-## 14. Manifest attachment is applied only by the API startup path
-`grant_manifest_capabilities()` is called from `api/server.py` lifespan after the coding agent
-and Blacksmith are registered. CLI and direct orchestrator usage do not grant the manifest's L0
-capabilities. **Fix:** centralize agent bootstrap so every entry point applies attachments.
+## 13. Import promotion has no distinct human approver — CLOSED `daffe85`
+`GitHubSkillImportService.promote()` fails closed without an explicit approver identity and
+a publish authorizer (the historical default approver `"owner"` is gone); the import script's
+`--promote` requires `--approver <human identity>`.
 
-## 15. Imported agent PACK prompts are not yet blueprint mappings
-`MarkdownImportService` classifies `AGENTS.md`-style sources as `PromptKind.PACK` DRAFT prompts,
-but no consumer turns them into Factory blueprints. Plan A (auto-install mapping) is scoped to
-the two registered agents in `data/agents/agents.yaml`; the remaining quarantined PACK prompts
-still have no runtime identity. **Fix:** implement a PACK→blueprint service with evidence.
+## 14. Manifest attachment only on the API startup path — CLOSED `0078fa3`
+`agents/bootstrap.bootstrap_agents()` installs manifest agents and grants manifest
+capabilities in one seam; the API lifespan calls it. The CLI is a pure HTTP client, so it is
+covered transitively (`agency start` → API lifespan). Embedded-orchestrator wiring was
+deliberately not forced: it would break the codified empty-registry invariant
+(`test_register_agent`) and is cwd-dependent — a one-line follow-up if wanted (see the note
+in `tests/test_agent_request_entrypoint.py`).
 
-## 16. Installed-agent registry is a flat manifest
-`data/agents/agents.yaml` is a hand-maintained list (`AgentManager`, `InstalledAgent`) with no
-PLAN.json per agent and no dedup against Factory blueprints. `scripts/setup_autonomous_loop.sh`
-does not exist; `agents.toml` duplicates the manifest. **Fix:** generate both from one source,
-and add lifecycle validation before install.
+## 15. Imported agent PACK prompts are not yet blueprint mappings — CLOSED `b616fb9`
+`agents/bootstrap.pack_blueprint_from_prompt` maps a quarantined PACK DRAFT prompt to a DRAFT
+factory blueprint (`prompt_refs=[ref]`, creator `pack-import`, provenance string carried as
+evidence and logged; dedup by derived blueprint id). No auto-approval or activation — the
+factory's governed approve/activate path applies.
 
-## 17. PAK sync is modelled but not wired to an external PAK repository
-`InstallPlan`, `PAKSyncInstallPlan`, `install()` and `apply_install_plan()` implement install,
-invert and merge locally, but no PAK repo/workflow consumes them. `docs/opensource/pak.md`
-and the A2-Security-Advisors-LTD `pak`/`schema` docs were unavailable (404). **Fix:** connect a
-real PAK repository and verify the sync flow against its manifest format.
+## 16. Installed-agent registry is a flat manifest — CLOSED `b616fb9`
+`agents.yaml` is the single source: `AgentManager.to_toml()/write_toml()` regenerate
+`agents.toml` (drift fixed), and `validate_installed_agents()` runs before install —
+duplicate manifest ids raise, unparsable versions and missing factory blueprints skip with a
+reason. PLAN.json per agent was skipped (YAGNI, nothing consumes it);
+`scripts/setup_autonomous_loop.sh` was not created — it is referenced nowhere outside this
+file (the documented loop entry is `agency loop run|resume|status`).
 
-## 18. External HTTP intake is bearer-token authed, not peer-grant actuation (2026-11-20)
-`POST /v1/tasks` and butler `POST /v1/message` are enabled behind owner-issued bearer tokens
-(`agency/api/auth.py`, `AGENCY_API_TOKENS` file) with server-bound identity, scoped reads and
-creator-only cancellation. This is *not* the §12 peer execution-grant path: `consensus/grants.py`
-still has no actuator consumer (PLAN_V1 D6) and the grant-verifier replacement of
-`require_peer_authority` (Slice D) remains future work. Tokens are plaintext over HTTP —
-bind servers to loopback or terminate TLS. **Fix:** implement D6 actuator-side grant
-enforcement and swap the authed routes onto the grant verifier.
+## 17. PAK sync is modelled but not wired to an external PAK repository — OPEN (external blocker)
+The local install/invert/merge model is complete and tested, but no real PAK
+repository/manifest format is available to wire against (`docs/opensource/pak.md` and the
+A2-Security-Advisors-LTD `pak`/`schema` docs were 404 at implementation time). Connect a real
+PAK repository and verify the sync flow against its manifest format when one exists.
 
-## 19. Dispatcher/task-store operational bounds (2026-11-20)
+## 18. External HTTP intake — D6 grant-verifier landed; full route swap remains — PARTIALLY CLOSED `8604f8a`, `11854fa`, `37095b9`, `f981282`
+Landed: the §12 actuator-side enforcement primitives — a grant-verifying HTTP dependency,
+genesis registry seeding and scoped read opening (`8604f8a`, adapted to the merged router
+posture in `2eb4603`, async-bridge fix `37095b9`), memory owner-scope binding, finality-gated
+writes and the evidence doc (`11854fa`), plus the Wave1 lattice (ABCI codec/app/host, A4/A5
+wiring) those surfaces ride on. Additive salvage on the consolidation line: `forge ship`
+gated local fast-forward with audited approval bypass and the offline core-smoke CI/CD job
+(`f981282`, incl. `tests/test_consensus_grant_wire.py`). Still open: the authed routes
+(`POST /v1/tasks`, butler `POST /v1/message`) still enforce bearer tokens, not the verifier —
+the full swap is future work; `POST /v1/agents` stays 503 (spec-pinned, see #21e); no real
+peer certificates or live multi-peer actuator run yet (Slice D ballots in flight). Tokens
+are plaintext over HTTP — bind servers to loopback or terminate TLS.
+
+## 19. Dispatcher/task-store operational bounds (2026-11-20) — PARTIALLY CLOSED `3a3cd91`, `a34d90d`
 Tasks persist in `data/tasks.db` (`AGENCY_TASKS_DB`); claims are atomic across the api and
-butler processes, so both dispatchers share one queue. But: startup recovery of tasks caught
-RUNNING is opt-in (`AGENCY_TASKS_RECOVER=1`) and single-process-only — a second live process's
-running tasks would be wrongly requeued; audit/memory/evidence stores remain per-process
-(`:memory:` defaults for the api server), so evidence rows are not shared; status updates
-across processes are last-writer-wins with best-effort transition checks. Also (2026-11-20
-live E2E): three near-simultaneous task executions hit the configured LLM provider's HTTP 402
-(quota) under burst — per-caller/provider rate limiting or retry-with-backoff at the LLM
-adapter is needed before this surface is load-bearing. **Fix:** shared
-durable audit/evidence backends, a lease/heartbeat so recovery can distinguish dead from
-live claimers, and provider-aware backoff in the LLM adapter.
+butler processes, so both dispatchers share one queue. Closed since then:
+the LLM 402/429/5xx burst item (`cfd9eb1`, provider-aware backoff in `LLMAdapter.generate`);
+task-claim leases (`3a3cd91`) — claims stamp `lease_owner` + `lease_expires_at` (TTL
+`AGENCY_TASKS_LEASE_SECONDS`, default 300 s), the dispatcher heartbeats in-flight tasks, and
+`AGENCY_TASKS_RECOVER=1` now requeues only expired (or pre-lease) claims, so a second live
+process's running tasks are left alone — safe multi-process recovery requires every claiming
+process to run a lease-aware build (pre-lease processes do not heartbeat, so their claims
+expire like dead ones); and shared durable backends (`a34d90d`) — `AGENCY_AUDIT_DB` /
+`AGENCY_EVIDENCE_DB` / `AGENCY_MEMORY_DB` point the api and butler orchestrators at the same
+file-backed SQLite stores (`:memory:` defaults unchanged, so the hermetic suite is untouched).
+Still open: status updates across processes are last-writer-wins with best-effort transition
+checks (a cross-process compare-and-swap would have to thread an expected-status guard
+through every caller — deferred as not cheap). Honest limits of the lease: a hung-but-alive
+process (blocked event loop, no heartbeats) has its leases expire and its tasks requeued
+while still executing, and a task claimed by a process that crashed less than one lease TTL
+ago is only recovered after the TTL lapses.
 
-## 20. Autonomy-engine assignments still never execute (2026-11-20)
-`run_autonomous` stops after assign/spawn/proof; the general agent→agent path now exists
-(`delegate_task` tool + `AgencyOrchestrator.delegate_task`, depth-bounded), but subtasks the
-engine assigns are still not dispatched to their assigned agents. Forge routing
-(`forge_build_strategy`, BlacksmithOps QUEUED→DISPATCHED) is owned by
-`docs/PLAN_BLACKSMITH_FORGE_ORCHESTRATOR.md` phases 2-6. **Fix:** materialise engine
-assignments as delegated child tasks once the BlacksmithOps state machine lands.
+## 20. Autonomy-engine assignments still never execute — CLOSED `f68d62f` (2026-11-21)
+`run_autonomous` still stops after assign/spawn/forge/proof, but the new
+`dispatch_assignments` leg (`src/agency/autonomy/engine.py`) now materialises every
+planner-assigned subtask as a delegated child task: `submit_autonomous_task` mirrors spawned
+agents into the identity registry, submits the umbrella parent task, then binds
+`AgencyOrchestrator.delegate_task` (depth-bounded, per-child deadline via
+`autonomy_delegate_timeout`, metered, through the shared dispatcher queue) as the engine's
+delegate. Outcomes are honest: pre-creation rejections (unknown target/parent, depth limit,
+no dispatcher) record FAILED; an expired wait records UNCERTAIN and is never re-dispatched;
+COMPLETED carries a result digest; the proof bundle records
+dispatched/dispatch_failed/dispatch_uncertain/dispatch_skipped. With
+`assignment_journal_path` configured, the durable A5 `AssignmentJournal` records
+ASSIGNED→RUNNING→terminal atomically with its outbox rows under its bounded id scheme (real
+ids stay in the proof bundle and the new `RunResult.dispatches` field); progressed records
+are never re-dispatched, and journal errors fail closed by propagating. Forge-domain
+children keep routing through BlacksmithOps (owned by
+`docs/PLAN_BLACKSMITH_FORGE_ORCHESTRATOR.md`, unchanged). Still out of scope: cross-restart
+reconciliation of never-dispatched ASSIGNED rows (dispatch and its ASSIGNED→RUNNING write
+share no intervening await, so the window is a killed process), parallel/dependency-aware
+dispatch (sequential in plan order today), and the pre-existing umbrella parent execution
+alongside the children.
+
+## 21. Task-lifecycle audit items (2026-11-20 audit, disposition 2026-11-21)
+Of the three audit items outside gap 19: (d) delegated child tasks' results never returned
+to the submitter — CLOSED `3a3cd91`: a terminal child now records its
+result on the parent task record (`TaskManager.update_status` appends a `child_result`
+message to the parent, visible via `GET /v1/tasks/{id}` and `TaskManager.get_task`; the
+child's own `output`/`error` stay authoritative; a crash between the terminal write and the
+append is honest UNCERTAIN — the parent may never learn, the child record always holds the
+result), and `TaskDispatcher.wait` re-polls the shared store so a delegation wait resolves
+even when another process's dispatcher executed the child (completion events are
+process-local). (e) agent intake path 503-blocked — LEFT BLOCKED deliberately (`17f1d95`
+pins the boundary): the route is
+`POST /v1/agents`, gated by `agency/api/authority.py` (`require_peer_authority`, "deliberately
+not an owner-token switch") and the `docs/SPEC_BETA_BOUNDARY_AND_PEER_EXECUTION.md` release
+gate ("until peer certificates and actuator checks exist, no consequential route may
+create/revoke agents"); `tests/test_agent_intake_boundary.py` pins that `AGENCY_API_TOKENS`
+does NOT open it. The D6 grant-verifier dependency has now landed (see #18); route
+enablement still requires the full verifier swap on consequential routes and an explicit
+owner decision, not a bearer-token switch. (f) task decomposition is
+regex-only (`agents/planner.py::_default_strategy`) — REMAINS: the `AgentPlanner` strategy
+seam is already pluggable, but with the hermetic echo provider an LLM-backed splitter cannot
+be validated offline (no API keys on this machine, #10); adding an untestable live path was
+rejected as not a clean bounded improvement.

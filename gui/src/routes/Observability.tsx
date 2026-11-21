@@ -31,8 +31,7 @@ import {
 import { useCsrf } from '../api/pilot'
 import { useAuth } from '../stores/auth'
 import { Chip, LoadingBlock, PanelRow, PilotErrorNote, PilotGate, StateChip } from './PilotShared'
-
-type Tone = 'signal' | 'muted' | 'amber' | 'green' | 'red'
+import { stateTone, type Tone } from '../components/tones'
 
 type SectionState =
   | { kind: 'loading' }
@@ -249,16 +248,7 @@ function MemoriesBody({ view }: { view: MemoryView }) {
 }
 
 function severityTone(severity: string): Tone {
-  switch (severity.toLowerCase()) {
-    case 'critical':
-      return 'red'
-    case 'high':
-      return 'amber'
-    case 'medium':
-      return 'signal'
-    default:
-      return 'muted'
-  }
+  return stateTone(severity)
 }
 
 function EvidenceBody({ view }: { view: RiskView }) {

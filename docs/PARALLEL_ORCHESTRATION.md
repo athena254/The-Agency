@@ -153,73 +153,55 @@ Decomposition tree:
 ```python
 class ConversationalAgent:
     async def execute_parallel(
-        self,
-        sub_queries: List[SubQuery],
-        timeout: float = 30.0
+        self, sub_queries: List[SubQuery], timeout: float = 30.0
     ) -> List[SubResult]:
         """Execute ALL sub-queries in parallel."""
-        
+
         tasks = []
         for sub_q in sub_queries:
             agent = sub_q.agent
             query = sub_q.query
-            
+
             # Fire off task to each agent
-            task = asyncio.create_task(
-                self.bridge.ask(
-                    agent=agent,
-                    query=query,
-                    timeout=timeout
-                )
-            )
+            task = asyncio.create_task(self.bridge.ask(agent=agent, query=query, timeout=timeout))
             tasks.append(task)
-        
+
         # Wait for ALL to complete (or timeout)
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         # Separate successes from failures
         processed = []
         for sub_q, result in zip(sub_queries, results):
             if isinstance(result, Exception):
-                processed.append(SubResult(
-                    agent=sub_q.agent,
-                    status="error",
-                    error=str(result),
-                    data=None
-                ))
+                processed.append(
+                    SubResult(agent=sub_q.agent, status="error", error=str(result), data=None)
+                )
             else:
-                processed.append(SubResult(
-                    agent=sub_q.agent,
-                    status="success",
-                    data=result,
-                    error=None
-                ))
-        
+                processed.append(
+                    SubResult(agent=sub_q.agent, status="success", data=result, error=None)
+                )
+
         return processed
-    
-    async def handle_complex_request(
-        self,
-        message: str,
-        session: Session
-    ) -> str:
+
+    async def handle_complex_request(self, message: str, session: Session) -> str:
         """Full parallel orchestration flow."""
-        
+
         # 1. Enrich with context from other agents
         enriched = await self.enrich_with_shared_context(message)
-        
+
         # 2. Decompose into sub-queries
         sub_queries = await self.decompose_request(enriched)
-        
+
         # 3. Execute ALL in parallel
         sub_results = await self.execute_parallel(sub_queries, timeout=30.0)
-        
+
         # 4. Synthesize results
         response = await self.synthesize(message, sub_results, session)
-        
+
         # 5. Save to session
         session.append_message(role="user", content=message)
         session.append_message(role="assistant", content=response)
-        
+
         return response
 ```
 
@@ -230,33 +212,30 @@ class ConversationalAgent:
 ```python
 class ConversationalAgent:
     async def synthesize(
-        self,
-        original_message: str,
-        sub_results: List[SubResult],
-        session: Session
+        self, original_message: str, sub_results: List[SubResult], session: Session
     ) -> str:
         """Aggregate results from multiple agents into unified response."""
-        
+
         # 1. Collect all data points
         data_points = {}
         for result in sub_results:
             if result.status == "success":
                 data_points[result.agent] = result.data
-        
+
         # 2. Cross-reference for anomalies
         anomalies = self.detect_anomalies(data_points)
-        
+
         # 3. Build unified narrative
         synthesis_prompt = f"""
         Synthesize these agent results into a unified response.
-        
+
         User request: {original_message}
-        
+
         Agent results:
         {self.format_sub_results(sub_results)}
-        
+
         Detected anomalies: {anomalies}
-        
+
         Rules:
         - Combine insights into a cohesive narrative
         - Cross-reference data between agents
@@ -264,51 +243,55 @@ class ConversationalAgent:
         - Add personal context from session history
         - Generate actionable recommendations
         - Use emojis and formatting for readability
-        
+
         Return: Formatted response string
         """
-        
+
         response = await self.llm.generate(synthesis_prompt)
-        
+
         # 4. If anomalies detected, optionally launch follow-up
         if anomalies and self.config.enable_follow_up:
             follow_up = await self.handle_anomalies(anomalies, sub_results)
             response += f"\n\n---\n🔍 Follow-up: {follow_up}"
-        
+
         return response
-    
+
     def detect_anomalies(self, data_points: dict) -> List[Anomaly]:
         """Cross-reference data to find discrepancies."""
-        
+
         anomalies = []
-        
+
         # Example: Cash flow check
         if "finance" in data_points and "work" in data_points:
             finance = data_points["finance"]
             work = data_points["work"]
-            
+
             # If committed spending > cash on hand
             if work.get("committed_spend", 0) > finance.get("cash_on_hand", 0):
-                anomalies.append(Anomaly(
-                    type="cash_flow_warning",
-                    severity="high",
-                    message=f"Committed spend (${work['committed_spend']}) exceeds cash (${finance['cash_on_hand']})",
-                    agents_involved=["finance", "work"]
-                ))
-        
+                anomalies.append(
+                    Anomaly(
+                        type="cash_flow_warning",
+                        severity="high",
+                        message=f"Committed spend (${work['committed_spend']}) exceeds cash (${finance['cash_on_hand']})",
+                        agents_involved=["finance", "work"],
+                    )
+                )
+
         # Example: Revenue discrepancy
         if "finance" in data_points and "business" in data_points:
             finance_rev = data_points["finance"].get("revenue", 0)
             business_rev = data_points["business"].get("revenue", 0)
-            
+
             if abs(finance_rev - business_rev) > 0.05 * finance_rev:
-                anomalies.append(Anomaly(
-                    type="revenue_discrepancy",
-                    severity="medium",
-                    message=f"Finance reports ${finance_rev} but Business reports ${business_rev}",
-                    agents_involved=["finance", "business"]
-                ))
-        
+                anomalies.append(
+                    Anomaly(
+                        type="revenue_discrepancy",
+                        severity="medium",
+                        message=f"Finance reports ${finance_rev} but Business reports ${business_rev}",
+                        agents_involved=["finance", "business"],
+                    )
+                )
+
         return anomalies
 ```
 
@@ -319,47 +302,53 @@ class ConversationalAgent:
 ```python
 class ConversationalAgent:
     async def handle_anomalies(
-        self,
-        anomalies: List[Anomaly],
-        previous_results: List[SubResult]
+        self, anomalies: List[Anomaly], previous_results: List[SubResult]
     ) -> str:
         """Launch follow-up parallel queries when anomalies detected."""
-        
+
         follow_up_tasks = []
-        
+
         for anomaly in anomalies:
             if anomaly.type == "cash_flow_warning":
                 # Launch investigation across all spend-tracking agents
-                follow_up_tasks.append(self.bridge.ask("finance", "Show all expenses >$500 last 30 days"))
+                follow_up_tasks.append(
+                    self.bridge.ask("finance", "Show all expenses >$500 last 30 days")
+                )
                 follow_up_tasks.append(self.bridge.ask("work", "List all paid invoices last month"))
-                follow_up_tasks.append(self.bridge.ask("technology", "Show subscription renewals last month"))
-                follow_up_tasks.append(self.bridge.ask("personal", "Any large personal transactions?"))
-            
+                follow_up_tasks.append(
+                    self.bridge.ask("technology", "Show subscription renewals last month")
+                )
+                follow_up_tasks.append(
+                    self.bridge.ask("personal", "Any large personal transactions?")
+                )
+
             elif anomaly.type == "revenue_discrepancy":
-                follow_up_tasks.append(self.bridge.ask("finance", "Show revenue recognition policy"))
-                follow_up_tasks.append(self.bridge.ask("business", "Show revenue calculation method"))
-        
+                follow_up_tasks.append(
+                    self.bridge.ask("finance", "Show revenue recognition policy")
+                )
+                follow_up_tasks.append(
+                    self.bridge.ask("business", "Show revenue calculation method")
+                )
+
         if not follow_up_tasks:
             return ""
-        
+
         # Execute follow-up in parallel
         follow_up_results = await asyncio.gather(*follow_up_tasks, return_exceptions=True)
-        
+
         # Synthesize findings
         return await self.synthesize_anomalies(anomalies, follow_up_results)
-    
+
     async def synthesize_anomalies(
-        self,
-        anomalies: List[Anomaly],
-        follow_up_results: List[SubResult]
+        self, anomalies: List[Anomaly], follow_up_results: List[SubResult]
     ) -> str:
         """Explain what was found during investigation."""
-        
+
         findings = []
         for result in follow_up_results:
             if result.status == "success":
                 findings.append(f"[{result.agent}]: {result.data}")
-        
+
         return f"🔍 Investigation results:\n" + "\n".join(findings)
 ```
 

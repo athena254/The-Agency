@@ -11,6 +11,11 @@ from agency.factory.imports import ImportedMarkdown
 from agency.factory.prompts import PromptKind, PromptRegistry, PromptSpec, PromptStatus
 from agency.kernel.identity import Agent
 from agency.kernel.registry import AgentRegistry
+from agency.skills.executor import (
+    DOCUMENTATION_ONLY_IMPLEMENTATION,
+    OperationRegistry,
+    SkillExecutor,
+)
 from agency.skills.registry import SkillRegistry, SkillSpec, SkillStatus
 
 
@@ -41,6 +46,8 @@ def service(tmp_path: Path) -> GitHubSkillImportService:
     return GitHubSkillImportService(
         PromptRegistry(":memory:"),
         SkillRegistry(str(tmp_path / "skills.db")),
+        approver="reviewer",
+        publish_authorizer=lambda actor, action: action == "skill.publish",
         data_dir=tmp_path,
     )
 
@@ -95,6 +102,46 @@ def test_make_skills_promote_and_attach(tmp_path: Path, service: GitHubSkillImpo
     assert any(
         cap.name == f"skill-{skill_id}" for cap in kernel.get_required("coding-agent").capabilities
     )
+
+
+def test_made_skills_are_documentation_only(service: GitHubSkillImportService) -> None:
+    record = _imported("Code Review", "Review code for defects", "skills/code/SKILL.md", "9" * 64)
+    created = service.make_skills(service.study_and_dedupe([record]))
+
+    assert len(created) == 1
+    skill_id, version = created[0]
+    spec = service._skills.get(skill_id, version)
+    assert spec.implementation == DOCUMENTATION_ONLY_IMPLEMENTATION
+
+    assert service.promote(created, "test review evidence") == created
+    published = service._skills.get(skill_id, version)
+    result = SkillExecutor(OperationRegistry()).run(published)
+
+    assert result.success is False
+    assert result.error == "skill is documentation-only; no executable operation"
+
+
+def test_promote_requires_explicit_approver(tmp_path: Path) -> None:
+    svc = GitHubSkillImportService(
+        PromptRegistry(":memory:"),
+        SkillRegistry(str(tmp_path / "skills.db")),
+        data_dir=tmp_path,
+    )
+    with pytest.raises(ValueError, match="explicit approver"):
+        svc.promote((("some-skill", "1.0.0"),), "evidence")
+    svc.close()
+
+
+def test_promote_requires_publish_authorizer(tmp_path: Path) -> None:
+    svc = GitHubSkillImportService(
+        PromptRegistry(":memory:"),
+        SkillRegistry(str(tmp_path / "skills.db")),
+        data_dir=tmp_path,
+        approver="reviewer",
+    )
+    with pytest.raises(ValueError, match="publish authorizer"):
+        svc.promote((("some-skill", "1.0.0"),), "evidence")
+    svc.close()
 
 
 def test_improve_existing_builds_successor(service: GitHubSkillImportService) -> None:

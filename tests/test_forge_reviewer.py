@@ -76,3 +76,80 @@ def test_llm_review_path(tmp_path):
     assert report.gate == "PASS"
     assert report.score == 5
     assert "heuristic_review" not in report.caveats
+
+
+def _fake_config(provider, model, *, api_key=None):
+    from pydantic import SecretStr
+
+    from agency.llm.config import LLMConfig
+
+    return LLMConfig(
+        provider=provider,
+        model=model,
+        api_key=SecretStr(api_key) if api_key else None,
+    )
+
+
+def test_build_review_llm_prefers_google_serious_model(monkeypatch):
+    """Google credentials drive the gate's serious model even when the task LLM
+    uses a different backend; the echo fallback beneath must not be consulted."""
+    import agency.llm.config as llm_config
+    from agency.forge.reviewer import build_review_llm
+
+    monkeypatch.setattr(
+        llm_config,
+        "load_named_provider",
+        lambda name, **kw: _fake_config("google", "gemini-3.5-flash-lite", api_key="k"),
+    )
+
+    def _unexpected(*a, **kw):  # pragma: no cover - must not be reached
+        raise AssertionError("load_config consulted despite Google credentials")
+
+    monkeypatch.setattr(llm_config, "load_config", _unexpected)
+
+    adapter = build_review_llm()
+    assert adapter is not None
+    assert adapter.model == "gemini-4-hydrogen"
+    assert adapter.provider == "google"
+
+
+def test_build_review_llm_falls_back_to_agency_llm(monkeypatch):
+    """Without Google credentials the gate uses the configured Agency LLM
+    unchanged (no Gemini override on a non-Google backend)."""
+    import agency.llm.config as llm_config
+    from agency.forge.reviewer import build_review_llm
+
+    monkeypatch.setattr(
+        llm_config,
+        "load_named_provider",
+        lambda name, **kw: _fake_config("google", "gemini-3.5-flash-lite"),
+    )
+    monkeypatch.setattr(
+        llm_config,
+        "load_config",
+        lambda **kw: _fake_config("openai", "hy4-flash:free", api_key="k"),
+    )
+
+    adapter = build_review_llm()
+    assert adapter is not None
+    assert adapter.model == "hy4-flash:free"
+    assert adapter.provider == "openai"
+
+
+def test_build_review_llm_none_when_no_provider(monkeypatch):
+    """No Google credentials and an echo task LLM mean no review LLM."""
+    import agency.llm.config as llm_config
+    from agency.forge.reviewer import build_review_llm
+
+    monkeypatch.setattr(
+        llm_config,
+        "load_named_provider",
+        lambda name, **kw: _fake_config("google", "gemini-3.5-flash-lite"),
+    )
+    monkeypatch.setattr(
+        llm_config,
+        "load_config",
+        lambda **kw: _fake_config("echo", "echo"),
+    )
+
+    assert build_review_llm() is None

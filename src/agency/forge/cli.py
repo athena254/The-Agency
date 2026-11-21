@@ -1,7 +1,8 @@
 """Forge entry point: `forge` launches the Forge TUI.
 
 Non-interactive subcommands delegate to the agency CLI's forge app:
-`forge code <task>`, `forge tools`, `forge tool <name>`.
+`forge code <task>`, `forge tools`, `forge tool <name>`, `forge status`,
+`forge ship` (gated local fast-forward; Tier6 salvage from 2dc83cb).
 Use `-yolo` / `--yolo` to bypass human approvals (audited, session-only).
 """
 
@@ -26,7 +27,7 @@ def _strip_yolo(argv: list[str]) -> tuple[bool, list[str]]:
 
 def main() -> None:
     yolo, argv = _strip_yolo(sys.argv[1:])
-    if argv and argv[0] in ("code", "tools", "tool"):
+    if argv and argv[0] in ("code", "tools", "tool", "ship", "status"):
         from agency.cli.main import app as agency_app
 
         agency_app(args=["forge", *argv])

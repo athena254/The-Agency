@@ -493,22 +493,34 @@ def _llm_review_one_round(
 def build_review_llm() -> Any | None:
     """Build the configured Agency LLM for the review gate.
 
-    Uses the same ``agency.llm`` configuration path as the rest of the
-    application, so ``AGENCY_LLM_*`` settings and ``.env`` are honoured. The
-    echo/offline fallback is treated as "no provider configured" and returns
-    ``None`` so hermetic runs never attempt a network call.
+    The serious-work models (:mod:`agency.llm.serious_models`) are Google Gemini
+    models, so when Google credentials exist the gate runs them on the Google
+    provider even when the Agency's task LLM uses a different backend —
+    ``load_named_provider`` keeps the two providers' credentials and endpoints
+    apart. Without Google credentials the gate falls back to the configured
+    Agency LLM (``AGENCY_LLM_*`` / ``.env``). The echo/offline fallback is
+    treated as "no provider configured" and returns ``None`` so hermetic runs
+    never attempt a network call.
     """
     try:
         from agency.llm.adapter import LLMAdapter
-        from agency.llm.config import ProviderKind, load_config
+        from agency.llm.config import ProviderKind, load_config, load_named_provider
         from agency.llm.serious_models import serious_model
 
+        google_config: Any = None
+        try:
+            candidate = load_named_provider("google")
+        except ValueError:  # unknown preset — defensive; the name is hardcoded
+            candidate = None
+        if candidate is not None and candidate.api_key is not None:
+            google_config = candidate
+        if google_config is not None:
+            return LLMAdapter(config=google_config.model_copy(update={"model": serious_model()}))
         config = load_config()
         if config.provider is ProviderKind.ECHO:
             return None
         if config.provider is ProviderKind.GOOGLE:
-            # Serious-work models are Gemini models; only override the model
-            # when the configured provider is Google, never for other backends.
+            # Task LLM already on Google: point it at the serious model.
             config = config.model_copy(update={"model": serious_model()})
         return LLMAdapter(config=config)
     except Exception:  # noqa: BLE001

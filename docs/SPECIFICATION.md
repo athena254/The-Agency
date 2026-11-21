@@ -510,8 +510,8 @@ Response (streaming SSE):
 @dataclass
 class TaskMessage:
     task_id: str
-    type: str                    # "code_generation", "simulation", "research", etc.
-    content: str                 # Task description
+    type: str  # "code_generation", "simulation", "research", etc.
+    content: str  # Task description
     metadata: dict = field(default_factory=dict)
     # metadata: source, agent, priority, budget, parent_task_id
     created_by: str = "system"
@@ -524,8 +524,8 @@ class TaskMessage:
 @dataclass
 class ResultMessage:
     task_id: str
-    bridge_type: str             # "native", "claude_code", "codex", etc.
-    status: str                  # "completed", "failed", "timeout"
+    bridge_type: str  # "native", "claude_code", "codex", etc.
+    status: str  # "completed", "failed", "timeout"
     output: str
     artifacts: list[str] = field(default_factory=list)
     usage: dict = field(default_factory=dict)
@@ -539,13 +539,13 @@ class ResultMessage:
 @dataclass
 class CapabilityAdvertisement:
     agent_id: str
-    domain: str                  # "personal", "work", "finance", etc.
-    capabilities: list[str]      # ["code_generation", "simulation", ...]
+    domain: str  # "personal", "work", "finance", etc.
+    capabilities: list[str]  # ["code_generation", "simulation", ...]
     supports_streaming: bool
     supports_tools: bool
-    addons: list[str]            # ["simulation", "auto_research", ...]
-    llm: str                     # Current model
-    status: str                  # "active", "idle", "error"
+    addons: list[str]  # ["simulation", "auto_research", ...]
+    llm: str  # Current model
+    status: str  # "active", "idle", "error"
 ```
 
 ---

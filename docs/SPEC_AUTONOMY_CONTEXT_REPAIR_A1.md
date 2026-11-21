@@ -5,7 +5,7 @@ Status: **IMPLEMENTED and locally qualified; not pushed, merged or deployed.**
 Base: `1c7e7da2774ee4687741a0e346cbf2d593a9c845`.
 Approved specification checkpoint: `020c9883732ab3cd793bb63449263d9a2df0c1d5`; implementation source/tests matched the handoff baseline before edits. Qualified code commit: `e1dce2dcde3880f04cb3d78e8d2663515df6f8c9`. See section 8 for exact evidence and limitations; this is not an integrated autonomy or peer-authority pass.
 Parent milestone: [SPEC_BOUNDED_AUTONOMY_V1.md](SPEC_BOUNDED_AUTONOMY_V1.md).
-Source evidence: [baseline diagnostic](research-evidence/bounded-autonomy-baseline-20261016.json) and [source map](RESEARCH_BOUNDED_AUTONOMY_20261016.md).
+Source evidence: [baseline diagnostic](archive/research-evidence/bounded-autonomy-baseline-20261016.json) and [source map](archive/RESEARCH_BOUNDED_AUTONOMY_20261016.md).
 
 ## 1. Goal and non-goals
 

@@ -52,6 +52,9 @@ honcho = ["honcho-ai==2.9.0"]
 agency = "agency.cli:main"
 forge = "agency.forge.cli:main"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/agency"]
 
@@ -64,5 +67,7 @@ target-version = "py311"
 line-length = 100
 
 [tool.mypy]
-python_version = "3.11"
+# 3.12: the resolved numpy stubs use the `type` statement, so 3.11-mode mypy
+# aborts before checking anything; the dev venv floor is 3.12 already.
+python_version = "3.12"
 strict = true

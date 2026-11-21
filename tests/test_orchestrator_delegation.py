@@ -69,9 +69,7 @@ async def test_delegation_depth_guard() -> None:
         parent = await orch._task_manager.create_task(
             title="parent", created_by=parent_agent.id, input={"description": "work"}
         )
-        child = await orch.delegate_task(
-            parent.task_id, worker.id, description="first hop"
-        )
+        child = await orch.delegate_task(parent.task_id, worker.id, description="first hop")
         with pytest.raises(ValueError, match="delegation depth limit"):
             await orch.delegate_task(child.task_id, parent_agent.id, description="second hop")
     finally:
@@ -93,5 +91,32 @@ async def test_delegate_task_tool_registered_and_runs() -> None:
         )
         assert result.ok is False
         assert "unknown or revoked target agent" in (result.error or "")
+    finally:
+        await orch.stop()
+
+
+@pytest.mark.asyncio
+async def test_delegated_result_is_recorded_on_the_parent_task() -> None:
+    """Return-to-submitter (task-lifecycle gap d): the parent record carries
+    the child's terminal result as a child_result message."""
+    orch = _orchestrator()
+    await orch.start()
+    await orch.start_dispatcher()
+    try:
+        parent_agent = await orch.register_agent("coordinator", "general", ["inspect"])
+        worker = await orch.register_agent("worker", "research", ["inspect"])
+        parent = await orch._task_manager.create_task(
+            title="parent", created_by=parent_agent.id, input={"description": "parent work"}
+        )
+        child = await orch.delegate_task(
+            parent.task_id, worker.id, description="produce a paragraph"
+        )
+        assert child.status is TaskStatus.COMPLETED
+        parent_after = await orch.get_task(parent.task_id)
+        results = [m for m in parent_after.messages if m.type == "child_result"]
+        assert len(results) == 1
+        assert results[0].content["child_task_id"] == child.task_id
+        assert results[0].content["status"] == "completed"
+        assert results[0].content["summary"] == child.output.get("summary")
     finally:
         await orch.stop()

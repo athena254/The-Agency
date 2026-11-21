@@ -10,9 +10,17 @@ Claim protocol
 IMMEDIATE`` transaction so two dispatcher processes can never claim the same
 task. SQLite WAL keeps readers unblocked while claims serialize.
 
-Startup recovery is explicit, not automatic: a shared database means one
-process must not requeue tasks another (live) process is executing. Call
-:meth:`requeue_running` on boot only in single-process deployments
+Claims carry a lease: the claiming process stamps its ``owner_id`` and a
+``lease_expires_at`` deadline and renews it via :meth:`heartbeat` while the
+task executes (the dispatcher heartbeats its in-flight tasks). Startup
+recovery is explicit, not automatic; with ``expired_only=True`` it requeues
+only claims whose lease expired (or pre-lease legacy rows), so a second live
+process's running tasks are left alone. Safe multi-process recovery therefore
+requires every claiming process to run a lease-aware build; a live process
+running pre-lease code still has its tasks requeued after the lease TTL.
+
+Single-process deployments may still call :meth:`requeue_running` with
+``expired_only=False`` (the historical behaviour) on boot
 (``AGENCY_TASKS_RECOVER=1``).
 """
 
@@ -20,8 +28,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
+import os
+import socket
+from collections.abc import Sequence
+from datetime import datetime, timedelta
 from typing import Any, Self
+from uuid import uuid4
 
 import aiosqlite
 import structlog
@@ -30,6 +42,9 @@ from agency.kernel.identity import utcnow
 from agency.kernel.tasks import Task, TaskMessage, TaskStatus
 
 log = structlog.get_logger(__name__)
+
+LEASE_SECONDS_ENV_VAR = "AGENCY_TASKS_LEASE_SECONDS"
+DEFAULT_LEASE_SECONDS = 300
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -68,6 +83,32 @@ _TASK_COLUMNS = (
     "parent_id, priority, seq, created_at, updated_at"
 )
 
+_TERMINAL_STATUSES = frozenset({TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.BLOCKED})
+
+
+def _resolve_lease_seconds(lease_seconds: int | None) -> int:
+    """Lease TTL in seconds: explicit argument > env > conservative default."""
+
+    raw = lease_seconds
+    if raw is None:
+        raw_env = os.environ.get(LEASE_SECONDS_ENV_VAR, "").strip()
+        try:
+            raw = int(raw_env) if raw_env else DEFAULT_LEASE_SECONDS
+        except ValueError:
+            log.warning("task_store.lease_env_invalid", env=LEASE_SECONDS_ENV_VAR)
+            raw = DEFAULT_LEASE_SECONDS
+    if raw < 1:
+        log.warning("task_store.lease_too_small", value=raw, minimum=1)
+        raw = 1
+    return raw
+
+
+def _default_owner_id() -> str:
+    """Per-process claim owner: host + pid + random suffix (unique per instance)."""
+
+    host = socket.gethostname() or "unknown-host"
+    return f"{host}:{os.getpid()}:{uuid4().hex[:8]}"
+
 
 def _dump(value: Any) -> str:
     return json.dumps(value if value is not None else {}, default=str)
@@ -96,11 +137,15 @@ class TaskStore:
     All public methods lazily initialize the schema.
     """
 
-    def __init__(self, db_path: str) -> None:
+    def __init__(
+        self, db_path: str, *, owner_id: str | None = None, lease_seconds: int | None = None
+    ) -> None:
         self._db_path = db_path
         self._conn: aiosqlite.Connection | None = None
         self._initialized = False
         self._init_lock = asyncio.Lock()
+        self._owner_id = owner_id or _default_owner_id()
+        self._lease_seconds = _resolve_lease_seconds(lease_seconds)
 
     async def __aenter__(self) -> Self:
         await self.initialize()
@@ -112,6 +157,16 @@ class TaskStore:
     @property
     def db_path(self) -> str:
         return self._db_path
+
+    @property
+    def owner_id(self) -> str:
+        """Claim owner stamped on tasks this process claims."""
+        return self._owner_id
+
+    @property
+    def lease_seconds(self) -> int:
+        """Lease TTL granted on each claim and heartbeat renewal."""
+        return self._lease_seconds
 
     @property
     def connection(self) -> aiosqlite.Connection:
@@ -136,8 +191,24 @@ class TaskStore:
             await self._conn.execute("PRAGMA journal_mode=WAL")
             await self._conn.execute("PRAGMA busy_timeout=5000")
             await self._conn.executescript(_SCHEMA)
+            await self._migrate_lease_columns()
             self._initialized = True
-            log.info("task_store.initialized", db_path=self._db_path)
+            log.info(
+                "task_store.initialized",
+                db_path=self._db_path,
+                owner_id=self._owner_id,
+                lease_seconds=self._lease_seconds,
+            )
+
+    async def _migrate_lease_columns(self) -> None:
+        """Add the lease columns to pre-lease databases (idempotent)."""
+
+        conn = self.connection
+        cursor = await conn.execute("PRAGMA table_info(tasks)")
+        existing = {row["name"] for row in await cursor.fetchall()}
+        for column in ("lease_owner", "lease_expires_at"):
+            if column not in existing:
+                await conn.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
 
     async def close(self) -> None:
         """Close the connection. Safe to call more than once."""
@@ -161,7 +232,8 @@ class TaskStore:
             row = await cursor.fetchone()
             seq = int(row[0]) if row is not None else 1
             await conn.execute(
-                f"INSERT INTO tasks ({_TASK_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                f"INSERT INTO tasks ({_TASK_COLUMNS}, lease_owner, lease_expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
                 (
                     task.task_id,
                     task.title,
@@ -239,6 +311,10 @@ class TaskStore:
         if status is not None:
             assignments.append("status = ?")
             params.append(status.value)
+            if status in _TERMINAL_STATUSES:
+                # The lease has served its purpose; keep terminal rows tidy.
+                assignments.append("lease_owner = NULL")
+                assignments.append("lease_expires_at = NULL")
         if set_error:
             assignments.append("error = ?")
             params.append(error)
@@ -256,6 +332,9 @@ class TaskStore:
 
         The SELECT and UPDATE run inside one ``BEGIN IMMEDIATE`` transaction,
         so concurrent dispatcher processes serialize on SQLite's write lock.
+        The claim is stamped with this store's ``owner_id`` and a lease
+        deadline (``lease_seconds`` from now); the claimer renews it via
+        :meth:`heartbeat` while the task executes.
         """
 
         await self.initialize()
@@ -271,10 +350,18 @@ class TaskStore:
             if row is None:
                 await conn.execute("COMMIT")
                 return None
-            now = _iso(utcnow())
+            now = utcnow()
+            lease_expires_at = _iso(now + timedelta(seconds=self._lease_seconds))
             await conn.execute(
-                "UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ?",
-                (TaskStatus.RUNNING.value, now, row["task_id"]),
+                "UPDATE tasks SET status = ?, updated_at = ?, lease_owner = ?, "
+                "lease_expires_at = ? WHERE task_id = ?",
+                (
+                    TaskStatus.RUNNING.value,
+                    _iso(now),
+                    self._owner_id,
+                    lease_expires_at,
+                    row["task_id"],
+                ),
             )
             await conn.execute("COMMIT")
         except BaseException:
@@ -285,9 +372,34 @@ class TaskStore:
             raise
         task = _task_from_row(row)
         task.status = TaskStatus.RUNNING
-        task.updated_at = datetime.fromisoformat(now)
+        task.updated_at = now
         task.messages = await self.list_messages(task.task_id)
         return task
+
+    async def heartbeat(self, task_ids: Sequence[str]) -> int:
+        """Renew the lease on ``task_ids`` claimed by this store's owner.
+
+        Only rows still RUNNING and stamped with this store's ``owner_id`` are
+        renewed; a task that was requeued (or claimed by another process) is
+        not touched. Returns the number of renewed leases.
+        """
+
+        ids = [task_id for task_id in task_ids if task_id]
+        if not ids:
+            return 0
+        await self.initialize()
+        conn = self.connection
+        placeholders = ", ".join("?" for _ in ids)
+        lease_expires_at = _iso(utcnow() + timedelta(seconds=self._lease_seconds))
+        cursor = await conn.execute(
+            f"UPDATE tasks SET lease_expires_at = ? WHERE status = ? "
+            f"AND lease_owner = ? AND task_id IN ({placeholders})",
+            (lease_expires_at, TaskStatus.RUNNING.value, self._owner_id, *ids),
+        )
+        renewed = cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 0
+        if renewed:
+            log.debug("task_store.heartbeat", renewed=renewed)
+        return renewed
 
     async def insert_message(self, task_id: str, message: TaskMessage) -> None:
         """Append one conversation message row."""
@@ -332,25 +444,42 @@ class TaskStore:
             )
         return messages
 
-    async def requeue_running(self, *, note: str) -> int:
-        """Requeue every RUNNING task back to PENDING and append ``note``.
+    async def requeue_running(self, *, note: str, expired_only: bool = False) -> int:
+        """Requeue RUNNING tasks back to PENDING and append ``note``.
 
-        Only safe in single-process deployments: a live second process would
-        otherwise have its executing tasks snatched back into the queue.
+        ``expired_only=True`` (multi-process recovery) requeues only tasks
+        whose claim lease has expired — or pre-lease rows with no lease at
+        all. Tasks whose lease is still fresh belong to a live claimer and
+        are left alone. This makes restart recovery safe across processes,
+        provided every claiming process runs a lease-aware build (pre-lease
+        processes do not heartbeat, so their claims look expired).
+
+        ``expired_only=False`` (the historical default) requeues every
+        RUNNING task — only safe in single-process deployments.
+
         Returns the number of requeued tasks.
         """
 
         await self.initialize()
         async with self._transaction() as conn:
-            cursor = await conn.execute("SELECT task_id FROM tasks WHERE status = ?",
-                                        (TaskStatus.RUNNING.value,))
-            rows = await cursor.fetchall()
+            if expired_only:
+                cursor = await conn.execute(
+                    "SELECT task_id FROM tasks WHERE status = ? "
+                    "AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
+                    (TaskStatus.RUNNING.value, _iso(utcnow())),
+                )
+            else:
+                cursor = await conn.execute(
+                    "SELECT task_id FROM tasks WHERE status = ?", (TaskStatus.RUNNING.value,)
+                )
+            rows = list(await cursor.fetchall())
             if not rows:
                 return 0
             now = _iso(utcnow())
             for row in rows:
                 await conn.execute(
-                    "UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ?",
+                    "UPDATE tasks SET status = ?, updated_at = ?, lease_owner = NULL, "
+                    "lease_expires_at = NULL WHERE task_id = ?",
                     (TaskStatus.PENDING.value, now, row["task_id"]),
                 )
                 await conn.execute(
@@ -365,7 +494,7 @@ class TaskStore:
                         now,
                     ),
                 )
-            log.info("task_store.requeued_running", count=len(rows))
+            log.info("task_store.requeued_running", count=len(rows), expired_only=expired_only)
             return len(rows)
 
     # ------------------------------------------------------------------ #

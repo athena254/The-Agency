@@ -30,7 +30,7 @@ class AnthropicProvider(BaseProvider):
         if self._client is not None:
             return self._client
         try:
-            from anthropic import AsyncAnthropic  # type: ignore[import-not-found]
+            from anthropic import AsyncAnthropic
         except ImportError as exc:
             raise RuntimeError(
                 "The 'anthropic' package is required for AnthropicProvider. "

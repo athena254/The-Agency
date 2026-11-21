@@ -8,6 +8,7 @@ Command surface
 ---------------
 * ``agency start`` / ``agency stop`` / ``agency status`` — server lifecycle.
 * ``agency agent list`` / ``agency agent create`` — identity management.
+* ``agency agent request`` — request a governed agent from a purpose.
 * ``agency task create`` / ``agency task list`` — work management.
 * ``agency memory search`` — full-text memory lookup.
 * ``agency evidence list`` — filtered finding browser.
@@ -451,6 +452,47 @@ def agent_capabilities(
         return
     console.print(f"[green]Updated capabilities[/green] for agent [bold]{agent_id}[/bold]")
     console.print(f"[dim]mode: {mode} | capabilities: {', '.join(capability)}[/dim]")
+
+
+@agent_app.command("request")
+def agent_request(
+    blueprint_id: str = typer.Option(
+        ..., "--blueprint-id", "-b", help="Blueprint id for the new governed agent."
+    ),
+    name: str = typer.Option(..., "--name", "-n", help="Human-readable agent name."),
+    purpose: str = typer.Option(
+        ..., "--purpose", "-p", help="Free-text purpose the agent is manufactured for."
+    ),
+    domain: str = typer.Option(
+        "general", "--domain", "-d", help="Operational domain (must be allowlisted server-side)."
+    ),
+    server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    token: str | None = typer.Option(
+        None, "--token", help="Bearer token (overrides AGENCY_API_TOKEN)."
+    ),
+    output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+) -> None:
+    """Request a governed agent (server-side authorizer + domain allowlist apply)."""
+    base = _server_url(server_url)
+    body: dict[str, Any] = {
+        "blueprint_id": blueprint_id,
+        "name": name,
+        "purpose": purpose,
+        "domain": domain,
+    }
+    with _client(base, headers=_headers(token)) as client:
+        payload = _handle_response(client.post("/v1/agent-requests", json=body))
+    if output_json:
+        _print_json(payload)
+        return
+    console.print(
+        Panel(
+            f"[green]Requested agent[/green] [bold]{payload.get('agent_id')}[/bold]\n"
+            f"blueprint: {payload.get('blueprint_id')} v{payload.get('version')}\n"
+            f"note: {payload.get('note', '')}",
+            expand=False,
+        )
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1088,6 +1130,48 @@ def _make_worker(name: str, model: str | None, timeout_s: int) -> ExternalWorker
     if key == "cursor":
         return CursorWorker(timeout_s=timeout_s)
     raise typer.BadParameter(f"unsupported worker: {name} (opencode|claudecode|codex|pi|cursor)")
+
+
+@forge_app.command("ship")
+def forge_ship(
+    worktree_root: Path = typer.Option(..., "--worktree-root"),  # noqa: B008
+    target_branch: str = typer.Option(..., "--target-branch"),
+    pipeline_gate: str = typer.Option("FAIL", "--pipeline-gate"),
+    smoke_gate: str = typer.Option("FAIL", "--smoke-gate"),
+    approved: bool = typer.Option(False, "--approved", help="Explicit human approval."),
+    proof_log: Path | None = typer.Option(None, "--proof-log"),  # noqa: B008
+    repo_root: Path | None = typer.Option(None, "--repo-root"),  # noqa: B008
+    output_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Locally fast-forward merge a PASS worktree branch (never releases)."""
+
+    from agency.forge.ship import ship_branch
+
+    yolo = os.environ.get("AGENCY_YOLO") == "1"
+    approval_source = "explicit" if approved else ("yolo" if yolo else "")
+    if not approval_source:
+        _fail("ship requires explicit --approved (or audited -yolo); no merge performed")
+    if pipeline_gate.upper() != "PASS" or smoke_gate.upper() != "PASS":
+        _fail("ship requires both pipeline and smoke gates to be PASS")
+
+    report = ship_branch(
+        str(worktree_root),
+        target_branch,
+        pipeline_gate=pipeline_gate.upper(),
+        smoke_gate=smoke_gate.upper(),
+        approved=True,
+        proof_log=str(proof_log) if proof_log else None,
+        repo_root=str(repo_root) if repo_root else None,
+    )
+    receipt = report.model_dump(mode="json")
+    receipt["approval_source"] = approval_source
+    receipt["yolo_audited"] = yolo
+    if output_json:
+        _print_json(receipt)
+    else:
+        console.print(f"Ship gate: {report.gate} (report {report.report_id})")
+    if report.gate != "PASS":
+        raise typer.Exit(code=1)
 
 
 def _print_loop_result(result: Any, *, output_json: bool) -> None:

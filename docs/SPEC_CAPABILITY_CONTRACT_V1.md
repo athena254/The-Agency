@@ -55,31 +55,31 @@ class CapabilityContract:
     """Unified schema for all capability types."""
 
     # Identity
-    capability_id: str                    # e.g., "research.skill", "finance.agent"
-    version: str                         # semver "X.Y.Z"
-    name: str                            # human-readable name
-    description: str                     # what this capability does
+    capability_id: str  # e.g., "research.skill", "finance.agent"
+    version: str  # semver "X.Y.Z"
+    name: str  # human-readable name
+    description: str  # what this capability does
     capability_type: CapabilityType
 
     # Interface
-    inputs: dict[str, Any]               # JSON schema for inputs
-    outputs: dict[str, Any]              # JSON schema for outputs
-    permissions: tuple[str, ...]         # what this capability needs (e.g., "web_search", "file_read")
+    inputs: dict[str, Any]  # JSON schema for inputs
+    outputs: dict[str, Any]  # JSON schema for outputs
+    permissions: tuple[str, ...]  # what this capability needs (e.g., "web_search", "file_read")
 
     # Implementation
-    implementation_ref: str              # opaque reference to the actual implementation
-    implementation_kind: str             # "executable" | "workflow" | "agent" | "skill"
+    implementation_ref: str  # opaque reference to the actual implementation
+    implementation_kind: str  # "executable" | "workflow" | "agent" | "skill"
 
     # Governance
-    creator: str                         # who created this version
-    provenance: str                      # evidence reference (evaluation, review, etc.)
-    status: CapabilityStatus             # lifecycle state
+    creator: str  # who created this version
+    provenance: str  # evidence reference (evaluation, review, etc.)
+    status: CapabilityStatus  # lifecycle state
 
     # Composability
-    composability: ComposabilityMetadata # how this capability can participate in compositions
+    composability: ComposabilityMetadata  # how this capability can participate in compositions
 
     # Metadata
-    tags: tuple[str, ...] = ()           # searchable tags
+    tags: tuple[str, ...] = ()  # searchable tags
     created_at: str = ""
     updated_at: str = ""
 ```
@@ -92,7 +92,7 @@ class ComposabilityMetadata:
     """Machine-readable metadata for safe composition."""
 
     # What roles can this capability play in a composition?
-    roles: tuple[str, ...] = ()          # e.g., ("enrichment", "validation", "transformation")
+    roles: tuple[str, ...] = ()  # e.g., ("enrichment", "validation", "transformation")
 
     # What input types can it accept? (for interface matching)
     input_schema: dict[str, Any] = field(default_factory=dict)
@@ -216,9 +216,9 @@ Every composed capability records its composition graph:
 class CompositionGraph:
     """Records what capabilities were composed and how."""
 
-    nodes: tuple[CapabilityRef, ...]      # all referenced capabilities
-    edges: tuple[tuple[str, str], ...]    # (producer_step, consumer_step)
-    specification_hash: str               # hash of the specification
+    nodes: tuple[CapabilityRef, ...]  # all referenced capabilities
+    edges: tuple[tuple[str, str], ...]  # (producer_step, consumer_step)
+    specification_hash: str  # hash of the specification
 ```
 
 ## 6. Discovery
