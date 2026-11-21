@@ -3,10 +3,10 @@
 Found while implementing `RequestedAgentService` (`src/agency/factory/requested_agent.py`).
 Ordered by production risk. **Avoid these patterns; all agents are free to fix them.**
 
-**Status 2026-11-22 (full-gap sweep):** 16 of 20 closed — gaps 1-9, 11-16 and 20; gaps 18
-(D6 grant-verifier landed, full route swap remains), 19 (leases + shared stores, no
-last-writer-wins CAS) and 10 (live adapter + live task qualified on CentAI `hy4-flash:free`
-2026-11-22; improve leg + soak remain) are partially closed — commit references below; gap
+**Status 2026-11-22 (full-gap sweep):** 17 of 20 closed — gaps 1-9, 11-16, 19 and 20; gaps 18
+(D6 grant-verifier landed, full route swap remains) and 10 (live adapter + live task
+qualified on CentAI `hy4-flash:free` 2026-11-22; improve leg + soak remain) are partially
+closed — commit references below; gap
 20's ref is on `gap/autonomy-execution`, the Tier6 refs landed on `main` (`37095b9`) and the
 consolidation line (`f981282`). Gap 17 remains open for an external reason (no real PAK
 repository to wire against); gaps 18-20 were added by the intake workstream (2026-11-20).
@@ -144,7 +144,7 @@ the full swap is future work; `POST /v1/agents` stays 503 (spec-pinned, see #21e
 peer certificates or live multi-peer actuator run yet (Slice D ballots in flight). Tokens
 are plaintext over HTTP — bind servers to loopback or terminate TLS.
 
-## 19. Dispatcher/task-store operational bounds (2026-11-20) — PARTIALLY CLOSED `3a3cd91`, `a34d90d`
+## 19. Dispatcher/task-store operational bounds (2026-11-20) — CLOSED `3a3cd91`, `a34d90d`, `11f7600`
 Tasks persist in `data/tasks.db` (`AGENCY_TASKS_DB`); claims are atomic across the api and
 butler processes, so both dispatchers share one queue. Closed since then:
 the LLM 402/429/5xx burst item (`cfd9eb1`, provider-aware backoff in `LLMAdapter.generate`);
@@ -156,12 +156,31 @@ process to run a lease-aware build (pre-lease processes do not heartbeat, so the
 expire like dead ones); and shared durable backends (`a34d90d`) — `AGENCY_AUDIT_DB` /
 `AGENCY_EVIDENCE_DB` / `AGENCY_MEMORY_DB` point the api and butler orchestrators at the same
 file-backed SQLite stores (`:memory:` defaults unchanged, so the hermetic suite is untouched).
-Still open: status updates across processes are last-writer-wins with best-effort transition
-checks (a cross-process compare-and-swap would have to thread an expected-status guard
-through every caller — deferred as not cheap). Honest limits of the lease: a hung-but-alive
-process (blocked event loop, no heartbeats) has its leases expire and its tasks requeued
-while still executing, and a task claimed by a process that crashed less than one lease TTL
-ago is only recovered after the TTL lapses.
+The last open item — last-writer-wins status updates with best-effort transition checks — is
+closed too (`11f7600`): cross-process status writes are compare-and-set. `TaskStore.update_task`
+guards its UPDATE with the caller's expected status inside one `BEGIN IMMEDIATE` transaction
+(the claims discipline) and returns a typed `TaskWriteResult` (applied / yielded_terminal /
+stale / missing); `TaskManager.update_status` threads the status it read into the store call
+as the guard, so every status-writing caller (dispatcher-executed tasks, delegation timeouts,
+the `PATCH /v1/tasks/{id}/status` route, forge runs) is covered centrally without per-caller
+edits. COMPLETED/FAILED records are immutable — exactly the existing transition matrix's
+no-outgoing-edge set; BLOCKED stays re-openable because BLOCKED -> PENDING is the documented
+requeue path — so a late writer observes the stored terminal record and yields (logged
+`task.status_write_yielded` / `task_store.terminal_write_refused`, no exception, no duplicate
+`child_result` notification on the parent). A stale write — the record moved to another
+writable state between the writer's read and its CAS, e.g. a zombie executor finishing a task
+that recovery requeued — fails closed with a ValueError naming the actual status, never
+overwrites blind; illegal transitions keep failing closed as before. The kernel keeps its
+five-state enum (no UNCERTAIN member): interrupted RUNNING work is protected by the same
+rule — no stale writer can terminalize it — and stays with the explicit lease-expiry recovery
+path, which requeues it honestly rather than resuming it automatically. Honest limits of the
+lease: a hung-but-alive process (blocked event loop, no heartbeats) has its leases expire and
+its tasks requeued while still executing, and a task claimed by a process that crashed less
+than one lease TTL ago is only recovered after the TTL lapses; since `11f7600` the requeued
+task's record is safe either way — the zombie's late terminal write fails closed once the
+record moved (PENDING/BLOCKED), but when recovery already re-claimed it RUNNING the status
+guard cannot tell two RUNNING claims apart (lease ownership is deliberately not part of the
+guard; wave F lease/heartbeat semantics unchanged), so first terminal write wins there.
 
 ## 20. Autonomy-engine assignments still never execute — CLOSED `f68d62f` (2026-11-21)
 `run_autonomous` still stops after assign/spawn/forge/proof, but the new
