@@ -55,9 +55,21 @@ def test_domain_prompts_carry_identity_honesty_output_contract(domain: str) -> N
 
 
 def test_manifest_prompt_slots_have_param_providers() -> None:
+    from agency.tools.availability_params import (
+        MISSING_BUILD_SLOT,
+        MISSING_INSTALL_SLOT,
+        PROVISIONED_SLOT,
+    )
+
+    provider_slots = {
+        *REA_TOOL_PARAM_NAMES,
+        PROVISIONED_SLOT,
+        MISSING_INSTALL_SLOT,
+        MISSING_BUILD_SLOT,
+    }
     for spec in builtin_specs():
         for slot in _SLOT_RE.findall(spec.body):
-            assert slot in REA_TOOL_PARAM_NAMES, (
+            assert slot in provider_slots, (
                 f"prompt {spec.prompt_id} uses slot {slot} with no param provider"
             )
 
