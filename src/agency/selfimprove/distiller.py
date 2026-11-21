@@ -10,10 +10,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from agency.skills.executor import DOCUMENTATION_ONLY_IMPLEMENTATION
 from agency.skills.registry import SkillRegistry, SkillSpec, SkillStatus
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+_IMPL_RE_SAFE = re.compile(r"[^a-z0-9_.-]")
 
 
 @dataclass
@@ -36,6 +36,14 @@ def _slugify(value: str) -> str:
     if slug[0].isdigit():
         slug = f"skill-{slug}"
     return slug[:48]
+
+
+def _impl_name(slug: str) -> str:
+    base = slug.replace("-", "_")
+    base = _IMPL_RE_SAFE.sub("", base)
+    if not base or base[0].isdigit():
+        base = f"skill_{base}" if base else "skill_learned"
+    return f"learned.{base}"
 
 
 def _next_version(registry: SkillRegistry, skill_id: str) -> str:
@@ -63,8 +71,6 @@ def distill_skill(
 ) -> SkillSpec | None:
     """Propose and register a DRAFT skill from a completed task trace.
 
-    The skill is documentation-only metadata (gaps.md #4): its implementation
-    is the documentation-only sentinel, never a registered operation.
     Returns None when the trace is not distillable (failed task, empty title,
     or a registry error). Never raises for normal distillation failures.
     """
@@ -85,7 +91,7 @@ def distill_skill(
             inputs={"task": {"type": "string"}},
             outputs={"result": {"type": "string"}},
             permissions=(),
-            implementation=DOCUMENTATION_ONLY_IMPLEMENTATION,
+            implementation=_impl_name(slug),
             provenance=f"task:{trace.task_id}",
             status=SkillStatus.DRAFT,
         )
@@ -105,7 +111,6 @@ def evolve_skill(
 
     The prior version is read-only. The successor retains its logical operation
     and requested permissions; changed authority requires separate review.
-    Documentation-only predecessors therefore keep the sentinel (gaps.md #4).
     """
     if trace.status.strip().lower() != "completed" or not trace.description.strip():
         return None

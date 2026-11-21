@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from agency.core.hashing import canonical_sha256 as _canonical_sha256
+from agency.factory.coding_models import canonical_sha256 as _canonical_sha256
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")

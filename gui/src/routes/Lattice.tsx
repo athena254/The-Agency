@@ -1,5 +1,5 @@
 import { Layers } from 'lucide-react'
-import { PageHeader as Header } from '../components/ui'
+import { Header } from './Memories'
 import { LockedPanel } from './Locked'
 
 export function LatticePage() {

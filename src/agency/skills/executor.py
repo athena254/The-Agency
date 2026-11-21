@@ -12,11 +12,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-# Sentinel implementation for skills that are documentation-only metadata
-# (learned/gap skills, GitHub-imported skills): nothing is registered in the
-# OperationRegistry, and SkillExecutor.run reports that clearly (gaps.md #4, #11).
-DOCUMENTATION_ONLY_IMPLEMENTATION = "documentation-only"
-
 
 @dataclass(frozen=True)
 class SkillRunResult:
@@ -94,13 +89,6 @@ class SkillExecutor:
                 version=version,
                 success=False,
                 error=f"unknown operation: {impl!r}",
-            )
-        if impl == DOCUMENTATION_ONLY_IMPLEMENTATION:
-            return SkillRunResult(
-                skill_id=skill_id,
-                version=version,
-                success=False,
-                error="skill is documentation-only; no executable operation",
             )
         fn = self._operations.get(impl)
         if fn is None:

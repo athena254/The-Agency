@@ -5,7 +5,7 @@ domain = "coding"
 prompt_id = "coding-agent"
 path = ".agent-prompts/agents/coding-agent.md"
 
-[agents.auto-71b41d6dd48dc58e]
+[agents.blacksmith]
 name = "blacksmith"
 version = "1.0.0"
 domain = "forge"

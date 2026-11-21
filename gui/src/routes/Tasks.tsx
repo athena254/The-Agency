@@ -1,8 +1,9 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Calculator, FolderKanban, RefreshCw, ShieldCheck } from 'lucide-react'
 import {
   cancelTask,
+  fetchTask,
   fetchTasks,
   fetchThreads,
   fetchVerification,
@@ -13,28 +14,28 @@ import {
   type OwnerTaskView,
   type VerificationView,
 } from '../api/pilot'
-import { useTaskSettle } from '../api/useTaskSettle'
 import { useAuth } from '../stores/auth'
-import { ConfirmDialog, EmptyState } from '../components/ui'
-import { useToast } from '../components/toast'
-import { stateTone } from '../components/tones'
+import { EmptyState } from './Dashboard'
 import { Chip, LoadingBlock, PanelRow, PilotErrorNote, PilotGate, StateChip } from './PilotShared'
+
+const TERMINAL = new Set(['COMPLETED', 'FAILED', 'DENIED', 'CANCELLED', 'UNCERTAIN'])
 
 export function TasksPage() {
   const token = useAuth((s) => s.ownerToken)
   const setOwnerToken = useAuth((s) => s.setOwnerToken)
   const setAuthNotice = useAuth((s) => s.setAuthNotice)
   const csrf = useCsrf()
-  const toast = useToast()
 
   const [verifyTaskId, setVerifyTaskId] = useState<string | null>(null)
   const [selectedThread, setSelectedThread] = useState('')
   const [calcRequestId, setCalcRequestId] = useState(() => `ui-${Date.now()}`)
   const [expression, setExpression] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [calcView, setCalcView] = useState<OwnerTaskView | null>(null)
+  const [calcReceipt, setCalcReceipt] = useState<VerificationView | null>(null)
   const [calcError, setCalcError] = useState<string | null>(null)
-  const [cancelTarget, setCancelTarget] = useState<OwnerTaskView | null>(null)
-  const [cancelBusy, setCancelBusy] = useState(false)
+  const [calcTaskId, setCalcTaskId] = useState<string | null>(null)
+  const [pollNonce, setPollNonce] = useState(0)
 
   const tasks = useQuery({
     queryKey: ['pilot-tasks', token],
@@ -56,44 +57,20 @@ export function TasksPage() {
     enabled: Boolean(token) && Boolean(verifyTaskId),
   })
 
-  const handleAuthFailure = useCallback(
-    (message: string) => {
-      setAuthNotice(message)
-      setOwnerToken(null)
-    },
-    [setAuthNotice, setOwnerToken],
-  )
-
-  const settleVerification = useCallback(
-    (taskId: string) => fetchVerification(csrf, taskId),
-    [csrf],
-  )
-
-  const [calcTaskId, setCalcTaskId] = useState<string | null>(null)
-  const calcState = useTaskSettle<VerificationView>({
-    csrf,
-    taskId: calcTaskId,
-    settle: settleVerification,
-    onAuthFailure: handleAuthFailure,
-  })
-
-  const confirmCancel = useCallback(async () => {
-    if (!cancelTarget) return
-    setCancelBusy(true)
-    try {
-      await cancelTask(csrf, cancelTarget.task_id, `ui-${Date.now()}`)
-      toast(`Cancellation requested for ${cancelTarget.task_id}`, 'success')
-      setCancelTarget(null)
-      void tasks.refetch()
-    } catch (err) {
-      if (isPilotAuthFailure(err)) {
-        handleAuthFailure(pilotErrorMessage(err))
+  const cancel = useCallback(
+    async (taskId: string) => {
+      try {
+        await cancelTask(csrf, taskId, `ui-${Date.now()}`)
+        tasks.refetch()
+      } catch (err) {
+        if (isPilotAuthFailure(err)) {
+          setAuthNotice(pilotErrorMessage(err))
+          setOwnerToken(null)
+        }
       }
-      toast(`Cancellation failed: ${pilotErrorMessage(err)}`, 'danger')
-    } finally {
-      setCancelBusy(false)
-    }
-  }, [cancelTarget, csrf, handleAuthFailure, tasks, toast])
+    },
+    [csrf, setAuthNotice, setOwnerToken, tasks],
+  )
 
   const submitCalc = useCallback(async () => {
     const requestId = calcRequestId.trim()
@@ -107,13 +84,16 @@ export function TasksPage() {
         thread_id: selectedThread,
         expression: expr,
       })
+      setCalcView(view)
+      setCalcReceipt(null)
       setCalcTaskId(view.task_id)
+      setPollNonce((n) => n + 1)
       setCalcRequestId(`ui-${Date.now()}`)
       setExpression('')
-      toast('Calculator task submitted', 'success')
     } catch (err) {
       if (isPilotAuthFailure(err)) {
-        handleAuthFailure(pilotErrorMessage(err))
+        setAuthNotice(pilotErrorMessage(err))
+        setOwnerToken(null)
       }
       setCalcError(pilotErrorMessage(err))
     } finally {
@@ -123,17 +103,55 @@ export function TasksPage() {
     calcRequestId,
     csrf,
     expression,
-    handleAuthFailure,
     selectedThread,
+    setAuthNotice,
+    setOwnerToken,
     submitting,
-    toast,
   ])
+
+  // Poll the calculator task until it settles, then read its verification receipt.
+  useEffect(() => {
+    if (!calcTaskId) return
+    let cancelled = false
+    let timer: number | undefined
+    let attempts = 0
+
+    const tick = async () => {
+      attempts += 1
+      try {
+        const view = await fetchTask(csrf, calcTaskId)
+        if (cancelled) return
+        setCalcView(view)
+        if (TERMINAL.has(view.state)) {
+          const receipt = await fetchVerification(csrf, view.task_id)
+          if (!cancelled) setCalcReceipt(receipt)
+          return
+        }
+      } catch (err) {
+        if (cancelled) return
+        if (isPilotAuthFailure(err)) {
+          setAuthNotice(pilotErrorMessage(err))
+          setOwnerToken(null)
+        }
+        setCalcError(pilotErrorMessage(err))
+        return
+      }
+      if (attempts >= 30) {
+        if (!cancelled) setCalcError('Timed out waiting for the task to settle.')
+        return
+      }
+      timer = window.setTimeout(tick, 2000)
+    }
+
+    timer = window.setTimeout(tick, 1000)
+    return () => {
+      cancelled = true
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [calcTaskId, csrf, pollNonce, setAuthNotice, setOwnerToken])
 
   const list = tasks.data?.tasks ?? []
   const threadList = threads.data?.threads ?? []
-  const calcView = calcState.view
-  const calcReceipt = calcState.settled
-  const calcPollError = calcState.error
 
   return (
     <div className="space-y-4">
@@ -149,7 +167,6 @@ export function TasksPage() {
           className="mc-btn"
           onClick={() => tasks.refetch()}
           disabled={tasks.isFetching}
-          aria-label="Refresh tasks"
         >
           <RefreshCw size={13} className={tasks.isFetching ? 'animate-spin' : ''} />
           Refresh
@@ -174,10 +191,7 @@ export function TasksPage() {
             ) : (
               <ul className="divide-y divide-line">
                 {list.map((task) => (
-                  <li
-                    key={task.task_id}
-                    className={`flex items-center gap-3 px-5 py-3${verifyTaskId === task.task_id ? ' bg-ink-1' : ''}`}
-                  >
+                  <li key={task.task_id} className="flex items-center gap-3 px-5 py-3">
                     <FolderKanban size={15} className="flex-none text-text-3" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm text-text-1">{task.request_id}</div>
@@ -187,20 +201,15 @@ export function TasksPage() {
                     <button
                       type="button"
                       className="mc-btn flex-none"
-                      onClick={() =>
-                        setVerifyTaskId((current) =>
-                          current === task.task_id ? null : task.task_id,
-                        )
-                      }
-                      aria-pressed={verifyTaskId === task.task_id}
+                      onClick={() => setVerifyTaskId(task.task_id)}
                     >
-                      {verifyTaskId === task.task_id ? 'Hide receipt' : 'Verify'}
+                      Verify
                     </button>
                     {task.state === 'RUNNING' || task.state === 'ADMITTED' ? (
                       <button
                         type="button"
                         className="mc-btn mc-btn-danger flex-none"
-                        onClick={() => setCancelTarget(task)}
+                        onClick={() => void cancel(task.task_id)}
                       >
                         Cancel
                       </button>
@@ -222,8 +231,7 @@ export function TasksPage() {
                   <span className="mc-label">GET /api/pilot/tasks/:id/verification</span>
                   <button
                     type="button"
-                    className="mc-icon-btn"
-                    aria-label="Refresh verification"
+                    className="mc-btn flex-none"
                     onClick={() => verification.refetch()}
                     disabled={!verifyTaskId || verification.isFetching}
                   >
@@ -317,7 +325,6 @@ export function TasksPage() {
                 <button
                   type="submit"
                   className="mc-btn mc-btn-primary w-full justify-center"
-                  aria-busy={submitting}
                   disabled={
                     submitting ||
                     !csrf ||
@@ -330,14 +337,14 @@ export function TasksPage() {
                 </button>
               </form>
 
-              {calcError || calcPollError ? (
-                <div className="mt-3" role="alert">
-                  <PilotErrorNote error={calcError ?? calcPollError} />
+              {calcError ? (
+                <div className="mt-3">
+                  <PilotErrorNote error={calcError} />
                 </div>
               ) : null}
 
               {calcView ? (
-                <div className="mt-4 border-t border-line pt-4" aria-live="polite">
+                <div className="mt-4 border-t border-line pt-4">
                   <div className="mc-label mb-2">Task result</div>
                   <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
                     <PanelRow label="Task">{calcView.task_id}</PanelRow>
@@ -388,16 +395,6 @@ export function TasksPage() {
             </section>
           </div>
         </div>
-
-        <ConfirmDialog
-          open={cancelTarget !== null}
-          title="Cancel this task?"
-          body={`Request cancellation of task ${cancelTarget?.task_id ?? ''}. Cancellation is task-scoped and recorded in the audit log; it may not take effect instantly.`}
-          confirmLabel="Request cancellation"
-          busy={cancelBusy}
-          onConfirm={() => void confirmCancel()}
-          onCancel={() => setCancelTarget(null)}
-        />
       </PilotGate>
     </div>
   )
@@ -412,9 +409,7 @@ function VerificationBody({ data }: { data: VerificationView }) {
         <PanelRow label="Request">{data.request_id}</PanelRow>
         <PanelRow label="Thread">{data.thread_id}</PanelRow>
         <PanelRow label="Reason">
-          <Chip tone={stateTone(data.reason === 'available' ? 'passed' : 'uncertain')}>
-            {data.reason}
-          </Chip>
+          <Chip tone={data.reason === 'available' ? 'green' : 'amber'}>{data.reason}</Chip>
         </PanelRow>
       </dl>
 
@@ -423,7 +418,7 @@ function VerificationBody({ data }: { data: VerificationView }) {
           <div className="mc-label mb-2">Calculator receipt</div>
           <dl className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
             <PanelRow label="Status">
-              <Chip tone={stateTone(data.receipt.status)}>{data.receipt.status}</Chip>
+              <Chip tone={receiptTone(data.receipt.status)}>{data.receipt.status}</Chip>
             </PanelRow>
             <PanelRow label="Reason">{data.receipt.reason}</PanelRow>
             <PanelRow label="Expression">
@@ -448,4 +443,15 @@ function VerificationBody({ data }: { data: VerificationView }) {
       )}
     </div>
   )
+}
+
+function receiptTone(status: string): 'green' | 'red' | 'amber' {
+  switch (status) {
+    case 'passed':
+      return 'green'
+    case 'failed':
+      return 'red'
+    default:
+      return 'amber'
+  }
 }

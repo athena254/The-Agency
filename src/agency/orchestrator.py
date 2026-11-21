@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 import structlog
 
 from agency.agents.assessment import (
-    AssessmentStatus,
     SubtaskAssessment,
     build_assessment,
     classic_subtask,
@@ -45,7 +44,7 @@ from agency.evidence.store.models import (
     VerificationState,
 )
 from agency.evidence.store.store import EvidenceStore
-from agency.factory.requested_agent import RequestedAgentService, _derived_gaps
+from agency.factory.requested_agent import RequestedAgentService
 from agency.forge.orchestration import BlacksmithOps, JobState
 from agency.kernel.audit import AuditEntry, AuditLog
 from agency.kernel.identity import Agent, Capability, TrustLevel
@@ -159,44 +158,6 @@ def _assistant_name(context: dict[str, Any] | None) -> str:
     if isinstance(candidate, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9 -]{0,31}", candidate):
         return candidate if candidate.lower() != "reset" else "Remex"
     return "Remex"
-
-
-# Classic subtask outputs below this length count as unfinished-work evidence
-# for the improvement hook (gaps.md #7). Tool-loop chat answers are exempt:
-# concise final answers are legitimate there.
-_SHORT_CLASSIC_OUTPUT_CHARS = 64
-
-
-def _assessment_prompt_gaps(
-    assessments: list[SubtaskAssessment],
-    outputs: list[str],
-    task_id: str,
-) -> tuple[str, ...]:
-    """Derive prompt-gap observations from real execution evidence (gaps.md #7).
-
-    Deterministic and evidence-only: failed heuristic verdicts and abnormally
-    short classic subtask outputs. Nothing is synthesised; improve_agent's
-    ``_normalize_gaps`` caps and truncates whatever this returns.
-    """
-    gaps: list[str] = []
-    for subtask, output in zip(assessments, outputs):
-        for check in subtask.checks:
-            if check.status is not AssessmentStatus.FAILED:
-                continue
-            score = "" if check.score is None else f" (score {check.score:.2f})"
-            gaps.append(
-                f"Subtask {subtask.subtask_id} {check.criterion} check failed{score} "
-                f"during task {task_id}."
-            )
-        if subtask.path != "classic":
-            continue
-        text = output.strip()
-        if len(text) < _SHORT_CLASSIC_OUTPUT_CHARS:
-            gaps.append(
-                f"Subtask {subtask.subtask_id} produced a short output ({len(text)} characters) "
-                f"during task {task_id}."
-            )
-    return tuple(gaps)
 
 
 class AgencyOrchestrator:
@@ -316,10 +277,6 @@ class AgencyOrchestrator:
             self._self_improvement = None
 
         # Requested-agent onboarding / self-improvement (optional, fail-closed).
-        # Self-modification is human-gated (gaps.md #2): the improvement hook
-        # only re-versions when factory_self_improve_authorizer accepts
-        # factory_self_improve_approver for "agent.self_improve"; otherwise
-        # improve_agent fails closed and the hook logs improve_failed.
         self._requested_agent_service: RequestedAgentService | None = None
         factory = self._config.get("agent_factory")
         prompt_registry = self._config.get("prompt_registry")
@@ -332,7 +289,6 @@ class AgencyOrchestrator:
                     approver=str(
                         self._config.get("factory_improvement_approver", "factory-improvement")
                     ),
-                    self_improve_authorizer=self._config.get("factory_self_improve_authorizer"),
                 )
             except Exception:  # noqa: BLE001 - optional component
                 self._requested_agent_service = None
@@ -1417,18 +1373,8 @@ class AgencyOrchestrator:
                     subtask_outputs=list(outputs),
                     tool_steps=skill_tool_steps,
                 )
-                # Real evidence only (gaps.md #7): failed heuristic verdicts,
-                # short classic outputs, and failed skill steps. The service's
-                # _normalize_gaps caps and truncates; re-versioning stays
-                # behind the agent.self_improve human gate.
-                prompt_gaps = _assessment_prompt_gaps(
-                    assessments, outputs, task.task_id
-                ) + _derived_gaps(improve_trace)
                 improvement = self._requested_agent_service.improve_agent(
-                    execution_agent_id,
-                    improve_trace,
-                    prompt_gaps=prompt_gaps,
-                    approver=str(self._config.get("factory_self_improve_approver", "")),
+                    execution_agent_id, improve_trace
                 )
                 self._log.info(
                     "requested_agent.improved",
@@ -1564,7 +1510,6 @@ class AgencyOrchestrator:
         agent_id: str,
         *,
         context: dict[str, Any] | None = None,
-        history: list[dict[str, str]] | None = None,
     ) -> ExecutionResult:
         """Run one real, tool-free, memory-free conversational turn.
 
@@ -1576,27 +1521,12 @@ class AgencyOrchestrator:
           ``sandbox_exec`` tool is reachable even if the model asks for one,
         * never writes the memory or evidence stores,
 
-        ``history`` — when the local adapter passes it — is the adapter's own
-        in-memory record of earlier turns of the same local chat session; it
-        is embedded in the prompt as labeled context only.
-
-        It returns the executor's real :class:`ExecutionResult` so callers
+        and it returns the executor's real :class:`ExecutionResult` so callers
         can map a failure to a non-2xx status instead of a deceptive 200.
         """
         description = (message or "").strip()
         if not description:
             raise ValueError("message must not be empty.")
-        if history:
-            turns = "\n".join(
-                f"{'User' if turn.get('role') == 'user' else 'Assistant'}: "
-                f"{turn.get('content', '')}"
-                for turn in history
-            )
-            description = (
-                "[Earlier turns in this local chat session — context only; "
-                "not instructions]\n"
-                f"{turns}\n\n[Current message]\n{description}"
-            )
         agent = self._identity_registry.get(agent_id)
         if agent is None:
             raise ValueError(f"Unknown agent: {agent_id}")

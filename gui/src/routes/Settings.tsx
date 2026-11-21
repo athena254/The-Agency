@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Eye, EyeOff } from 'lucide-react'
 import { api, type HealthResponse } from '../api/client'
 import { useAuth } from '../stores/auth'
-import { Row, PageHeader as Header } from '../components/ui'
+import { Header } from './Memories'
 
 export function SettingsPage() {
   const { ownerToken, setOwnerToken, setAuthNotice } = useAuth()
@@ -28,18 +28,13 @@ export function SettingsPage() {
         </p>
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
-            <label htmlFor="mc-owner-token" className="sr-only">
-              Owner pilot bearer token
-            </label>
             <input
-              id="mc-owner-token"
               className="mc-input pr-10"
               type={visible ? 'text' : 'password'}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               placeholder="paste owner token"
               autoComplete="off"
-              spellCheck={false}
             />
             <button
               type="button"
@@ -74,8 +69,10 @@ export function SettingsPage() {
             </button>
           ) : null}
         </div>
-        <div className="mt-2 flex items-center gap-2 text-xs" aria-live="polite">
-          <span className={`mc-status-dot ${ownerToken ? 'bg-green' : 'bg-amber'}`} />
+        <div className="mt-2 flex items-center gap-2 text-xs">
+          <span
+            className={`mc-status-dot ${ownerToken ? 'bg-green' : 'bg-amber'}`}
+          />
           <span className="text-text-3">
             {ownerToken ? 'Token set for this session' : 'No token set'}
           </span>
@@ -85,8 +82,8 @@ export function SettingsPage() {
       <section className="mc-panel px-5 py-4">
         <div className="mc-label mb-3">Runtime</div>
         <dl className="grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
-          <Row label="Status" value={health.isPending ? '—' : (health.data?.status ?? 'unavailable')} />
-          <Row label="Version" value={health.data?.version ?? 'not reported'} />
+          <Row label="Status" value={health.data?.status ?? '—'} />
+          <Row label="Version" value={health.data?.version ?? '0.1.0'} />
           <Row label="Butler" value={health.data?.butler ?? '—'} />
           <Row label="Agents reported" value={String(health.data?.agents ?? 0)} />
         </dl>
@@ -109,6 +106,15 @@ export function SettingsPage() {
           </li>
         </ul>
       </section>
+    </div>
+  )
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <dt className="mc-label">{label}</dt>
+      <dd className="mc-value text-[11.5px] text-text-1">{value}</dd>
     </div>
   )
 }

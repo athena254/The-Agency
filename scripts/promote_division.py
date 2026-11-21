@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 import sys
 import tempfile
 from collections import Counter
@@ -33,8 +34,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from agency.factory.prompts import PromptRegistry, PromptStatus
-from agency.tools.reviewer import SkillSpectorReviewer, verdict_for_report
+from agency.factory.prompts import PromptRegistry, PromptStatus  # noqa: E402
+from agency.tools.reviewer import SkillSpectorReviewer, verdict_for_report  # noqa: E402
 
 MIN_BODY_CHARS = 500
 CHUNK = 50  # SkillSpector caps skills per scan; chunk bundles at this size  # excludes clone-pointer debris (see AGENCY_AGENTS_IMPORT_REVIEW §2)
