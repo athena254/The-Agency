@@ -277,6 +277,10 @@ class AgencyOrchestrator:
             self._self_improvement = None
 
         # Requested-agent onboarding / self-improvement (optional, fail-closed).
+        # Self-modification is human-gated (gaps.md #2): the improvement hook
+        # only re-versions when factory_self_improve_authorizer accepts
+        # factory_self_improve_approver for "agent.self_improve"; otherwise
+        # improve_agent fails closed and the hook logs improve_failed.
         self._requested_agent_service: RequestedAgentService | None = None
         factory = self._config.get("agent_factory")
         prompt_registry = self._config.get("prompt_registry")
@@ -289,6 +293,7 @@ class AgencyOrchestrator:
                     approver=str(
                         self._config.get("factory_improvement_approver", "factory-improvement")
                     ),
+                    self_improve_authorizer=self._config.get("factory_self_improve_authorizer"),
                 )
             except Exception:  # noqa: BLE001 - optional component
                 self._requested_agent_service = None
@@ -1374,7 +1379,9 @@ class AgencyOrchestrator:
                     tool_steps=skill_tool_steps,
                 )
                 improvement = self._requested_agent_service.improve_agent(
-                    execution_agent_id, improve_trace
+                    execution_agent_id,
+                    improve_trace,
+                    approver=str(self._config.get("factory_self_improve_approver", "")),
                 )
                 self._log.info(
                     "requested_agent.improved",

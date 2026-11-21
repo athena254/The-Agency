@@ -33,7 +33,16 @@ async def test_orchestrator_request_agent_then_task_improves_it(tmp_path) -> Non
         is_skill_published=lambda sid, ver: True,
     )
     orch = AgencyOrchestrator(
-        config={"agent_factory": factory, "prompt_registry": prompts},
+        config={
+            "agent_factory": factory,
+            "prompt_registry": prompts,
+            # Human gate for self-modification (gaps.md #2): the hook may only
+            # re-version when this actor is authorized for agent.self_improve.
+            "factory_self_improve_authorizer": lambda actor, perm: (
+                perm == "agent.self_improve" and actor == "human-lead"
+            ),
+            "factory_self_improve_approver": "human-lead",
+        },
         memory_db_path=":memory:",
         skill_db_path=str(tmp_path / "skills.db"),
     )
@@ -95,6 +104,7 @@ async def test_orchestrator_request_agent_then_task_improves_it(tmp_path) -> Non
 
         improved = factory.get("scout", "1.0.1")
         assert improved.status is BlueprintStatus.ACTIVE
+        assert improved.approver == "human-lead"
         assert factory.get("scout", "1.0.0").status is BlueprintStatus.REVOKED
         assert prompts.get("purpose-scout", "1.0.1").status is PromptStatus.PUBLISHED
         versions = registry.list_versions("search-docs")

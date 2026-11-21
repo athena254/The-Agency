@@ -964,6 +964,179 @@ class AgentFactory:
                 )
         return self.get(bp.blueprint_id, bp.version)
 
+    def reversion(
+        self, blueprint_id: str, new_version: str, old_version: str, *, evidence: str
+    ) -> Agent:
+        """Atomically activate ``new_version`` and revoke ``old_version``.
+
+        Both state changes commit in ONE SQLite transaction, so a crash can
+        never leave two ACTIVE blueprints or strand the superseded identity
+        (gaps.md #3). The new identity is registered inside the transaction
+        and rolled back on any failure; the old identity's ephemeral
+        registration is removed only after the audit commits, mirroring
+        ``revoke``. ``activate``/``revoke`` remain unchanged for other callers.
+        """
+        ev = _check_evidence(evidence, "revocation evidence")
+        agent: Agent | None = None
+        registration_attempted = False
+        old_runtime_id: str | None = None
+        try:
+            with self._conn:
+                self._conn.execute("BEGIN IMMEDIATE")
+                old = self.get(blueprint_id, old_version)
+                if old.status is not BlueprintStatus.ACTIVE:
+                    raise ValueError(
+                        f"reversion requires an ACTIVE old version, found {old.status.value}."
+                    )
+                bp = self.get(blueprint_id, new_version)
+                if bp.status is not BlueprintStatus.APPROVED:
+                    raise ValueError(
+                        f"reversion requires APPROVED, found {bp.status.value} "
+                        "(no pre-approval activation)."
+                    )
+                if bp.runtime_agent_id:
+                    raise ValueError("blueprint already active (race/restart ambiguity).")
+                self.validate(bp.blueprint_id, bp.version)
+                metadata: dict[str, Any] = {
+                    "blueprint_id": bp.blueprint_id,
+                    "blueprint_version": bp.version,
+                    "factory": "agent-factory-v1",
+                    "skill_refs": [list(ref) for ref in bp.skill_refs],
+                    "workflow_refs": [list(ref) for ref in bp.workflow_refs],
+                }
+                if bp.prompt_refs:
+                    if self._prompt_resolver is None:
+                        raise ValueError(
+                            "prompt refs pinned but no prompt resolver configured (fail closed)."
+                        )
+                    params = self._resolve_prompt_params(bp)
+                    composed = compose_system_prompt(
+                        bp.prompt_refs,
+                        resolver=self._prompt_resolver,
+                        params=params,
+                        override=bp.prompt_override,
+                    )
+                    metadata["system_prompt"] = composed.text
+                    metadata["prompt_refs"] = [list(r) for r in composed.prompt_refs]
+                    metadata["prompt_composed_sha256"] = composed.sha256
+                    if params:
+                        metadata["prompt_params"] = params
+                ceilings: dict[str, ActionClass] = {}
+                for name, value in bp.capability_ceilings:
+                    action = ActionClass(value)
+                    if action.level > ActionClass.L2_CONTROLLED_TESTING.level:
+                        raise ValueError(
+                            "factory ceiling exceeds L2_CONTROLLED_TESTING (v1 hard cap)."
+                        )
+                    ceilings[name] = action
+                agent = Agent(
+                    name=bp.name,
+                    domain=bp.domain,
+                    capabilities=[
+                        Capability(
+                            name=c,
+                            max_level=ceilings.get(c, ActionClass.L0_OBSERVATION),
+                        )
+                        for c in bp.capabilities
+                    ],
+                    trust_level=TrustLevel.UNKNOWN,
+                    metadata=metadata,
+                )
+                registration_attempted = True
+                try:
+                    self._kernels.register(agent)
+                except ValueError as exc:
+                    raise ValueError(f"kernel registration failed closed: {exc}") from exc
+                try:
+                    self._runtimes.register(agent)
+                except Exception as exc:
+                    raise ValueError(f"runtime registration failed closed: {exc}") from exc
+                now = _now_iso()
+                cur = self._conn.execute(
+                    "UPDATE blueprints SET status = ?, runtime_agent_id = ?,"
+                    " updated_at = ? WHERE blueprint_id = ? AND version = ?"
+                    " AND status = ? AND runtime_agent_id IS NULL",
+                    (
+                        BlueprintStatus.ACTIVE.value,
+                        agent.id,
+                        now,
+                        bp.blueprint_id,
+                        bp.version,
+                        BlueprintStatus.APPROVED.value,
+                    ),
+                )
+                if cur.rowcount != 1:
+                    raise ValueError("reversion lost a race (fail closed; orphan revoked).")
+                self._conn.execute(
+                    "INSERT INTO factory_events (blueprint_id, version, from_status,"
+                    " to_status, actor, evidence, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        bp.blueprint_id,
+                        bp.version,
+                        BlueprintStatus.APPROVED.value,
+                        BlueprintStatus.ACTIVE.value,
+                        bp.creator,
+                        bp.evidence,
+                        now,
+                    ),
+                )
+                self._conn.execute(
+                    "UPDATE blueprints SET status = ?, evidence = ?, updated_at = ?"
+                    " WHERE blueprint_id = ? AND version = ?",
+                    (
+                        BlueprintStatus.REVOKED.value,
+                        ev,
+                        now,
+                        old.blueprint_id,
+                        old.version,
+                    ),
+                )
+                self._conn.execute(
+                    "INSERT INTO factory_events (blueprint_id, version, from_status,"
+                    " to_status, actor, evidence, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        old.blueprint_id,
+                        old.version,
+                        old.status.value,
+                        BlueprintStatus.REVOKED.value,
+                        old.creator,
+                        ev,
+                        now,
+                    ),
+                )
+                old_runtime_id = old.runtime_agent_id
+        except Exception:
+            if registration_attempted and agent is not None:
+                try:
+                    self._runtimes.deregister(agent.id)
+                finally:
+                    try:
+                        self._kernels.revoke(agent.id)
+                    except KeyError:
+                        logger.warning(
+                            "factory.kernel_identity_absent_on_rollback", agent_id=agent.id
+                        )
+            raise
+        # Persist the audit and tombstone before mutating ephemeral registries
+        # (same discipline as revoke): the old row is already REVOKED in
+        # SQLite, so a failed kernel revoke cannot strand it ACTIVE.
+        if old_runtime_id:
+            try:
+                self._kernels.revoke(old_runtime_id)
+            except KeyError:
+                logger.warning(
+                    "factory.kernel_identity_absent_on_revoke", agent_id=old_runtime_id
+                )
+            try:
+                self._runtimes.deregister(old_runtime_id)
+            except KeyError:
+                # Runtime identities do not survive process restarts.
+                logger.info(
+                    "factory.runtime_identity_absent_on_revoke", agent_id=old_runtime_id
+                )
+        assert agent is not None
+        return agent
+
     def get(self, blueprint_id: str, version: str) -> Blueprint:
         """Return one blueprint snapshot; unknown raises KeyError."""
         row = self._conn.execute(
