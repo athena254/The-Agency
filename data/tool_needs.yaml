@@ -1,0 +1,44 @@
+# Domain tool-needs catalog: capability/domain profile -> tool names.
+#
+# Pure declaration data. Which tools each domain needs; resolution against
+# the registry / Forge catalog (and any Forge build) happens at provisioning
+# time, never here. Loaded by src/agency/tools/needs.py.
+#
+# Keep it honest: list only tools that actually exist — registered builtin
+# tools (src/agency/tools/builtin/) or Forge catalog names
+# (src/agency/forge/tool_catalog.py). Unknown names fail closed later, not
+# here (creation is never blocked by this file).
+profiles:
+  default:
+    # Owner decision 2026-11-21 (PLAN_TOOL_PROVISIONING §8.3): agents that
+    # declare no requirements get the function-enabling builtin set.
+    required:
+      - memory_query
+      - memory_write
+      - utc_time
+    optional:
+      - web_search
+      - web_fetch
+      - calculator
+  research:
+    required:
+      - web_search
+      - web_fetch
+    optional:
+      - memory_query
+      - memory_write
+  forge:
+    # Reverse-engineering catalog names (forge/tool_catalog.py): catalog
+    # tools reported with needs_install honesty, not registered builtins.
+    required: []
+    optional:
+      - rea
+      - ghidra
+      - jadx
+      - apktool
+      - frida
+      - ilspy
+      - radare2
+      - angr
+      - mitmproxy
+      - rizin

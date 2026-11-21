@@ -49,6 +49,7 @@ SEGMENT_IDS = {
     "agency-evidence-discipline",
     "agency-forge-orchestrator",
     "agency-l0-scope",
+    "agency-tool-availability",
     "apprentice-researcher",
     "reap-core-methodology",
     "reap-safety-scope",

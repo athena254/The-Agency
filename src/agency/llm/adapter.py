@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import os
@@ -17,6 +18,26 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = structlog.get_logger(__name__)
+
+# Provider-side throttling (429) and free-tier quota windows (402) are
+# transient at task timescales: a burst of parallel task executions must
+# back off and retry instead of failing outright. 5xx gateway flaps get the
+# same treatment. Non-transient statuses (401/403/404/422) surface untouched.
+_PROVIDER_RETRY_STATUSES = frozenset({402, 429, 500, 502, 503, 504, 529})
+_PROVIDER_MAX_ATTEMPTS = 3
+_PROVIDER_BACKOFF_BASE_S = 1.0
+_PROVIDER_BACKOFF_CAP_S = 15.0
+
+
+def _provider_retry_delay(response: Any, attempt: int) -> float:
+    """Seconds to wait before re-posting; a parseable Retry-After wins."""
+
+    try:
+        return max(0.0, min(float(response.headers.get("retry-after")), _PROVIDER_BACKOFF_CAP_S))
+    except (TypeError, ValueError):
+        return max(
+            0.0, min(_PROVIDER_BACKOFF_BASE_S * (2**attempt), _PROVIDER_BACKOFF_CAP_S)
+        )
 
 _INCEPTION_PROVIDERS = {
     "inception",
@@ -343,6 +364,8 @@ class LLMAdapter:
 
     async def generate(self, prompt: str, context: dict[str, Any] | None = None) -> str:
         """Generate a response from the LLM."""
+        import httpx
+
         ctx = context or {}
 
         # Override model/provider from context if specified
@@ -351,41 +374,74 @@ class LLMAdapter:
 
         self._log.debug("llm_generate", provider=provider, model=model)
 
-        try:
-            if provider == "nous":
-                return await self._nous_generate(prompt, model)
-            elif provider == "openai":
-                return await self._openai_generate(prompt, model)
-            elif provider == "anthropic":
-                return await self._anthropic_generate(prompt, model)
-            elif provider == "openrouter":
-                return await self._openrouter_generate(prompt, model)
-            elif provider == "google":
-                return await self._google_generate(prompt, model)
-            elif provider == "pollinations":
-                return await self._pollinations_generate(prompt, model)
-            elif provider in _INCEPTION_PROVIDERS:
-                return await self._inception_generate(prompt, model)
-            elif provider == "ollama":
-                return await self._ollama_generate(prompt, model)
-            elif provider == "echo":
-                return self._echo_generate(prompt)
-            else:
-                raise ValueError(f"Unsupported LLM provider: {provider!r}")
-        except Exception as e:
-            # Never log the exception body: provider errors can echo the request
-            # payload (private prompt/chat content). The class name is enough to
-            # diagnose the failure without leaking user text.
-            self._log.error(
-                "llm_error",
-                provider=provider,
-                model=model,
-                error_class=type(e).__name__,
-                status=getattr(getattr(e, "response", None), "status_code", None),
-            )
-            # A failed model call is never a successful echo reply, even when
-            # the caller requests strict=False. Echo is an explicit provider.
-            raise
+        attempt = 0
+        while True:
+            try:
+                if provider == "nous":
+                    return await self._nous_generate(prompt, model)
+                elif provider == "openai":
+                    return await self._openai_generate(prompt, model)
+                elif provider == "anthropic":
+                    return await self._anthropic_generate(prompt, model)
+                elif provider == "openrouter":
+                    return await self._openrouter_generate(prompt, model)
+                elif provider == "google":
+                    return await self._google_generate(prompt, model)
+                elif provider == "pollinations":
+                    return await self._pollinations_generate(prompt, model)
+                elif provider in _INCEPTION_PROVIDERS:
+                    return await self._inception_generate(prompt, model)
+                elif provider == "ollama":
+                    return await self._ollama_generate(prompt, model)
+                elif provider == "echo":
+                    return self._echo_generate(prompt)
+                else:
+                    raise ValueError(f"Unsupported LLM provider: {provider!r}")
+            except httpx.HTTPStatusError as exc:
+                # Provider throttling/quota windows are transient at task
+                # timescales: back off and retry before surfacing the failure.
+                response = getattr(exc, "response", None)
+                status = response.status_code if response is not None else None
+                if (
+                    status not in _PROVIDER_RETRY_STATUSES
+                    or attempt + 1 >= _PROVIDER_MAX_ATTEMPTS
+                ):
+                    # Never log the exception body: provider errors can echo the
+                    # request payload (private prompt/chat content). The class
+                    # name and status are enough to diagnose without leaking text.
+                    self._log.error(
+                        "llm_error",
+                        provider=provider,
+                        model=model,
+                        error_class=type(exc).__name__,
+                        status=status,
+                    )
+                    raise
+                delay = _provider_retry_delay(response, attempt)
+                self._log.warning(
+                    "llm_provider_retry",
+                    provider=provider,
+                    model=model,
+                    status=status,
+                    attempt=attempt + 1,
+                    delay_s=delay,
+                )
+                attempt += 1
+                await asyncio.sleep(delay)
+            except Exception as e:
+                # Never log the exception body: provider errors can echo the request
+                # payload (private prompt/chat content). The class name is enough to
+                # diagnose the failure without leaking user text.
+                self._log.error(
+                    "llm_error",
+                    provider=provider,
+                    model=model,
+                    error_class=type(e).__name__,
+                    status=getattr(getattr(e, "response", None), "status_code", None),
+                )
+                # A failed model call is never a successful echo reply, even when
+                # the caller requests strict=False. Echo is an explicit provider.
+                raise
 
     async def stream(
         self, prompt: str, context: dict[str, Any] | None = None

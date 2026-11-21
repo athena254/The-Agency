@@ -165,6 +165,7 @@ def activate_for_caps(
     domain: str = AUTO_DOMAIN,
     name: str | None = None,
     prompt_refs: list[tuple[str, str]] | None = None,
+    tool_requirements: tuple[str, ...] | None = None,
 ) -> str:
     """Auto-approve + activate a blueprint for ``caps``; return agent id.
 
@@ -172,7 +173,9 @@ def activate_for_caps(
     ``(caps, registry)`` call styles, ``registry`` may instead be the
     factory when ``factory`` is omitted. ``prompt_refs`` pins published
     prompt segments on the blueprint (factory must have prompt callbacks
-    configured; fails closed otherwise). Idempotent: repeated calls with
+    configured; fails closed otherwise). ``tool_requirements`` is a pure
+    declaration persisted on the blueprint (no resolver needed; the factory
+    validates names and bounds). Idempotent: repeated calls with
     the same capabilities return the same agent id.
     """
     resolved = factory if factory is not None else registry
@@ -205,6 +208,8 @@ def activate_for_caps(
         }
         if prompt_refs:
             create_kwargs["prompt_refs"] = list(prompt_refs)
+        if tool_requirements:
+            create_kwargs["tool_requirements"] = list(tool_requirements)
         resolved.create(**create_kwargs)
     except (ValueError, TypeError):
         existing = None

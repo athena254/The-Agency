@@ -1,14 +1,19 @@
-"""Task router — CRUD operations over :class:`agency.kernel.tasks.TaskManager`.
+"""Task router — task intake and result retrieval over :class:`agency.kernel.tasks.TaskManager`.
 
 Mounted by :mod:`agency.api.server` at ``/v1/tasks``.
 
-Endpoints
----------
-POST   /v1/tasks                    Create a task.
-GET    /v1/tasks                    List tasks (``status``, ``limit`` filters).
-GET    /v1/tasks/{task_id}          Fetch one task.
-PATCH  /v1/tasks/{task_id}/status   Transition lifecycle state.
-POST   /v1/tasks/{task_id}/messages Append a structured message.
+Endpoints (all bearer-token authenticated; see :mod:`agency.api.auth`)
+-----------------------------------------------------------------------
+POST   /v1/tasks                    Submit a task (``tasks:write``).
+GET    /v1/tasks                    List own tasks (``tasks:read``).
+GET    /v1/tasks/{task_id}          Fetch one own task + result (``tasks:read``).
+PATCH  /v1/tasks/{task_id}/status   Owner transitions; creators may cancel (``tasks:write``).
+POST   /v1/tasks/{task_id}/messages Append a structured message to an own task.
+
+Identity is bound server-side: ``created_by`` comes from the authenticated
+principal, never from the request body (owners may submit on behalf of an
+agent explicitly). Reads are scoped to the caller's own tasks unless the
+principal is the owner.
 """
 
 from __future__ import annotations
@@ -19,12 +24,16 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from agency.api.authority import require_peer_authority
+from agency.api.auth import Principal, principal_dependency
+from agency.kernel.registry import AgentRegistry
 from agency.kernel.tasks import Task, TaskManager, TaskMessage, TaskStatus
 
 log = structlog.get_logger(__name__)
 
-router = APIRouter(tags=["tasks"], dependencies=[Depends(require_peer_authority)])
+router = APIRouter(tags=["tasks"])
+
+MAX_DESCRIPTION_CHARS = 8000
+MAX_EXTERNAL_PRIORITY = 5
 
 
 # --------------------------------------------------------------------------- #
@@ -38,11 +47,17 @@ class TaskCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str = Field(default="", description="Short human-readable title.")
-    created_by: str = Field(min_length=1, description="Agent or operator id.")
+    created_by: str = Field(
+        default="",
+        description="Ignored for non-owner callers; owners may submit on behalf of an agent.",
+    )
     input: dict[str, Any] = Field(default_factory=dict)
     parent_id: str | None = Field(default=None)
     priority: int = Field(default=0, ge=0, le=10)
     task_id: str | None = Field(default=None, description="Explicit id; generated when omitted.")
+    agent_id: str | None = Field(
+        default=None, description="Registered agent that should execute this task."
+    )
 
 
 class TaskStatusUpdateRequest(BaseModel):
@@ -80,50 +95,101 @@ def _manager(request: Request) -> TaskManager:
     return cast(TaskManager, manager)
 
 
+def _registry(request: Request) -> AgentRegistry | None:
+    return getattr(request.app.state, "agent_registry", None)
+
+
+def _owns_task(task: Task, principal: Principal) -> bool:
+    return principal.role == "owner" or task.created_by == principal.caller_id
+
+
+def _scoped_created_by(principal: Principal, requested: str) -> str:
+    """Bind ``created_by`` to the caller; owners may submit on behalf of an agent."""
+
+    if principal.role == "owner" and requested.strip():
+        return requested.strip()
+    return principal.caller_id
+
+
 # --------------------------------------------------------------------------- #
 # Routes
 # --------------------------------------------------------------------------- #
 
 
-@router.post("", response_model=Task, status_code=status.HTTP_201_CREATED, summary="Create a task")
-async def create_task(payload: TaskCreateRequest, request: Request) -> Task:
-    """Create and register a new task."""
+@router.post("", response_model=Task, status_code=status.HTTP_201_CREATED, summary="Submit a task")
+async def create_task(
+    payload: TaskCreateRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(principal_dependency("tasks:write"))],
+) -> Task:
+    """Create and register a new task for dispatcher execution."""
     manager = _manager(request)
+    description = payload.input.get("description")
+    if isinstance(description, str) and len(description) > MAX_DESCRIPTION_CHARS:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"description exceeds {MAX_DESCRIPTION_CHARS} chars.",
+        )
+    if payload.agent_id is not None:
+        agent = (_registry(request) or AgentRegistry()).get(payload.agent_id)
+        if agent is None or agent.revoked:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"unknown agent_id {payload.agent_id!r}",
+            )
+    task_input = dict(payload.input)
+    if payload.agent_id is not None:
+        task_input["agent_id"] = payload.agent_id
     try:
         task = await manager.create_task(
             title=payload.title,
-            created_by=payload.created_by,
-            input=payload.input,
+            created_by=_scoped_created_by(principal, payload.created_by),
+            input=task_input,
             parent_id=payload.parent_id,
-            priority=payload.priority,
+            priority=payload.priority
+            if principal.role == "owner"
+            else min(payload.priority, MAX_EXTERNAL_PRIORITY),
             task_id=payload.task_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    log.info("api.task.created", task_id=task.task_id, created_by=payload.created_by)
+    log.info(
+        "api.task.created",
+        task_id=task.task_id,
+        created_by=task.created_by,
+        principal=principal.caller_id,
+        role=principal.role,
+    )
     return task
 
 
-@router.get("", response_model=list[Task], summary="List tasks")
+@router.get("", response_model=list[Task], summary="List own tasks")
 async def list_tasks(
     request: Request,
+    principal: Annotated[Principal, Depends(principal_dependency("tasks:read"))],
     task_status: Annotated[
         TaskStatus | None, Query(alias="status", description="Filter by lifecycle state.")
     ] = None,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[Task]:
-    """List tasks ordered by creation time (earliest first)."""
+    """List tasks ordered by creation time (scoped to the caller unless owner)."""
     manager = _manager(request)
-    tasks = await manager.list_tasks(status=task_status)
+    created_by = None if principal.role == "owner" else principal.caller_id
+    tasks = await manager.list_tasks(status=task_status, created_by=created_by)
     return tasks[:limit]
 
 
-@router.get("/{task_id}", response_model=Task, summary="Get a task")
-async def get_task(task_id: str, request: Request) -> Task:
-    """Fetch a single task by id."""
+@router.get("/{task_id}", response_model=Task, summary="Get a task and its result")
+async def get_task(
+    task_id: str,
+    request: Request,
+    principal: Annotated[Principal, Depends(principal_dependency("tasks:read"))],
+) -> Task:
+    """Fetch a single task by id (scoped to the caller unless owner)."""
     manager = _manager(request)
     task = await manager.get_task(task_id)
-    if task is None:
+    if task is None or not _owns_task(task, principal):
+        # 404 (not 403) so foreign task ids are not confirmed to exist.
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"unknown task {task_id!r}"
         )
@@ -132,10 +198,28 @@ async def get_task(task_id: str, request: Request) -> Task:
 
 @router.patch("/{task_id}/status", response_model=Task, summary="Transition task status")
 async def update_task_status(
-    task_id: str, payload: TaskStatusUpdateRequest, request: Request
+    task_id: str,
+    payload: TaskStatusUpdateRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(principal_dependency("tasks:write"))],
 ) -> Task:
-    """Transition a task into a new lifecycle state."""
+    """Transition a task into a new lifecycle state.
+
+    Owners may apply any legal transition; other callers may only cancel
+    (``blocked``) their own tasks.
+    """
     manager = _manager(request)
+    if principal.role != "owner":
+        task = await manager.get_task(task_id)
+        if task is None or task.created_by != principal.caller_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"unknown task {task_id!r}"
+            )
+        if payload.status is not TaskStatus.BLOCKED:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="callers may only cancel their own tasks (status=blocked)",
+            )
     try:
         return await manager.update_status(task_id, payload.status, error=payload.error)
     except KeyError as exc:
@@ -151,16 +235,24 @@ async def update_task_status(
     summary="Append a task message",
 )
 async def add_task_message(
-    task_id: str, payload: TaskMessageCreateRequest, request: Request
+    task_id: str,
+    payload: TaskMessageCreateRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(principal_dependency("tasks:write"))],
 ) -> TaskMessage:
     """Append a structured message to a task's conversation log."""
     manager = _manager(request)
+    task = await manager.get_task(task_id)
+    if task is None or not _owns_task(task, principal):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"unknown task {task_id!r}"
+        )
     message = TaskMessage(
         task_id=task_id,
         type=payload.type,
         content=payload.content,
         metadata=payload.metadata,
-        created_by=payload.created_by,
+        created_by=principal.caller_id,
     )
     try:
         return await manager.add_message(task_id, message)

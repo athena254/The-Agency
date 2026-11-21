@@ -34,6 +34,7 @@ from agency.butler.router import MessageRouter
 from agency.butler.threads import Thread, ThreadMessage, ThreadStore, Workspace
 from agency.kernel.audit import AuditEntry, AuditLog
 from agency.kernel.identity import Agent
+from agency.kernel.tasks import TaskStatus
 from agency.llm.metered import MeteredDenied, MeteredError
 from agency.memory.sms.models import MemoryItem, MemoryTier
 from agency.memory.sms.retrieval import RetrievalEngine
@@ -641,6 +642,9 @@ class ButlerService:
 
     async def route(self, message: str, context: dict[str, Any]) -> Agent:
         """Select the handling agent, preferring the LLM when configured."""
+        # Direct HTTP callers may route without handle_message; audit needs
+        # the stores initialized exactly like any other entry point.
+        await self._ensure_started()
         await self._audit_append(
             agent=None,
             action="butler.route_intent",
@@ -692,40 +696,76 @@ class ButlerService:
             title=f"Butler message from {context.get('sender', 'unknown')}",
             description=message,
             agent_id=agent.id,
+            context=context,
         )
-        result = await self._orchestrator.execute_task(task.task_id, context=context)
-        if result.status is not ExecutionStatus.COMPLETED:
-            await self._audit_append(
-                agent=agent.id,
-                action="butler.execute",
-                result=result.status.value,
-                target=task.task_id,
-                evidence={"task_id": task.task_id},
-            )
-            self._log.warning(
-                "butler.execute_failed_status",
-                agent_id=agent.id,
+        # ``has_dispatcher`` is looked up defensively: test double orchestrators
+        # (and older embedders) predate the queue consumer.
+        if getattr(self._orchestrator, "has_dispatcher", False):
+            # One execution authority: the dispatcher claims and runs the task
+            # (bounded by the caller's turn timeout); this coroutine just
+            # awaits the terminal state and reads the stored result payload.
+            final = await self._orchestrator.wait_task_result(task.task_id)
+            if final.status is not TaskStatus.COMPLETED:
+                await self._audit_append(
+                    agent=agent.id,
+                    action="butler.execute",
+                    result=final.status.value,
+                    target=task.task_id,
+                    evidence={"task_id": task.task_id},
+                )
+                self._log.warning(
+                    "butler.execute_failed_status",
+                    agent_id=agent.id,
+                    task_id=task.task_id,
+                    status=final.status.value,
+                )
+                raise ButlerExecutionError(
+                    f"Task execution failed with status: {final.status.value}"
+                )
+            output = assessed_output(
+                str(final.output.get("summary", "")),
+                assessment=None,
                 task_id=task.task_id,
-                status=result.status.value,
+                execution_status=final.status.value,
             )
-            raise ButlerExecutionError(f"Task execution failed with status: {result.status.value}")
-        output = assessed_output(
-            result.output,
-            assessment=getattr(result, "assessment", None)
-            if getattr(result, "task_id", None) == task.task_id
-            else None,
-            task_id=task.task_id,
-            execution_status=result.status.value,
-        )
+            status_value = final.status.value
+        else:
+            result = await self._orchestrator.execute_task(task.task_id, context=context)
+            if result.status is not ExecutionStatus.COMPLETED:
+                await self._audit_append(
+                    agent=agent.id,
+                    action="butler.execute",
+                    result=result.status.value,
+                    target=task.task_id,
+                    evidence={"task_id": task.task_id},
+                )
+                self._log.warning(
+                    "butler.execute_failed_status",
+                    agent_id=agent.id,
+                    task_id=task.task_id,
+                    status=result.status.value,
+                )
+                raise ButlerExecutionError(
+                    f"Task execution failed with status: {result.status.value}"
+                )
+            output = assessed_output(
+                result.output,
+                assessment=getattr(result, "assessment", None)
+                if getattr(result, "task_id", None) == task.task_id
+                else None,
+                task_id=task.task_id,
+                execution_status=result.status.value,
+            )
+            status_value = result.status.value
         await self._audit_append(
             agent=agent.id,
             action="butler.execute",
-            result=result.status.value,
+            result=status_value,
             target=task.task_id,
             evidence={"task_id": task.task_id, "output_length": len(output)},
         )
         self._log.info(
-            "butler.executed", agent_id=agent.id, task_id=task.task_id, status=result.status.value
+            "butler.executed", agent_id=agent.id, task_id=task.task_id, status=status_value
         )
         return output
 

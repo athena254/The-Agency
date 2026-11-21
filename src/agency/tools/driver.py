@@ -95,6 +95,22 @@ def _truncate(value: str, limit: int = 2000) -> str:
     return value[:limit]
 
 
+def _ctx_allowed_tools(ctx: ToolContext) -> frozenset[str] | set[str] | None:
+    """Allowlist carried on the context; None advertises the full registry.
+
+    Hidden tools never reach the model (PLAN_TOOL_PROVISIONING §3.5):
+    when the context carries ``metadata["allowed_tools"]``, only those
+    specs are advertised in the prompt.
+    """
+    metadata = getattr(ctx, "metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    allowed = metadata.get("allowed_tools")
+    if isinstance(allowed, (frozenset, set)):
+        return allowed
+    return None
+
+
 class ToolDriver:
     """Run the JSON tool-calling protocol loop for any text LLM."""
 
@@ -287,8 +303,12 @@ class ToolDriver:
             metered = self._llm
 
         specs: list[Any] = []
+        allowed_tools = _ctx_allowed_tools(ctx)
         try:
-            specs = list(self._registry.list_specs())
+            if allowed_tools is None:
+                specs = list(self._registry.list_specs())
+            else:
+                specs = list(self._registry.list_specs(allowed_tools=allowed_tools))
         except Exception as exc:  # noqa: BLE001 — driver must still run
             if beta_path:
                 return ToolLoopResult(final_answer="Beta tool unavailable.", status="tool_error")

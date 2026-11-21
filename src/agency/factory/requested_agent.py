@@ -51,6 +51,8 @@ class RequestedAgentRequest:
     domain: str = "general"
     capabilities: tuple[str, ...] = ()
     approver: str = ""
+    tool_requirements: Sequence[str] | None = None
+    use_default_profile: bool = False
 
 
 @dataclass(frozen=True)
@@ -285,6 +287,13 @@ class RequestedAgentService:
         """Create, approve, and activate a governed agent for ``request``."""
         self._validate_request(request)
         ensure_builtin_prompts(self._prompt_registry)
+        tool_requirements = request.tool_requirements
+        if tool_requirements is None and request.use_default_profile:
+            # Lazy import: agency.tools must never be a module-level factory
+            # dependency (gaps.md #1 import-cycle rule).
+            from agency.tools.needs import default_requirements
+
+            tool_requirements = default_requirements()
 
         versions = [bp.version for bp in self._factory.list_versions(request.blueprint_id)]
         version = _next_version(versions)
@@ -331,6 +340,7 @@ class RequestedAgentService:
             request.name,
             domain=request.domain,
             capabilities=list(request.capabilities),
+            tool_requirements=list(tool_requirements or ()),
             skill_refs=list(attached),
             prompt_refs=prompt_refs,
             creator=request.creator,
@@ -471,6 +481,7 @@ class RequestedAgentService:
                 bp.name,
                 domain=bp.domain,
                 capabilities=list(bp.capabilities),
+                tool_requirements=list(bp.tool_requirements),
                 skill_refs=list(bp.skill_refs),
                 prompt_refs=new_refs,
                 prompt_params=dict(bp.prompt_params),

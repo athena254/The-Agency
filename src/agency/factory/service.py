@@ -49,6 +49,7 @@ APPROVE_PERMISSION = "agent.approve"
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _CAP_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
+_TOOL_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 _PARAM_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
 MAX_ID_LEN = 128
@@ -56,6 +57,7 @@ MAX_NAME_LEN = 200
 MAX_EVIDENCE_LEN = 4096
 MAX_CAPS = 32
 MAX_REFS = 32
+MAX_TOOL_REQUIREMENTS = 32
 MAX_JSON_BYTES = 64 * 1024
 MAX_PROMPT_PARAMS_BYTES = 8 * 1024
 MAX_PROMPT_PARAM_VALUE_LEN = 512
@@ -178,6 +180,33 @@ def _normalize_ceilings(value: Any, allowed_caps: tuple[str, ...]) -> tuple[tupl
     return tuple(out)
 
 
+def _normalize_tool_requirements(value: Any) -> tuple[str, ...]:
+    """Normalize declared tool names; pure declaration, no catalog check here.
+
+    Fail closed: names are lowercase kebab/snake, bounded, duplicate-free.
+    Resolution against registries/catalogs happens at provisioning time.
+    """
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise TypeError("tool_requirements must be a list of tool names.")
+    if len(value) > MAX_TOOL_REQUIREMENTS:
+        raise ValueError(f"too many tool requirements: {len(value)} > {MAX_TOOL_REQUIREMENTS}.")
+    out: list[str] = []
+    for entry in value:
+        if not isinstance(entry, str):
+            raise TypeError("tool requirement entries must be strings.")
+        name = entry.strip()
+        if not name:
+            raise ValueError("tool requirement entries must be nonblank strings.")
+        if _TOOL_RE.match(name) is None:
+            raise ValueError(f"invalid tool requirement {entry!r}.")
+        if name in out:
+            raise ValueError(f"duplicate tool requirement {name!r}.")
+        out.append(name)
+    return tuple(out)
+
+
 def _normalize_refs(value: Any, kind: str) -> tuple[tuple[str, str], ...]:
     """Normalize pinned (id, version) refs; unpinned refs raise ValueError."""
     if value is None:
@@ -263,6 +292,7 @@ class Blueprint:
     domain: str
     capabilities: tuple[str, ...] = ()
     capability_ceilings: tuple[tuple[str, str], ...] = ()
+    tool_requirements: tuple[str, ...] = ()
     skill_refs: tuple[tuple[str, str], ...] = ()
     workflow_refs: tuple[tuple[str, str], ...] = ()
     prompt_refs: tuple[tuple[str, str], ...] = ()
@@ -286,6 +316,7 @@ class Blueprint:
             "domain": self.domain,
             "capabilities": list(self.capabilities),
             "capability_ceilings": [list(r) for r in self.capability_ceilings],
+            "tool_requirements": list(self.tool_requirements),
             "skill_refs": [list(r) for r in self.skill_refs],
             "workflow_refs": [list(r) for r in self.workflow_refs],
             "prompt_refs": [list(r) for r in self.prompt_refs],
@@ -350,6 +381,7 @@ class AgentFactory:
             "name TEXT NOT NULL, domain TEXT NOT NULL, "
             "capabilities_json TEXT NOT NULL, "
             "capability_ceilings_json TEXT NOT NULL DEFAULT '[]', "
+            "tools_json TEXT NOT NULL DEFAULT '[]', "
             "skills_json TEXT NOT NULL, "
             "workflows_json TEXT NOT NULL, prompts_json TEXT NOT NULL DEFAULT '[]', "
             "prompt_params_json TEXT NOT NULL DEFAULT '{}', "
@@ -371,10 +403,11 @@ class AgentFactory:
         self._conn.commit()
 
     def _migrate_blueprints(self) -> None:
-        """Add prompt columns to blueprint tables created before this slice."""
+        """Add prompt/tool columns to blueprint tables created before this slice."""
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(blueprints)")}
         additions = {
             "capability_ceilings_json": "TEXT NOT NULL DEFAULT '[]'",
+            "tools_json": "TEXT NOT NULL DEFAULT '[]'",
             "prompts_json": "TEXT NOT NULL DEFAULT '[]'",
             "prompt_params_json": "TEXT NOT NULL DEFAULT '{}'",
             "prompt_override": "TEXT NOT NULL DEFAULT ''",
@@ -403,6 +436,7 @@ class AgentFactory:
         domain: str = "general",
         capabilities: Any = (),
         capability_ceilings: Any = (),
+        tool_requirements: Any = (),
         skill_refs: Any = (),
         workflow_refs: Any = (),
         prompt_refs: Any = (),
@@ -422,6 +456,7 @@ class AgentFactory:
             raise ValueError("creator exceeds 128 chars.")
         caps = _normalize_caps(capabilities, self._allowed)
         ceilings = _normalize_ceilings(capability_ceilings, caps)
+        tools = _normalize_tool_requirements(tool_requirements)
         skills = _normalize_refs(skill_refs, "skill")
         workflows = _normalize_refs(workflow_refs, "workflow")
         prompts = _normalize_refs(prompt_refs, "prompt")
@@ -433,6 +468,7 @@ class AgentFactory:
             {
                 "caps": list(caps),
                 "cc": ceilings,
+                "tr": list(tools),
                 "sk": skills,
                 "wf": workflows,
                 "pr": prompts,
@@ -445,12 +481,12 @@ class AgentFactory:
             with self._conn:
                 self._conn.execute(
                     "INSERT INTO blueprints (blueprint_id, version, name, domain,"
-                    " capabilities_json, capability_ceilings_json, skills_json,"
+                    " capabilities_json, capability_ceilings_json, tools_json, skills_json,"
                     " workflows_json, prompts_json,"
                     " prompt_params_json, prompt_override, creator,"
                     " status, approver, evidence, runtime_agent_id,"
                     " created_at, updated_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         bid,
                         ver,
@@ -458,6 +494,7 @@ class AgentFactory:
                         dom,
                         json.dumps(list(caps)),
                         json.dumps([list(r) for r in ceilings]),
+                        json.dumps(list(tools)),
                         json.dumps([list(r) for r in skills]),
                         json.dumps([list(r) for r in workflows]),
                         json.dumps([list(r) for r in prompts]),
@@ -494,6 +531,7 @@ class AgentFactory:
         _check_version(bp.version)
         _normalize_caps(list(bp.capabilities), self._allowed)
         _normalize_ceilings(list(bp.capability_ceilings), bp.capabilities)
+        _normalize_tool_requirements(list(bp.tool_requirements))
         self._check_published_refs(bp)
         return bp
 
@@ -928,7 +966,7 @@ class AgentFactory:
         """Return one blueprint snapshot; unknown raises KeyError."""
         row = self._conn.execute(
             "SELECT blueprint_id, version, name, domain, capabilities_json,"
-            " capability_ceilings_json, skills_json, workflows_json,"
+            " capability_ceilings_json, tools_json, skills_json, workflows_json,"
             " prompts_json, prompt_params_json,"
             " prompt_override, creator, status, approver, evidence,"
             " runtime_agent_id, created_at, updated_at"
@@ -943,7 +981,7 @@ class AgentFactory:
         """Return all versions for blueprint_id sorted by semver."""
         rows = self._conn.execute(
             "SELECT blueprint_id, version, name, domain, capabilities_json,"
-            " capability_ceilings_json, skills_json, workflows_json,"
+            " capability_ceilings_json, tools_json, skills_json, workflows_json,"
             " prompts_json, prompt_params_json,"
             " prompt_override, creator, status, approver, evidence,"
             " runtime_agent_id, created_at, updated_at"
@@ -973,6 +1011,7 @@ class AgentFactory:
             domain,
             caps_j,
             cc_j,
+            tools_j,
             sk_j,
             wf_j,
             pr_j,
@@ -989,6 +1028,7 @@ class AgentFactory:
         try:
             caps = tuple(json.loads(caps_j))
             ceilings_j = tuple(json.loads(cc_j))
+            tools_j_list = json.loads(tools_j)
             skills = tuple(tuple(r) for r in json.loads(sk_j))
             wfs = tuple(tuple(r) for r in json.loads(wf_j))
             prompts = tuple(tuple(r) for r in json.loads(pr_j))
@@ -1003,6 +1043,10 @@ class AgentFactory:
             ceilings = _normalize_ceilings(ceilings_j, norm_caps)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"corrupt blueprint ceilings: {exc}") from None
+        try:
+            tools = _normalize_tool_requirements(list(tools_j_list))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"corrupt blueprint tool requirements: {exc}") from None
         return Blueprint(
             blueprint_id=bid,
             version=ver,
@@ -1010,6 +1054,7 @@ class AgentFactory:
             domain=domain,
             capabilities=norm_caps,
             capability_ceilings=ceilings,
+            tool_requirements=tools,
             skill_refs=skills,
             workflow_refs=wfs,
             prompt_refs=prompts,
