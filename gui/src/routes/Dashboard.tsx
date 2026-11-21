@@ -12,6 +12,7 @@ import {
 import { Link } from 'react-router-dom'
 import { api, type AgentDescriptor, type HealthResponse } from '../api/client'
 import { fetchTasks, pilotErrorMessage, useCsrf } from '../api/pilot'
+import { EmptyState, StatusDot } from '../components/ui'
 import { useAuth } from '../stores/auth'
 import { CapabilitiesPanel, SpendingPanel } from './PilotOverview'
 import { PilotGate } from './PilotShared'
@@ -327,23 +328,13 @@ function SnapshotRow({
   value: string
   tone: 'green' | 'amber' | 'signal'
 }) {
-  const dots = { green: 'bg-green', amber: 'bg-amber', signal: 'bg-signal' }
   return (
     <li className="flex items-start gap-2.5">
-      <span className={`mc-status-dot mt-1.5 ${dots[tone]}`} aria-hidden="true" />
+      <StatusDot tone={tone} label={`${label}: ${value}`} />
       <div className="min-w-0 flex-1">
         <div className="mc-label">{label}</div>
         <div className="text-[13px] text-text-1">{value}</div>
       </div>
     </li>
-  )
-}
-
-export function EmptyState({ title, detail }: { title: string; detail: string }) {
-  return (
-    <div className="px-5 py-10 text-center">
-      <div className="text-sm text-text-2">{title}</div>
-      <div className="mt-1 text-xs text-text-3">{detail}</div>
-    </div>
   )
 }

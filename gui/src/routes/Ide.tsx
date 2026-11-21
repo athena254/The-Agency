@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Send } from 'lucide-react'
-import { api, type ChatResponse, type SessionResponse } from '../api/client'
+import { type ChatResponse } from '../api/client'
+import { useCsrf } from '../api/pilot'
+import { Row } from '../components/ui'
 
 interface Message {
   id: string
@@ -16,23 +19,25 @@ function nextId() {
   return `m${counter}`
 }
 
+/** Human, honest error text — never a raw status/body dump. */
+function chatErrorText(status: number): string {
+  if (status === 403) return 'Request rejected (missing or invalid CSRF token). Try again.'
+  if (status === 413) return 'Message exceeds the maximum allowed length.'
+  if (status === 502) return 'The Butler could not complete this turn.'
+  if (status === 503) return 'Chat is unavailable in this configuration.'
+  if (status === 504) return 'The Butler timed out before replying. Try again.'
+  return `Request failed (HTTP ${status}).`
+}
+
 export function IdePage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const csrfRef = useRef<string | null>(null)
+  const csrf = useCsrf()
+  const queryClient = useQueryClient()
   const sessionIdRef = useRef(crypto.randomUUID())
   const endRef = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    api
-      .get<SessionResponse>('/api/session')
-      .then((session) => {
-        csrfRef.current = session.csrf_token
-      })
-      .catch((err) => setError(err.message))
-  }, [])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -49,19 +54,20 @@ export function IdePage() {
     setBusy(true)
 
     try {
-      const token = csrfRef.current
       const result = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { 'X-Prototype-CSRF': token } : {}),
+          ...(csrf ? { 'X-Prototype-CSRF': csrf } : {}),
         },
         body: JSON.stringify({ message: text, session_id: sessionIdRef.current }),
       })
       if (!result.ok) {
-        if (result.status === 403) csrfRef.current = null
-        const body = await result.text()
-        throw new Error(`${result.status}: ${body.slice(0, 160)}`)
+        if (result.status === 403) {
+          // The cached CSRF token was rejected — refresh it for the next turn.
+          void queryClient.invalidateQueries({ queryKey: ['csrf'] })
+        }
+        throw new Error(chatErrorText(result.status))
       }
       const data = (await result.json()) as ChatResponse
       setMessages((prev) =>
@@ -78,7 +84,7 @@ export function IdePage() {
     } finally {
       setBusy(false)
     }
-  }, [busy, input])
+  }, [busy, input, csrf, queryClient])
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 lg:flex-row">
@@ -212,15 +218,6 @@ export function IdePage() {
           are separate gates.
         </div>
       </aside>
-    </div>
-  )
-}
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <dt className="mc-label">{label}</dt>
-      <dd className="mc-value text-[11.5px] text-text-1">{children}</dd>
     </div>
   )
 }

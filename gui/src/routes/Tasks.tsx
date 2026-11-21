@@ -15,7 +15,7 @@ import {
   type VerificationView,
 } from '../api/pilot'
 import { useAuth } from '../stores/auth'
-import { EmptyState } from './Dashboard'
+import { EmptyState } from '../components/ui'
 import { Chip, LoadingBlock, PanelRow, PilotErrorNote, PilotGate, StateChip } from './PilotShared'
 
 const TERMINAL = new Set(['COMPLETED', 'FAILED', 'DENIED', 'CANCELLED', 'UNCERTAIN'])

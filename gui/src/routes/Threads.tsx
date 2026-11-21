@@ -10,7 +10,7 @@ import {
   useCsrf,
 } from '../api/pilot'
 import { useAuth } from '../stores/auth'
-import { EmptyState } from './Dashboard'
+import { EmptyState } from '../components/ui'
 import { LoadingBlock, PilotErrorNote, PilotGate, StateChip } from './PilotShared'
 
 export function ThreadsPage() {

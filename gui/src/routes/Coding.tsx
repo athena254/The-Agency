@@ -14,7 +14,7 @@ import {
   type OwnerTaskView,
 } from '../api/pilot'
 import { useAuth } from '../stores/auth'
-import { EmptyState } from './Dashboard'
+import { EmptyState } from '../components/ui'
 import { LockedPanel } from './Locked'
 import { Chip, LoadingBlock, PanelRow, PilotErrorNote, PilotGate, StateChip } from './PilotShared'
 

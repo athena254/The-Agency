@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Bot, RefreshCw } from 'lucide-react'
 import { api, type AgentDescriptor } from '../api/client'
 import { pilotErrorMessage } from '../api/pilot'
-import { EmptyState } from './Dashboard'
+import { EmptyState } from '../components/ui'
 
 export function AgentsPage() {
   const agents = useQuery({

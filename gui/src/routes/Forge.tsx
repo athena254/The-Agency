@@ -1,5 +1,5 @@
 import { Shield } from 'lucide-react'
-import { Header } from './Memories'
+import { PageHeader as Header } from '../components/ui'
 import { LockedPanel } from './Locked'
 
 export function ForgePage() {
