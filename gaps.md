@@ -3,13 +3,13 @@
 Found while implementing `RequestedAgentService` (`src/agency/factory/requested_agent.py`).
 Ordered by production risk. **Avoid these patterns; all agents are free to fix them.**
 
-**Status 2026-11-21 (full-gap sweep):** 16 of 20 closed — gaps 1-9, 11-16 and 20; gaps 18
-(D6 grant-verifier landed, full route swap remains) and 19 (leases + shared stores, no
-last-writer-wins CAS) are partially closed — commit references below; gap 20's ref is on
-`gap/autonomy-execution`, the Tier6 refs landed on `main` (`37095b9`) and the consolidation
-line (`f981282`). Gaps 10 and 17 remain open for external reasons (no local LLM API keys; no
-real PAK repository to wire against); gaps 18-20 were added by the intake workstream
-(2026-11-20).
+**Status 2026-11-22 (full-gap sweep):** 16 of 20 closed — gaps 1-9, 11-16 and 20; gaps 18
+(D6 grant-verifier landed, full route swap remains), 19 (leases + shared stores, no
+last-writer-wins CAS) and 10 (live adapter + live task qualified on CentAI `hy4-flash:free`
+2026-11-22; improve leg + soak remain) are partially closed — commit references below; gap
+20's ref is on `gap/autonomy-execution`, the Tier6 refs landed on `main` (`37095b9`) and the
+consolidation line (`f981282`). Gap 17 remains open for an external reason (no real PAK
+repository to wire against); gaps 18-20 were added by the intake workstream (2026-11-20).
 
 ## 1. Capability ⇄ Factory circular import (structural) — CLOSED `5399d37`
 `canonical_sha256` moved to the neutral `src/agency/core/hashing.py`; `factory.coding_models`
@@ -62,10 +62,18 @@ registration, with a per-service lifetime cap (`MAX_LIFETIME_LEARNED_SKILLS = 32
 `PromptRegistry`, `AgentFactory` and `SkillRegistry` set `journal_mode=WAL` +
 `synchronous=NORMAL` on their connections; one writer connection per process stands.
 
-## 10. No live-provider qualification of this flow — OPEN (external blocker)
-Verification remains offline. A live LLM run of request→task→improve plus multi-restart /
-concurrency soak requires configured provider API keys — none exist on this machine. Run the
-smoke after keys are set; do not claim production certification until then.
+## 10. No live-provider qualification of this flow — PARTIALLY CLOSED (2026-11-22, live)
+Qualified live on an OpenAI-compatible provider (CentAI `api.cent-ai.dev/v1`, model
+`hy4-flash:free`, configured via `AGENCY_LLM_PROVIDER=openai` + `AGENCY_LLM_BASE_URL` +
+`AGENCY_LLM_API_KEY` in the untracked `.env`; key is never committed): (a) the Agency's own
+adapter path (dotenv → `load_config` → `LLMAdapter.generate`) returned the exact expected
+marker; (b) a real task ran through the full dispatcher pipeline — live planner (2 subtasks),
+live executor (`attempts=1`), correct result (`42`), audit entries, memory write, terminal
+`completed`, clean shutdown. The verifier scored the subtasks `0.667/failed` on a correct
+answer — the known independent-checker strictness open item, recorded honestly as findings.
+Still open: the improve leg of request→task→improve with a live provider, multi-restart and
+concurrency soak, and a second provider for comparison. Do not claim full production
+certification until those are exercised.
 
 ## 11. GitHub-imported skills are metadata-only — CLOSED `36bd00f`
 `ext-*` skills are created with the same documentation-only sentinel as gap 4; promotion and
