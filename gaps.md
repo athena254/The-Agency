@@ -3,9 +3,10 @@
 Found while implementing `RequestedAgentService` (`src/agency/factory/requested_agent.py`).
 Ordered by production risk. **Avoid these patterns; all agents are free to fix them.**
 
-**Status 2026-11-21 (full-gap sweep):** 15 of 17 closed — gaps 1-9 and 11-16, commit
-references below are on `integrated`. Gaps 10 and 17 remain open for external reasons
-(no local LLM API keys; no real PAK repository to wire against).
+**Status 2026-11-21 (full-gap sweep):** 15 of 20 closed — gaps 1-9 and 11-16, commit
+references below are on `integrated`. Gaps 10 and 17 remain open for external reasons (no
+local LLM API keys; no real PAK repository to wire against); gaps 18-20 were added by the
+intake workstream (2026-11-20).
 
 ## 1. Capability ⇄ Factory circular import (structural) — CLOSED `5399d37`
 `canonical_sha256` moved to the neutral `src/agency/core/hashing.py`; `factory.coding_models`
@@ -105,3 +106,33 @@ The local install/invert/merge model is complete and tested, but no real PAK
 repository/manifest format is available to wire against (`docs/opensource/pak.md` and the
 A2-Security-Advisors-LTD `pak`/`schema` docs were 404 at implementation time). Connect a real
 PAK repository and verify the sync flow against its manifest format when one exists.
+
+## 18. External HTTP intake is bearer-token authed, not peer-grant actuation (2026-11-20)
+`POST /v1/tasks` and butler `POST /v1/message` are enabled behind owner-issued bearer tokens
+(`agency/api/auth.py`, `AGENCY_API_TOKENS` file) with server-bound identity, scoped reads and
+creator-only cancellation. This is *not* the §12 peer execution-grant path: `consensus/grants.py`
+still has no actuator consumer (PLAN_V1 D6) and the grant-verifier replacement of
+`require_peer_authority` (Slice D) remains future work. Tokens are plaintext over HTTP —
+bind servers to loopback or terminate TLS. **Fix:** implement D6 actuator-side grant
+enforcement and swap the authed routes onto the grant verifier.
+
+## 19. Dispatcher/task-store operational bounds (2026-11-20)
+Tasks persist in `data/tasks.db` (`AGENCY_TASKS_DB`); claims are atomic across the api and
+butler processes, so both dispatchers share one queue. But: startup recovery of tasks caught
+RUNNING is opt-in (`AGENCY_TASKS_RECOVER=1`) and single-process-only — a second live process's
+running tasks would be wrongly requeued; audit/memory/evidence stores remain per-process
+(`:memory:` defaults for the api server), so evidence rows are not shared; status updates
+across processes are last-writer-wins with best-effort transition checks. Also (2026-11-20
+live E2E): three near-simultaneous task executions hit the configured LLM provider's HTTP 402
+(quota) under burst — per-caller/provider rate limiting or retry-with-backoff at the LLM
+adapter is needed before this surface is load-bearing. **Fix:** shared
+durable audit/evidence backends, a lease/heartbeat so recovery can distinguish dead from
+live claimers, and provider-aware backoff in the LLM adapter.
+
+## 20. Autonomy-engine assignments still never execute (2026-11-20)
+`run_autonomous` stops after assign/spawn/proof; the general agent→agent path now exists
+(`delegate_task` tool + `AgencyOrchestrator.delegate_task`, depth-bounded), but subtasks the
+engine assigns are still not dispatched to their assigned agents. Forge routing
+(`forge_build_strategy`, BlacksmithOps QUEUED→DISPATCHED) is owned by
+`docs/PLAN_BLACKSMITH_FORGE_ORCHESTRATOR.md` phases 2-6. **Fix:** materialise engine
+assignments as delegated child tasks once the BlacksmithOps state machine lands.
