@@ -6,8 +6,8 @@ import pytest
 
 from agency.consensus.abci import (
     WIRE_LENGTH_DELIMITED,
+    CommitInfo,
     ExecTxResult,
-    Header,
     ResponseCommit,
     ResponseEcho,
     ResponseEnvelope,
@@ -26,7 +26,6 @@ from agency.consensus.abci import (
     decode_request,
     encode_message_field,
     encode_response,
-    encode_string_field,
     encode_tag,
     encode_uint64_field,
     encode_varint,
@@ -73,19 +72,18 @@ def test_decode_request_echo_exact_vector() -> None:
     assert envelope.echo.message == message.decode("utf-8")
 
 
-def test_decode_finalize_block_with_header_and_unknown_fields() -> None:
+def test_decode_finalize_block_with_commit_info_and_unknown_fields() -> None:
     timestamp = encode_uint64_field(1, 1_700_000_000) + encode_uint64_field(2, 123)
-    header_body = (
-        encode_string_field(2, "lattice-test")
-        + encode_uint64_field(3, 42)
-        + encode_message_field(4, timestamp)
-        + encode_uint64_field(99, 7)
-    )
+    # RequestFinalizeBlock field 2 is CommitInfo (decided_last_commit); its
+    # only decoded member is round = 1.
+    commit_info_body = encode_uint64_field(1, 3) + encode_uint64_field(99, 7)
     body = (
         encode_message_field(1, b"a")
         + encode_message_field(1, b"b")
-        + encode_message_field(2, header_body)
+        + encode_message_field(2, commit_info_body)
         + encode_message_field(4, b"\xaa" * 32)
+        + encode_message_field(6, timestamp)
+        + encode_uint64_field(5, 42)
     )
     envelope = decode_request(encode_message_field(20, body))
     assert envelope.kind == "finalize_block"
@@ -93,11 +91,9 @@ def test_decode_finalize_block_with_header_and_unknown_fields() -> None:
     assert finalize is not None
     assert finalize.txs == (b"a", b"b")
     assert finalize.hash == b"\xaa" * 32
-    assert finalize.header == Header(
-        chain_id="lattice-test",
-        height=42,
-        time=Timestamp(seconds=1_700_000_000, nanos=123),
-    )
+    assert finalize.height == 42
+    assert finalize.time == Timestamp(seconds=1_700_000_000, nanos=123)
+    assert finalize.decided_last_commit == CommitInfo(round=3)
 
 
 def test_decode_unknown_oneof_returns_unknown() -> None:
