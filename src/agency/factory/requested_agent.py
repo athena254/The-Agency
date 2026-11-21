@@ -14,6 +14,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from agency.capability.adapters import SkillCapabilityAdapter
+from agency.capability.attestation import AttestationError
+from agency.capability.contract import CapabilityRef, CapabilityType
 from agency.factory.prompts import PromptKind, PromptRegistry, PromptSpec, PromptStatus
 from agency.factory.prompts_builtin import ensure_builtin_prompts
 from agency.factory.service import AgentFactory, BlueprintStatus
@@ -533,10 +536,6 @@ class RequestedAgentService:
     def publish_skill(
         self, skill_id: str, version: str, *, approver: str, evidence: str = ""
     ) -> SkillSpec:
-        from agency.capability.adapters import SkillCapabilityAdapter
-        from agency.capability.attestation import AttestationError
-        from agency.capability.contract import CapabilityRef, CapabilityType
-
         spec = self._skill_registry.get(skill_id, version)
         if spec.status is SkillStatus.PUBLISHED:
             raise ValueError("skill is already published")
