@@ -61,7 +61,9 @@ def make_persona_service(llm: LLMCallable | None = None, **config_overrides: Any
     """Build an unstarted Butler with decision routing (fake) so the injected
     LLM callable is used for persona framing only, never for routing."""
     config = ButlerConfig(decision_provider="jev", **config_overrides)
-    svc = ButlerService(config=config, orchestrator=AgencyOrchestrator(), llm=llm)
+    svc = ButlerService(
+        config=config, orchestrator=AgencyOrchestrator(memory_db_path=":memory:"), llm=llm
+    )
     svc._decision_model = JevDecisionModel(
         FakeJevClient({"routes_to_security": 0.9}),
         svc.router,

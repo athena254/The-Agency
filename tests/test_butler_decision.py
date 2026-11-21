@@ -71,7 +71,9 @@ def make_jev_service(
 ) -> ButlerService:
     """Build an unstarted Butler with decision routing enabled (fake provider)."""
     config = ButlerConfig(decision_provider="jev", **config_overrides)
-    svc = ButlerService(config=config, orchestrator=AgencyOrchestrator())
+    svc = ButlerService(
+        config=config, orchestrator=AgencyOrchestrator(memory_db_path=":memory:")
+    )
     svc._decision_model = JevDecisionModel(
         FakeJevClient(probabilities),
         svc.router,
@@ -83,7 +85,9 @@ def make_jev_service(
 
 @pytest_asyncio.fixture
 async def service() -> AsyncIterator[ButlerService]:
-    svc = ButlerService(config=ButlerConfig(), orchestrator=AgencyOrchestrator())
+    svc = ButlerService(
+        config=ButlerConfig(), orchestrator=AgencyOrchestrator(memory_db_path=":memory:")
+    )
     await svc.start()
     try:
         yield svc
@@ -425,7 +429,7 @@ async def test_service_wires_config_model_and_thresholds(
         config=ButlerConfig(
             decision_provider="jev", jev_model="jev-test", jev_signal_threshold=0.95
         ),
-        orchestrator=AgencyOrchestrator(),
+        orchestrator=AgencyOrchestrator(memory_db_path=":memory:"),
     )
     await svc.start()
     try:

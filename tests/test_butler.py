@@ -20,7 +20,12 @@ from agency.orchestrator import AgencyOrchestrator
 
 @pytest_asyncio.fixture
 async def service() -> ButlerService:
-    svc = ButlerService(config=ButlerConfig(), orchestrator=AgencyOrchestrator())
+    # Isolated memory db: the default relative path shares state across every
+    # test in the worktree, and list_all(limit=100) hides new turns once the
+    # accumulated file crosses 100 rows.
+    svc = ButlerService(
+        config=ButlerConfig(), orchestrator=AgencyOrchestrator(memory_db_path=":memory:")
+    )
     await svc.start()
     try:
         yield svc
