@@ -23,6 +23,7 @@ import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
 from agency.agents.assessment import ExecutionAssessment
+from agency.agents.intelligence import ProfileError, load_agent_profile, profile_prompt_block
 from agency.llm.adapter import LLMAdapter
 
 logger = structlog.get_logger(__name__)
@@ -165,6 +166,7 @@ class AgentExecutor:
 
         ctx = self._coerce_context(context)
         prompt, payload = self._coerce_task(task)
+        prompt = self._with_profile_prompt(prompt, ctx.agent_id)
         tid = task_id or payload.get("task_id", str(uuid4()))
         timeout = ctx.timeout_s or self._default_timeout_s
         max_retries = ctx.max_retries if context is not None else self._default_max_retries
@@ -364,6 +366,22 @@ class AgentExecutor:
             **context,
         }
         return ExecutionContext.model_validate(merged)
+
+    def _with_profile_prompt(self, prompt: str, agent_id: str | None) -> str:
+        """Prepend the executing agent's intelligence profile when loadable.
+
+        Fail-open (AIS spec §10): a missing or invalid profile never breaks a
+        task — the profile is descriptive context, so execution continues
+        unprofiled and the gap is logged.
+        """
+        if not agent_id:
+            return prompt
+        try:
+            profile = load_agent_profile(agent_id)
+        except ProfileError as exc:
+            self._log.warning("executor.profile_unavailable", agent_id=agent_id, error=str(exc))
+            return prompt
+        return profile_prompt_block(profile) + "\n\n" + prompt
 
     @staticmethod
     async def _echo_backend(prompt: str, context: dict[str, Any]) -> dict[str, Any]:
