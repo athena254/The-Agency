@@ -96,3 +96,27 @@ as bounded polling timeouts with the original diagnostic; stronger best-effort r
 handling could preserve diagnostics if report validation or cleanup itself crashes.
 The local output directory contains generated signing material and node logs; keep it
 private. This harness is not a sandbox against a hostile same-host administrator.
+
+## Slice C agency-net (2026-11-22)
+
+`agency.lab.comet_agency_net` extends the engine lab to the Agency application on real
+transport: four 0.38.26 validators, each paired with its own
+`agency consensus-abci-host` child over a real TCP socket, transacting signed ballot
+envelopes through real CometBFT RPC. Three consecutive full PASS runs on 2026-11-22
+(final report `C:/Users/PC/agency-tools/labs/agency-net-20261122-015423/report.json`,
+schema `agency.lab.comet_agency_net_report/v1`): quorum ballot convergence with an
+independent app-hash replay oracle, node kill/restart with application replay
+convergence, 1/3 persistent-peer partition with majority progress + isolated-node stall
++ healed convergence, rebroadcast replay refused at CheckTx with exactly-once
+`executed_grant` records, revocation fail-closed at the ledger/actuator seam, and
+conflicting ballots resolved deterministically (equivocation rejection, fail-closed
+tally) with equal app hashes across all four peers. Full per-scenario numbers, deviations
+and re-run instructions: `SLICE_C_LIVE_EVIDENCE.md`; machine-readable summary appended to
+`research-evidence/comet-engine-verification.json`.
+
+The live proof required production fixes to the previously landed socket host: varint
+framing (CometBFT's delimited-wire format), decoding `Request.commit`/`check_tx`/`query`,
+answering the mempool and query connections (CometBFT dials four and kills the app
+connection on any `ResponseException`), per-connection serving with one dispatch lock,
+chain-id binding via InitChain, and non-destructive `retain_height`. Each fix carries
+hermetic tests; the engine (kvstore) harness and its report schema are unchanged.
