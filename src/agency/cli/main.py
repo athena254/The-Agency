@@ -1478,3 +1478,68 @@ def consensus_sign_ballot(
         _print_json({"wire_hex": wire.hex()})
     else:
         console.print(wire.hex())
+
+
+@app.command("consensus-sign-grant")
+def consensus_sign_grant(
+    genesis: str = typer.Option(..., "--genesis", help="Path to genesis.json."),
+    key: str = typer.Option(..., "--key", help="Base64 raw Ed25519 private key."),
+    task_id: str = typer.Option(
+        ..., "--task-id", help="Exact HTTP scope, e.g. 'GET /v1/governance/proposals', or READ."
+    ),
+    proposal_id: str = typer.Option(..., "--proposal-id", help="Proposal the grant cites."),
+    issued_at_ms: int = typer.Option(
+        1000, "--issued-at-ms", help="Issued BFT time in ms (server pins this via env)."
+    ),
+    expires_at_ms: int = typer.Option(
+        61000, "--expires-at-ms", help="Expiry BFT time in ms (max lifetime 1h)."
+    ),
+    output_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Build a signed, task-scoped grant for X-Agency-Grant (dev helper).
+
+    The private key never leaves this machine; only the signed grant payload
+    (public fields + signatures) is printed. Paste the base64 line as the
+    X-Agency-Grant header value.
+    """
+    import base64
+    import json as _json
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from agency.consensus.genesis import load_genesis
+    from agency.consensus.grants import GrantLedger
+    from agency.peers.identities import PeerIdentity
+
+    membership = load_genesis(genesis)
+    raw = base64.b64decode(key.strip())
+    issuer = PeerIdentity.from_private_key(Ed25519PrivateKey.from_private_bytes(raw))
+    grant = GrantLedger(membership=membership).issue(
+        issuer,
+        proposal_id=proposal_id,
+        task_id=task_id,
+        issued_at_ms=issued_at_ms,
+        expires_at_ms=expires_at_ms,
+        affected_consumers=[],
+    )
+    payload = {
+        "proposal_id": grant.proposal_id,
+        "task_id": grant.task_id,
+        "issuer_peer_id": grant.issuer_peer_id,
+        "membership_epoch": grant.membership_epoch,
+        "membership_root": grant.membership_root,
+        "nonce": grant.nonce,
+        "issued_at_ms": grant.issued_at_ms,
+        "expires_at_ms": grant.expires_at_ms,
+        "affected_consumers": list(grant.affected_consumers),
+        "attestation": {
+            "attestor_peer_id": grant.attestation.attestor_peer_id,
+            "signature": grant.attestation.signature.hex(),
+        },
+        "signature": grant.signature.hex(),
+    }
+    header = base64.b64encode(_json.dumps(payload).encode("utf-8")).decode("ascii")
+    if output_json:
+        _print_json({"grant_header": header})
+    else:
+        console.print(header)
