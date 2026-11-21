@@ -14,6 +14,8 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
+from agency.autonomy.forge_auto import ToolBuildResult
+from agency.tools.base import ToolResult, ToolRisk, ToolSpec
 from agency.tools.provision import (
     BUILDABLE,
     CATALOG_AVAILABLE,
@@ -22,8 +24,12 @@ from agency.tools.provision import (
     NEEDS_INSTALL,
     PROVISIONED,
     UNKNOWN,
+    ToolProvisionReport,
+    build_missing,
+    provision_and_build,
     resolve,
 )
+from agency.tools.registry import ToolRegistry
 
 
 def _reg(*names: str) -> SimpleNamespace:
@@ -169,3 +175,149 @@ def test_default_catalog_probe_reports_without_raising() -> None:
     # Real PATH probing: the honest outcome is one of the two catalog states.
     report = resolve(("ghidra",))
     assert report.items[0].status in {CATALOG_AVAILABLE, NEEDS_INSTALL}
+
+
+# --------------------------------------------------------------------- #
+# build_missing + provision_and_build (Phase 5 wiring; hermetic builders)
+# --------------------------------------------------------------------- #
+
+
+class _StubTool:
+    """Minimal registered tool: enough for list_specs and a call."""
+
+    def __init__(self, name: str) -> None:
+        self.spec = ToolSpec(name=name, description="stub", risk=ToolRisk.READ_ONLY)
+
+    async def run(self, args: dict, ctx: object) -> ToolResult:
+        return ToolResult(tool=self.spec.name, ok=True, output={})
+
+
+def _fake_builder(
+    outcomes: dict[str, ToolBuildResult],
+    calls: list[str],
+    register_on_pass: bool = True,
+):
+    """Injectable build_tool_fn: records names, registers only on success."""
+
+    def build(name: str, code: str, tests: str, registry: object) -> ToolBuildResult:
+        calls.append(name)
+        if registry is not None and outcomes[name].registered and register_on_pass:
+            registry.register(_StubTool(name))
+        return outcomes[name]
+
+    return build
+
+
+def _mixed_report() -> ToolProvisionReport:
+    """PROVISIONED + BUILDABLE + UNKNOWN in one report (injectable probe)."""
+    return resolve(
+        ("known", "buildable", "nosuchtool"),
+        registry=_reg("known"),
+        build_specs={"buildable": {"code": "def run(): ...", "tests": "..."}},
+    )
+
+
+def test_build_missing_builds_only_buildable_items() -> None:
+    calls: list[str] = []
+    outcome = ToolBuildResult(
+        name="buildable", gate="PASS", sha256="0" * 64, registered=True, detail="registered"
+    )
+    registry = ToolRegistry()
+    registry.register(_StubTool("known"))
+    results = build_missing(
+        _mixed_report(),
+        build_specs={"buildable": {"code": "c", "tests": "t"}},
+        registry=registry,
+        build_tool_fn=_fake_builder({"buildable": outcome}, calls),
+    )
+    assert calls == ["buildable"]  # never called for PROVISIONED or UNKNOWN
+    assert set(results) == {"buildable"}
+    assert results["buildable"].gate == "PASS"
+    assert {spec.name for spec in registry.list_specs()} == {"known", "buildable"}
+
+
+def test_build_missing_skips_buildable_without_spec() -> None:
+    calls: list[str] = []
+    report = resolve(("gap",), registry=_reg(), build_specs={"gap": {"code": "c", "tests": "t"}})
+    assert report.items[0].status == BUILDABLE  # precondition: it IS buildable
+    # A BUILDABLE item whose spec is absent from the mapping handed to
+    # build_missing cannot be built: honest no-op, nothing registered.
+    results = build_missing(
+        report,
+        build_specs={"other": {"code": "c", "tests": "t"}},
+        registry=ToolRegistry(),
+        build_tool_fn=_fake_builder({}, calls),
+    )
+    assert calls == []
+    assert results == {}
+
+
+def test_build_missing_returns_failed_result_without_registering() -> None:
+    calls: list[str] = []
+    outcome = ToolBuildResult(
+        name="buildable", gate="FAIL", sha256="0" * 64, registered=False, detail="gate failed"
+    )
+    registry = ToolRegistry()
+    results = build_missing(
+        _mixed_report(),
+        build_specs={"buildable": {"code": "c", "tests": "t"}},
+        registry=registry,
+        build_tool_fn=_fake_builder({"buildable": outcome}, calls, register_on_pass=False),
+    )
+    assert results["buildable"].gate == "FAIL"  # honest: failure stays failure
+    assert {spec.name for spec in registry.list_specs()} == set()  # nothing registered
+
+
+def test_provision_and_build_flips_registered_tool_to_provisioned() -> None:
+    calls: list[str] = []
+    outcome = ToolBuildResult(
+        name="weather_lookup", gate="PASS", sha256="0" * 64, registered=True, detail="registered"
+    )
+    registry = ToolRegistry()
+    registry.register(_StubTool("memory_query"))
+    final = provision_and_build(
+        ("memory_query", "weather_lookup"),
+        registry=registry,
+        build_specs={"weather_lookup": {"code": "c", "tests": "t"}},
+        build_tool_fn=_fake_builder({"weather_lookup": outcome}, calls),
+    )
+    assert calls == ["weather_lookup"]
+    assert [item.status for item in final.items] == [PROVISIONED, PROVISIONED]
+
+
+def test_provision_and_build_failed_build_stays_buildable_with_gate_detail() -> None:
+    calls: list[str] = []
+    outcome = ToolBuildResult(
+        name="weather_lookup",
+        gate="FAIL",
+        sha256="0" * 64,
+        report_id="rep-1",
+        registered=False,
+        detail="forge gate failed; tool not registered",
+    )
+    registry = ToolRegistry()
+    registry.register(_StubTool("memory_query"))
+    final = provision_and_build(
+        ("memory_query", "weather_lookup"),
+        registry=registry,
+        build_specs={"weather_lookup": {"code": "c", "tests": "t"}},
+        build_tool_fn=_fake_builder({"weather_lookup": outcome}, calls, register_on_pass=False),
+    )
+    weather = final.items[1]
+    assert calls == ["weather_lookup"]
+    assert weather.status == BUILDABLE
+    assert "build gate FAIL" in weather.detail
+    assert "forge gate failed; tool not registered" in weather.detail
+    assert {spec.name for spec in registry.list_specs()} == {"memory_query"}
+
+
+def test_provision_and_build_without_buildable_is_pure_resolve() -> None:
+    calls: list[str] = []
+    final = provision_and_build(
+        ("nosuchtool",),
+        registry=_reg(),
+        build_specs={},
+        build_tool_fn=_fake_builder({}, calls),
+    )
+    assert calls == []  # UNKNOWN: no build attempted
+    assert final.items[0].status == UNKNOWN

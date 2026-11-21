@@ -1,6 +1,6 @@
 # PLAN: Tool Provisioning — every agent gets the tools it needs; Forge builds or imports what's missing
 
-**Date:** 2026-11-21 · **Status:** DRAFT for owner review · **Branch target:** `feat/tool-provisioning` (off `main`)
+**Date:** 2026-11-21 · **Status:** IMPLEMENTED (phases 1-5, branch `feat/tool-provisioning`, commits 9b3eaec..HEAD) · **Branch target:** `feat/tool-provisioning` (off `main`)
 
 **Goal:** When the Agent Factory makes an agent, that agent must actually have the tools its
 domain requires — declared on the blueprint, provisioned at activation, and enforced at call
@@ -191,3 +191,36 @@ MCP spec & security: [tools](https://modelcontextprotocol.io/specification/2025-
    requirements get the `default` profile from the needs catalog (`web_search`, `web_fetch`,
    `memory_query`, `memory_write`, `utc_time`, `calculator`).
 4. **Needs data location: `data/tool_needs.yaml`** (as recommended).
+
+## 9. Implementation notes (phases 1-5, 2026-11-21)
+
+- **Phase 4a canonical content-hash scheme** (`agency/tools/importing.py`):
+  `provenance.content_hash` is a sha256 over sorted `(filename, bytes)` pairs
+  plus the parsed manifest itself — descriptions included — serialized
+  canonically (`sort_keys`, compact separators) with the `content_hash` field
+  zeroed before hashing, so the pin is not self-referential and tool
+  descriptions participate in the hash (anti rug-pull per rule 4).
+  `verify_content_hash` recomputes and compares via `hmac.compare_digest`;
+  every update re-enters quarantine as a new import.
+- **Phase 4b deferred corners** (`agency/tools/mcp_bridge.py`): KISS v1 spawns
+  a fresh stdio subprocess per tool call; persistent connections, OAuth /
+  auth of any kind, HTTP/SSE transports, and egress enforcement
+  (`network.allowedDomains` is declared in manifests but not enforced at the
+  bridge) are explicitly deferred until a real need appears.
+- **Phase 3 seams** (`agency/orchestrator.py`): `_TOOL_ORCHESTRATOR_SEAMS =
+  frozenset({"agency_skill", "delegate_task"})` — pinned-skill invocation and
+  depth-guarded delegation ride along in every factory-issued allowlist by
+  design, so governed orchestrator capabilities are not cut off by the
+  fail-closed tool surface.
+- **improve_agent preservation fix** (`agency/factory/requested_agent.py`):
+  the re-versioned blueprint copies the current `tool_requirements` forward,
+  so self-improvement can neither widen nor silently drop an agent's
+  declared tool surface (regression: `tests/test_tool_allowlist_enforcement.py::test_improve_agent_reversion_keeps_tool_requirements`).
+- **Phase 5 wiring** (`agency/tools/provision.py`): `build_missing` builds
+  exactly the BUILDABLE items through the real `build_tool` gates (injectable
+  for hermetic tests; a BUILDABLE item without a spec is an honest no-op);
+  `provision_and_build` resolves, builds, and re-resolves — registered tools
+  flip to PROVISIONED, failed gates stay BUILDABLE with the gate failure in
+  the item detail. `BlacksmithOps.build_tool_job` already existed and needed
+  no change; the live acceptance walks the whole chain with real gates in
+  `tests/test_tool_provisioning_acceptance.py`.

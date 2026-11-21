@@ -15,8 +15,9 @@ Sources, in precedence order per name:
    with the install hint when missing, and ``MCP_BRIDGE_UNCONFIGURED`` for
    catalog entries without a command (MCP bridges; bridging lands later).
 3. ``build_specs`` — caller-supplied Forge build specs (name -> {code,
-   tests}) for names no other source knows → ``BUILDABLE`` (Phase 5 wires
-   the actual build job).
+   tests}) for names no other source knows → ``BUILDABLE``. The actual
+   build job is dispatched by :func:`build_missing` /
+   :func:`provision_and_build` (Phase 5), never by :func:`resolve`.
 4. nothing knows the name → ``UNKNOWN`` (fail closed, never dropped).
 """
 
@@ -25,11 +26,14 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
 
 from agency.forge.tool_catalog import ToolSpec, get_tool, is_available
+
+if TYPE_CHECKING:
+    from agency.autonomy.forge_auto import ToolBuildResult
 
 MAX_REQUIREMENTS = 64
 
@@ -159,6 +163,88 @@ def resolve(
     )
 
 
+def _spec_fields(spec: Any) -> tuple[str, str]:
+    """Read ``(code, tests)`` from a mapping- or attribute-shaped build spec."""
+    if isinstance(spec, Mapping):
+        return spec["code"], spec["tests"]
+    return spec.code, spec.tests
+
+
+def build_missing(
+    report: ToolProvisionReport,
+    *,
+    build_specs: Mapping[str, Any],
+    registry: Any,
+    build_tool_fn: Callable[[str, str, str, Any], ToolBuildResult] | None = None,
+) -> dict[str, ToolBuildResult]:
+    """Attempt Forge builds for exactly the BUILDABLE items of ``report``.
+
+    For each item with status ``BUILDABLE``, call
+    ``build_tool_fn(name, code, tests, registry)`` — by default the real
+    :func:`agency.autonomy.forge_auto.build_tool` (inspection, security scan
+    and pytest gates; registration only on PASS + digest match). Items with
+    any other status are never built; a BUILDABLE name without a spec is
+    skipped honestly (no build attempted, nothing registered). Results are
+    returned as ``{name: ToolBuildResult}`` and are the build function's own
+    honest outcomes: a FAILED gate stays FAILED and nothing gets registered.
+    ``build_tool_fn`` is injectable so tests stay hermetic.
+    """
+    if build_tool_fn is None:
+        # Lazy import mirrors BlacksmithOps.build_tool_job: keeps
+        # agency.tools ↔ agency.autonomy free of module-level cycles.
+        from agency.autonomy.forge_auto import build_tool
+
+        build_tool_fn = build_tool
+    results: dict[str, ToolBuildResult] = {}
+    for item in report.items:
+        if item.status != BUILDABLE:
+            continue
+        spec = build_specs.get(item.tool)
+        if spec is None:
+            continue
+        code, tests = _spec_fields(spec)
+        results[item.tool] = build_tool_fn(item.tool, code, tests, registry)
+    return results
+
+
+def provision_and_build(
+    requirements: Iterable[str],
+    *,
+    registry: Any,
+    build_specs: Mapping[str, Mapping[str, str]],
+    build_tool_fn: Callable[[str, str, str, Any], ToolBuildResult] | None = None,
+) -> ToolProvisionReport:
+    """Resolve, build the BUILDABLE gaps, then re-resolve post-build reality.
+
+    Convenience over :func:`resolve` + :func:`build_missing`: the first
+    resolve classifies the requirements; when anything is ``BUILDABLE`` the
+    real build runs (honoring the same honesty contract); a second resolve
+    reflects the registry after the builds — tools that registered become
+    ``PROVISIONED``, failed builds stay ``BUILDABLE`` with the gate failure
+    folded into their detail. Purely additive to the caller's registry:
+    nothing is unregistered, denied, or invented here.
+    """
+    names = _normalize_requirements(requirements)
+    initial = resolve(names, registry=registry, build_specs=build_specs)
+    builds: dict[str, ToolBuildResult] = {}
+    if any(item.status == BUILDABLE for item in initial.items):
+        builds = build_missing(
+            initial, build_specs=build_specs, registry=registry, build_tool_fn=build_tool_fn
+        )
+    final = resolve(names, registry=registry, build_specs=build_specs)
+    if not builds:
+        return final
+    items: list[ToolProvisionItem] = []
+    for item in final.items:
+        result = builds.get(item.tool)
+        if item.status == BUILDABLE and result is not None and not result.registered:
+            item = item.model_copy(
+                update={"detail": f"{item.detail}; build gate {result.gate}: {result.detail}"}
+            )
+        items.append(item)
+    return final.model_copy(update={"items": tuple(items)})
+
+
 __all__ = [
     "BUILDABLE",
     "CATALOG_AVAILABLE",
@@ -169,5 +255,7 @@ __all__ = [
     "UNKNOWN",
     "ToolProvisionItem",
     "ToolProvisionReport",
+    "build_missing",
+    "provision_and_build",
     "resolve",
 ]
