@@ -300,6 +300,16 @@
       "provenance": "builtin:agency-factory/segments/agency-l0-scope"
     },
     {
+      "id": "agency-tool-availability",
+      "version": "1.0.0",
+      "name": "Agency Tool Availability",
+      "description": "Resolved availability of this agent's declared tool requirements, filled at activation.",
+      "domain": "agency",
+      "kind": "SEGMENT",
+      "file": "segments/agency-tool-availability.md",
+      "provenance": "builtin:agency-factory/segments/agency-tool-availability"
+    },
+    {
       "id": "apprentice-researcher",
       "version": "1.0.0",
       "name": "Apprentice Researcher",
