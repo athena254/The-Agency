@@ -59,6 +59,9 @@ data/*
 !data/agents/
 !data/agents/agents.yaml
 
+# Private Butler intelligence documents (owner persona/charter; never commit).
+data/intelligence/
+
 # Temporary coding-agent inputs and tool caches
 .agent-input/
 .mypy_cache/
