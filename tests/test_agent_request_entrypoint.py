@@ -494,4 +494,3 @@ async def test_api_lifespan_skips_request_service_without_allowlist(
 # registry empty until agents are registered (tests/test_orchestrator.py
 # codifies that invariant), so the wiring is left to operators — see the
 # gap-14 report notes.
-

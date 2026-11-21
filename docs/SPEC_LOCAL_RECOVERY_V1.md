@@ -33,13 +33,19 @@ dynamic operation import, never fake demo op as production feature).
 ## 4. Types / signatures (exact)
 ```python
 class WorkflowExecutor:
-  def __init__(self, registry, operations, authorizer=None,
-               replay_safe=frozenset(), operation_versions=None) -> None: ...
-  def run(self, workflow_id, version, inputs, actor_id) -> WorkflowRun: ...  # unchanged
-  def run_recoverable(self, workflow_id, version, inputs, actor_id) -> RecoverableRun: ...
-  def resume(self, run_id: str, inputs: dict, actor_id: str) -> RecoverableRun: ...
-  def reconcile(self) -> list[RecoverableRun]: ...  # lock-gated, no clock arg
-  def inspect_recoverable(self, run_id: str) -> RecoverableRun: ...
+    def __init__(
+        self,
+        registry,
+        operations,
+        authorizer=None,
+        replay_safe=frozenset(),
+        operation_versions=None,
+    ) -> None: ...
+    def run(self, workflow_id, version, inputs, actor_id) -> WorkflowRun: ...  # unchanged
+    def run_recoverable(self, workflow_id, version, inputs, actor_id) -> RecoverableRun: ...
+    def resume(self, run_id: str, inputs: dict, actor_id: str) -> RecoverableRun: ...
+    def reconcile(self) -> list[RecoverableRun]: ...  # lock-gated, no clock arg
+    def inspect_recoverable(self, run_id: str) -> RecoverableRun: ...
 ```
 `replay_safe` (subset of `operations`) and `operation_versions` are
 construction-time trusted config (reviewed code), never model/caller flags.

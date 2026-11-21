@@ -287,8 +287,8 @@ Suggested immutable fields:
 class CapabilityRef:
     capability_type: CapabilityType
     capability_id: str
-    version: str                  # exact X.Y.Z; no "latest" or ranges at execution
-    digest: str | None = None     # sha256:<64 lowercase hex>; required in a lockfile/release
+    version: str  # exact X.Y.Z; no "latest" or ranges at execution
+    digest: str | None = None  # sha256:<64 lowercase hex>; required in a lockfile/release
 ```
 
 Reference identity is `(capability_type, capability_id, version)`. Digest is an integrity assertion over the canonical content projection. The resolver must reject a digest mismatch.
@@ -311,8 +311,8 @@ class CapabilityContract:
     ref: CapabilityRef
     name: str
     description: str
-    lifecycle_state: str             # normalized projection; see §4.2
-    native_state: str                # exact native status or REGISTERED_UNVERIFIED
+    lifecycle_state: str  # normalized projection; see §4.2
+    native_state: str  # exact native status or REGISTERED_UNVERIFIED
     inputs: dict[str, object] | None
     outputs: dict[str, object] | None
     requested_permissions: tuple[str, ...]
@@ -342,11 +342,11 @@ Represent relationships explicitly:
 
 ```python
 class DependencyRelation(str, Enum):
-    REQUIRES = "requires"              # hard dependency; must resolve
-    COMPOSES = "composes"              # member of an immutable composition
+    REQUIRES = "requires"  # hard dependency; must resolve
+    COMPOSES = "composes"  # member of an immutable composition
     CONFLICTS_WITH = "conflicts_with"  # cannot coexist in one resolved graph
-    SUPERSEDES = "supersedes"          # governance/deprecation relationship
-    COMPATIBLE_WITH = "compatible_with"# positive compatibility assertion with evidence
+    SUPERSEDES = "supersedes"  # governance/deprecation relationship
+    COMPATIBLE_WITH = "compatible_with"  # positive compatibility assertion with evidence
 ```
 
 Each edge must identify the target using a full `CapabilityRef` and may include a bounded interface/role label. `REQUIRES`/`COMPOSES` edges are exact-version dependencies. Never use an unpinned name or a branch/tag alias in a released graph.
@@ -461,9 +461,10 @@ A successful resolution returns an immutable lock snapshot:
 ```python
 @dataclass(frozen=True)
 class ResolvedNode:
-    ref: CapabilityRef             # includes digest
+    ref: CapabilityRef  # includes digest
     native_state: str
     adapter_schema_version: int
+
 
 @dataclass(frozen=True)
 class ResolvedCapabilityGraph:
@@ -761,15 +762,21 @@ class CapabilityRegistryView(Protocol):
     def get(self, ref: CapabilityRef) -> CapabilityContract: ...
     def list(self, query: CapabilityQuery) -> list[CapabilityContract]: ...
 
+
 class CapabilityResolver:
-    def resolve(self, root: CapabilityRef, *, purpose: ResolutionPurpose) -> ResolvedCapabilityGraph: ...
+    def resolve(
+        self, root: CapabilityRef, *, purpose: ResolutionPurpose
+    ) -> ResolvedCapabilityGraph: ...
+
 
 class CapabilityIndex:
     def rebuild(self) -> IndexBuildReport: ...
     def search(self, query: CapabilityQuery) -> list[CapabilitySearchResult]: ...
 
+
 class CompatibilityChecker:
     def check(self, graph: ResolvedCapabilityGraph) -> CompatibilityReport: ...
+
 
 class EvaluationRegistry:
     def register_suite(self, suite: EvaluationSuite, *, actor: str) -> EvaluationSuite: ...
@@ -777,11 +784,15 @@ class EvaluationRegistry:
     def record_run(self, run: EvaluationRun) -> EvaluationRun: ...
     def get_run(self, run_id: str) -> EvaluationRun: ...
 
+
 class EvaluationRunner:
     def run(self, target: CapabilityRef, suite: CapabilityRef, *, actor: str) -> EvaluationRun: ...
 
+
 class CompositionEngine:
-    def compose_agent(self, request: AgentCompositionRequest, *, creator: str) -> CompositionDraft: ...
+    def compose_agent(
+        self, request: AgentCompositionRequest, *, creator: str
+    ) -> CompositionDraft: ...
     def inspect_impact(self, ref: CapabilityRef) -> DependencyImpactReport: ...
 ```
 

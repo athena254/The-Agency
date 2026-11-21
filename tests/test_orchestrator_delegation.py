@@ -69,9 +69,7 @@ async def test_delegation_depth_guard() -> None:
         parent = await orch._task_manager.create_task(
             title="parent", created_by=parent_agent.id, input={"description": "work"}
         )
-        child = await orch.delegate_task(
-            parent.task_id, worker.id, description="first hop"
-        )
+        child = await orch.delegate_task(parent.task_id, worker.id, description="first hop")
         with pytest.raises(ValueError, match="delegation depth limit"):
             await orch.delegate_task(child.task_id, parent_agent.id, description="second hop")
     finally:

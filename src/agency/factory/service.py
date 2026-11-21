@@ -1124,16 +1124,12 @@ class AgentFactory:
             try:
                 self._kernels.revoke(old_runtime_id)
             except KeyError:
-                logger.warning(
-                    "factory.kernel_identity_absent_on_revoke", agent_id=old_runtime_id
-                )
+                logger.warning("factory.kernel_identity_absent_on_revoke", agent_id=old_runtime_id)
             try:
                 self._runtimes.deregister(old_runtime_id)
             except KeyError:
                 # Runtime identities do not survive process restarts.
-                logger.info(
-                    "factory.runtime_identity_absent_on_revoke", agent_id=old_runtime_id
-                )
+                logger.info("factory.runtime_identity_absent_on_revoke", agent_id=old_runtime_id)
         assert agent is not None
         return agent
 

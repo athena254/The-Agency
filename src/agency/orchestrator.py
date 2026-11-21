@@ -389,9 +389,7 @@ class AgencyOrchestrator:
             self._lattice = self._lattice_lease.lattice
             self._build_tool_layer()
             self._started = True
-            self._log.info(
-                "orchestrator_started", max_concurrent_tasks=self._max_concurrent_tasks
-            )
+            self._log.info("orchestrator_started", max_concurrent_tasks=self._max_concurrent_tasks)
         except BaseException:
             # Cancellation also requires rollback; cleanup must not mask it.
             try:
@@ -497,9 +495,7 @@ class AgencyOrchestrator:
             raise ValueError(f"unknown parent task {parent_task_id!r}")
         depth = await self._delegation_depth(parent)
         if depth >= self._max_delegation_depth:
-            raise ValueError(
-                f"delegation depth limit reached ({self._max_delegation_depth})"
-            )
+            raise ValueError(f"delegation depth limit reached ({self._max_delegation_depth})")
         child = await self._task_manager.create_task(
             title=(title or f"Delegated: {parent.title}")[:200],
             created_by=target.id,
@@ -555,11 +551,7 @@ class AgencyOrchestrator:
             agent = self._identity_registry.get(task.created_by)
             if agent is not None and not agent.revoked:
                 return agent.id
-        fallbacks = [
-            agent
-            for agent in self._identity_registry.list_agents()
-            if not agent.revoked
-        ]
+        fallbacks = [agent for agent in self._identity_registry.list_agents() if not agent.revoked]
         for agent in fallbacks:
             if agent.domain == "general":
                 return agent.id

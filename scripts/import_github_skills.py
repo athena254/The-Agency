@@ -89,8 +89,9 @@ def main() -> int:
         prompts,
         skills,
         approver=args.approver,
-        publish_authorizer=lambda actor, action: action == "skill.publish"
-        and actor == args.approver,
+        publish_authorizer=lambda actor, action: (
+            action == "skill.publish" and actor == args.approver
+        ),
         data_dir=args.data_dir,
     )
     try:

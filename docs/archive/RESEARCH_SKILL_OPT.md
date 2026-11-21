@@ -106,7 +106,7 @@ class SkillDocument:
 
     skill_id: str
     version: str
-    content: str                    # The Markdown skill document
+    content: str  # The Markdown skill document
     optimization_history: tuple[OptimizationRecord, ...] = ()
     validation_score: float | None = None
 ```

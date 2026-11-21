@@ -641,9 +641,7 @@ class RequestedAgentService:
                 f"publication of {(skill_id, version)!r} requires a configured "
                 "attestation store (fail closed)."
             )
-        digest = (
-            SkillCapabilityAdapter(self._skill_registry).get(skill_id, version).content_digest
-        )
+        digest = SkillCapabilityAdapter(self._skill_registry).get(skill_id, version).content_digest
         ref = CapabilityRef(CapabilityType.SKILL, skill_id, version)
         if self._attestation_store.get(ref, digest) is None:
             raise AttestationError(f"publication of {(skill_id, version)!r} requires attestation")

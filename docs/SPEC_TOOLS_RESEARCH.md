@@ -38,16 +38,18 @@ callable, risk metadata.
 
 ```python
 class ToolRisk(str, Enum):
-    READ_ONLY = "read_only"      # search, fetch, memory query — no side effects
-    MUTATES_STATE = "mutates"    # memory write, agent spawn
-    EXECUTES_CODE = "executes"   # sandbox exec — needs risk engine sign-off
+    READ_ONLY = "read_only"  # search, fetch, memory query — no side effects
+    MUTATES_STATE = "mutates"  # memory write, agent spawn
+    EXECUTES_CODE = "executes"  # sandbox exec — needs risk engine sign-off
+
 
 @dataclass(frozen=True)
 class ToolSpec:
-    name: str                    # "web_search"
-    description: str             # shown to the LLM
-    parameters: dict[str, Any]   # JSON Schema for args
+    name: str  # "web_search"
+    description: str  # shown to the LLM
+    parameters: dict[str, Any]  # JSON Schema for args
     risk: ToolRisk = ToolRisk.READ_ONLY
+
 
 class ToolResult(BaseModel):
     tool: str
@@ -55,10 +57,12 @@ class ToolResult(BaseModel):
     output: Any = None
     error: str | None = None
     duration_ms: int = 0
-    evidence: dict[str, Any] = {}   # urls fetched, citations, bytes read
+    evidence: dict[str, Any] = {}  # urls fetched, citations, bytes read
+
 
 class Tool(Protocol):
     spec: ToolSpec
+
     async def run(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult: ...
 ```
 

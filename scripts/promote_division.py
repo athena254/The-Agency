@@ -33,13 +33,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from agency.factory.prompts import PromptRegistry, PromptStatus  # noqa: E402
-from agency.tools.reviewer import SkillSpectorReviewer, verdict_for_report  # noqa: E402
+from agency.factory.prompts import PromptRegistry, PromptStatus
+from agency.tools.reviewer import SkillSpectorReviewer, verdict_for_report
 
 MIN_BODY_CHARS = 500
 CHUNK = 50  # SkillSpector caps skills per scan; chunk bundles at this size
 # Non-agent content the import walk also captured (repo readmes/indexes):
-EXCLUDED_DIVISIONS = {"README", "AGENTS", "CLAUDE", "changelog"}  # excludes clone-pointer debris (see AGENCY_AGENTS_IMPORT_REVIEW §2)
+EXCLUDED_DIVISIONS = {
+    "README",
+    "AGENTS",
+    "CLAUDE",
+    "changelog",
+}  # excludes clone-pointer debris (see AGENCY_AGENTS_IMPORT_REVIEW §2)
 APPROVER = "skillspector-reviewer"
 
 

@@ -39,6 +39,7 @@ from agency.orchestrator import AgencyOrchestrator
 def _database_path(env_var: str, default: str) -> str:
     return os.environ.get(env_var, default)
 
+
 log = structlog.get_logger(__name__)
 
 
@@ -215,10 +216,7 @@ def create_app(config: ButlerConfig | None = None) -> FastAPI:
             path = path[len(root) :]
         if request.method == "GET" and path == "/v1/health":
             return await call_next(request)
-        if (
-            path == "/v1/message"
-            and getattr(application.state, "token_registry", None) is not None
-        ):
+        if path == "/v1/message" and getattr(application.state, "token_registry", None) is not None:
             return await call_next(request)
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

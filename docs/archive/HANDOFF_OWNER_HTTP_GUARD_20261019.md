@@ -18,8 +18,7 @@ async def guard_owner_request(
     *,
     csrf_token: str | None,
     write: bool = False,
-) -> tuple[OwnerPrincipal, dict[str, Any] | None]:
-    ...
+) -> tuple[OwnerPrincipal, dict[str, Any] | None]: ...
 ```
 
 The guard uses the **real** `OwnerAuthenticator`, `OwnerPrincipal` and fixed-message `PilotError`. No runtime/service construction, app import, route, provider, memory, database, Telegram identity, CORS middleware or forwarded-header trust is added. Existing app helpers were inspected but not imported: they are app-coupled and accept looser Host/Origin forms than this contract permits.

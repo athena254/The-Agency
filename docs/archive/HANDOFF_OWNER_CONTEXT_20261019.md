@@ -8,8 +8,7 @@ Only production change is the existing `ThreadContextEngine.assemble`:
 ```python
 async def assemble(
     self, owner: str, thread_id: str, message: str, *, local_only: bool = False
-) -> ThreadContext:
-    ...
+) -> ThreadContext: ...
 ```
 
 - `True` bypasses `_topical_recall` completely, rather than querying shared memory and discarding results.

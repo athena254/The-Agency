@@ -17,8 +17,6 @@ Set AGENCY_LLM_API_KEY env var for real LLM calls.
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -57,7 +55,7 @@ async def live_test() -> None:
         ("memory_keeper", "memory", ["remember", "recall", "search"]),
     ]
     for name, domain, caps in agents:
-        agent = await butler.orchestrator.register_agent(name, domain, caps)
+        await butler.orchestrator.register_agent(name, domain, caps)
         print(f"  ✓ Registered {name} ({domain})")
 
     # Send test messages
@@ -78,7 +76,7 @@ async def live_test() -> None:
 
         print(f"  Response: {response[:100]}...")
         print(f"  Time: {elapsed:.2f}s")
-        print(f"  ✓ Message handled")
+        print("  ✓ Message handled")
 
     # Health check
     print("\n" + "=" * 60)
@@ -94,7 +92,9 @@ async def live_test() -> None:
     print("=" * 60)
     entries = await butler.orchestrator._audit_log.query()
     for entry in entries[-5:]:
-        print(f"  [{entry.timestamp.strftime('%H:%M:%S')}] {entry.agent}: {entry.action} → {entry.result}")
+        print(
+            f"  [{entry.timestamp.strftime('%H:%M:%S')}] {entry.agent}: {entry.action} → {entry.result}"
+        )
 
     # Memory
     print("\n" + "=" * 60)

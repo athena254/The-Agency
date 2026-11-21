@@ -129,11 +129,11 @@ Rules used to judge the prompts above, distilled from the sources:
 New module `src/agency/agents/_prompt_shared.py`:
 
 ```python
-HONESTY = (...)      # never claim undone work; cite evidence; say "I don't know"
-OPERATING = (...)    # plan → act → verify (with what command) → report; stop conditions
-ESCALATION = (...)   # when out of scope/blocked: stop and answer with
-                     # {"final": "BLOCKED: <what> because <evidence>"}; never improvise authority
-OUTPUT_CONTRACT = 'Always end with {"final": "<your reply>"}.'   # single source
+HONESTY = ...  # never claim undone work; cite evidence; say "I don't know"
+OPERATING = ...  # plan → act → verify (with what command) → report; stop conditions
+ESCALATION = ...  # when out of scope/blocked: stop and answer with
+# {"final": "BLOCKED: <what> because <evidence>"}; never improvise authority
+OUTPUT_CONTRACT = 'Always end with {"final": "<your reply>"}.'  # single source
 ```
 
 Each `*_SYSTEM_PROMPT` becomes: identity line + Scope line + domain Rules (domain-specific

@@ -187,14 +187,10 @@ def _build_requested_agent_service(
     """Compose the requested-agent entrypoint service from the default stores."""
     prompts = PromptRegistry(_database_path("AGENCY_PROMPTS_DB", "data/prompts.db"))
     skills = SkillRegistry(_database_path("AGENCY_SKILL_DB_PATH", "data/skills.db"))
-    approver = (
-        os.environ.get(AGENCY_REQUEST_APPROVER_ENV, "").strip() or DEFAULT_REQUEST_APPROVER
-    )
+    approver = os.environ.get(AGENCY_REQUEST_APPROVER_ENV, "").strip() or DEFAULT_REQUEST_APPROVER
     factory = AgentFactory(
         _database_path("AGENCY_FACTORY_DB", "data/factory.db"),
-        authorizer=lambda actor, permission: (
-            permission == "agent.approve" and actor == approver
-        ),
+        authorizer=lambda actor, permission: permission == "agent.approve" and actor == approver,
         kernel_registry=kernel_registry,
         runtime_registry=runtime_registry,
         is_prompt_published=prompts.is_published,
@@ -432,10 +428,13 @@ def create_app() -> FastAPI:
         is_ballot = path == "/v1/governance/ballot"
         if (request.method == "GET" and path == "/v1/health") or is_ballot:
             return await call_next(request)
-        if any(
-            path == prefix or path.startswith(prefix + "/")
-            for prefix in ENABLED_AUTHED_PREFIXES
-        ) and getattr(application.state, "token_registry", None) is not None:
+        if (
+            any(
+                path == prefix or path.startswith(prefix + "/")
+                for prefix in ENABLED_AUTHED_PREFIXES
+            )
+            and getattr(application.state, "token_registry", None) is not None
+        ):
             return await call_next(request)
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

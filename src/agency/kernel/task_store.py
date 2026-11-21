@@ -342,8 +342,9 @@ class TaskStore:
 
         await self.initialize()
         async with self._transaction() as conn:
-            cursor = await conn.execute("SELECT task_id FROM tasks WHERE status = ?",
-                                        (TaskStatus.RUNNING.value,))
+            cursor = await conn.execute(
+                "SELECT task_id FROM tasks WHERE status = ?", (TaskStatus.RUNNING.value,)
+            )
             rows = await cursor.fetchall()
             if not rows:
                 return 0

@@ -1,4 +1,5 @@
 """Offline smoke test of Agency threads, skills, and deterministic workflows."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -29,22 +30,38 @@ def main() -> None:
         reopened.close()
 
         skills = SkillRegistry(str(root / "skills.db"), allowed_permissions=frozenset({"analyze"}))
-        skills.register(SkillSpec(
-            skill_id="count-text", version="1.0.0", name="Count text", description="Character count",
-            inputs={"text": "string"}, outputs={"count": "integer"},
-            permissions=("analyze",), implementation="text.count", provenance="smoke",
-        ))
+        skills.register(
+            SkillSpec(
+                skill_id="count-text",
+                version="1.0.0",
+                name="Count text",
+                description="Character count",
+                inputs={"text": "string"},
+                outputs={"count": "integer"},
+                permissions=("analyze",),
+                implementation="text.count",
+                provenance="smoke",
+            )
+        )
         skills.transition("count-text", "1.0.0", SkillStatus.TESTING)
         skills.transition("count-text", "1.0.0", SkillStatus.APPROVED, "unit-tested")
         skill = skills.publish("count-text", "1.0.0", "human-approved")
         assert skills.list_events("count-text", "1.0.0")[-1]["evidence"] == "human-approved"
 
         workflows = WorkflowRegistry(str(root / "workflows.db"))
-        workflows.register(WorkflowDefinition(
-            workflow_id="count", version="1.0.0", steps=(WorkflowStep(
-                step_id="measure", operation=skill.implementation, permissions=skill.permissions,
-            ),),
-        ))
+        workflows.register(
+            WorkflowDefinition(
+                workflow_id="count",
+                version="1.0.0",
+                steps=(
+                    WorkflowStep(
+                        step_id="measure",
+                        operation=skill.implementation,
+                        permissions=skill.permissions,
+                    ),
+                ),
+            )
+        )
         executor = WorkflowExecutor(
             workflows,
             operations={"text.count": lambda inputs, _: {"count": len(inputs["text"])}},
@@ -60,7 +77,9 @@ def main() -> None:
         assert reopened_workflows.get_run(run.run_id).status == "COMPLETED"
         reopened_workflows.close()
         skills.close()
-        print("AGENCY_CORE_SMOKE_OK thread_isolation=ok skill_lifecycle=ok workflow=ok deny=ok restart=ok")
+        print(
+            "AGENCY_CORE_SMOKE_OK thread_isolation=ok skill_lifecycle=ok workflow=ok deny=ok restart=ok"
+        )
 
 
 if __name__ == "__main__":
