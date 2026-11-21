@@ -17,7 +17,7 @@ import {
   type GovernanceVote,
 } from '../api/governance'
 import { useAuth } from '../stores/auth'
-import { Header } from './Memories'
+import { PageHeader as Header } from '../components/ui'
 import { Chip, LoadingBlock, PanelRow, StateChip } from './PilotShared'
 
 /**
