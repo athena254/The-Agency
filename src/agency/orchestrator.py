@@ -254,6 +254,11 @@ class AgencyOrchestrator:
         # default keeps the historical in-memory behaviour for library users.
         self._task_manager = task_manager or TaskManager()
         self._audit_log = AuditLog(":memory:")
+        # Durable A5 assignment journal (opt-in via config) backing the
+        # autonomy engine's delegated child tasks (gaps.md #20). Opened
+        # lazily and fail-closed: a broken journal disables journalling,
+        # never dispatch itself.
+        self._assignment_journal = self._open_assignment_journal()
 
         # Dispatcher — the queue consumer; started/stopped with the
         # orchestrator lifecycle. Concurrency is bounded per process.
@@ -653,6 +658,13 @@ class AgencyOrchestrator:
             closers.append(self._memory_lifecycle.stop_periodic)
             if lease is not None:
                 closers.append(lease.release)
+            journal = self._assignment_journal
+            if journal is not None:
+
+                async def close_journal() -> None:
+                    journal.close()
+
+                closers.append(close_journal)
             closers.extend(
                 [self._audit_log.close, self._evidence_store.close, self._memory_store.close]
             )
@@ -867,6 +879,95 @@ class AgencyOrchestrator:
         self._log.info("task_submitted", task_id=task.task_id, title=title)
         return task
 
+    def _open_assignment_journal(self) -> Any:
+        """Open the optional durable assignment journal (fail-closed, opt-in)."""
+        journal_path = self._config.get("assignment_journal_path")
+        if not journal_path:
+            return None
+        try:
+            from agency.autonomy.assignment_journal import AssignmentJournal
+
+            return AssignmentJournal(str(journal_path))
+        except Exception:  # noqa: BLE001 — optional component; never blocks startup
+            self._log.warning("assignment_journal_open_failed")
+            return None
+
+    async def _mirror_spawn(self, agent_id: Any) -> None:
+        """Mirror one runtime spawn into the identity registry + lattice (idempotent)."""
+        if not isinstance(agent_id, str) or self._identity_registry.get(agent_id):
+            return
+        record = self._runtime_registry.get_agent(agent_id)
+        if record is None:
+            return
+        with suppress(ValueError):
+            self._identity_registry.register(record.agent)
+        if self._lattice is not None:
+            try:
+                await self._lattice.register_agent(
+                    agent_id=agent_id,
+                    agent_type=record.agent.domain,
+                    capabilities=[c.name for c in record.agent.capabilities],
+                )
+            except Exception:  # noqa: BLE001 — optional lattice mirror.
+                self._log.warning("lattice.spawn_register_failed", agent_id=agent_id)
+
+    def _autonomy_delegate(self, parent_task_id: str) -> Any:
+        """Bind :meth:`delegate_task` as the engine's assignment materialiser.
+
+        The child joins the shared dispatcher queue (depth-bounded, metered,
+        audited by the existing delegation path). Outcomes are honest:
+        pre-creation rejections are ``failed``, an expired wait is
+        ``uncertain`` (the child may still be running and is never resumed).
+        """
+        timeout_raw = self._config.get("autonomy_delegate_timeout")
+        timeout = float(timeout_raw) if isinstance(timeout_raw, (int, float)) else 300.0
+
+        async def delegate(subtask: Any, agent_id: str) -> Any:
+            from agency.autonomy.engine import DispatchOutcome
+
+            if not self.has_dispatcher:
+                return DispatchOutcome(
+                    status="failed",
+                    child_task_id=None,
+                    detail="no dispatcher started; delegated child not queued",
+                )
+            try:
+                child = await self.delegate_task(
+                    parent_task_id,
+                    agent_id,
+                    title=subtask.title[:200],
+                    description=subtask.description,
+                    timeout=timeout,
+                )
+            except ValueError as exc:
+                # Unknown parent/target or depth limit: nothing was created.
+                return DispatchOutcome(status="failed", child_task_id=None, detail=str(exc))
+            except TimeoutError:
+                return DispatchOutcome(
+                    status="uncertain",
+                    child_task_id=None,
+                    detail="delegation wait timed out; child may still be running",
+                )
+            if child.status is TaskStatus.COMPLETED:
+                return DispatchOutcome(
+                    status="completed",
+                    child_task_id=child.task_id,
+                    detail=json.dumps(child.output, sort_keys=True, default=str)[:200],
+                )
+            if child.status in (TaskStatus.FAILED, TaskStatus.BLOCKED):
+                return DispatchOutcome(
+                    status="failed",
+                    child_task_id=child.task_id,
+                    detail=child.error or f"child ended {child.status.value}",
+                )
+            return DispatchOutcome(
+                status="uncertain",
+                child_task_id=child.task_id,
+                detail=f"child ended {child.status.value}",
+            )
+
+        return delegate
+
     async def submit_autonomous_task(
         self,
         task: str,
@@ -876,7 +977,7 @@ class AgencyOrchestrator:
         budget: int = 10,
     ) -> Any:
         """Plan+assign/spawn via ``run_autonomous``; mirror spawns + lattice. KISS."""
-        from agency.autonomy.engine import run_autonomous
+        from agency.autonomy.engine import dispatch_assignments, run_autonomous
 
         tools = (
             set(available_tools)
@@ -897,31 +998,24 @@ class AgencyOrchestrator:
         )
         # Mirror runtime spawns into identity registry + lattice.
         for spawn in result.spawns:
-            agent_id = spawn.get("agent_id")
-            if not isinstance(agent_id, str) or self._identity_registry.get(agent_id):
-                continue
-            record = self._runtime_registry.get_agent(agent_id)
-            if record is None:
-                continue
-            with suppress(ValueError):
-                self._identity_registry.register(record.agent)
-            if self._lattice is not None:
-                try:
-                    await self._lattice.register_agent(
-                        agent_id=agent_id,
-                        agent_type=record.agent.domain,
-                        capabilities=[c.name for c in record.agent.capabilities],
-                    )
-                except Exception:  # noqa: BLE001 — optional lattice mirror.
-                    self._log.warning("lattice.spawn_register_failed", agent_id=agent_id)
+            await self._mirror_spawn(spawn.get("agent_id"))
         agent_id = next(
             (a["agent_id"] for a in result.assignments if a.get("agent_id") is not None),
             result.spawns[0].get("agent_id") if result.spawns else None,
         )
-        await self.submit_task(
+        parent = await self.submit_task(
             title=task[:80] or "autonomous",
             description=task,
             agent_id=agent_id if isinstance(agent_id, str) else None,
+        )
+        # Materialise the engine's assignments as delegated child tasks under
+        # the parent (gaps.md #20): depth-bounded, deadline-bounded, honest
+        # statuses, optional durable journal record.
+        result = await dispatch_assignments(
+            result,
+            self._planner,
+            delegate=self._autonomy_delegate(parent.task_id),
+            journal=self._assignment_journal,
         )
         return result
 
