@@ -1132,6 +1132,48 @@ def _make_worker(name: str, model: str | None, timeout_s: int) -> ExternalWorker
     raise typer.BadParameter(f"unsupported worker: {name} (opencode|claudecode|codex|pi|cursor)")
 
 
+@forge_app.command("ship")
+def forge_ship(
+    worktree_root: Path = typer.Option(..., "--worktree-root"),  # noqa: B008
+    target_branch: str = typer.Option(..., "--target-branch"),
+    pipeline_gate: str = typer.Option("FAIL", "--pipeline-gate"),
+    smoke_gate: str = typer.Option("FAIL", "--smoke-gate"),
+    approved: bool = typer.Option(False, "--approved", help="Explicit human approval."),
+    proof_log: Path | None = typer.Option(None, "--proof-log"),  # noqa: B008
+    repo_root: Path | None = typer.Option(None, "--repo-root"),  # noqa: B008
+    output_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Locally fast-forward merge a PASS worktree branch (never releases)."""
+
+    from agency.forge.ship import ship_branch
+
+    yolo = os.environ.get("AGENCY_YOLO") == "1"
+    approval_source = "explicit" if approved else ("yolo" if yolo else "")
+    if not approval_source:
+        _fail("ship requires explicit --approved (or audited -yolo); no merge performed")
+    if pipeline_gate.upper() != "PASS" or smoke_gate.upper() != "PASS":
+        _fail("ship requires both pipeline and smoke gates to be PASS")
+
+    report = ship_branch(
+        str(worktree_root),
+        target_branch,
+        pipeline_gate=pipeline_gate.upper(),
+        smoke_gate=smoke_gate.upper(),
+        approved=True,
+        proof_log=str(proof_log) if proof_log else None,
+        repo_root=str(repo_root) if repo_root else None,
+    )
+    receipt = report.model_dump(mode="json")
+    receipt["approval_source"] = approval_source
+    receipt["yolo_audited"] = yolo
+    if output_json:
+        _print_json(receipt)
+    else:
+        console.print(f"Ship gate: {report.gate} (report {report.report_id})")
+    if report.gate != "PASS":
+        raise typer.Exit(code=1)
+
+
 def _print_loop_result(result: Any, *, output_json: bool) -> None:
     if output_json:
         _print_json(result.model_dump(mode="json"))
