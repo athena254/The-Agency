@@ -95,8 +95,16 @@ class FakeButler:
         )
         return f"reply:{message}"
 
-    async def handle_isolated_message(self, message: str, sender: str) -> ButlerReply:
-        self.calls.append({"path": "isolated", "message": message, "sender": sender})
+    async def handle_isolated_message(
+        self,
+        message: str,
+        sender: str,
+        *,
+        history: list[dict[str, str]] | None = None,
+    ) -> ButlerReply:
+        self.calls.append(
+            {"path": "isolated", "message": message, "sender": sender, "history": history}
+        )
         text = self._reply_text if self._reply_text is not None else f"reply:{message}"
         return ButlerReply(text=text, status=self._reply_status)
 
@@ -252,6 +260,71 @@ def test_chat_uses_isolated_tool_free_path_with_fixed_sender() -> None:
     assert call["path"] == "isolated"
     assert call["message"] == "hello there"
     assert call["sender"] == "local:prototype"
+    assert call["history"] is None
+
+
+def test_chat_without_session_id_stays_stateless() -> None:
+    butler = FakeButler()
+    with TestClient(create_app(butler), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
+        token = _csrf(client)
+        client.post("/api/chat", json={"message": "first"}, headers=_post_headers(token))
+        client.post("/api/chat", json={"message": "second"}, headers=_post_headers(token))
+    assert len(butler.calls) == 2
+    assert butler.calls[0]["history"] is None
+    assert butler.calls[1]["history"] is None
+
+
+def test_chat_with_session_id_replays_earlier_turns() -> None:
+    butler = FakeButler()
+    with TestClient(create_app(butler), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
+        token = _csrf(client)
+        first = client.post(
+            "/api/chat",
+            json={"message": "first", "session_id": "session-abc-123"},
+            headers=_post_headers(token),
+        )
+        second = client.post(
+            "/api/chat",
+            json={"message": "second", "session_id": "session-abc-123"},
+            headers=_post_headers(token),
+        )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert butler.calls[0]["history"] == []
+    assert butler.calls[1]["history"] == [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "reply:first"},
+    ]
+
+
+def test_chat_session_history_is_bounded_per_session() -> None:
+    butler = FakeButler()
+    with TestClient(create_app(butler), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
+        token = _csrf(client)
+        for index in range(12):
+            client.post(
+                "/api/chat",
+                json={"message": f"m{index}", "session_id": "session-abc-123"},
+                headers=_post_headers(token),
+            )
+    history = butler.calls[-1]["history"]
+    assert len(history) == 16  # 11 prior exchanges; the store keeps the last 8
+    assert history[0] == {"role": "user", "content": "m3"}
+    assert history[-1] == {"role": "assistant", "content": "reply:m10"}
+
+
+def test_chat_rejects_invalid_session_id_without_butler_call() -> None:
+    butler = FakeButler()
+    with TestClient(create_app(butler), base_url=LOCAL_BASE, client=("127.0.0.1", 50000)) as client:
+        token = _csrf(client)
+        for bad in ("short", "bad id!!", "x" * 129):
+            response = client.post(
+                "/api/chat",
+                json={"message": "hi", "session_id": bad},
+                headers=_post_headers(token),
+            )
+            assert response.status_code == 422
+    assert butler.calls == []
 
 
 # --------------------------------------------------------------------------- #

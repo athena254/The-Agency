@@ -13,9 +13,9 @@ surface than :mod:`agency.butler.server`:
                       Read-only local observability (agents, tasks, evidence,
                       risk, memory, audit, owner, skills, tools) behind the same
                       owner boundary. Never a write, never a ``/v1`` route.
-``POST /api/chat``    ``{message}`` -> ``{response}`` via the isolated,
-                      tool-free, memory-free, non-mirrored Butler path
-                      (``502``/``504``/``503`` on failure).
+``POST /api/chat``    ``{message, session_id?}`` -> ``{response}`` via the
+                      isolated, tool-free, memory-free, non-mirrored Butler
+                      path (``502``/``504``/``503`` on failure).
 
 Every ``/api`` request must carry a loopback ``Host``; ``POST /api/chat``
 additionally requires a non-foreign ``Origin``, the per-process CSRF header
@@ -23,6 +23,10 @@ and a JSON content type. There is no CORS middleware, no caller-supplied
 ``sender``/``context``/tool grant, and no agent creation or thread access.
 Chat runs only through the isolated read-only Butler path: no tool driver, no
 memory read/write, and no Lattice task mirror of the private text.
+With an optional client-generated ``session_id``, the server replays its own
+bounded, in-memory record of earlier turns of that browser page session as
+prompt context; the client never supplies conversation content, and the
+record is never persisted or logged — it dies with the process.
 Failures return an explicit non-2xx ``{"error": ...}`` without echoing the
 inbound message, model output, or raw exception text.
 """
@@ -31,10 +35,11 @@ from __future__ import annotations
 
 import ipaddress
 import secrets
+from collections import OrderedDict, deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import urlsplit
 
 import structlog
@@ -205,6 +210,10 @@ class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     message: str = Field(min_length=1, description="User message text.")
+    # Opaque client-generated key for this browser page session; it never
+    # carries conversation content. Absent/None => the stateless single-turn
+    # behavior (no session state is created or read).
+    session_id: Annotated[str | None, Field(pattern=r"^[A-Za-z0-9_-]{8,128}$")] = None
 
 
 class ChatResponse(BaseModel):
@@ -214,6 +223,56 @@ class ChatResponse(BaseModel):
 
     response: str
     assessment: ExecutionAssessment | None = None
+
+
+_CHAT_SESSION_LIMIT = 64  # LRU cap on tracked chat sessions
+_CHAT_TURNS_PER_SESSION = 8  # most recent exchanges kept per session
+
+
+class _ChatSessionHistory:
+    """Bounded in-memory record of this process's own ``/api/chat`` turns.
+
+    Keyed by the client's opaque page-session id. The client never supplies
+    conversation content: the server records only turns it served itself.
+    Nothing is persisted, logged or mirrored — the record dies with the
+    process. Sessions are evicted LRU-first past ``max_sessions`` and each
+    session keeps only its most recent ``turns_per_session`` exchanges.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_sessions: int = _CHAT_SESSION_LIMIT,
+        turns_per_session: int = _CHAT_TURNS_PER_SESSION,
+    ) -> None:
+        self._max_sessions = max_sessions
+        self._turns_per_session = turns_per_session
+        self._sessions: OrderedDict[str, deque[dict[str, str]]] = OrderedDict()
+
+    def history(self, session_id: str) -> list[dict[str, str]]:
+        """Return copies of the recorded turns for ``session_id`` (oldest first)."""
+        record = self._sessions.get(session_id)
+        if record is None:
+            return []
+        self._sessions.move_to_end(session_id)
+        return [dict(turn) for turn in record]
+
+    def record(self, session_id: str, *, user: str, assistant: str) -> None:
+        """Append one served exchange to ``session_id`` (creating/evicting as needed)."""
+        record = self._sessions.get(session_id)
+        if record is None:
+            # Two entries per exchange (user + assistant reply).
+            record = deque(maxlen=self._turns_per_session * 2)
+            self._sessions[session_id] = record
+            while len(self._sessions) > self._max_sessions:
+                self._sessions.popitem(last=False)
+        self._sessions.move_to_end(session_id)
+        record.append({"role": "user", "content": user})
+        record.append({"role": "assistant", "content": assistant})
+
+    def clear(self) -> None:
+        """Drop all recorded turns (process shutdown)."""
+        self._sessions.clear()
 
 
 class AgentView(BaseModel):
@@ -291,6 +350,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             await service.stop()
         finally:
             application.state.butler_started = False
+        application.state.chat_history.clear()
         log.info("prototype.api_shutdown")
 
 
@@ -320,6 +380,7 @@ def create_app(
     application.state.pilot_started = False
     application.state.butler_started = False
     application.state.csrf_token = secrets.token_urlsafe(32)
+    application.state.chat_history = _ChatSessionHistory()
     application.include_router(pilot_router)
     application.include_router(observe_router)
 
@@ -455,7 +516,12 @@ def create_app(
                 detail="Prototype chat is unavailable in this configuration.",
             )
         try:
-            reply = await isolated(payload.message, LOCAL_SENDER)
+            history = (
+                request.app.state.chat_history.history(payload.session_id)
+                if payload.session_id is not None
+                else None
+            )
+            reply = await isolated(payload.message, LOCAL_SENDER, history=history)
         except ButlerAuditError:
             log.warning("prototype.audit_unavailable")
             raise HTTPException(
@@ -479,6 +545,10 @@ def create_app(
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="The Butler returned no reply.",
+            )
+        if payload.session_id is not None:
+            request.app.state.chat_history.record(
+                payload.session_id, user=payload.message, assistant=text
             )
         report = bound_assessment(
             getattr(reply, "assessment", None),
