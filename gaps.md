@@ -6,7 +6,9 @@ Ordered by production risk. **Avoid these patterns; all agents are free to fix t
 **Status 2026-11-21 (full-gap sweep):** 15 of 20 closed — gaps 1-9 and 11-16, commit
 references below are on `integrated`. Gaps 10 and 17 remain open for external reasons (no
 local LLM API keys; no real PAK repository to wire against); gaps 18-20 were added by the
-intake workstream (2026-11-20).
+intake workstream (2026-11-20); gap 19 is partially closed on `gap/taskstore-lifecycle`
+(`3a3cd91`, `a34d90d`: leases + shared stores, plus `cfd9eb1` LLM backoff;
+last-writer-wins status remains).
 
 ## 1. Capability ⇄ Factory circular import (structural) — CLOSED `5399d37`
 `canonical_sha256` moved to the neutral `src/agency/core/hashing.py`; `factory.coding_models`
@@ -116,18 +118,24 @@ still has no actuator consumer (PLAN_V1 D6) and the grant-verifier replacement o
 bind servers to loopback or terminate TLS. **Fix:** implement D6 actuator-side grant
 enforcement and swap the authed routes onto the grant verifier.
 
-## 19. Dispatcher/task-store operational bounds (2026-11-20)
+## 19. Dispatcher/task-store operational bounds (2026-11-20) — PARTIALLY CLOSED `3a3cd91`, `a34d90d`
 Tasks persist in `data/tasks.db` (`AGENCY_TASKS_DB`); claims are atomic across the api and
-butler processes, so both dispatchers share one queue. But: startup recovery of tasks caught
-RUNNING is opt-in (`AGENCY_TASKS_RECOVER=1`) and single-process-only — a second live process's
-running tasks would be wrongly requeued; audit/memory/evidence stores remain per-process
-(`:memory:` defaults for the api server), so evidence rows are not shared; status updates
-across processes are last-writer-wins with best-effort transition checks. Also (2026-11-20
-live E2E): three near-simultaneous task executions hit the configured LLM provider's HTTP 402
-(quota) under burst — per-caller/provider rate limiting or retry-with-backoff at the LLM
-adapter is needed before this surface is load-bearing. **Fix:** shared
-durable audit/evidence backends, a lease/heartbeat so recovery can distinguish dead from
-live claimers, and provider-aware backoff in the LLM adapter.
+butler processes, so both dispatchers share one queue. Closed since then:
+the LLM 402/429/5xx burst item (`cfd9eb1`, provider-aware backoff in `LLMAdapter.generate`);
+task-claim leases (`3a3cd91`) — claims stamp `lease_owner` + `lease_expires_at` (TTL
+`AGENCY_TASKS_LEASE_SECONDS`, default 300 s), the dispatcher heartbeats in-flight tasks, and
+`AGENCY_TASKS_RECOVER=1` now requeues only expired (or pre-lease) claims, so a second live
+process's running tasks are left alone — safe multi-process recovery requires every claiming
+process to run a lease-aware build (pre-lease processes do not heartbeat, so their claims
+expire like dead ones); and shared durable backends (`a34d90d`) — `AGENCY_AUDIT_DB` /
+`AGENCY_EVIDENCE_DB` / `AGENCY_MEMORY_DB` point the api and butler orchestrators at the same
+file-backed SQLite stores (`:memory:` defaults unchanged, so the hermetic suite is untouched).
+Still open: status updates across processes are last-writer-wins with best-effort transition
+checks (a cross-process compare-and-swap would have to thread an expected-status guard
+through every caller — deferred as not cheap). Honest limits of the lease: a hung-but-alive
+process (blocked event loop, no heartbeats) has its leases expire and its tasks requeued
+while still executing, and a task claimed by a process that crashed less than one lease TTL
+ago is only recovered after the TTL lapses.
 
 ## 20. Autonomy-engine assignments still never execute (2026-11-20)
 `run_autonomous` stops after assign/spawn/proof; the general agent→agent path now exists
@@ -136,3 +144,25 @@ engine assigns are still not dispatched to their assigned agents. Forge routing
 (`forge_build_strategy`, BlacksmithOps QUEUED→DISPATCHED) is owned by
 `docs/PLAN_BLACKSMITH_FORGE_ORCHESTRATOR.md` phases 2-6. **Fix:** materialise engine
 assignments as delegated child tasks once the BlacksmithOps state machine lands.
+
+## 21. Task-lifecycle audit items (2026-11-20 audit, disposition 2026-11-21)
+Of the three audit items outside gap 19: (d) delegated child tasks' results never returned
+to the submitter — CLOSED `3a3cd91`: a terminal child now records its
+result on the parent task record (`TaskManager.update_status` appends a `child_result`
+message to the parent, visible via `GET /v1/tasks/{id}` and `TaskManager.get_task`; the
+child's own `output`/`error` stay authoritative; a crash between the terminal write and the
+append is honest UNCERTAIN — the parent may never learn, the child record always holds the
+result), and `TaskDispatcher.wait` re-polls the shared store so a delegation wait resolves
+even when another process's dispatcher executed the child (completion events are
+process-local). (e) agent intake path 503-blocked — LEFT BLOCKED deliberately (`17f1d95`
+pins the boundary): the route is
+`POST /v1/agents`, gated by `agency/api/authority.py` (`require_peer_authority`, "deliberately
+not an owner-token switch") and the `docs/SPEC_BETA_BOUNDARY_AND_PEER_EXECUTION.md` release
+gate ("until peer certificates and actuator checks exist, no consequential route may
+create/revoke agents"); `tests/test_agent_intake_boundary.py` pins that `AGENCY_API_TOKENS`
+does NOT open it. Enablement needs the Slice D grant-verifier / D6 actuator work (see #18)
+or an explicit owner decision, not a bearer-token switch. (f) task decomposition is
+regex-only (`agents/planner.py::_default_strategy`) — REMAINS: the `AgentPlanner` strategy
+seam is already pluggable, but with the hermetic echo provider an LLM-backed splitter cannot
+be validated offline (no API keys on this machine, #10); adding an untestable live path was
+rejected as not a clean bounded improvement.
