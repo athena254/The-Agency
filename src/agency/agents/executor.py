@@ -368,8 +368,13 @@ class AgentExecutor:
         return ExecutionContext.model_validate(merged)
 
     def _with_profile_prompt(self, prompt: str, agent_id: str | None) -> str:
-        """Prepend the executing agent's intelligence profile when loadable.
+        """Append the agent's private intelligence profile when one exists.
 
+        Appended — never prepended — so system/factory prompt prefix
+        contracts (runtime prompt consumption, autonomy context propagation)
+        stay byte-identical. Only a private per-agent profile is injected:
+        the committed template alone carries no agent-specific information,
+        and template-only agents keep their exact historical prompts.
         Fail-open (AIS spec §10): a missing or invalid profile never breaks a
         task — the profile is descriptive context, so execution continues
         unprofiled and the gap is logged.
@@ -381,7 +386,9 @@ class AgentExecutor:
         except ProfileError as exc:
             self._log.warning("executor.profile_unavailable", agent_id=agent_id, error=str(exc))
             return prompt
-        return profile_prompt_block(profile) + "\n\n" + prompt
+        if profile.source != "private":
+            return prompt
+        return prompt + "\n\n" + profile_prompt_block(profile)
 
     @staticmethod
     async def _echo_backend(prompt: str, context: dict[str, Any]) -> dict[str, Any]:

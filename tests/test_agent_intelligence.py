@@ -198,20 +198,18 @@ class RecordingLLM:
 
 
 @pytest.mark.asyncio
-async def test_executor_prepends_profile_block(
+async def test_executor_skips_template_only_agents(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # No private copy for this id: the committed template is injected.
+    # No private copy for this id: template-only agents run unprofiled so
+    # their prompts stay byte-identical (prompt prefix/equality contracts).
     monkeypatch.setenv("AGENCY_PRIVATE_DATA_DIR", str(tmp_path / "empty"))
     llm = RecordingLLM()
     executor = AgentExecutor(llm=llm)
     result = await executor.execute("summarize the ledger", context={"agent_id": "agent-x"})
     assert result.status is ExecutionStatus.COMPLETED
     assert result.output == "OK"
-    block, separator, task_text = llm.prompts[0].partition("\n\n")
-    assert separator and task_text == "summarize the ledger"
-    assert block.startswith(PROFILE_HEADER)
-    assert "Role:" in block
+    assert llm.prompts[0] == "summarize the ledger"
 
 
 @pytest.mark.asyncio
@@ -225,8 +223,11 @@ async def test_executor_uses_private_profile_override(
     llm = RecordingLLM()
     executor = AgentExecutor(llm=llm)
     await executor.execute("do the thing", context={"agent_id": "agent-y"})
-    assert "Role: Ledger keeper" in llm.prompts[0]
-    assert llm.prompts[0].endswith("do the thing")
+    # Appended, never prepended: the task prompt keeps the prefix contract.
+    task_text, separator, block = llm.prompts[0].partition("\n\n")
+    assert task_text == "do the thing" and separator
+    assert block.startswith(PROFILE_HEADER)
+    assert "Role: Ledger keeper" in block
 
 
 @pytest.mark.asyncio
