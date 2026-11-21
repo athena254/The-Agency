@@ -82,6 +82,19 @@ TOOL_CAPABLE_DOMAINS = frozenset(
 # Per-domain tool-loop budgets (general is lighter: mostly chat).
 _TOOL_ITERATIONS: dict[str, int] = {"research": 6, "general": 4}
 
+# Builtin tools every allowlisted agent keeps, on top of its declared needs
+# (PLAN_TOOL_PROVISIONING §3.5; owner decision §8.3 fixes the default
+# profile to the same function-enabling set).
+_TOOL_ALWAYS_ON = frozenset(
+    {"web_search", "web_fetch", "memory_query", "memory_write", "utc_time", "calculator"}
+)
+
+# The orchestrator's governed seams registered for every tool-capable agent
+# (see _build_tool_layer): pinned-skill invocation and depth-guarded
+# delegation. Factory allowlists include them, otherwise a pinned skill
+# could never execute — the requested-agent loop depends on agency_skill.
+_TOOL_ORCHESTRATOR_SEAMS = frozenset({"agency_skill", "delegate_task"})
+
 _DEFAULT_MEMORY_DB = "data/memory.db"
 
 
@@ -288,6 +301,9 @@ class AgencyOrchestrator:
         # live services (memory, sandbox), so tests can inject fakes first.
         self._tool_registry: ToolRegistry | None = None
         self._tool_driver: ToolDriver | None = None
+        # Per-agent resolved tool allowlists (best-effort cache; see
+        # _resolve_allowed_tools). Never raised out of dict operations.
+        self._tool_allowlist_cache: dict[str, frozenset[str]] = {}
         # Process sandbox — works without Docker (weaker isolation, see
         # ProcessSandboxBackend docstring). Docker config can override.
         self._sandbox_manager = SandboxManager(
@@ -506,11 +522,21 @@ class AgencyOrchestrator:
         return fallbacks[0].id if fallbacks else None
 
     def _tool_context(
-        self, agent_id: str, task_id: str, *, beta_principal: BetaPrincipal | None = None
+        self,
+        agent_id: str,
+        task_id: str,
+        *,
+        beta_principal: BetaPrincipal | None = None,
+        allowed_tools: frozenset[str] | None = None,
     ) -> ToolContext:
         """Build per-task context; never infer authority from caller context."""
         if beta_principal is not None and not isinstance(beta_principal, BetaPrincipal):
             raise TypeError("beta_principal must be a BetaPrincipal")
+        if allowed_tools is None:
+            allowed_tools = self._resolve_allowed_tools(agent_id)
+        metadata: dict[str, Any] = {}
+        if allowed_tools is not None:
+            metadata["allowed_tools"] = frozenset(allowed_tools)
         return ToolContext(
             agent_id=agent_id,
             task_id=task_id,
@@ -518,8 +544,49 @@ class AgencyOrchestrator:
             sandbox_manager=self._sandbox_manager,
             lattice=self._lattice,
             audit=self._audit_log,
+            metadata=metadata,
             beta_principal=beta_principal,
         )
+
+    def _resolve_allowed_tools(self, agent_id: str) -> frozenset[str] | None:
+        """Resolve the agent's tool allowlist; None keeps legacy-open behavior.
+
+        Factory-issued agents always get an explicit allowlist (fail closed):
+        blueprint tool requirements ∪ the needs catalog's default profile ∪
+        builtin always-ons, deduplicated. Agents without a reachable factory
+        identity stay unfiltered (backward compatible). Best-effort: no
+        lookup failure ever raises or blocks tool-context construction; a
+        factory agent degrades to a smaller explicit set instead of none.
+        The per-agent cache is advisory and never raises.
+        """
+        cached = self._tool_allowlist_cache.get(agent_id)
+        if cached is not None:
+            return cached
+        try:
+            agent = self._identity_registry.get(agent_id)
+        except Exception:  # noqa: BLE001 — resolution is best-effort
+            return None
+        if agent is None or agent.revoked or agent.metadata.get("factory") != "agent-factory-v1":
+            return None
+        names: set[str] = set(_TOOL_ALWAYS_ON | _TOOL_ORCHESTRATOR_SEAMS)
+        with suppress(Exception):  # the default profile is advisory
+            from agency.tools.needs import default_requirements  # lazy: gaps.md #1
+
+            names.update(default_requirements())
+        with suppress(Exception):  # blueprint lookup is advisory
+            factory = self._config.get("agent_factory")
+            blueprint_id = agent.metadata.get("blueprint_id")
+            blueprint_version = agent.metadata.get("blueprint_version")
+            if (
+                factory is not None
+                and isinstance(blueprint_id, str)
+                and isinstance(blueprint_version, str)
+            ):
+                names.update(factory.get(blueprint_id, blueprint_version).tool_requirements)
+        allowed = frozenset(names)
+        with suppress(Exception):  # cache is best-effort
+            self._tool_allowlist_cache[agent_id] = allowed
+        return allowed
 
     async def stop(self) -> None:
         """Release our local lease and attempt all independently owned cleanup."""

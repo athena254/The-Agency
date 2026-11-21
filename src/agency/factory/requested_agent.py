@@ -481,6 +481,7 @@ class RequestedAgentService:
                 bp.name,
                 domain=bp.domain,
                 capabilities=list(bp.capabilities),
+                tool_requirements=list(bp.tool_requirements),
                 skill_refs=list(bp.skill_refs),
                 prompt_refs=new_refs,
                 prompt_params=dict(bp.prompt_params),

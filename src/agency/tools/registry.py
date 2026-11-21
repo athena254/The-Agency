@@ -33,6 +33,10 @@ _TYPE_NAMES = ("string", "integer", "number", "boolean", "array", "object")
 
 _BETA_AUDIT_ERROR = "beta audit unavailable"
 
+# Fixed error vocabulary for per-agent allowlist denials (PLAN §3.5): the
+# caller gets a stable message, never the allowlist or its own input.
+_NOT_PROVISIONED_ERROR = "tool not provisioned for this agent"
+
 
 def _type_matches(value: Any, expected: str) -> bool:
     """Check a JSON-schema primitive type; bool is not an integer."""
@@ -211,9 +215,17 @@ class ToolRegistry:
         except KeyError:
             raise ToolError(f"unknown tool: {name}", tool=name) from None
 
-    def list_specs(self) -> list[ToolSpec]:
-        """Return all tool specs sorted by name."""
-        return [self._tools[name].spec for name in sorted(self._tools)]
+    def list_specs(self, allowed_tools: frozenset[str] | set[str] | None = None) -> list[ToolSpec]:
+        """Return all tool specs sorted by name.
+
+        With ``allowed_tools``, only specs whose name is in the set are
+        returned, so prompt building never advertises a tool the agent
+        cannot call (hidden tools don't reach the model). ``None`` keeps
+        the unfiltered behavior.
+        """
+        if allowed_tools is None:
+            return [self._tools[name].spec for name in sorted(self._tools)]
+        return [self._tools[name].spec for name in sorted(self._tools) if name in allowed_tools]
 
     def set_timeout(self, name: str, seconds: float) -> None:
         """Override the execution timeout for one tool.
@@ -253,6 +265,16 @@ class ToolRegistry:
             safe_name = "unknown" if self._strict else name
             result = ToolResult(tool=safe_name, ok=False, error=f"unknown tool: {safe_name}")
             await self._audit_call(ctx, safe_name, result)
+            return result
+
+        # Per-agent provisioning gate (PLAN §3.5): a context carrying an
+        # explicit allowlist may only call tools in it. Checked before any
+        # validation, policy evaluation, or execution; audited like other
+        # denials via _audit_call.
+        allowed = ctx.metadata.get("allowed_tools")
+        if isinstance(allowed, (frozenset, set)) and name not in allowed:
+            result = ToolResult(tool=name, ok=False, error=_NOT_PROVISIONED_ERROR)
+            await self._audit_call(ctx, name, result)
             return result
 
         violation = _validate_args(tool.spec, args)
