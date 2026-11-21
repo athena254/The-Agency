@@ -71,9 +71,13 @@ marker; (b) a real task ran through the full dispatcher pipeline — live planne
 live executor (`attempts=1`), correct result (`42`), audit entries, memory write, terminal
 `completed`, clean shutdown. The verifier scored the subtasks `0.667/failed` on a correct
 answer — the known independent-checker strictness open item, recorded honestly as findings.
-Still open: the improve leg of request→task→improve with a live provider, multi-restart and
-concurrency soak, and a second provider for comparison. Do not claim full production
-certification until those are exercised.
+Still open: multi-restart and concurrency soak, and a second provider for comparison. The
+improve leg was qualified live the same day (2026-11-22): the offline `test_requested_agent_
+e2e` flow re-run with the live provider driving planner/executor — `request_agent` → live
+task → `improve_agent` re-versioned `scout` 1.0.0→1.0.1 (`prompt_refined=True`, atomic
+reversion, approver `human-lead` via the #2 human gate, purpose prompt 1.0.1 PUBLISHED,
+distilled skill 1.0.1 DRAFT). Do not claim full production certification until the soak is
+exercised.
 
 ## 11. GitHub-imported skills are metadata-only — CLOSED `36bd00f`
 `ext-*` skills are created with the same documentation-only sentinel as gap 4; promotion and
