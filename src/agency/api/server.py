@@ -251,7 +251,15 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         await task_store.initialize()
         application.state.task_store = task_store
         if os.environ.get("AGENCY_TASKS_RECOVER", "").strip() == "1":
-            requeued = await task_store.requeue_running(note="requeued after restart")
+            # Lease-aware recovery: only claims whose lease expired (or
+            # pre-lease rows) are requeued, so a second live process's
+            # running tasks — leases still fresh via its dispatcher
+            # heartbeats — are left alone. Safe across processes when every
+            # claiming process runs a lease-aware build; see TaskStore
+            # module docstring for the honest limits.
+            requeued = await task_store.requeue_running(
+                note="requeued after restart (lease expired)", expired_only=True
+            )
             if requeued:
                 log.info("api.tasks_recovered", requeued=requeued)
 
@@ -278,8 +286,16 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
         # Full execution stack: the dispatcher inside the orchestrator drains
         # the shared task queue (same file as the butler server), so tasks
-        # submitted over this API actually execute in parallel.
-        orchestrator = AgencyOrchestrator(task_manager=application.state.task_manager)
+        # submitted over this API actually execute in parallel. The
+        # audit/evidence/memory paths are passed through so one process uses
+        # one durable backend per store (gaps.md #19): api + butler share
+        # rows when the same env vars point both servers at one file.
+        orchestrator = AgencyOrchestrator(
+            task_manager=application.state.task_manager,
+            audit_db_path=_database_path("AGENCY_AUDIT_DB", ":memory:"),
+            evidence_db_path=_database_path("AGENCY_EVIDENCE_DB", ":memory:"),
+            memory_db_path=_database_path("AGENCY_MEMORY_DB", ":memory:"),
+        )
         application.state.orchestrator = orchestrator
         await orchestrator.start()
         await orchestrator.start_dispatcher()

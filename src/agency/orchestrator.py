@@ -222,6 +222,8 @@ class AgencyOrchestrator:
         skill_operations: OperationRegistry | None = None,
         task_manager: TaskManager | None = None,
         blacksmith_ops: BlacksmithOps | None = None,
+        audit_db_path: str | None = None,
+        evidence_db_path: str | None = None,
     ) -> None:
         self._config = config or {}
         self._blacksmith_ops = blacksmith_ops
@@ -253,7 +255,17 @@ class AgencyOrchestrator:
         # Injected manager lets server processes share one store-backed queue;
         # default keeps the historical in-memory behaviour for library users.
         self._task_manager = task_manager or TaskManager()
-        self._audit_log = AuditLog(":memory:")
+        # Audit/evidence: ``:memory:`` by default (per-process, hermetic);
+        # ``AGENCY_AUDIT_DB`` / ``AGENCY_EVIDENCE_DB`` point api + butler at
+        # shared durable files so audit trails and evidence rows survive
+        # restarts and are visible across processes.
+        self._audit_log = AuditLog(
+            audit_db_path
+            if audit_db_path is not None
+            else (
+                self._config.get("audit_db_path") or os.environ.get("AGENCY_AUDIT_DB") or ":memory:"
+            )
+        )
 
         # Dispatcher — the queue consumer; started/stopped with the
         # orchestrator lifecycle. Concurrency is bounded per process.
@@ -339,7 +351,15 @@ class AgencyOrchestrator:
                 self._requested_agent_service = None
 
         # Evidence & Risk
-        self._evidence_store = EvidenceStore()
+        self._evidence_store = EvidenceStore(
+            evidence_db_path
+            if evidence_db_path is not None
+            else (
+                self._config.get("evidence_db_path")
+                or os.environ.get("AGENCY_EVIDENCE_DB")
+                or ":memory:"
+            )
+        )
         self._risk_engine = RiskEngine()
 
         # Tool layer — registry is empty until start() wires builtins with
