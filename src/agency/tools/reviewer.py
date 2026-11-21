@@ -194,9 +194,7 @@ class SkillSpectorReviewer:
                 check=False,
             )
         except subprocess.TimeoutExpired:
-            return _unavailable(
-                f"{SCANNER} scan timed out after {self._timeout_s}s (fail closed)"
-            )
+            return _unavailable(f"{SCANNER} scan timed out after {self._timeout_s}s (fail closed)")
         except OSError as exc:
             return _unavailable(f"{SCANNER} could not be executed: {exc} (fail closed)")
         if proc.returncode != 0:
