@@ -59,7 +59,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: 'Platform',
     items: [
-      { to: '/lattice', label: 'Lattice', icon: Layers, locked: true, gate: 'P2' },
+      { to: '/lattice', label: 'Lattice', icon: Layers },
       { to: '/forge', label: 'Forge', icon: Shield, locked: true, gate: 'P2 + P3 + P4' },
       { to: '/settings', label: 'Settings', icon: Settings },
     ],

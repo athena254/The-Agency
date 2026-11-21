@@ -15,16 +15,26 @@ export class PilotError extends Error {
 interface AuthState {
   /** Owner bearer token for the /api/pilot surface. Kept in memory only. */
   ownerToken: string | null
+  /**
+    Signed X-Agency-Grant header value for grant-gated /v1 reads (e.g. the
+    governance proposals listing). Minted by the owner OUTSIDE the browser
+    with `agency consensus-sign-grant`; pasted in and kept in memory only.
+    No key material ever reaches the GUI.
+  */
+  govGrant: string | null
   /** Last owner-auth failure notice. Never contains the token itself. */
   authNotice: string | null
   setOwnerToken: (token: string | null) => void
+  setGovGrant: (grant: string | null) => void
   setAuthNotice: (notice: string | null) => void
 }
 
 export const useAuth = create<AuthState>((set) => ({
   ownerToken: null,
+  govGrant: null,
   authNotice: null,
   setOwnerToken: (token) => set({ ownerToken: token }),
+  setGovGrant: (grant) => set({ govGrant: grant }),
   setAuthNotice: (notice) => set({ authNotice: notice }),
 }))
 
