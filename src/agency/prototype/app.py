@@ -6,7 +6,7 @@ surface than :mod:`agency.butler.server`:
 
 ``GET  /``            Static UI shell (once the UI lane adds assets).
 ``GET  /assets/*``    Static UI assets from ``prototype/static``.
-``GET  /api/health``  ``{status, butler, agents}``.
+``GET  /api/health``  ``{status, butler, agents, version}``.
 ``GET  /api/agents``  ``{agents: [{id, name, domain}]}``.
 ``GET  /api/session`` ``{csrf_token}`` for accepted local requests.
 ``GET  /api/pilot/observe/*``
@@ -301,6 +301,7 @@ class HealthResponse(BaseModel):
     status: str
     butler: str
     agents: int
+    version: str
 
 
 class SessionResponse(BaseModel):
@@ -477,6 +478,7 @@ def create_app(
             status="ok" if running else "starting",
             butler="running" if running else "starting",
             agents=len(agents),
+            version=__version__,
         )
 
     @application.get("/api/agents", response_model=AgentsResponse, tags=["prototype"])

@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import agency.prototype.app as prototype_app
+from agency import __version__
 from agency.agents.executor import AgentExecutor
 from agency.butler.config import ButlerConfig
 from agency.butler.service import ButlerReply, ButlerService
@@ -197,10 +198,11 @@ def test_health_reports_running_butler_and_agent_count() -> None:
         response = client.get("/api/health")
     assert response.status_code == 200
     body = response.json()
-    assert set(body) == {"status", "butler", "agents"}
+    assert set(body) == {"status", "butler", "agents", "version"}
     assert body["status"] == "ok"
     assert body["butler"] == "running"
     assert body["agents"] == 2
+    assert body["version"] == __version__
 
 
 def test_agents_endpoint_returns_service_roster() -> None:
