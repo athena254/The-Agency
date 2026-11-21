@@ -1,8 +1,16 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
-from agency.agents.bootstrap import apply_installed_agents, bootstrap_agents
+import pytest
+
+from agency.agents.bootstrap import (
+    apply_installed_agents,
+    bootstrap_agents,
+    ensure_installed_agents,
+    validate_installed_agents,
+)
 from agency.agents.install import (
     InstallPlanEntry,
     PAKSyncInstallPlan,
@@ -11,6 +19,7 @@ from agency.agents.install import (
     install,
 )
 from agency.factory.manager import AgentManager, InstalledAgent
+from agency.factory.service import AgentFactory
 from agency.kernel.registry import AgentRegistry
 
 
@@ -107,3 +116,69 @@ def test_bootstrap_agents_skips_unknown_manifest_agents(tmp_path) -> None:
     result = bootstrap_agents(registry, manager=manager, manifest_path=str(manifest))
     assert result.installed_agents == ("a",)
     assert result.granted_capabilities == 0
+
+
+# --- lifecycle validation before install (gaps.md #16) -------------------------
+
+
+def test_validate_installed_agents_records_checks_and_skips() -> None:
+    good = _agent("good")
+    bad_version = replace(_agent("bad"), version="not-semver")
+    factory = AgentFactory(":memory:")
+    factory.create("good", "1.0.0", "good", creator="test")
+
+    validation = validate_installed_agents([good, bad_version], factory=factory)
+
+    assert [agent.id for agent in validation.installed] == ["good"]
+    assert validation.skipped == (("bad", "invalid version 'not-semver'"),)
+    assert any(check.startswith("good:") for check in validation.checks)
+    assert any("blueprint" in check for check in validation.checks)
+
+
+def test_validate_installed_agents_skips_missing_factory_blueprint() -> None:
+    factory = AgentFactory(":memory:")
+
+    validation = validate_installed_agents([_agent("a")], factory=factory)
+
+    assert validation.installed == ()
+    assert validation.skipped == (("a", "no factory blueprint for 'a'"),)
+
+
+def test_validate_installed_agents_without_factory_still_checks_versions() -> None:
+    validation = validate_installed_agents([_agent("a")])
+
+    assert [agent.id for agent in validation.installed] == ["a"]
+    assert validation.skipped == ()
+    assert any("a: version 1.0.0" in check for check in validation.checks)
+
+
+def test_ensure_installed_agents_rejects_duplicate_manifest_ids(tmp_path) -> None:
+    registry = AgentRegistry()
+    manager = AgentManager(path=tmp_path / "agents.yaml")
+    manager.save([_agent("a"), _agent("a")])
+
+    with pytest.raises(ValueError, match="duplicate"):
+        ensure_installed_agents(manager, registry)
+    assert registry.get("a") is None
+
+
+def test_ensure_installed_agents_skips_bad_version_and_installs_rest(tmp_path) -> None:
+    registry = AgentRegistry()
+    manager = AgentManager(path=tmp_path / "agents.yaml")
+    manager.save([replace(_agent("bad"), version="not-semver"), _agent("b")])
+
+    assert ensure_installed_agents(manager, registry) == ["b"]
+    assert registry.get("b") is not None
+    assert registry.get("bad") is None
+
+
+def test_ensure_installed_agents_with_factory_requires_blueprint(tmp_path) -> None:
+    registry = AgentRegistry()
+    manager = AgentManager(path=tmp_path / "agents.yaml")
+    manager.save([_agent("a"), _agent("b")])
+    factory = AgentFactory(":memory:")
+    factory.create("a", "1.0.0", "a", creator="test")
+
+    assert ensure_installed_agents(manager, registry, factory=factory) == ["a"]
+    assert registry.get("a") is not None
+    assert registry.get("b") is None
