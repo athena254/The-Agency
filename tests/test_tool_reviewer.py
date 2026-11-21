@@ -29,7 +29,17 @@ from agency.tools.reviewer import (
     ToolReviewVerdict,
 )
 
-REPORT_TEMPLATE = {"score": 95, "findings": []}
+REPORT_TEMPLATE = {
+    "skill": {"name": "unknown", "source": "."},
+    "risk_assessment": {
+        "score": 20,
+        "severity": "LOW",
+        "recommendation": "OK",
+        "max_issue_severity": "NONE",
+    },
+    "components": [{"path": "SKILL.md", "type": "markdown", "executable": False}],
+    "issues": [],
+}
 
 
 def _verdict(**over: Any) -> ToolReviewVerdict:
@@ -66,11 +76,9 @@ def _write_stub(
         "sleep_path = os.path.join(BIN, 'sleep_s.txt')\n"
         "if os.path.exists(sleep_path):\n"
         "    time.sleep(float(open(sleep_path, encoding='utf-8').read()))\n"
-        "out = args[args.index('--output') + 1]\n"
         "data = open(CANNED, encoding='utf-8').read()\n"
-        "if data:\n"  # empty canned report -> scanner produced no output file
-        "    with open(out, 'w', encoding='utf-8') as fh:\n"
-        "        fh.write(data)\n"
+        "if data:\n"  # empty canned report -> scanner produced no stdout report
+        "    sys.stdout.write(data)\n"
         f"sys.exit({exit_code})\n",
         encoding="utf-8",
     )
@@ -160,61 +168,151 @@ def test_review_invokes_the_documented_command_line(
     assert verdict.verdict == "PASS"
     args = _args_recorded(bin_dir)
     assert args[:2] == ["scan", str(scan_root)]
-    assert args[2:-2] == ["--no-llm", "--format", "json"]
-    assert args[-2] == "--output"
-    assert args[-1] != str(scan_root)  # report goes to its own temp file
+    assert args[2:] == ["--no-llm", "--format", "json"]  # JSON to stdout: `--output` is
+    # unsupported on Windows (SkillSpector's own guidance is stdout redirection).
 
 
 # --- SkillSpectorReviewer: verdict mapping ------------------------------------
 
 
-@pytest.mark.parametrize("score", [80, 95, 100])
-def test_pass_requires_score_at_least_80(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, score: int
-) -> None:
-    _stage(monkeypatch, tmp_path, report={"score": score, "findings": []}, exit_code=0, sleep_s=0.0)
+def _report(
+    *,
+    score: int = 20,
+    recommendation: str = "OK",
+    issues: list[dict] | None = None,
+    executable_paths: tuple[str, ...] = (),
+) -> dict:
+    return {
+        "skill": {"name": "unknown", "source": "."},
+        "risk_assessment": {
+            "score": score,
+            "severity": "HIGH" if score >= 60 else "MEDIUM",
+            "recommendation": recommendation,
+            "max_issue_severity": "NONE" if not issues else "HIGH",
+        },
+        "components": [
+            {"path": path, "type": "python", "executable": True} for path in executable_paths
+        ]
+        + [{"path": "SKILL.md", "type": "markdown", "executable": False}],
+        "issues": issues or [],
+    }
+
+
+def test_pass_on_clean_low_risk_report(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _stage(monkeypatch, tmp_path, report=REPORT_TEMPLATE, exit_code=0, sleep_s=0.0)
+    verdict = SkillSpectorReviewer().review(tmp_path)
+    assert verdict.verdict == "PASS"
+    assert verdict.score == 20
+
+
+@pytest.mark.parametrize("score", [0, 21, 35])
+def test_low_risk_scores_pass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, score: int) -> None:
+    _stage(
+        monkeypatch,
+        tmp_path,
+        report=_report(score=score, recommendation="CAUTION"),
+        exit_code=0,
+        sleep_s=0.0,
+    )
     verdict = SkillSpectorReviewer().review(tmp_path)
     assert verdict.verdict == "PASS"
     assert verdict.score == score
 
 
-@pytest.mark.parametrize("score", [0, 79])
-def test_fail_below_score_80(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, score: int) -> None:
-    _stage(monkeypatch, tmp_path, report={"score": score, "findings": []}, exit_code=0, sleep_s=0.0)
-    assert SkillSpectorReviewer().review(tmp_path).verdict == "FAIL"
-
-
-def test_fail_on_high_severity_finding_even_with_good_score(
+def test_fail_on_scanner_block_recommendation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    report = {
-        "score": 95,
-        "findings": [{"severity": "high", "message": "shell execution"}],
-    }
+    _stage(
+        monkeypatch,
+        tmp_path,
+        report=_report(score=90, recommendation="BLOCK"),
+        exit_code=0,
+        sleep_s=0.0,
+    )
+    verdict = SkillSpectorReviewer().review(tmp_path)
+    assert verdict.verdict == "FAIL"
+    assert "BLOCK" in verdict.findings_summary
+
+
+def test_fail_on_critical_issue_in_markdown(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    report = _report(
+        score=70,
+        recommendation="CAUTION",
+        issues=[
+            {
+                "severity": "CRITICAL",
+                "category": "Data Exfiltration",
+                "location": {"file": "SKILL.md", "start_line": 1},
+            }
+        ],
+    )
     _stage(monkeypatch, tmp_path, report=report, exit_code=0, sleep_s=0.0)
     verdict = SkillSpectorReviewer().review(tmp_path)
     assert verdict.verdict == "FAIL"
-    assert verdict.score == 95
-    assert "high" in verdict.findings_summary
+    assert "critical" in verdict.findings_summary
 
 
-def test_medium_findings_do_not_block(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    report = {
-        "score": 85,
-        "findings": [{"severity": "medium", "message": "style"}],
-    }
+def test_fail_on_high_issue_in_executable_component(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    report = _report(
+        score=45,
+        recommendation="CAUTION",
+        executable_paths=("tool.py",),
+        issues=[
+            {
+                "severity": "HIGH",
+                "category": "Dangerous Code",
+                "location": {"file": "tool.py", "start_line": 9},
+            }
+        ],
+    )
+    _stage(monkeypatch, tmp_path, report=report, exit_code=0, sleep_s=0.0)
+    assert SkillSpectorReviewer().review(tmp_path).verdict == "FAIL"
+
+
+def test_high_issue_in_advisory_markdown_does_not_block(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Persona text trips jailbreak heuristics: recorded as evidence, not a block."""
+    report = _report(
+        score=35,
+        recommendation="CAUTION",
+        issues=[
+            {
+                "severity": "HIGH",
+                "category": "Anti-Refusal",
+                "location": {"file": "SKILL.md", "start_line": 37},
+            }
+        ],
+    )
     _stage(monkeypatch, tmp_path, report=report, exit_code=0, sleep_s=0.0)
     verdict = SkillSpectorReviewer().review(tmp_path)
     assert verdict.verdict == "PASS"
-    assert "medium" in verdict.findings_summary
+    assert "HIGH=1" in verdict.findings_summary
+
+
+def test_medium_findings_do_not_block(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    report = _report(
+        score=15,
+        recommendation="OK",
+        issues=[{"severity": "MEDIUM", "category": "Style", "location": {"file": "SKILL.md"}}],
+    )
+    _stage(monkeypatch, tmp_path, report=report, exit_code=0, sleep_s=0.0)
+    verdict = SkillSpectorReviewer().review(tmp_path)
+    assert verdict.verdict == "PASS"
+    assert "MEDIUM=1" in verdict.findings_summary
 
 
 def test_missing_or_non_integer_score_fails_closed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    _stage(monkeypatch, tmp_path, report={"findings": []}, exit_code=0, sleep_s=0.0)
+    report = {"risk_assessment": {"severity": "LOW"}, "issues": [], "components": []}
+    _stage(monkeypatch, tmp_path, report=report, exit_code=0, sleep_s=0.0)
     verdict = SkillSpectorReviewer().review(tmp_path)
-    assert verdict.verdict == "FAIL"
+    assert verdict.verdict == "UNAVAILABLE"
 
 
 def test_report_json_round_trips(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

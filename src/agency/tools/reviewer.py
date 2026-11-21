@@ -24,7 +24,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
@@ -32,8 +31,13 @@ from pydantic import BaseModel, ConfigDict
 
 SCANNER = "skillspector"
 DEFAULT_SCAN_TIMEOUT_S = 300
-PASS_SCORE_MIN = 80
-_BLOCKING_SEVERITIES = frozenset({"critical", "high"})
+# SkillSpector's `risk_assessment.recommendation` is its own verdict vocabulary
+# (e.g. OK / CAUTION / BLOCK); BLOCK is the scanner's hard refusal and always
+# fails the review. The numeric score is a *risk* score (lower = safer) and is
+# recorded as evidence, never used as a gate on its own.
+BLOCKING_RECOMMENDATION = "BLOCK"
+CRITICAL_SEVERITY = "CRITICAL"
+HIGH_SEVERITY = "HIGH"
 _FALLBACK_SCANNER = "static-fallback"
 
 Verdict = Literal["PASS", "FAIL", "UNAVAILABLE"]
@@ -71,30 +75,67 @@ def _unavailable(detail: str) -> ToolReviewVerdict:
 
 
 def _map_report(data: Any) -> ToolReviewVerdict:
-    """Map a parsed scanner report to a verdict; missing shapes fail closed."""
+    """Map a parsed scanner report to a verdict; missing shapes fail closed.
+
+    Real report shape (SkillSpector v2): ``risk_assessment`` carries
+    ``score`` (risk, lower = safer), ``severity``, ``recommendation`` and
+    ``max_issue_severity``; ``issues[]`` are per-finding (``severity``,
+    ``category``, ``location.file``); ``components[]`` mark each file
+    ``executable``. Policy:
+
+    - the scanner's own ``BLOCK`` recommendation always fails the review;
+    - any CRITICAL finding fails the review;
+    - HIGH-or-above findings located in *executable* components fail the
+      review (code must be clean);
+    - HIGH findings in advisory-only markdown stay PASS — they are recorded
+      verbatim as evidence (persona text routinely trips jailbreak-pattern
+      heuristics; the scan report rides along with every promotion).
+    """
     if not isinstance(data, dict):
         return _unavailable(f"{SCANNER} report is not a JSON object (fail closed)")
-    score = data.get("score")
+    risk = data.get("risk_assessment")
+    if not isinstance(risk, dict):
+        return _unavailable(f"{SCANNER} report has no risk_assessment (fail closed)")
+    score = risk.get("score")
     if not isinstance(score, int) or isinstance(score, bool):
-        score = 0  # unusable score cannot pass the >= 80 requirement
-    findings = data.get("findings")
-    if not isinstance(findings, list):
-        findings = []
+        return _unavailable(f"{SCANNER} risk score is missing or not an integer (fail closed)")
+    recommendation = str(risk.get("recommendation", "")).upper()
+    issues = data.get("issues")
+    if not isinstance(issues, list):
+        issues = []
+    components = data.get("components")
+    if not isinstance(components, list):
+        components = []
+    executable_paths = {
+        str(c.get("path"))
+        for c in components
+        if isinstance(c, dict) and c.get("executable") and c.get("path")
+    }
+
     counts: dict[str, int] = {}
     blocking: list[str] = []
-    for finding in findings:
-        if not isinstance(finding, dict):
+    for issue in issues:
+        if not isinstance(issue, dict):
             continue
-        severity = str(finding.get("severity", "unknown")).lower()
+        severity = str(issue.get("severity", "unknown")).upper()
         counts[severity] = counts.get(severity, 0) + 1
-        if severity in _BLOCKING_SEVERITIES:
-            blocking.append(str(finding.get("message", severity)))
-    summary = f"score {score}; " + (
+        category = str(issue.get("category", "unknown"))
+        raw_location = issue.get("location")
+        location: dict[Any, Any] = raw_location if isinstance(raw_location, dict) else {}
+        file_path = str(location.get("file", "?"))
+        if severity == CRITICAL_SEVERITY:
+            blocking.append(f"critical {category} in {file_path}")
+        elif severity == HIGH_SEVERITY and file_path in executable_paths:
+            blocking.append(f"high {category} in executable {file_path}")
+
+    if recommendation == BLOCKING_RECOMMENDATION:
+        blocking.append("scanner recommendation is BLOCK")
+    summary = f"risk score {score} ({recommendation}); " + (
         ", ".join(f"{name}={count}" for name, count in sorted(counts.items())) or "no findings"
     )
     if blocking:
         summary += "; blocking: " + "; ".join(blocking[:3])
-    verdict: Verdict = "PASS" if score >= PASS_SCORE_MIN and not blocking else "FAIL"
+    verdict: Verdict = "FAIL" if blocking else "PASS"
     return ToolReviewVerdict(
         scanner=SCANNER,
         score=score,
@@ -144,44 +185,36 @@ class SkillSpectorReviewer:
             return _unavailable(
                 f"{SCANNER} executable not found on PATH or in the venv; import must stay quarantined (fail closed)"
             )
-        with tempfile.TemporaryDirectory(prefix="skillspector-review-") as tmp:
-            out_path = Path(tmp) / "report.json"
-            command = [
-                exe,
-                "scan",
-                str(path),
-                "--no-llm",
-                "--format",
-                "json",
-                "--output",
-                str(out_path),
-            ]
-            try:
-                proc = subprocess.run(
-                    command,
-                    capture_output=True,
-                    timeout=self._timeout_s,
-                    check=False,
-                )
-            except subprocess.TimeoutExpired:
-                return _unavailable(
-                    f"{SCANNER} scan timed out after {self._timeout_s}s (fail closed)"
-                )
-            except OSError as exc:
-                return _unavailable(f"{SCANNER} could not be executed: {exc} (fail closed)")
-            if proc.returncode != 0:
-                stderr = proc.stderr.decode("utf-8", errors="replace").strip()
-                detail = f"{SCANNER} exited {proc.returncode}"
-                if stderr:
-                    detail += f": {stderr[:200]}"
-                return _unavailable(detail + " (fail closed)")
-            try:
-                raw = out_path.read_text(encoding="utf-8")
-                data = json.loads(raw)
-            except (OSError, ValueError):
-                return _unavailable(
-                    f"{SCANNER} report is missing, unreadable, or not valid JSON (fail closed)"
-                )
+        command = [exe, "scan", str(path), "--no-llm", "--format", "json"]
+        try:
+            proc = subprocess.run(
+                command,
+                capture_output=True,
+                timeout=self._timeout_s,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return _unavailable(
+                f"{SCANNER} scan timed out after {self._timeout_s}s (fail closed)"
+            )
+        except OSError as exc:
+            return _unavailable(f"{SCANNER} could not be executed: {exc} (fail closed)")
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode("utf-8", errors="replace").strip()
+            detail = f"{SCANNER} exited {proc.returncode}"
+            if stderr:
+                detail += f": {stderr[:200]}"
+            return _unavailable(detail + " (fail closed)")
+        try:
+            # The scanner writes the JSON report to stdout; `--output` is
+            # explicitly unsupported on some platforms (Windows) and its own
+            # guidance is to redirect stdout to a file outside the scan target.
+            raw = proc.stdout.decode("utf-8", errors="replace")
+            data = json.loads(raw)
+        except ValueError:
+            return _unavailable(
+                f"{SCANNER} report is missing, unreadable, or not valid JSON (fail closed)"
+            )
         return _map_report(data)
 
 
@@ -248,7 +281,6 @@ class StaticFallbackReviewer:
 
 __all__ = [
     "DEFAULT_SCAN_TIMEOUT_S",
-    "PASS_SCORE_MIN",
     "SCANNER",
     "SkillSpectorReviewer",
     "StaticFallbackReviewer",
