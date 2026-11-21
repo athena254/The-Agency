@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 import structlog
 
 from agency.agents.assessment import (
+    AssessmentStatus,
     SubtaskAssessment,
     build_assessment,
     classic_subtask,
@@ -44,7 +45,7 @@ from agency.evidence.store.models import (
     VerificationState,
 )
 from agency.evidence.store.store import EvidenceStore
-from agency.factory.requested_agent import RequestedAgentService
+from agency.factory.requested_agent import RequestedAgentService, _derived_gaps
 from agency.forge.orchestration import BlacksmithOps, JobState
 from agency.kernel.audit import AuditEntry, AuditLog
 from agency.kernel.identity import Agent, Capability, TrustLevel
@@ -158,6 +159,44 @@ def _assistant_name(context: dict[str, Any] | None) -> str:
     if isinstance(candidate, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9 -]{0,31}", candidate):
         return candidate if candidate.lower() != "reset" else "Remex"
     return "Remex"
+
+
+# Classic subtask outputs below this length count as unfinished-work evidence
+# for the improvement hook (gaps.md #7). Tool-loop chat answers are exempt:
+# concise final answers are legitimate there.
+_SHORT_CLASSIC_OUTPUT_CHARS = 64
+
+
+def _assessment_prompt_gaps(
+    assessments: list[SubtaskAssessment],
+    outputs: list[str],
+    task_id: str,
+) -> tuple[str, ...]:
+    """Derive prompt-gap observations from real execution evidence (gaps.md #7).
+
+    Deterministic and evidence-only: failed heuristic verdicts and abnormally
+    short classic subtask outputs. Nothing is synthesised; improve_agent's
+    ``_normalize_gaps`` caps and truncates whatever this returns.
+    """
+    gaps: list[str] = []
+    for subtask, output in zip(assessments, outputs):
+        for check in subtask.checks:
+            if check.status is not AssessmentStatus.FAILED:
+                continue
+            score = "" if check.score is None else f" (score {check.score:.2f})"
+            gaps.append(
+                f"Subtask {subtask.subtask_id} {check.criterion} check failed{score} "
+                f"during task {task_id}."
+            )
+        if subtask.path != "classic":
+            continue
+        text = output.strip()
+        if len(text) < _SHORT_CLASSIC_OUTPUT_CHARS:
+            gaps.append(
+                f"Subtask {subtask.subtask_id} produced a short output ({len(text)} characters) "
+                f"during task {task_id}."
+            )
+    return tuple(gaps)
 
 
 class AgencyOrchestrator:
@@ -1378,9 +1417,17 @@ class AgencyOrchestrator:
                     subtask_outputs=list(outputs),
                     tool_steps=skill_tool_steps,
                 )
+                # Real evidence only (gaps.md #7): failed heuristic verdicts,
+                # short classic outputs, and failed skill steps. The service's
+                # _normalize_gaps caps and truncates; re-versioning stays
+                # behind the agent.self_improve human gate.
+                prompt_gaps = _assessment_prompt_gaps(
+                    assessments, outputs, task.task_id
+                ) + _derived_gaps(improve_trace)
                 improvement = self._requested_agent_service.improve_agent(
                     execution_agent_id,
                     improve_trace,
+                    prompt_gaps=prompt_gaps,
                     approver=str(self._config.get("factory_self_improve_approver", "")),
                 )
                 self._log.info(

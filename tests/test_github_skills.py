@@ -11,6 +11,11 @@ from agency.factory.imports import ImportedMarkdown
 from agency.factory.prompts import PromptKind, PromptRegistry, PromptSpec, PromptStatus
 from agency.kernel.identity import Agent
 from agency.kernel.registry import AgentRegistry
+from agency.skills.executor import (
+    DOCUMENTATION_ONLY_IMPLEMENTATION,
+    OperationRegistry,
+    SkillExecutor,
+)
 from agency.skills.registry import SkillRegistry, SkillSpec, SkillStatus
 
 
@@ -97,6 +102,23 @@ def test_make_skills_promote_and_attach(tmp_path: Path, service: GitHubSkillImpo
     assert any(
         cap.name == f"skill-{skill_id}" for cap in kernel.get_required("coding-agent").capabilities
     )
+
+
+def test_made_skills_are_documentation_only(service: GitHubSkillImportService) -> None:
+    record = _imported("Code Review", "Review code for defects", "skills/code/SKILL.md", "9" * 64)
+    created = service.make_skills(service.study_and_dedupe([record]))
+
+    assert len(created) == 1
+    skill_id, version = created[0]
+    spec = service._skills.get(skill_id, version)
+    assert spec.implementation == DOCUMENTATION_ONLY_IMPLEMENTATION
+
+    assert service.promote(created, "test review evidence") == created
+    published = service._skills.get(skill_id, version)
+    result = SkillExecutor(OperationRegistry()).run(published)
+
+    assert result.success is False
+    assert result.error == "skill is documentation-only; no executable operation"
 
 
 def test_promote_requires_explicit_approver(tmp_path: Path) -> None:

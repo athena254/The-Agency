@@ -18,6 +18,7 @@ from agency.factory.imports import ImportedMarkdown, MarkdownImportService
 from agency.factory.prompts import PromptRegistry
 from agency.kernel.identity import Capability
 from agency.kernel.policies import ActionClass
+from agency.skills.executor import DOCUMENTATION_ONLY_IMPLEMENTATION
 from agency.skills.registry import SkillRegistry, SkillSpec, SkillStatus
 
 DEFAULT_REPOS: tuple[str, ...] = (
@@ -139,17 +140,6 @@ def _similarity(left: set[str], right: set[str]) -> float:
     if not left or not right:
         return 0.0
     return len(left & right) / len(left | right)
-
-
-def _implementation_name(record: StudyRecord) -> str:
-    source = record.source.removeprefix("https://github.com/")
-    owner_repo = source.split("/")[:2]
-    stem = Path(record.source_path).stem.casefold()
-    raw = "ext-" + "-".join([*owner_repo, stem])
-    cleaned = re.sub(r"[^a-z0-9._-]+", "-", raw).strip("-._")
-    if not cleaned or not cleaned[0].isalpha():
-        cleaned = "ext-" + cleaned
-    return cleaned[:100]
 
 
 def _next_version(versions: list[str]) -> str:
@@ -376,7 +366,10 @@ class GitHubSkillImportService:
                     inputs={"task": {"type": "string"}},
                     outputs={"result": {"type": "string"}},
                     permissions=(),
-                    implementation=_implementation_name(record),
+                    # Documentation-only metadata (gaps.md #11): imported
+                    # skills are never executable, so never name a nonexistent
+                    # operation here.
+                    implementation=DOCUMENTATION_ONLY_IMPLEMENTATION,
                     provenance=record.source,
                     status=SkillStatus.DRAFT,
                 )
@@ -414,6 +407,8 @@ class GitHubSkillImportService:
                     inputs=dict(spec.inputs),
                     outputs=dict(spec.outputs),
                     permissions=tuple(spec.permissions),
+                    # Successors retain the predecessor's implementation, so
+                    # documentation-only predecessors keep the sentinel.
                     implementation=spec.implementation,
                     provenance=f"improved-by-import:{record.source}",
                     status=SkillStatus.DRAFT,

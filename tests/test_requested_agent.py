@@ -22,6 +22,7 @@ from agency.factory.service import AgentFactory, BlueprintStatus
 from agency.kernel.identity import Agent
 from agency.kernel.registry import AgentRegistry as KernelRegistry
 from agency.selfimprove.distiller import TaskTrace
+from agency.skills.executor import DOCUMENTATION_ONLY_IMPLEMENTATION
 from agency.skills.registry import SkillRegistry, SkillSpec, SkillStatus
 
 
@@ -441,6 +442,29 @@ def test_improve_agent_caps_lifetime_learned_skills(tmp_path, monkeypatch) -> No
         )
         assert second.new_skills == ()
         assert second.distilled_skills == ()
+    finally:
+        factory.close()
+        prompts.close()
+        skills.close()
+
+
+def test_improve_agent_registers_documentation_only_gap_and_distilled_skills(tmp_path) -> None:
+    service, factory, prompts, skills, _ = _service(tmp_path, self_improve_authorizer=_allow)
+    try:
+        result = service.request_agent(_request())
+        trace = TaskTrace(
+            task_id="task-1",
+            title="Find docs",
+            description="Search the document store for matching keywords.",
+            status="completed",
+        )
+        report = service.improve_agent(
+            result.agent_id, trace, prompt_gaps=["Prefer summary answers."], approver="human-lead"
+        )
+        assert report.new_skills
+        assert report.distilled_skills
+        for sid, ver in report.new_skills + report.distilled_skills:
+            assert skills.get(sid, ver).implementation == DOCUMENTATION_ONLY_IMPLEMENTATION
     finally:
         factory.close()
         prompts.close()

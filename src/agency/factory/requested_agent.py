@@ -23,6 +23,7 @@ from agency.factory.prompts_builtin import ensure_builtin_prompts
 from agency.factory.service import AgentFactory, BlueprintStatus
 from agency.selfimprove.distiller import TaskTrace, _description_from_trace, _slugify
 from agency.selfimprove.loop import SelfImprovementLoop
+from agency.skills.executor import DOCUMENTATION_ONLY_IMPLEMENTATION
 from agency.skills.registry import SkillRegistry, SkillSpec, SkillStatus
 
 if TYPE_CHECKING:
@@ -198,7 +199,9 @@ def _new_gap_skill(
         inputs={"task": {"type": "string"}},
         outputs={"result": {"type": "string"}},
         permissions=(),
-        implementation=f"learned.{slug}",
+        # Documentation-only metadata (gaps.md #4): no callable is registered
+        # for learned gap skills, so never name a nonexistent operation here.
+        implementation=DOCUMENTATION_ONLY_IMPLEMENTATION,
         provenance=f"agent-gap:{agent_id}",
         status=SkillStatus.DRAFT,
     )
