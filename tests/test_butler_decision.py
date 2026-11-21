@@ -395,18 +395,18 @@ async def test_client_failure_falls_back_and_turn_survives() -> None:
 
 
 @pytest.mark.asyncio
-async def test_route_audit_evidence_carries_decision_metadata(jev_service: ButlerService) -> None:
+async def test_decision_audit_entry_carries_metadata(jev_service: ButlerService) -> None:
     message = "scan for vulnerabilities and exploits"
     response = await jev_service.handle_message(message, "tester", {})
     assert response
     entries = await jev_service._audit.query()
-    route_entries = [e for e in entries if e.action == "butler.route"]
-    assert route_entries
-    evidence = route_entries[-1].evidence or {}
+    decision_entries = [e for e in entries if e.action == "butler.decision"]
+    assert decision_entries
+    evidence = decision_entries[-1].evidence or {}
     assert evidence["decision_source"] == "jev"
     assert evidence["confidence"] == pytest.approx(0.9)
     assert evidence["judgments"]["routes_to_security"] == pytest.approx(0.9)
-    assert set(evidence) <= {"message_length", "decision_source", "confidence", "judgments"}
+    assert set(evidence) <= {"decision_source", "confidence", "judgments"}
     # Audit records carry metadata only — never message content (spec §21).
     assert message not in json.dumps(evidence)
 
@@ -439,9 +439,8 @@ async def test_service_wires_config_model_and_thresholds(
         assert response
         assert built["model"] == "jev-test"
         entries = await svc._audit.query()
-        route_entries = [e for e in entries if e.action == "butler.route"]
-        assert route_entries
-        evidence = route_entries[-1].evidence or {}
-        assert evidence["decision_source"] == "keyword_corroborated"
+        decision_entries = [e for e in entries if e.action == "butler.decision"]
+        assert decision_entries
+        assert decision_entries[-1].result == "keyword_corroborated"
     finally:
         await svc.stop()

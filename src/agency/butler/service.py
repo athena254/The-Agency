@@ -376,19 +376,16 @@ class ButlerService:
         if memory_context:
             merged["memory_context"] = memory_context
 
-        agent, decision = await self._route_with_decision(text, merged)
-        evidence: dict[str, Any] = {"message_length": len(text)}
-        if decision is not None:
-            # Decision metadata only — never message content (spec §21).
-            evidence["decision_source"] = decision.source
-            evidence["confidence"] = decision.confidence
-            evidence["judgments"] = dict(decision.judgments)
+        # Public routing seam: embedders and tests may monkeypatch route().
+        # Decision-model metadata is audited by the decision path itself as a
+        # dedicated ``butler.decision`` entry (metadata only — spec §21).
+        agent = await self.route(text, merged)
         await self._audit_append(
             agent=agent.id,
             action="butler.route",
             result="routed",
             target=agent.id,
-            evidence=evidence,
+            evidence={"message_length": len(text)},
         )
 
         try:
@@ -713,6 +710,19 @@ class ButlerService:
         if self._config.decision_enabled:
             decision = await self._decide(message, context)
             if decision is not None:
+                # Dedicated decision audit entry: metadata only, never message
+                # content (spec §21). Fired exactly when a decision resolves.
+                await self._audit_append(
+                    agent=None,
+                    action="butler.decision",
+                    result=decision.source,
+                    target=decision.domain,
+                    evidence={
+                        "decision_source": decision.source,
+                        "confidence": decision.confidence,
+                        "judgments": dict(decision.judgments),
+                    },
+                )
                 for agent in self._router.list_agents():
                     if agent.domain.strip().lower() == decision.domain.strip().lower():
                         self._log.info(
