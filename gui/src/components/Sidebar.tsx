@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   Activity,
   Bot,
@@ -20,6 +21,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
+import { api, type HealthResponse } from '../api/client'
 import { useAuth } from '../stores/auth'
 
 export interface NavItem {
@@ -51,9 +53,9 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: 'Inspect',
     items: [
-      { to: '/memories', label: 'Memories', icon: Brain, locked: true, gate: 'P1 + P2' },
-      { to: '/evidence', label: 'Evidence', icon: ScrollText, locked: true, gate: 'P1 + P2' },
-      { to: '/skills', label: 'Skills', icon: Sparkles, locked: true, gate: 'P2 + P4' },
+      { to: '/memories', label: 'Memories', icon: Brain },
+      { to: '/evidence', label: 'Evidence', icon: ScrollText },
+      { to: '/skills', label: 'Skills', icon: Sparkles },
     ],
   },
   {
@@ -113,6 +115,24 @@ function SidebarContent({
   onNavigate?: () => void
   onClose?: () => void
 }) {
+  const health = useQuery({
+    queryKey: ['health'],
+    queryFn: () => api.get<HealthResponse>('/api/health'),
+    refetchInterval: 15_000,
+  })
+  const runtime =
+    health.isPending
+      ? { tone: 'bg-text-3 animate-pulse', label: 'Checking runtime', text: 'checking…' }
+      : health.isError
+        ? { tone: 'bg-red', label: 'Runtime unreachable', text: 'unreachable' }
+        : health.data?.status === 'ok'
+          ? {
+              tone: 'bg-green',
+              label: 'Runtime healthy',
+              text: `v${health.data.version ?? '?'} · ${health.data.agents} agent${health.data.agents === 1 ? '' : 's'}`,
+            }
+          : { tone: 'bg-amber', label: 'Runtime starting', text: health.data?.status ?? 'degraded' }
+
   return (
     <>
       <div className="flex items-center gap-3 border-b border-line px-4 py-4">
@@ -141,12 +161,14 @@ function SidebarContent({
         <NavGroups onNavigate={onNavigate} />
       </nav>
 
-      <div className="border-t border-line px-4 py-3">
+      <div className="border-t border-line px-4 py-3" aria-live="polite">
         <div className="mc-label">Runtime</div>
-        <div className="mt-1 text-xs text-text-2">Local prototype</div>
-        <div className="mc-value mt-0.5 text-[10.5px] text-text-3">
-          v0.1.0 · single-owner
+        <div className="mt-1 flex items-center gap-2 text-xs text-text-2">
+          <span className={`mc-status-dot flex-none ${runtime.tone}`} aria-hidden="true" />
+          <span className="sr-only">{runtime.label}</span>
+          Local prototype
         </div>
+        <div className="mc-value mt-0.5 text-[10.5px] text-text-3">{runtime.text}</div>
       </div>
     </>
   )
