@@ -12,7 +12,9 @@ import {
 import { Link } from 'react-router-dom'
 import { api, type AgentDescriptor, type HealthResponse } from '../api/client'
 import { fetchTasks, pilotErrorMessage, useCsrf } from '../api/pilot'
-import { EmptyState, StatusDot } from '../components/ui'
+import { fetchObserveOverview, type AuditEntryView } from '../api/observe'
+import { EmptyState, StateBadge, StatusDot } from '../components/ui'
+import { formatAge, formatDateTime } from '../lib/format'
 import { useAuth } from '../stores/auth'
 import { CapabilitiesPanel, SpendingPanel } from './PilotOverview'
 import { PilotGate } from './PilotShared'
@@ -36,10 +38,17 @@ export function DashboardPage() {
     enabled: Boolean(token),
     refetchInterval: 15_000,
   })
+  const observe = useQuery({
+    queryKey: ['observe-overview', token],
+    queryFn: () => fetchObserveOverview(csrf, 8),
+    enabled: Boolean(token && csrf),
+    refetchInterval: 15_000,
+  })
 
   const agentList = agents.data?.agents ?? []
   const components = health.data?.components
   const hasComponents = Boolean(components && Object.keys(components).length > 0)
+  const overview = observe.data
 
   const status = health.isPending
     ? 'checking'
@@ -61,10 +70,29 @@ export function DashboardPage() {
       ? '—'
       : String(tasks.data?.tasks.length ?? 0)
 
+  /** Real count from the observe surface, or an honest fallback. */
+  const observeCount = (
+    section: { total: number; available: boolean } | undefined,
+  ): { value: string; note?: string } => {
+    if (!token) return { value: '—', note: 'Owner token required' }
+    if (observe.isPending) return { value: '…' }
+    if (observe.isError || !section) return { value: '—', note: 'Pilot surface unavailable' }
+    return section.available
+      ? { value: String(section.total) }
+      : { value: '—', note: 'Section unavailable' }
+  }
+
+  const memory = observeCount(overview?.memories)
+  const evidence = observeCount(overview?.evidence)
+
+  const auditEntries = overview?.audit.available ? (overview.audit.entries ?? []) : []
   const refresh = () => {
     void health.refetch()
     void agents.refetch()
-    if (token) void tasks.refetch()
+    if (token) {
+      void tasks.refetch()
+      void observe.refetch()
+    }
   }
 
   return (
@@ -134,16 +162,16 @@ export function DashboardPage() {
             <StatCard
               icon={Database}
               label="Memories"
-              value="—"
+              value={memory.value}
               tone="amber"
-              note="Gated · P1 + P2"
+              note={memory.note}
             />
             <StatCard
               icon={ShieldCheck}
               label="Evidence"
-              value="—"
+              value={evidence.value}
               tone="green"
-              note="Gated · P1 + P2"
+              note={evidence.note}
             />
           </div>
 
@@ -209,11 +237,48 @@ export function DashboardPage() {
               to see task counts and pilot panels.
             </p>
           ) : null}
-          <p className="mc-caption mt-4 border-t border-line pt-3">
-            This is the current snapshot, not an event timeline. The runtime publishes no
-            activity stream.
-          </p>
         </div>
+      </section>
+
+      <section className="mc-panel">
+        <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
+          <h2 className="mc-section-title">Recent audit events</h2>
+          <span className="mc-label">immutable audit log · read-only</span>
+        </div>
+        {!token ? (
+          <div className="px-5 py-4">
+            <p className="mc-caption">
+              The audit log is owner-scoped.{' '}
+              <Link to="/settings" className="mc-link">
+                Add an owner token
+              </Link>{' '}
+              to view recent events.
+            </p>
+          </div>
+        ) : observe.isPending ? (
+          <div className="px-5 py-6 text-center text-sm text-text-3" role="status">
+            Loading audit events…
+          </div>
+        ) : observe.isError ? (
+          <div className="px-5 py-4">
+            <p className="mc-caption">Audit feed unavailable: {pilotErrorMessage(observe.error)}</p>
+          </div>
+        ) : !overview?.audit.available ? (
+          <div className="px-5 py-4">
+            <p className="mc-caption">Audit log unavailable: {overview?.audit.reason ?? 'not collected'}</p>
+          </div>
+        ) : auditEntries.length === 0 ? (
+          <EmptyState
+            title="No audit entries yet"
+            detail="Recorded authorization decisions and execution events will appear here."
+          />
+        ) : (
+          <ul className="divide-y divide-line">
+            {auditEntries.map((entry) => (
+              <AuditRow key={entry.entry_id} entry={entry} />
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="space-y-4">
@@ -273,6 +338,28 @@ function agentTone(status: string | undefined): string {
   if (value.includes('error') || value.includes('fail') || value.includes('down')) return 'bg-red'
   if (value.includes('idle') || value.includes('offline')) return 'bg-text-3'
   return 'bg-green'
+}
+
+function AuditRow({ entry }: { entry: AuditEntryView }) {
+  const title = entry.action ?? entry.authorization ?? 'event'
+  const subject = entry.target ?? entry.agent ?? entry.task ?? ''
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 py-2.5">
+      <span
+        className="mc-value flex-none text-[11px] text-text-3"
+        title={entry.timestamp ? formatDateTime(entry.timestamp, true) : undefined}
+      >
+        {formatAge(entry.timestamp)}
+      </span>
+      <span className="mc-value min-w-0 flex-1 truncate text-[11.5px] text-text-1">{title}</span>
+      {subject ? (
+        <span className="mc-value hidden min-w-0 max-w-40 truncate text-[11px] text-text-3 sm:inline">
+          {subject}
+        </span>
+      ) : null}
+      <StateBadge state={entry.result} />
+    </li>
+  )
 }
 
 function Divider() {

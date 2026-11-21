@@ -70,6 +70,10 @@ const STATE_TONES: Record<string, Tone> = {
   medium: 'amber',
   high: 'red',
   critical: 'red',
+  // Verification receipts / objective statuses.
+  passed: 'green',
+  uncertain: 'amber',
+  unable_to_verify: 'amber',
   // Audit results.
   allowed: 'green',
   denied: 'red',
