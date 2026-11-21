@@ -10,11 +10,13 @@ All values can be supplied via environment variables (prefixed with
     BUTLER_API_KEY_ENV_VAR=LLM_API_KEY
     BUTLER_MAX_MESSAGE_LENGTH=8000
     BUTLER_TIMEOUT=60.0
+    BUTLER_DECISION_PROVIDER=jev
+    BUTLER_JEV_MODEL=jev-latest
 """
 
 from __future__ import annotations
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,11 +47,42 @@ class ButlerConfig(BaseSettings):
     timeout: float = Field(
         default=60.0, gt=0, description="Per-message execution timeout in seconds."
     )
+    decision_provider: str = Field(
+        default="none",
+        description="Routing decision-model provider ('none' or 'jev').",
+    )
+    jev_model: str = Field(default="jev-latest", description="Jev System-1 model name.")
+    jev_signal_threshold: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="Judgment probability that counts as a definite yes (route).",
+    )
+    jev_uncertain_low: float = Field(
+        default=0.4,
+        ge=0.0,
+        le=1.0,
+        description="Judgment probability below which the judgment is a definite no (defer).",
+    )
+
+    @field_validator("decision_provider")
+    @classmethod
+    def _validate_decision_provider(cls, value: str) -> str:
+        """Reject unknown providers; store the canonical lowercase form."""
+        normalized = value.strip().lower()
+        if normalized not in ("none", "jev"):
+            raise ValueError("decision_provider must be one of: none, jev")
+        return normalized
 
     @property
     def llm_enabled(self) -> bool:
         """Return whether an LLM provider is configured."""
         return self.llm_provider.strip().lower() not in ("", "none", "disabled", "off")
+
+    @property
+    def decision_enabled(self) -> bool:
+        """Return whether a decision model is configured to route first."""
+        return self.decision_provider.strip().lower() == "jev"
 
 
 __all__ = ["ButlerConfig"]

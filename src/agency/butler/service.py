@@ -3,7 +3,8 @@
 :class:`ButlerService` is the single entry point for conversational traffic:
 
 1. Validate + truncate the inbound message.
-2. Route to an :class:`Agent` (LLM decision when configured, else keyword).
+2. Route to an :class:`Agent` (Jev decision model when configured, else
+   LLM decision, else keyword).
 3. Execute via :class:`AgencyOrchestrator` (submit + execute a task).
 4. Audit-log every step and persist the turn in memory.
 """
@@ -30,6 +31,7 @@ from agency.agents.executor import ExecutionStatus
 from agency.butler.commands import CommandError, ThreadCommands
 from agency.butler.config import ButlerConfig
 from agency.butler.context import ThreadContextEngine
+from agency.butler.decision import JevDecisionModel, RoutingDecision, TypeSafeJevClient
 from agency.butler.router import MessageRouter
 from agency.butler.threads import Thread, ThreadMessage, ThreadStore, Workspace
 from agency.kernel.audit import AuditEntry, AuditLog
@@ -117,6 +119,7 @@ class ButlerService:
         self._commands: ThreadCommands | None = None
         self._lattice: Lattice | None = None  # Will be set from orchestrator
         self._llm = llm
+        self._decision_model: JevDecisionModel | None = None
         self._log = structlog.get_logger(__name__)
         self._started = False
         self._seeded = False
@@ -367,13 +370,19 @@ class ButlerService:
         if memory_context:
             merged["memory_context"] = memory_context
 
-        agent = await self.route(text, merged)
+        agent, decision = await self._route_with_decision(text, merged)
+        evidence: dict[str, Any] = {"message_length": len(text)}
+        if decision is not None:
+            # Decision metadata only — never message content (spec §21).
+            evidence["decision_source"] = decision.source
+            evidence["confidence"] = decision.confidence
+            evidence["judgments"] = dict(decision.judgments)
         await self._audit_append(
             agent=agent.id,
             action="butler.route",
             result="routed",
             target=agent.id,
-            evidence={"message_length": len(text)},
+            evidence=evidence,
         )
 
         try:
@@ -654,7 +663,19 @@ class ButlerService:
             self._log.debug("butler.summarize_failed", thread_id=thread_id)
 
     async def route(self, message: str, context: dict[str, Any]) -> Agent:
-        """Select the handling agent, preferring the LLM when configured."""
+        """Select the handling agent, preferring the decision model when configured."""
+        agent, _decision = await self._route_with_decision(message, context)
+        return agent
+
+    async def _route_with_decision(
+        self, message: str, context: dict[str, Any]
+    ) -> tuple[Agent, RoutingDecision | None]:
+        """Route and return the agent plus any decision-model outcome.
+
+        Order: decision model (when ``decision_enabled``) → naive LLM →
+        keyword router. The decision model never raises into the turn; any
+        failure defers to the existing chain, which stays untouched.
+        """
         # Direct HTTP callers may route without handle_message; audit needs
         # the stores initialized exactly like any other entry point.
         await self._ensure_started()
@@ -665,6 +686,19 @@ class ButlerService:
             target="routing",
             evidence={"message_length": len(message)},
         )
+        if self._config.decision_enabled:
+            decision = await self._decide(message, context)
+            if decision is not None:
+                for agent in self._router.list_agents():
+                    if agent.domain.strip().lower() == decision.domain.strip().lower():
+                        self._log.info(
+                            "butler.decision_routed",
+                            source=decision.source,
+                            domain=decision.domain,
+                            confidence=decision.confidence,
+                        )
+                        return agent, decision
+                self._log.warning("butler.decision_unresolved", domain=decision.domain)
         llm = self._llm or self._build_llm_from_config()
         if llm is not None:
             try:
@@ -673,13 +707,43 @@ class ButlerService:
                     for agent in self._router.list_agents():
                         if agent.domain.strip().lower() == domain.strip().lower():
                             self._log.info("butler.llm_routed", domain=domain)
-                            return agent
+                            return agent, None
                     self._log.warning("butler.llm_unknown_domain", domain=domain)
             except (ButlerAuditError, MeteredDenied, MeteredError):
                 raise
             except Exception as exc:  # noqa: BLE001 — ordinary legacy failures may fall back.
                 self._log.warning("butler.llm_route_failed", error_type=type(exc).__name__)
-        return await self._router.route(message, context)
+        agent = await self._router.route(message, context)
+        return agent, None
+
+    # ------------------------------------------------------------------ #
+    # Decision-model routing (Jev System 1)
+    # ------------------------------------------------------------------ #
+
+    def _build_decision_model(self) -> JevDecisionModel | None:
+        """Construct the configured decision model lazily, exactly once."""
+        if self._decision_model is not None:
+            return self._decision_model
+        if not self._config.decision_enabled:
+            return None
+        self._decision_model = JevDecisionModel(
+            TypeSafeJevClient(model=self._config.jev_model),
+            self._router,
+            signal_threshold=self._config.jev_signal_threshold,
+            uncertain_low=self._config.jev_uncertain_low,
+        )
+        return self._decision_model
+
+    async def _decide(self, message: str, context: dict[str, Any]) -> RoutingDecision | None:
+        """Run the decision model; any failure defers (never raises into the turn)."""
+        try:
+            model = self._build_decision_model()
+            if model is None:
+                return None
+            return await model.decide(message, context, self._router.list_agents())
+        except Exception as exc:  # noqa: BLE001 — decision failures fall back, never fail the turn.
+            self._log.warning("butler.decision_failed", error_type=type(exc).__name__)
+            return None
 
     async def execute(
         self,
