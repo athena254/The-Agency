@@ -76,8 +76,17 @@ improve leg was qualified live the same day (2026-11-22): the offline `test_requ
 e2e` flow re-run with the live provider driving planner/executor — `request_agent` → live
 task → `improve_agent` re-versioned `scout` 1.0.0→1.0.1 (`prompt_refined=True`, atomic
 reversion, approver `human-lead` via the #2 human gate, purpose prompt 1.0.1 PUBLISHED,
-distilled skill 1.0.1 DRAFT). Do not claim full production certification until the soak is
-exercised.
+distilled skill 1.0.1 DRAFT). The Forge review gate was qualified live the same day on a
+second provider (Google, `5d91400`): with `GOOGLE_API_KEY` in the untracked `.env`,
+`build_review_llm` now prefers the Google serious model — the documented free
+`gemini-4-hydrogen` — via `load_named_provider("google")`, independent of the CentAI task
+LLM (unit-tested credential separation; the un-overridden default stays Google-only). Live
+`run_review(use_llm=True)` on a module+test fixture: inspection, security scan, the tests
+sub-gate (`rc=0`) and the LLM review round all executed, gate `PASS score 4`, sole caveat
+`not_a_human_review`. Free-tier capacity dips surface as 60s timeouts / transient 503s —
+the provider-aware backoff retries them and the gate fails closed with honest caveats when
+the provider stays unavailable (observed and verified live). Do not claim full production
+certification until the soak is exercised.
 
 ## 11. GitHub-imported skills are metadata-only — CLOSED `36bd00f`
 `ext-*` skills are created with the same documentation-only sentinel as gap 4; promotion and
