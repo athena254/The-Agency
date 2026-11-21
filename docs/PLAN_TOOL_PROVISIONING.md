@@ -179,12 +179,15 @@ MCP spec & security: [tools](https://modelcontextprotocol.io/specification/2025-
 [ToolMaker](https://arxiv.org/abs/2502.11705) · [GoEx](https://arxiv.org/abs/2404.06921) ·
 [AgentHub](https://arxiv.org/html/2510.03495)
 
-## 8. Open owner decisions
+## 8. Owner decisions (RESOLVED 2026-11-21)
 
-1. **Plugin format v1**: Python-tool manifests (recommended — reuses Forge gates directly) vs
-   MCP-server bridging first (catalog already has placeholders; needs an MCP client).
-2. **Import reviewers**: owner-only vs a trusted-maintainers allowlist per source org.
-3. **Default toolset** for factory agents that declare no requirements: none (fail closed,
-   recommended) vs a small builtin basic set.
-4. **Where domain needs data lives**: `data/tool_needs.yaml` (recommended) vs importing
-   `agency-agents`' `tools.json` directly.
+1. **Plugin format v1: BOTH** — Python-tool manifests AND MCP-server bridging (Phase 4a/4b).
+2. **Import reviewers: the system** — [NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector)
+   scans every imported package (`skillspector scan <path> --no-llm --format json`); the scan
+   verdict gates registration. Fail-closed when the scanner is unavailable on host
+   (`reviewer_unavailable` → import stays quarantined). Human override remains possible only
+   as an explicit, audited owner action.
+3. **Default toolset: the function-enabling builtin set** — agents that declare no
+   requirements get the `default` profile from the needs catalog (`web_search`, `web_fetch`,
+   `memory_query`, `memory_write`, `utc_time`, `calculator`).
+4. **Needs data location: `data/tool_needs.yaml`** (as recommended).
