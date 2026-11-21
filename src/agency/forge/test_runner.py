@@ -31,6 +31,20 @@ MAX_TEST_TIMEOUT_S = 300
 MAX_OUTPUT_BYTES = 64 * 1024
 MAX_REPO_BYTES = 50 * 1024 * 1024
 
+_IGNORED_NAMES = frozenset(
+    {
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".venv",
+        "__pycache__",
+        "ENV",
+        "node_modules",
+        "venv",
+    }
+)
+
 TestGate = Literal["PASS", "FAIL", "ERROR", "TIMEOUT", "SKIP"]
 
 Language = Literal["python", "node", "go", "rust"]
@@ -103,12 +117,17 @@ def _resolve_root(root: str | Path) -> Path:
 
 def _dir_size(path: Path) -> int:
     total = 0
-    for p in path.rglob("*"):
-        try:
-            if p.is_file() and not p.is_symlink():
-                total += p.stat().st_size
-        except OSError:
-            continue
+    for dirpath, dirnames, filenames in os.walk(path):
+        dirnames[:] = [name for name in dirnames if name not in _IGNORED_NAMES]
+        for name in filenames:
+            if name.endswith(".pyc"):
+                continue
+            candidate = Path(dirpath) / name
+            try:
+                if candidate.is_file() and not candidate.is_symlink():
+                    total += candidate.stat().st_size
+            except OSError:
+                continue
     return total
 
 
@@ -164,7 +183,7 @@ def run_tests(
             real_root,
             workdir,
             symlinks=False,
-            ignore=shutil.ignore_patterns("__pycache__", ".git", ".pytest_cache", "*.pyc"),
+            ignore=shutil.ignore_patterns(*sorted(_IGNORED_NAMES), "*.pyc"),
         )
     except Exception as exc:  # noqa: BLE001
         shutil.rmtree(tmpdir, ignore_errors=True)

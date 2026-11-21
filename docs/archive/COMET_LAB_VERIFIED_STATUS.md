@@ -60,11 +60,24 @@ The binary is supplied by the caller; the harness does not download it.
 
 ```bash
 AGENCY_LLM_PROVIDER=echo AGENCY_LLM_MODEL=echo PYTHONPATH=src \
-  'C:/Users/alphi/agency-mvp/.venv/Scripts/python.exe' -m agency.lab.comet_smoke \
-  --binary C:/Users/alphi/AppData/Local/Temp/agency-bft-tools/bin/cometbft.exe \
-  --output C:/Users/alphi/AppData/Local/Temp/agency-peer-labs/NEW_UNIQUE_DIRECTORY \
+  '.venv/Scripts/python.exe' -m agency.lab.comet_smoke \
+  --binary C:/Users/PC/agency-tools/bin/cometbft.exe \
+  --output C:/Users/PC/agency-tools/labs/NEW_UNIQUE_DIRECTORY \
   --whole-timeout 180
 ```
+
+### Binary provenance (2026-11-21, machine of user `PC`)
+
+Built from source with two-channel verification; the harness still does not download:
+
+- Tag object `2228c7101a00994a14811e15cd8795c7e70713c2` (GPG-signed), commit
+  `94d77f9f51a72e2b7d832798859f6222f08028f8` — both confirmed identical between the
+  local shallow clone (`C:/Users/PC/agency-tools/cometbft-src`) and the official
+  GitHub API ref (`repos/cometbft/cometbft/git/ref/tags/v0.38.26`, dereferenced).
+- Built with Go 1.27.4 (`D:/tools/go`): `go build -o .../bin/cometbft.exe ./cmd/cometbft`.
+- Artifact SHA-256:
+  `d7e7d47eae03d6318c5dde83a96af411dbbacc8b0505b501efe0375ee393535c`
+- `cometbft version` prints exactly `0.38.26` (harness exact-match gate satisfied).
 
 ## Boundary and remaining work
 
