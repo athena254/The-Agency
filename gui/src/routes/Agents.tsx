@@ -90,7 +90,12 @@ export function AgentsPage() {
             detail="Agents are seeded at startup. The list will appear once the surface reports them."
           />
         ) : (
-          <div className="mc-table-wrap">
+          <div
+        className="mc-table-wrap"
+        tabIndex={0}
+        role="region"
+        aria-label="Scrollable data table"
+      >
             <table className="w-full text-left">
               <caption className="sr-only">Registered agents</caption>
               <thead>
