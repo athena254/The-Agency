@@ -3,12 +3,13 @@
 Found while implementing `RequestedAgentService` (`src/agency/factory/requested_agent.py`).
 Ordered by production risk. **Avoid these patterns; all agents are free to fix them.**
 
-**Status 2026-11-21 (full-gap sweep):** 16 of 20 closed — gaps 1-9, 11-16 and 20; commit
-references below are on `integrated` (gap 20's on `gap/autonomy-execution`). Gap 19 is
-partially closed on `gap/taskstore-lifecycle` (`3a3cd91`, `a34d90d`: leases + shared
-stores, plus `cfd9eb1` LLM backoff; last-writer-wins status remains). Gaps 10 and 17
-remain open for external reasons (no local LLM API keys; no real PAK repository to wire
-against); gaps 18-20 were added by the intake workstream (2026-11-20).
+**Status 2026-11-21 (full-gap sweep):** 16 of 20 closed — gaps 1-9, 11-16 and 20; gaps 18
+(D6 grant-verifier landed, full route swap remains) and 19 (leases + shared stores, no
+last-writer-wins CAS) are partially closed — commit references below; gap 20's ref is on
+`gap/autonomy-execution`, the Tier6 refs landed on `main` (`37095b9`) and the consolidation
+line (`f981282`). Gaps 10 and 17 remain open for external reasons (no local LLM API keys; no
+real PAK repository to wire against); gaps 18-20 were added by the intake workstream
+(2026-11-20).
 
 ## 1. Capability ⇄ Factory circular import (structural) — CLOSED `5399d37`
 `canonical_sha256` moved to the neutral `src/agency/core/hashing.py`; `factory.coding_models`
@@ -109,14 +110,18 @@ repository/manifest format is available to wire against (`docs/opensource/pak.md
 A2-Security-Advisors-LTD `pak`/`schema` docs were 404 at implementation time). Connect a real
 PAK repository and verify the sync flow against its manifest format when one exists.
 
-## 18. External HTTP intake is bearer-token authed, not peer-grant actuation (2026-11-20)
-`POST /v1/tasks` and butler `POST /v1/message` are enabled behind owner-issued bearer tokens
-(`agency/api/auth.py`, `AGENCY_API_TOKENS` file) with server-bound identity, scoped reads and
-creator-only cancellation. This is *not* the §12 peer execution-grant path: `consensus/grants.py`
-still has no actuator consumer (PLAN_V1 D6) and the grant-verifier replacement of
-`require_peer_authority` (Slice D) remains future work. Tokens are plaintext over HTTP —
-bind servers to loopback or terminate TLS. **Fix:** implement D6 actuator-side grant
-enforcement and swap the authed routes onto the grant verifier.
+## 18. External HTTP intake — D6 grant-verifier landed; full route swap remains — PARTIALLY CLOSED `8604f8a`, `11854fa`, `37095b9`, `f981282`
+Landed: the §12 actuator-side enforcement primitives — a grant-verifying HTTP dependency,
+genesis registry seeding and scoped read opening (`8604f8a`, adapted to the merged router
+posture in `2eb4603`, async-bridge fix `37095b9`), memory owner-scope binding, finality-gated
+writes and the evidence doc (`11854fa`), plus the Wave1 lattice (ABCI codec/app/host, A4/A5
+wiring) those surfaces ride on. Additive salvage on the consolidation line: `forge ship`
+gated local fast-forward with audited approval bypass and the offline core-smoke CI/CD job
+(`f981282`, incl. `tests/test_consensus_grant_wire.py`). Still open: the authed routes
+(`POST /v1/tasks`, butler `POST /v1/message`) still enforce bearer tokens, not the verifier —
+the full swap is future work; `POST /v1/agents` stays 503 (spec-pinned, see #21e); no real
+peer certificates or live multi-peer actuator run yet (Slice D ballots in flight). Tokens
+are plaintext over HTTP — bind servers to loopback or terminate TLS.
 
 ## 19. Dispatcher/task-store operational bounds (2026-11-20) — PARTIALLY CLOSED `3a3cd91`, `a34d90d`
 Tasks persist in `data/tasks.db` (`AGENCY_TASKS_DB`); claims are atomic across the api and
@@ -174,8 +179,9 @@ pins the boundary): the route is
 not an owner-token switch") and the `docs/SPEC_BETA_BOUNDARY_AND_PEER_EXECUTION.md` release
 gate ("until peer certificates and actuator checks exist, no consequential route may
 create/revoke agents"); `tests/test_agent_intake_boundary.py` pins that `AGENCY_API_TOKENS`
-does NOT open it. Enablement needs the Slice D grant-verifier / D6 actuator work (see #18)
-or an explicit owner decision, not a bearer-token switch. (f) task decomposition is
+does NOT open it. The D6 grant-verifier dependency has now landed (see #18); route
+enablement still requires the full verifier swap on consequential routes and an explicit
+owner decision, not a bearer-token switch. (f) task decomposition is
 regex-only (`agents/planner.py::_default_strategy`) — REMAINS: the `AgentPlanner` strategy
 seam is already pluggable, but with the hermetic echo provider an LLM-backed splitter cannot
 be validated offline (no API keys on this machine, #10); adding an untestable live path was
