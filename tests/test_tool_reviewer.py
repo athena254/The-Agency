@@ -27,6 +27,7 @@ from agency.tools.reviewer import (
     StaticFallbackReviewer,
     ToolReviewer,
     ToolReviewVerdict,
+    verdict_for_report,
 )
 
 REPORT_TEMPLATE = {
@@ -319,6 +320,57 @@ def test_report_json_round_trips(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     _stage(monkeypatch, tmp_path, report=REPORT_TEMPLATE, exit_code=0, sleep_s=0.0)
     verdict = SkillSpectorReviewer().review(tmp_path)
     assert verdict.report_json == REPORT_TEMPLATE
+
+
+def test_recursive_multi_skill_bundle_maps_to_pass(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Recursive bundles use flat aggregate keys; verdict uses the scanner's own."""
+    bundle = {
+        "multi_skill": True,
+        "skill_count": 2,
+        "max_risk_score": 30,
+        "risk_severity": "MEDIUM",
+        "risk_recommendation": "CAUTION",
+        "skills": [],
+        "issues": [],
+        "components": [],
+        "analysis_completeness": {"status": "partial", "coverage_percent": 90.0},
+    }
+    _stage(monkeypatch, tmp_path, report=bundle, exit_code=0, sleep_s=0.0)
+    verdict = SkillSpectorReviewer().review(tmp_path)
+    assert verdict.verdict == "PASS"
+    assert verdict.score == 30
+    assert "partial analysis coverage (90.0%)" in verdict.findings_summary
+
+
+def test_verdict_for_report_scores_a_single_skill_sub_report() -> None:
+    clean = {
+        "skill": {"name": "ok-skill", "source": "."},
+        "risk_assessment": {
+            "score": 0,
+            "severity": "LOW",
+            "recommendation": "OK",
+            "max_issue_severity": "NONE",
+        },
+        "components": [{"path": "SKILL.md", "executable": False}],
+        "issues": [],
+    }
+    assert verdict_for_report(clean).verdict == "PASS"
+    critical = {
+        "skill": {"name": "bad-skill", "source": "."},
+        "risk_assessment": {
+            "score": 80,
+            "severity": "CRITICAL",
+            "recommendation": "BLOCK",
+            "max_issue_severity": "CRITICAL",
+        },
+        "components": [{"path": "SKILL.md", "executable": False}],
+        "issues": [
+            {"severity": "CRITICAL", "category": "Exfiltration", "location": {"file": "SKILL.md"}}
+        ],
+    }
+    assert verdict_for_report(critical).verdict == "FAIL"
 
 
 # --- SkillSpectorReviewer: scanner failures -> UNAVAILABLE --------------------

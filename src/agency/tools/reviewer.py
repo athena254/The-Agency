@@ -77,25 +77,37 @@ def _unavailable(detail: str) -> ToolReviewVerdict:
 def _map_report(data: Any) -> ToolReviewVerdict:
     """Map a parsed scanner report to a verdict; missing shapes fail closed.
 
-    Real report shape (SkillSpector v2): ``risk_assessment`` carries
-    ``score`` (risk, lower = safer), ``severity``, ``recommendation`` and
-    ``max_issue_severity``; ``issues[]`` are per-finding (``severity``,
-    ``category``, ``location.file``); ``components[]`` mark each file
-    ``executable``. Policy:
+    Two real report shapes (SkillSpector v2) are normalized:
 
-    - the scanner's own ``BLOCK`` recommendation always fails the review;
-    - any CRITICAL finding fails the review;
-    - HIGH-or-above findings located in *executable* components fail the
-      review (code must be clean);
-    - HIGH findings in advisory-only markdown stay PASS — they are recorded
-      verbatim as evidence (persona text routinely trips jailbreak-pattern
-      heuristics; the scan report rides along with every promotion).
+    - single skill: ``risk_assessment`` (score/severity/recommendation/
+      max_issue_severity) + ``issues[]`` + ``components[]``;
+    - recursive multi-skill bundle: flat ``max_risk_score`` /
+      ``risk_recommendation`` / ``risk_severity`` + ``skills[]`` where each
+      entry embeds a full single-skill report (use :func:`verdict_for_report`
+      on ``skills[i]`` for per-record verdicts).
+
+    Policy (both shapes): the scanner's own ``BLOCK`` recommendation always
+    fails the review; any CRITICAL finding fails the review; HIGH-or-above
+    findings located in *executable* components fail the review (code must
+    be clean); HIGH findings in advisory-only markdown stay PASS — recorded
+    verbatim as evidence (persona text routinely trips jailbreak-pattern
+    heuristics; the scan report rides along with every promotion). Partial
+    analysis coverage is recorded, never treated as a blocker (the scanner's
+    own risk assessment remains the verdict basis).
     """
     if not isinstance(data, dict):
         return _unavailable(f"{SCANNER} report is not a JSON object (fail closed)")
     risk = data.get("risk_assessment")
     if not isinstance(risk, dict):
-        return _unavailable(f"{SCANNER} report has no risk_assessment (fail closed)")
+        if data.get("multi_skill") or "max_risk_score" in data:
+            risk = {
+                "score": data.get("max_risk_score"),
+                "severity": data.get("risk_severity"),
+                "recommendation": data.get("risk_recommendation"),
+                "max_issue_severity": data.get("max_issue_severity", "NONE"),
+            }
+        else:
+            return _unavailable(f"{SCANNER} report has no risk_assessment (fail closed)")
     score = risk.get("score")
     if not isinstance(score, int) or isinstance(score, bool):
         return _unavailable(f"{SCANNER} risk score is missing or not an integer (fail closed)")
@@ -133,6 +145,9 @@ def _map_report(data: Any) -> ToolReviewVerdict:
     summary = f"risk score {score} ({recommendation}); " + (
         ", ".join(f"{name}={count}" for name, count in sorted(counts.items())) or "no findings"
     )
+    completeness = data.get("analysis_completeness")
+    if isinstance(completeness, dict) and completeness.get("status") == "partial":
+        summary += f"; partial analysis coverage ({completeness.get('coverage_percent')}%)"
     if blocking:
         summary += "; blocking: " + "; ".join(blocking[:3])
     verdict: Verdict = "FAIL" if blocking else "PASS"
@@ -145,6 +160,13 @@ def _map_report(data: Any) -> ToolReviewVerdict:
     )
 
 
+def verdict_for_report(data: Any) -> ToolReviewVerdict:
+    """Public verdict mapping — including per-skill sub-reports of a
+    recursive multi-skill bundle (``bundle["skills"][i]`` embeds a full
+    single-skill report)."""
+    return _map_report(data)
+
+
 class SkillSpectorReviewer:
     """Reviewer backed by the NVIDIA SkillSpector CLI (no LLM, no network).
 
@@ -153,8 +175,14 @@ class SkillSpectorReviewer:
     report is written to a private temp file, never stdout parsing.
     """
 
-    def __init__(self, *, scan_timeout_s: int = DEFAULT_SCAN_TIMEOUT_S) -> None:
+    def __init__(
+        self,
+        *,
+        scan_timeout_s: int = DEFAULT_SCAN_TIMEOUT_S,
+        extra_args: tuple[str, ...] = (),
+    ) -> None:
         self._timeout_s = scan_timeout_s
+        self._extra_args = extra_args
 
     @staticmethod
     def _find_scanner() -> str | None:
@@ -185,7 +213,7 @@ class SkillSpectorReviewer:
             return _unavailable(
                 f"{SCANNER} executable not found on PATH or in the venv; import must stay quarantined (fail closed)"
             )
-        command = [exe, "scan", str(path), "--no-llm", "--format", "json"]
+        command = [exe, "scan", str(path), "--no-llm", "--format", "json", *self._extra_args]
         try:
             proc = subprocess.run(
                 command,

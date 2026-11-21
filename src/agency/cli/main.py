@@ -8,6 +8,7 @@ Command surface
 ---------------
 * ``agency start`` / ``agency stop`` / ``agency status`` — server lifecycle.
 * ``agency agent list`` / ``agency agent create`` — identity management.
+* ``agency agent request`` — request a governed agent from a purpose.
 * ``agency task create`` / ``agency task list`` — work management.
 * ``agency memory search`` — full-text memory lookup.
 * ``agency evidence list`` — filtered finding browser.
@@ -450,6 +451,47 @@ def agent_capabilities(
         return
     console.print(f"[green]Updated capabilities[/green] for agent [bold]{agent_id}[/bold]")
     console.print(f"[dim]mode: {mode} | capabilities: {', '.join(capability)}[/dim]")
+
+
+@agent_app.command("request")
+def agent_request(
+    blueprint_id: str = typer.Option(
+        ..., "--blueprint-id", "-b", help="Blueprint id for the new governed agent."
+    ),
+    name: str = typer.Option(..., "--name", "-n", help="Human-readable agent name."),
+    purpose: str = typer.Option(
+        ..., "--purpose", "-p", help="Free-text purpose the agent is manufactured for."
+    ),
+    domain: str = typer.Option(
+        "general", "--domain", "-d", help="Operational domain (must be allowlisted server-side)."
+    ),
+    server_url: str = typer.Option(DEFAULT_SERVER_URL, "--server-url", "-u"),
+    token: str | None = typer.Option(
+        None, "--token", help="Bearer token (overrides AGENCY_API_TOKEN)."
+    ),
+    output_json: bool = typer.Option(False, "--json", help="Emit raw JSON."),
+) -> None:
+    """Request a governed agent (server-side authorizer + domain allowlist apply)."""
+    base = _server_url(server_url)
+    body: dict[str, Any] = {
+        "blueprint_id": blueprint_id,
+        "name": name,
+        "purpose": purpose,
+        "domain": domain,
+    }
+    with _client(base, headers=_headers(token)) as client:
+        payload = _handle_response(client.post("/v1/agent-requests", json=body))
+    if output_json:
+        _print_json(payload)
+        return
+    console.print(
+        Panel(
+            f"[green]Requested agent[/green] [bold]{payload.get('agent_id')}[/bold]\n"
+            f"blueprint: {payload.get('blueprint_id')} v{payload.get('version')}\n"
+            f"note: {payload.get('note', '')}",
+            expand=False,
+        )
+    )
 
 
 # --------------------------------------------------------------------------- #
