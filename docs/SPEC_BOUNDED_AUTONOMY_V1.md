@@ -14,9 +14,9 @@ This is bounded autonomy for an explicitly admitted task class, not unattended g
 The owner's instruction, "Start working towards this", starts research/specification/checkpoint work under the standing spec-first process. It does not select unresolved peer policy, authorize a live provider, enable beta execution, grant real filesystem access, merge main, push, restart the bot or deploy. Only the separate [A1 context repair](SPEC_AUTONOMY_CONTEXT_REPAIR_A1.md) is detailed enough here to request implementation approval. Later slices need their own frozen implementation contracts; do not build guessed protocol/SQL/wire details from this milestone outline.
 
 Companion documents:
-- [Source-backed gap map and research](RESEARCH_BOUNDED_AUTONOMY_20261016.md).
-- [Request/decision traceability](research-evidence/bounded-autonomy-request-20261016.md).
-- [Baseline diagnostic](research-evidence/bounded-autonomy-baseline-20261016.json).
+- [Source-backed gap map and research](archive/RESEARCH_BOUNDED_AUTONOMY_20261016.md).
+- [Request/decision traceability](archive/research-evidence/bounded-autonomy-request-20261016.md).
+- [Baseline diagnostic](archive/research-evidence/bounded-autonomy-baseline-20261016.json).
 - Existing authority requirements: `SPEC_SINGLE_HOST_LATTICE_MILESTONE.md`, `SPEC_FREE_ONLY_DECENTRALIZED_PROGRAM.md`, `SPEC_KNOWN_PEER_PROTOCOL.md`, `SPEC_PEER_LATTICE_GOVERNANCE.md`.
 - Existing implementations to reuse: `SPEC_LOCAL_RECOVERY_V1.md`, `SPEC_MODEL_METERING_V1.md`, `SPEC_AUDIT_LIFECYCLE.md`.
 

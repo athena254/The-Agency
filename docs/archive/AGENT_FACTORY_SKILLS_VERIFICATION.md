@@ -41,7 +41,7 @@ This report records a source-and-test review of the Agent Factory, skill registr
 
 ### Agent Factory: bounded lifecycle works
 
-`src/agency/factory/service.py` implements a SQLite-backed factory for versioned blueprints. Its module contract explicitly limits the factory to metadata and deterministic validation: it does not generate code, select models, evaluate agents, sandbox them, or deploy them. Approval uses an injected authorizer; pinned skill and workflow references are checked by injected callbacks, and requested references fail closed when the callback is absent or rejects them. Activation creates an identity at `TrustLevel.UNKNOWN` with L0-only claims and does not grant permissions. See the module contract at [`src/agency/factory/service.py`](../src/agency/factory/service.py#L1-L18), the v1 design contract in [`docs/SPEC_AGENT_FACTORY_V1.md`](SPEC_AGENT_FACTORY_V1.md), and the implementation’s approval/activation/revocation methods in that service.
+`src/agency/factory/service.py` implements a SQLite-backed factory for versioned blueprints. Its module contract explicitly limits the factory to metadata and deterministic validation: it does not generate code, select models, evaluate agents, sandbox them, or deploy them. Approval uses an injected authorizer; pinned skill and workflow references are checked by injected callbacks, and requested references fail closed when the callback is absent or rejects them. Activation creates an identity at `TrustLevel.UNKNOWN` with L0-only claims and does not grant permissions. See the module contract at [`src/agency/factory/service.py`](../../src/agency/factory/service.py#L1-L18), the v1 design contract in [`docs/SPEC_AGENT_FACTORY_V1.md`](../SPEC_AGENT_FACTORY_V1.md), and the implementation’s approval/activation/revocation methods in that service.
 
 **Restart recovery:** Startup still does not auto-resurrect identities. `AgentFactory.recover_active(...)` is an explicit recovery path requiring trusted `agent.recover` authorization and nonempty evidence; it revalidates pinned references, records an ACTIVE-to-ACTIVE audit event, and restores the recorded identity ID with UNKNOWN trust, L0 claims, and no permission grant. Conflicts fail closed; newly registered identities are rolled back if recovery audit fails. See `src/agency/factory/service.py` and tests in `tests/test_agent_factory.py`.
 
@@ -49,7 +49,7 @@ Autonomous capability development, evaluation, permission grants, and deployment
 
 ### Skills: registry and guarded execution seam work
 
-`src/agency/skills/registry.py` stores versioned skill metadata and lifecycle state in SQLite; registry entries are data, not executable source. `src/agency/skills/executor.py` is a separate execution seam: it requires `PUBLISHED` status, checks the permissions supplied to the executor, resolves the skill’s logical implementation name only through a registered operation, and returns failure for unpublished skills, denied permissions, or unknown operations. It does not import or evaluate arbitrary skill code. See [`src/agency/skills/registry.py`](../src/agency/skills/registry.py) and [`src/agency/skills/executor.py`](../src/agency/skills/executor.py#L1-L6), [`#L27-L55`](../src/agency/skills/executor.py#L27-L55), and [`#L56-L110`](../src/agency/skills/executor.py#L56-L110).
+`src/agency/skills/registry.py` stores versioned skill metadata and lifecycle state in SQLite; registry entries are data, not executable source. `src/agency/skills/executor.py` is a separate execution seam: it requires `PUBLISHED` status, checks the permissions supplied to the executor, resolves the skill’s logical implementation name only through a registered operation, and returns failure for unpublished skills, denied permissions, or unknown operations. It does not import or evaluate arbitrary skill code. See [`src/agency/skills/registry.py`](../../src/agency/skills/registry.py) and [`src/agency/skills/executor.py`](../../src/agency/skills/executor.py#L1-L6), [`#L27-L55`](../../src/agency/skills/executor.py#L27-L55), and [`#L56-L110`](../../src/agency/skills/executor.py#L56-L110).
 
 **Runtime integration:** `agency_skill` is now registered with the ordinary non-beta tool loop. It accepts an exact skill ID/version and inputs, but delegates to `AgencyOrchestrator.execute_skill(...)`; only factory-issued agents with that exact pinned reference can invoke it. The orchestrator re-reads the published version and resolves only host-registered operations. Permissioned skills require the configured trusted `skill_authorizer`; absent, false, or failing authorization denies execution. The model may request a tool call, but cannot bypass these checks or create executable code. See `src/agency/skills/tool.py`, `src/agency/orchestrator.py`, and `tests/test_orchestrator_skills.py`.
 
@@ -57,7 +57,7 @@ Autonomous capability development, evaluation, permission grants, and deployment
 
 ### Workflows are a bounded adjacent component
 
-`src/agency/workflows/executor.py` executes only pre-registered operations in deterministic order and documents that it does not promise exactly-once behavior or automatic recovery. The broader workflow spec states that arbitrary imports, shell commands, and remote skill execution are not part of v1: [`docs/SPEC_WORKFLOW_V1.md`](SPEC_WORKFLOW_V1.md#L7-L17).
+`src/agency/workflows/executor.py` executes only pre-registered operations in deterministic order and documents that it does not promise exactly-once behavior or automatic recovery. The broader workflow spec states that arbitrary imports, shell commands, and remote skill execution are not part of v1: [`docs/SPEC_WORKFLOW_V1.md`](../SPEC_WORKFLOW_V1.md#L7-L17).
 
 ## Verification performed
 
@@ -82,4 +82,4 @@ The full repository suite was attempted but did not complete in this environment
 - **Factory recovery:** implemented only as explicit authorized recovery with evidence; automatic startup rehydration remains disabled.
 - **Autonomous/production factory:** not implemented.
 
-For the repository’s maintained high-level status, see [`docs/CURRENT_STATE.md`](CURRENT_STATE.md#L82-L91) and [`docs/ARCHITECTURE.md`](ARCHITECTURE.md#L110-L113).
+For the repository’s maintained high-level status, see [`docs/CURRENT_STATE.md`](../CURRENT_STATE.md#L82-L91) and [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md#L110-L113).
