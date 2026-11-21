@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+import agency.tools.reviewer as reviewer_module
 from agency.tools.reviewer import (
     SkillSpectorReviewer,
     StaticFallbackReviewer,
@@ -123,6 +124,7 @@ def test_reviewers_satisfy_the_tool_reviewer_protocol() -> None:
 
 def test_unavailable_when_not_on_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _cleared_path(monkeypatch, tmp_path)
+    monkeypatch.setattr(reviewer_module.sys, "prefix", str(tmp_path / "empty-venv"))
     reviewer = SkillSpectorReviewer()
     assert reviewer.is_available() is False
     verdict = reviewer.review(tmp_path)
@@ -133,6 +135,18 @@ def test_unavailable_when_not_on_path(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
 def test_available_when_stub_on_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _stage(monkeypatch, tmp_path, report=REPORT_TEMPLATE, exit_code=0, sleep_s=0.0)
+    assert SkillSpectorReviewer().is_available() is True
+
+
+def test_available_when_installed_in_venv_scripts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """SkillSpector is a declared dependency: venv-local shims count as installed."""
+    _cleared_path(monkeypatch, tmp_path)
+    scripts = tmp_path / "Scripts"
+    scripts.mkdir()
+    (scripts / "skillspector.exe").write_text("stub", encoding="utf-8")
+    monkeypatch.setattr(reviewer_module.sys, "prefix", str(tmp_path))
     assert SkillSpectorReviewer().is_available() is True
 
 

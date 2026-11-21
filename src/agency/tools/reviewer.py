@@ -23,6 +23,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -114,14 +115,34 @@ class SkillSpectorReviewer:
     def __init__(self, *, scan_timeout_s: int = DEFAULT_SCAN_TIMEOUT_S) -> None:
         self._timeout_s = scan_timeout_s
 
+    @staticmethod
+    def _find_scanner() -> str | None:
+        """Resolve the scanner: PATH first, then the active venv's Scripts/bin.
+
+        SkillSpector is a declared Agency dependency (pyproject), installed
+        into the venv; a bare `shutil.which` misses venv shims when the
+        Scripts dir is not on the ambient PATH (Windows hosts).
+        """
+        found = shutil.which(SCANNER)
+        if found:
+            return found
+        for candidate in (
+            Path(sys.prefix) / "Scripts" / f"{SCANNER}.exe",
+            Path(sys.prefix) / "Scripts" / SCANNER,
+            Path(sys.prefix) / "bin" / SCANNER,
+        ):
+            if candidate.is_file():
+                return str(candidate)
+        return None
+
     def is_available(self) -> bool:
-        return shutil.which(SCANNER) is not None
+        return self._find_scanner() is not None
 
     def review(self, path: Path) -> ToolReviewVerdict:
-        exe = shutil.which(SCANNER)
+        exe = self._find_scanner()
         if exe is None:
             return _unavailable(
-                f"{SCANNER} executable not found on PATH; import must stay quarantined (fail closed)"
+                f"{SCANNER} executable not found on PATH or in the venv; import must stay quarantined (fail closed)"
             )
         with tempfile.TemporaryDirectory(prefix="skillspector-review-") as tmp:
             out_path = Path(tmp) / "report.json"
