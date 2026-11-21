@@ -3,10 +3,10 @@
 Found while implementing `RequestedAgentService` (`src/agency/factory/requested_agent.py`).
 Ordered by production risk. **Avoid these patterns; all agents are free to fix them.**
 
-**Status 2026-11-21 (full-gap sweep):** 15 of 20 closed — gaps 1-9 and 11-16, commit
-references below are on `integrated`. Gaps 10 and 17 remain open for external reasons (no
-local LLM API keys; no real PAK repository to wire against); gaps 18-20 were added by the
-intake workstream (2026-11-20).
+**Status 2026-11-21 (full-gap sweep):** 16 of 20 closed — gaps 1-9, 11-16 and 20; commit
+references below are on `integrated` (gap 20's on `gap/autonomy-execution`). Gaps 10 and 17
+remain open for external reasons (no local LLM API keys; no real PAK repository to wire
+against); gaps 18-19 were added by the intake workstream (2026-11-20).
 
 ## 1. Capability ⇄ Factory circular import (structural) — CLOSED `5399d37`
 `canonical_sha256` moved to the neutral `src/agency/core/hashing.py`; `factory.coding_models`
@@ -129,10 +129,24 @@ adapter is needed before this surface is load-bearing. **Fix:** shared
 durable audit/evidence backends, a lease/heartbeat so recovery can distinguish dead from
 live claimers, and provider-aware backoff in the LLM adapter.
 
-## 20. Autonomy-engine assignments still never execute (2026-11-20)
-`run_autonomous` stops after assign/spawn/proof; the general agent→agent path now exists
-(`delegate_task` tool + `AgencyOrchestrator.delegate_task`, depth-bounded), but subtasks the
-engine assigns are still not dispatched to their assigned agents. Forge routing
-(`forge_build_strategy`, BlacksmithOps QUEUED→DISPATCHED) is owned by
-`docs/PLAN_BLACKSMITH_FORGE_ORCHESTRATOR.md` phases 2-6. **Fix:** materialise engine
-assignments as delegated child tasks once the BlacksmithOps state machine lands.
+## 20. Autonomy-engine assignments still never execute — CLOSED `f68d62f` (2026-11-21)
+`run_autonomous` still stops after assign/spawn/forge/proof, but the new
+`dispatch_assignments` leg (`src/agency/autonomy/engine.py`) now materialises every
+planner-assigned subtask as a delegated child task: `submit_autonomous_task` mirrors spawned
+agents into the identity registry, submits the umbrella parent task, then binds
+`AgencyOrchestrator.delegate_task` (depth-bounded, per-child deadline via
+`autonomy_delegate_timeout`, metered, through the shared dispatcher queue) as the engine's
+delegate. Outcomes are honest: pre-creation rejections (unknown target/parent, depth limit,
+no dispatcher) record FAILED; an expired wait records UNCERTAIN and is never re-dispatched;
+COMPLETED carries a result digest; the proof bundle records
+dispatched/dispatch_failed/dispatch_uncertain/dispatch_skipped. With
+`assignment_journal_path` configured, the durable A5 `AssignmentJournal` records
+ASSIGNED→RUNNING→terminal atomically with its outbox rows under its bounded id scheme (real
+ids stay in the proof bundle and the new `RunResult.dispatches` field); progressed records
+are never re-dispatched, and journal errors fail closed by propagating. Forge-domain
+children keep routing through BlacksmithOps (owned by
+`docs/PLAN_BLACKSMITH_FORGE_ORCHESTRATOR.md`, unchanged). Still out of scope: cross-restart
+reconciliation of never-dispatched ASSIGNED rows (dispatch and its ASSIGNED→RUNNING write
+share no intervening await, so the window is a killed process), parallel/dependency-aware
+dispatch (sequential in plan order today), and the pre-existing umbrella parent execution
+alongside the children.
