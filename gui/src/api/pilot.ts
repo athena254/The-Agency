@@ -6,8 +6,8 @@
   fabricates a response; failures surface as PilotError with the HTTP status.
 */
 
-import { useEffect, useState } from 'react'
 import { api, type SessionResponse } from './client'
+import { useQuery } from '@tanstack/react-query'
 import { pilotRequest, PilotError } from '../stores/auth'
 
 export interface PilotLimits {
@@ -145,24 +145,19 @@ export interface CalculatorTaskInput {
   expression: string
 }
 
-/** Fetch the loopback CSRF token once per surface. Never persisted. */
+/**
+ * Fetch the loopback CSRF token once per session, shared through React
+ * Query so a mount tree issues a single /api/session request instead of
+ * one per component. Never persisted.
+ */
 export function useCsrf(): string | null {
-  const [csrf, setCsrf] = useState<string | null>(null)
-  useEffect(() => {
-    let alive = true
-    api
-      .get<SessionResponse>('/api/session')
-      .then((session) => {
-        if (alive) setCsrf(session.csrf_token)
-      })
-      .catch(() => {
-        if (alive) setCsrf(null)
-      })
-    return () => {
-      alive = false
-    }
-  }, [])
-  return csrf
+  const { data } = useQuery({
+    queryKey: ['csrf'],
+    queryFn: () => api.get<SessionResponse>('/api/session'),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  })
+  return data?.csrf_token ?? null
 }
 
 export function isPilotAuthFailure(err: unknown): boolean {

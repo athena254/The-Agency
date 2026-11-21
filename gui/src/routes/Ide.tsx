@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Send, Square } from 'lucide-react'
-import { api, type ChatResponse, type SessionResponse } from '../api/client'
+import { useQueryClient } from '@tanstack/react-query'
+import { Send } from 'lucide-react'
+import { type ChatResponse } from '../api/client'
+import { useCsrf } from '../api/pilot'
+import { Row } from '../components/ui'
 
 interface Message {
   id: string
@@ -16,22 +19,25 @@ function nextId() {
   return `m${counter}`
 }
 
+/** Human, honest error text — never a raw status/body dump. */
+function chatErrorText(status: number): string {
+  if (status === 403) return 'Request rejected (missing or invalid CSRF token). Try again.'
+  if (status === 413) return 'Message exceeds the maximum allowed length.'
+  if (status === 502) return 'The Butler could not complete this turn.'
+  if (status === 503) return 'Chat is unavailable in this configuration.'
+  if (status === 504) return 'The Butler timed out before replying. Try again.'
+  return `Request failed (HTTP ${status}).`
+}
+
 export function IdePage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const csrfRef = useRef<string | null>(null)
+  const csrf = useCsrf()
+  const queryClient = useQueryClient()
+  const sessionIdRef = useRef(crypto.randomUUID())
   const endRef = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    api
-      .get<SessionResponse>('/api/session')
-      .then((session) => {
-        csrfRef.current = session.csrf_token
-      })
-      .catch((err) => setError(err.message))
-  }, [])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -48,19 +54,20 @@ export function IdePage() {
     setBusy(true)
 
     try {
-      const token = csrfRef.current
       const result = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { 'X-Prototype-CSRF': token } : {}),
+          ...(csrf ? { 'X-Prototype-CSRF': csrf } : {}),
         },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, session_id: sessionIdRef.current }),
       })
       if (!result.ok) {
-        if (result.status === 403) csrfRef.current = null
-        const body = await result.text()
-        throw new Error(`${result.status}: ${body.slice(0, 160)}`)
+        if (result.status === 403) {
+          // The cached CSRF token was rejected — refresh it for the next turn.
+          void queryClient.invalidateQueries({ queryKey: ['csrf'] })
+        }
+        throw new Error(chatErrorText(result.status))
       }
       const data = (await result.json()) as ChatResponse
       setMessages((prev) =>
@@ -77,7 +84,7 @@ export function IdePage() {
     } finally {
       setBusy(false)
     }
-  }, [busy, input])
+  }, [busy, input, csrf, queryClient])
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 lg:flex-row">
@@ -86,18 +93,25 @@ export function IdePage() {
         <div className="flex items-center justify-between border-b border-line px-5 py-3">
           <div>
             <h2 className="text-sm font-semibold text-text-1">Isolated chat</h2>
-            <div className="mc-label mt-0.5">model-only · no tools · no memory</div>
+            <div className="mc-label mt-0.5">model-only · no tools · no memory store</div>
           </div>
-          <span className="mc-value text-[11px] text-text-3">mercury-3</span>
+          <span className="mc-value text-[11px] text-text-3">in-session context</span>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto px-5 py-4"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+        >
           {messages.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center text-center">
               <div className="text-sm text-text-2">Start a conversation</div>
               <div className="mt-1 max-w-sm text-xs text-text-3">
                 This is the isolated prototype path: it runs the model without tools, memory,
                 or Lattice mirroring. The governed task path arrives with peer authority.
+                Replies can see the earlier turns of this page session (kept in memory only,
+                gone on reload).
               </div>
             </div>
           ) : (
@@ -110,7 +124,7 @@ export function IdePage() {
                     }`}
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="mc-label mb-1">{m.role === 'user' ? 'you' : 'remex'}</div>
+                    <div className="mc-label mb-1">{m.role === 'user' ? 'you' : 'Butler'}</div>
                     {m.pending ? (
                       <div className="flex items-center gap-2 text-sm text-text-3">
                         <span className="mc-status-dot bg-signal animate-pulse" />
@@ -128,10 +142,21 @@ export function IdePage() {
         </div>
 
         <div className="border-t border-line p-4">
-          {error ? <div className="mb-2 text-xs text-red">{error}</div> : null}
+          {error ? (
+            <div className="mb-2 text-xs text-red" role="alert">
+              {error}
+            </div>
+          ) : null}
+          <label htmlFor="mc-ide-input" className="sr-only">
+            Message the Butler
+          </label>
+          <p id="mc-ide-input-hint" className="sr-only">
+            Press Enter to send, Shift+Enter to add a new line.
+          </p>
           <div className="flex items-end gap-2">
             <textarea
-              className="mc-input min-h-[68px] flex-1 resize-y"
+              id="mc-ide-input"
+              className="mc-textarea flex-1"
               placeholder="Message the Butler…"
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -141,15 +166,18 @@ export function IdePage() {
                   void send()
                 }
               }}
+              aria-busy={busy}
+              aria-describedby="mc-ide-input-hint"
             />
             <button
               type="button"
               className="mc-btn mc-btn-primary flex-none"
               onClick={() => void send()}
               disabled={busy || !input.trim()}
+              aria-label="Send message"
             >
-              {busy ? <Square size={13} /> : <Send size={13} />}
-              Send
+              <Send size={13} aria-hidden="true" />
+              {busy ? 'Sending…' : 'Send'}
             </button>
           </div>
         </div>
@@ -190,15 +218,6 @@ export function IdePage() {
           are separate gates.
         </div>
       </aside>
-    </div>
-  )
-}
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <dt className="mc-label">{label}</dt>
-      <dd className="mc-value text-[11.5px] text-text-1">{children}</dd>
     </div>
   )
 }

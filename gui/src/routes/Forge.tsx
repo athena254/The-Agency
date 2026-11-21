@@ -1,5 +1,5 @@
 import { Shield } from 'lucide-react'
-import { Header } from './Memories'
+import { PageHeader as Header } from '../components/ui'
 import { LockedPanel } from './Locked'
 
 export function ForgePage() {
@@ -16,8 +16,14 @@ export function ForgePage() {
         gates={['P2 peer authority', 'P3 isolation', 'P4 capability lifecycle']}
       />
       <div className="mc-panel px-5 py-4">
-        <div className="mc-label mb-2">Current capability</div>
-        <pre className="overflow-x-auto rounded-control border border-line bg-ink-0 p-3 font-mono text-[11.5px] leading-relaxed text-text-2">
+        <div className="mc-label mb-2 flex items-center gap-2">
+          Current capability
+          <span className="mc-badge">illustrative</span>
+        </div>
+        <pre
+          aria-label="Illustrative capability transcript"
+          className="overflow-x-auto rounded-control border border-line bg-ink-0 p-3 font-mono text-[11.5px] leading-relaxed text-text-2"
+        >
 {`agency forge code "<task>" --repo <path>
   -> isolated git worktree
   -> external coding agent (opencode, free models)

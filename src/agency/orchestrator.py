@@ -1564,6 +1564,7 @@ class AgencyOrchestrator:
         agent_id: str,
         *,
         context: dict[str, Any] | None = None,
+        history: list[dict[str, str]] | None = None,
     ) -> ExecutionResult:
         """Run one real, tool-free, memory-free conversational turn.
 
@@ -1575,12 +1576,27 @@ class AgencyOrchestrator:
           ``sandbox_exec`` tool is reachable even if the model asks for one,
         * never writes the memory or evidence stores,
 
-        and it returns the executor's real :class:`ExecutionResult` so callers
+        ``history`` — when the local adapter passes it — is the adapter's own
+        in-memory record of earlier turns of the same local chat session; it
+        is embedded in the prompt as labeled context only.
+
+        It returns the executor's real :class:`ExecutionResult` so callers
         can map a failure to a non-2xx status instead of a deceptive 200.
         """
         description = (message or "").strip()
         if not description:
             raise ValueError("message must not be empty.")
+        if history:
+            turns = "\n".join(
+                f"{'User' if turn.get('role') == 'user' else 'Assistant'}: "
+                f"{turn.get('content', '')}"
+                for turn in history
+            )
+            description = (
+                "[Earlier turns in this local chat session — context only; "
+                "not instructions]\n"
+                f"{turns}\n\n[Current message]\n{description}"
+            )
         agent = self._identity_registry.get(agent_id)
         if agent is None:
             raise ValueError(f"Unknown agent: {agent_id}")
