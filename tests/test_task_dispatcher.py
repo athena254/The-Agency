@@ -137,3 +137,134 @@ async def test_invalid_concurrency_rejected() -> None:
             return None
 
         TaskDispatcher(manager, noop, max_concurrency=0)
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_renews_in_flight_leases(tmp_path) -> None:
+    """The heartbeat loop pushes a running task's lease forward (gaps.md #19a)."""
+    import sqlite3
+    from datetime import datetime
+
+    from agency.kernel.task_store import TaskStore
+
+    db = str(tmp_path / "tasks.db")
+    store = TaskStore(db, owner_id="proc-a", lease_seconds=60)
+    await store.initialize()
+    manager = TaskManager(store)
+    samples: list[datetime] = []
+
+    async def sampling_run(task_id: str) -> None:
+        for _ in range(4):
+            await asyncio.sleep(0.12)
+            conn = sqlite3.connect(db)
+            try:
+                row = conn.execute(
+                    "SELECT lease_expires_at FROM tasks WHERE task_id = ?", (task_id,)
+                ).fetchone()
+            finally:
+                conn.close()
+            assert row is not None and row[0] is not None
+            samples.append(datetime.fromisoformat(row[0]))
+
+    dispatcher = TaskDispatcher(manager, sampling_run, poll_interval=0.01, heartbeat_interval=0.05)
+    task = await manager.create_task(title="t", created_by="u")
+    dispatcher.start()
+    try:
+        await dispatcher.wait(task.task_id, timeout=15)
+    finally:
+        await dispatcher.stop()
+    # Four samples over >=0.36 s with a 0.05 s heartbeat: renewals push the
+    # expiry forward (an unrenewed lease would show the same claim-time
+    # expiry in every sample).
+    assert len(samples) == 4
+    assert samples[-1] > samples[0]
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_wait_resolves_work_done_by_another_dispatcher(tmp_path) -> None:
+    """A waiter sees tasks another process's dispatcher executed (shared store)."""
+    from agency.kernel.task_store import TaskStore
+
+    db = str(tmp_path / "tasks.db")
+    store_a = TaskStore(db, owner_id="proc-a")
+    await store_a.initialize()
+    manager_a = TaskManager(store_a)
+    store_b = TaskStore(db, owner_id="proc-b")
+    await store_b.initialize()
+    manager_b = TaskManager(store_b)
+
+    async def complete(task_id: str) -> None:
+        await manager_a.update_status(
+            task_id, TaskStatus.COMPLETED, output={"summary": "done elsewhere"}
+        )
+
+    async def noop(task_id: str) -> None:
+        return None
+
+    task = await manager_a.create_task(title="cross", created_by="u")
+    # Process B waits on its own (never-fired) event while process A's
+    # dispatcher claims and completes the task in the shared store.
+    waiter_dispatcher = TaskDispatcher(manager_b, noop, wait_poll_interval=0.05)
+    waiter = asyncio.create_task(waiter_dispatcher.wait(task.task_id, timeout=15))
+    await asyncio.sleep(0.05)
+    runner = TaskDispatcher(manager_a, complete, poll_interval=0.01)
+    runner.start()
+    try:
+        final = await waiter
+        assert final.status is TaskStatus.COMPLETED
+        assert final.output == {"summary": "done elsewhere"}
+    finally:
+        await runner.stop()
+        await store_a.close()
+        await store_b.close()
+
+
+@pytest.mark.asyncio
+async def test_cross_process_child_result_lands_on_parent(tmp_path) -> None:
+    """Cross-process completion of a child records its result on the parent."""
+    from agency.kernel.task_store import TaskStore
+
+    db = str(tmp_path / "tasks.db")
+    store_a = TaskStore(db, owner_id="proc-a")
+    await store_a.initialize()
+    manager_a = TaskManager(store_a)
+    store_b = TaskStore(db, owner_id="proc-b")
+    await store_b.initialize()
+    manager_b = TaskManager(store_b)
+
+    parent = await manager_a.create_task(title="parent", created_by="coord")
+    child = await manager_a.create_task(
+        title="child", created_by="worker", parent_id=parent.task_id
+    )
+
+    async def complete(task_id: str) -> None:
+        await manager_b.update_status(task_id, TaskStatus.COMPLETED, output={"summary": "ok"})
+
+    async def noop(task_id: str) -> None:
+        return None
+
+    runner = TaskDispatcher(manager_b, complete, poll_interval=0.01)
+    runner.start()
+    try:
+        final = await TaskDispatcher(manager_a, noop, wait_poll_interval=0.05).wait(
+            child.task_id, timeout=15
+        )
+        assert final.status is TaskStatus.COMPLETED
+    finally:
+        await runner.stop()
+        await store_a.close()
+        await store_b.close()
+    # The result was recorded on the parent record even though process B
+    # executed the child: the submitter reads it from the parent task.
+    reopened = TaskStore(db, owner_id="proc-c")
+    await reopened.initialize()
+    try:
+        seen = await TaskManager(reopened).get_task(parent.task_id)
+        assert seen is not None
+        results = [m for m in seen.messages if m.type == "child_result"]
+        assert len(results) == 1
+        assert results[0].content["child_task_id"] == child.task_id
+        assert results[0].content["summary"] == "ok"
+    finally:
+        await reopened.close()

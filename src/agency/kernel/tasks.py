@@ -21,7 +21,7 @@ from dataclasses import dataclass, replace
 from dataclasses import field as dc_field
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 from uuid import uuid4
 
 import structlog
@@ -44,6 +44,12 @@ class TaskStatus(str, Enum):
 
     def __str__(self) -> str:
         return self.value
+
+
+#: States a task cannot leave; dispatchers and submitters treat these as final.
+_TERMINAL_STATUSES: Final[frozenset[TaskStatus]] = frozenset(
+    {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.BLOCKED}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +140,11 @@ class TaskManager:
         self._sequence = 0
         self._lock = asyncio.Lock()
         self._log = structlog.get_logger(__name__)
+
+    @property
+    def store(self) -> TaskStore | None:
+        """The backing store when SQLite is authoritative, else ``None``."""
+        return self._store
 
     # ------------------------------------------------------------------ #
     # Lifecycle
@@ -243,6 +254,11 @@ class TaskManager:
         alongside the status change so pollers never observe COMPLETED
         without its result). ``error`` is recorded when provided.
 
+        When the task is a child (``parent_id`` set) and the target state is
+        terminal, the result is also recorded on the parent's task record as
+        a ``child_result`` message, so the submitter sees the delegated
+        result wherever it reads task status.
+
         Raises
         ------
         KeyError:
@@ -277,7 +293,65 @@ class TaskManager:
                 if not updated:
                     raise KeyError(f"unknown task {task_id!r}")
         self._log.info("task.status", task_id=task_id, status=status.value)
+        if status in _TERMINAL_STATUSES:
+            await self._notify_parent_of_result(task_id, status)
         return await self.get_task(task_id) or current
+
+    async def heartbeat_many(self, task_ids: list[str]) -> int:
+        """Renew store leases for tasks this process still holds RUNNING.
+
+        No-op (0) without a store; in-memory tasks have no lease to renew.
+        """
+
+        if self._store is None or not task_ids:
+            return 0
+        return await self._store.heartbeat(task_ids)
+
+    async def _notify_parent_of_result(self, task_id: str, status: TaskStatus) -> None:
+        """Record a child task's terminal result on its parent's task record.
+
+        Delegated children carry ``parent_id``; the submitter reads task
+        status through the parent (``GET /v1/tasks/{id}`` or
+        :meth:`get_task`), so the result — status, output summary, error —
+        is appended as a structured ``child_result`` message there. The
+        child's own ``output``/``error`` fields are already persisted by the
+        terminal transition itself.
+
+        Best-effort by design: if the parent is gone, or the append races a
+        store shutdown, the child's terminal state still stands (the result
+        remains readable on the child record) and the loss is logged, not
+        raised. A crash between the child's terminal write and this append
+        is honest UNCERTAIN territory — the parent may never learn the
+        result, though the child record always holds it.
+        """
+
+        child = await self.get_task(task_id)
+        if child is None or not child.parent_id:
+            return
+        summary = child.output.get("summary") if isinstance(child.output, dict) else None
+        content = {
+            "child_task_id": child.task_id,
+            "status": status.value,
+            "summary": summary if isinstance(summary, str) else None,
+            "error": child.error,
+        }
+        try:
+            await self.add_message(
+                child.parent_id,
+                TaskMessage(
+                    task_id=child.parent_id,
+                    type="child_result",
+                    content=content,
+                    created_by="task_manager",
+                ),
+            )
+        except (KeyError, ValueError) as exc:
+            self._log.warning(
+                "task.parent_result_unrecorded",
+                child_task_id=task_id,
+                parent_task_id=child.parent_id,
+                reason=type(exc).__name__,
+            )
 
     # ------------------------------------------------------------------ #
     # Messaging
