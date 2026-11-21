@@ -41,6 +41,8 @@ def service(tmp_path: Path) -> GitHubSkillImportService:
     return GitHubSkillImportService(
         PromptRegistry(":memory:"),
         SkillRegistry(str(tmp_path / "skills.db")),
+        approver="reviewer",
+        publish_authorizer=lambda actor, action: action == "skill.publish",
         data_dir=tmp_path,
     )
 
@@ -95,6 +97,29 @@ def test_make_skills_promote_and_attach(tmp_path: Path, service: GitHubSkillImpo
     assert any(
         cap.name == f"skill-{skill_id}" for cap in kernel.get_required("coding-agent").capabilities
     )
+
+
+def test_promote_requires_explicit_approver(tmp_path: Path) -> None:
+    svc = GitHubSkillImportService(
+        PromptRegistry(":memory:"),
+        SkillRegistry(str(tmp_path / "skills.db")),
+        data_dir=tmp_path,
+    )
+    with pytest.raises(ValueError, match="explicit approver"):
+        svc.promote((("some-skill", "1.0.0"),), "evidence")
+    svc.close()
+
+
+def test_promote_requires_publish_authorizer(tmp_path: Path) -> None:
+    svc = GitHubSkillImportService(
+        PromptRegistry(":memory:"),
+        SkillRegistry(str(tmp_path / "skills.db")),
+        data_dir=tmp_path,
+        approver="reviewer",
+    )
+    with pytest.raises(ValueError, match="publish authorizer"):
+        svc.promote((("some-skill", "1.0.0"),), "evidence")
+    svc.close()
 
 
 def test_improve_existing_builds_successor(service: GitHubSkillImportService) -> None:
