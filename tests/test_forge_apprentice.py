@@ -148,6 +148,22 @@ def test_apprentice_pass_path_builds_and_gates(tmp_path: Path) -> None:
     assert "NOW WRITE exactly one file: test_app.py" in stub.prompts[1]
 
 
+def test_apprentice_language_kwarg_overrides_empty_repo(tmp_path: Path) -> None:
+    repo = _git_repo(tmp_path)  # empty repo: detection would say python
+    stub = _StubLLM(
+        [
+            _file('[package]\nname = "shorty"\nedition = "2021"\n'),
+            _file("fn main() {}\n"),
+        ]
+    )
+    report = run_apprentice(
+        repo, ["unused"], "task", language="rust", run_review_flag=False, llm=stub
+    )
+    assert report.gate == "PASS", report.failure_detail
+    assert "NOW WRITE exactly one file: Cargo.toml" in stub.prompts[0]
+    assert "NOW WRITE exactly one file: src/main.rs" in stub.prompts[1]
+
+
 def test_apprentice_fail_closed_on_unparsable_answer(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path)
     report = run_apprentice(

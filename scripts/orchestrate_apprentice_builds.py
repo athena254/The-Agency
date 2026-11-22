@@ -145,6 +145,7 @@ def main() -> int:
                 str(repo),
                 acceptance=_ACCEPTANCE,
                 test_paths=["."],
+                language=lang,
             )
             print(f"=== queued {lang}: job {job_id8(jobs[lang])} ===", flush=True)
 

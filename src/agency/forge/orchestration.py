@@ -68,6 +68,7 @@ class ForgeJob(BaseModel):
     acceptance: tuple[str, ...] = ()
     test_paths: tuple[str, ...] = ()
     state: JobState = JobState.QUEUED
+    language: str = Field(default="", max_length=32)
     attempts: int = Field(default=0, ge=0)
     report_id: str = ""
     gate: str = ""
@@ -185,6 +186,7 @@ class BlacksmithOps:
         *,
         acceptance: tuple[str, ...] | list[str] = (),
         test_paths: tuple[str, ...] | list[str] = (),
+        language: str = "",
     ) -> ForgeJob:
         if not isinstance(repo, str) or not Path(repo).is_absolute():
             raise ValueError(f"repo must be an absolute path, got {repo!r}.")
@@ -202,6 +204,7 @@ class BlacksmithOps:
             repo=repo,
             acceptance=acc,
             test_paths=tests,
+            language=str(language or "").strip()[:32],
             state=JobState.QUEUED,
             created_at=now,
             updated_at=now,
@@ -266,11 +269,13 @@ class BlacksmithOps:
             max_attempts=self._max_attempts,
             failure_tail=job.failure_detail if job.attempts > 1 else "",
         )
-        # The shadow kwarg is only forwarded when configured so custom
-        # runners with fixed signatures keep working.
-        shadow_kwargs: dict[str, Any] = (
-            {"shadow_llm": self._shadow_llm} if self._shadow_llm is not None else {}
-        )
+        # Optional kwargs are only forwarded when set so custom runners with
+        # fixed signatures keep working.
+        runner_kwargs: dict[str, Any] = {}
+        if self._shadow_llm is not None:
+            runner_kwargs["shadow_llm"] = self._shadow_llm
+        if job.language:
+            runner_kwargs["language"] = job.language
         try:
             report = self._runner(
                 job.repo,
@@ -280,7 +285,7 @@ class BlacksmithOps:
                 worktree_root=self._worktree_root,
                 run_tests_flag=bool(job.test_paths),
                 test_paths=list(job.test_paths) or None,
-                **shadow_kwargs,
+                **runner_kwargs,
             )
         except Exception as exc:  # noqa: BLE001 - a worker crash must fail the job honestly
             detail = f"{type(exc).__name__}: {exc}"[:MAX_DETAIL_CHARS]

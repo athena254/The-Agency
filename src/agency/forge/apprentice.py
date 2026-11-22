@@ -254,6 +254,7 @@ def run_apprentice(
     test_timeout_s: int = DEFAULT_TEST_TIMEOUT_S,
     run_review_flag: bool = True,
     llm: Any = None,
+    language: str = "",
     **kwargs: Any,
 ) -> ExternalAgentReport:
     """One apprentice build: LLM files -> gated coding agent -> LLM review.
@@ -293,7 +294,12 @@ def run_apprentice(
     if llm is None:
         return _fail("no apprentice LLM configured; run refused (fail closed)")
 
-    lang = detect_apprentice_language(real_repo)
+    # Empty target repos cannot reveal their language: the job carries it.
+    lang = (language or "").strip().lower()
+    if lang == "typescript":
+        lang = "node"
+    if lang not in FILE_PLANS:
+        lang = detect_apprentice_language(real_repo)
     plan = FILE_PLANS[lang]
 
     # One file per call with a COMPACT prompt: the full work order stays in
