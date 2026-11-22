@@ -6,6 +6,11 @@ v2: static security scan + bounded isolated test runner + composed pipeline.
 
 from __future__ import annotations
 
+from agency.forge.apprentice import (
+    build_apprentice_llm,
+    detect_apprentice_language,
+    run_apprentice,
+)
 from agency.forge.backlog import (
     MAX_ITEMS as MAX_BACKLOG_ITEMS,
 )
@@ -177,6 +182,9 @@ __all__ = [
     "WorktreeError",
     "WorktreeInfo",
     "available_tools",
+    "build_apprentice_llm",
+    "detect_apprentice_language",
+    "run_apprentice",
     "build_diff_bundle",
     "build_test_command",
     "capture_evidence",

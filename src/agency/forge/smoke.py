@@ -8,6 +8,7 @@ defines a FastAPI ``app``, otherwise ``python app.py``, otherwise
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import subprocess
@@ -62,9 +63,36 @@ def _npm_cmd() -> str:
     return name
 
 
+def _node_entry(real: Path) -> list[str] | None:
+    """Node/TypeScript entry: npm start when scripted, else a known entry file."""
+    pkg = real / "package.json"
+    if pkg.is_file():
+        try:
+            manifest = json.loads(pkg.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, ValueError):
+            manifest = {}
+        if isinstance(manifest, dict) and "start" in (manifest.get("scripts") or {}):
+            return [_npm_cmd(), "run", "start"]
+    for rel in ("src/index.ts", "src/app.ts", "src/main.ts", "index.ts", "app.ts", "src/index.js"):
+        if (real / rel).is_file():
+            return ["node", rel]
+    return None
+
+
 def build_command(root: str | Path, port: int) -> list[str]:
-    """Return the start command for *root*, per the simple manifest."""
+    """Return the start command for *root*, per the simple manifest.
+
+    The port is passed via the ``PORT`` environment variable (set by
+    :func:`smoke_app`); services must read it. Only the Python FastAPI path
+    gets explicit ``--port`` flags.
+    """
     real = Path(root)
+    if (real / "Cargo.toml").is_file():
+        return ["cargo", "run", "--quiet"]
+    if (real / "go.mod").is_file():
+        if (real / "main.go").is_file():
+            return ["go", "run", "main.go"]
+        return ["go", "run", "."]
     for rel in _PYTHON_CANDIDATES:
         candidate = real / rel
         if not candidate.is_file():
@@ -86,9 +114,9 @@ def build_command(root: str | Path, port: int) -> list[str]:
                 str(port),
             ]
         return [sys.executable, str(candidate)]
-    pkg = real / "package.json"
-    if pkg.is_file():
-        return [_npm_cmd(), "run", "start", "--", "--port", str(port)]
+    node_cmd = _node_entry(real)
+    if node_cmd is not None:
+        return node_cmd
     return [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1"]
 
 

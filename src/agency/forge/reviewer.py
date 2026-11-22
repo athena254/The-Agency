@@ -162,6 +162,32 @@ class ReviewStore:
         self.close()
 
 
+_LINTABLE_SUFFIXES = frozenset(
+    {
+        ".py",
+        ".go",
+        ".rs",
+        ".ts",
+        ".tsx",
+        ".mts",
+        ".cts",
+        ".js",
+        ".mjs",
+        ".cjs",
+        ".java",
+        ".kt",
+        ".c",
+        ".h",
+        ".cpp",
+        ".hpp",
+        ".rb",
+        ".php",
+        ".swift",
+        ".cs",
+    }
+)
+
+
 def _lint_check(root: Path, path: str) -> list[ReviewFinding]:
     findings: list[ReviewFinding] = []
     normalized = path.replace("\\", "/")
@@ -178,43 +204,41 @@ def _lint_check(root: Path, path: str) -> list[ReviewFinding]:
         return findings
     if not os.path.isfile(candidate) or st.st_size > MAX_FILE_BYTES:
         return findings
-    if candidate.suffix.lower() != ".py":
+    suffix = candidate.suffix.lower()
+    if suffix not in _LINTABLE_SUFFIXES:
         return findings
     try:
         text = candidate.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return findings
+    display = "/".join(parts)
     for lineno, line in enumerate(text.splitlines(), start=1):
         if len(line) > MAX_LINT_LINE_LENGTH:
             findings.append(
                 ReviewFinding(
-                    path="/".join(parts),
+                    path=display,
                     line=lineno,
                     rule_id="LINT001",
-                    severity="medium",
+                    severity="medium" if suffix == ".py" else "low",
                     message=f"LINT001 line too long ({len(line)} > {MAX_LINT_LINE_LENGTH})",
                 )
             )
-        stripped = line.strip()
-        if stripped == "except:" or stripped.startswith("except :"):
-            findings.append(
-                ReviewFinding(
-                    path="/".join(parts),
-                    line=lineno,
-                    rule_id="LINT002",
-                    severity="medium",
-                    message="LINT002 bare except",
+        if suffix == ".py":
+            stripped = line.strip()
+            if stripped == "except:" or stripped.startswith("except :"):
+                findings.append(
+                    ReviewFinding(
+                        path=display,
+                        line=lineno,
+                        rule_id="LINT002",
+                        severity="medium",
+                        message="LINT002 bare except",
+                    )
                 )
-            )
-        if "eval(" in line or "exec(" in line:
-            # security scan already covers; mark high here too for visibility
-            pass
-    # trailing whitespace / tabs
-    for lineno, line in enumerate(text.splitlines(), start=1):
         if line != line.rstrip(" \t"):
             findings.append(
                 ReviewFinding(
-                    path="/".join(parts),
+                    path=display,
                     line=lineno,
                     rule_id="LINT003",
                     severity="low",
