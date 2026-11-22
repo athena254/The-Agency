@@ -71,9 +71,7 @@ def make_jev_service(
 ) -> ButlerService:
     """Build an unstarted Butler with decision routing enabled (fake provider)."""
     config = ButlerConfig(decision_provider="jev", **config_overrides)
-    svc = ButlerService(
-        config=config, orchestrator=AgencyOrchestrator(memory_db_path=":memory:")
-    )
+    svc = ButlerService(config=config, orchestrator=AgencyOrchestrator(memory_db_path=":memory:"))
     svc._decision_model = JevDecisionModel(
         FakeJevClient(probabilities),
         svc.router,
