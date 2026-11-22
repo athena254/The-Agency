@@ -16,8 +16,8 @@ from typing import Any
 from urllib.parse import quote, urlparse
 
 import httpx
-import yaml  # type: ignore[import-untyped]
 
+from agency.core.frontmatter import FrontmatterError, split_frontmatter
 from agency.factory.prompts import PromptKind, PromptRegistry, PromptSpec, PromptStatus
 
 MAX_MARKDOWN_BYTES = 64 * 1024
@@ -66,23 +66,11 @@ def _candidate_id(source_path: str, source_identity: str) -> str:
 
 
 def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    if not text.startswith("---\n") and not text.startswith("---\r\n"):
-        return {}, text
-    lines = text.splitlines(keepends=True)
-    closing = next((i for i in range(1, min(len(lines), 202)) if lines[i].strip() == "---"), None)
-    if closing is None:
-        raise ImportError("unterminated YAML frontmatter")
-    header = "".join(lines[1:closing])
-    if len(header.encode("utf-8")) > 16 * 1024:
-        raise ImportError("frontmatter exceeds 16 KiB")
+    """Delegate to the shared core splitter, re-raising as ImportError."""
     try:
-        raw = yaml.safe_load(header) or {}
-    except yaml.YAMLError as exc:
-        raise ImportError(f"invalid YAML frontmatter: {exc}") from exc
-    if not isinstance(raw, dict) or any(not isinstance(key, str) for key in raw):
-        raise ImportError("frontmatter must be a string-keyed mapping")
-    body = "".join(lines[closing + 1 :])
-    return raw, body
+        return split_frontmatter(text)
+    except FrontmatterError as exc:
+        raise ImportError(str(exc)) from exc
 
 
 def _is_skill_doc(path: str) -> bool:
