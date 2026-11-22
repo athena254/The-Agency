@@ -4,12 +4,13 @@ Found while implementing `RequestedAgentService` (`src/agency/factory/requested_
 Ordered by production risk. **Avoid these patterns; all agents are free to fix them.**
 
 **Status 2026-11-22 (full-gap sweep):** 16 of 20 closed — gaps 1-9, 11-16 and 20; gaps 18
-(D6 grant-verifier landed, full route swap remains), 19 (leases + shared stores, no
-last-writer-wins CAS) and 10 (live adapter + live task qualified on CentAI `hy4-flash:free`
-2026-11-22; improve leg + soak remain) are partially closed — commit references below; gap
-20's ref is on `gap/autonomy-execution`, the Tier6 refs landed on `main` (`37095b9`) and the
-consolidation line (`f981282`). Gap 17 remains open for an external reason (no real PAK
-repository to wire against); gaps 18-20 were added by the intake workstream (2026-11-20).
+(grant path live on the authed intake routes; real PKI + multi-node consensus remain), 19
+(leases + shared stores, no last-writer-wins CAS) and 10 (live adapter + live task qualified
+on CentAI `hy4-flash:free` 2026-11-22; improve leg + soak remain) are partially closed —
+commit references below; gap 20's ref is on `gap/autonomy-execution`, the Tier6 refs landed
+on `main` (`37095b9`) and the consolidation line (`f981282`). Gap 17 remains open for an
+external reason (no real PAK repository to wire against); gaps 18-20 were added by the
+intake workstream (2026-11-20).
 
 ## 1. Capability ⇄ Factory circular import (structural) — CLOSED `5399d37`
 `canonical_sha256` moved to the neutral `src/agency/core/hashing.py`; `factory.coding_models`
@@ -131,18 +132,37 @@ repository/manifest format is available to wire against (`docs/opensource/pak.md
 A2-Security-Advisors-LTD `pak`/`schema` docs were 404 at implementation time). Connect a real
 PAK repository and verify the sync flow against its manifest format when one exists.
 
-## 18. External HTTP intake — D6 grant-verifier landed; full route swap remains — PARTIALLY CLOSED `8604f8a`, `11854fa`, `37095b9`, `f981282`
+## 18. External HTTP intake — route swap live on the authed intake routes — PARTIALLY CLOSED `8604f8a`, `11854fa`, `37095b9`, `f981282`, `fada9cb`
 Landed: the §12 actuator-side enforcement primitives — a grant-verifying HTTP dependency,
 genesis registry seeding and scoped read opening (`8604f8a`, adapted to the merged router
 posture in `2eb4603`, async-bridge fix `37095b9`), memory owner-scope binding, finality-gated
 writes and the evidence doc (`11854fa`), plus the Wave1 lattice (ABCI codec/app/host, A4/A5
 wiring) those surfaces ride on. Additive salvage on the consolidation line: `forge ship`
 gated local fast-forward with audited approval bypass and the offline core-smoke CI/CD job
-(`f981282`, incl. `tests/test_consensus_grant_wire.py`). Still open: the authed routes
-(`POST /v1/tasks`, butler `POST /v1/message`) still enforce bearer tokens, not the verifier —
-the full swap is future work; `POST /v1/agents` stays 503 (spec-pinned, see #21e); no real
-peer certificates or live multi-peer actuator run yet (Slice D ballots in flight). Tokens
-are plaintext over HTTP — bind servers to loopback or terminate TLS.
+(`f981282`, incl. `tests/test_consensus_grant_wire.py`). Route-enforcement tail closed
+(`fada9cb`): `POST /v1/tasks` and butler `POST /v1/message` accept a signed task-scoped
+grant (`X-Agency-Grant` bound to the exact HTTP scope) as a first-class alternative to
+bearer tokens — verified actuator-side through `grant_guard.enforce_grant` (nonce consumed
+at the point of use, so replays fail closed) against the pinned genesis membership, with an
+optionally file-backed ledger (`AGENCY_GRANT_STORE_DB` -> `DurableGrantStore`); invalid,
+expired, revoked, replayed or wrongly-scoped grants fail closed 401/403 from a fixed public
+catalog; bearer behaviour is byte-for-byte unchanged (any presented `Authorization` header
+always takes the bearer path and a bad bearer is never bypassed by a grant); every intake
+records `auth_kind=bearer|grant` plus the verified grant digest in its audit/log line.
+Live multi-peer actuator demo (`fada9cb`): `scripts/d6_actuator_demo.py` — four
+`identity_store` Ed25519 peers, pinned genesis, a uvicorn api process with file-backed
+stores on loopback, revocation pre-seeded into the durable store — bearer 201, grant 201
+(task bound server-side to the verified issuer peer id), replay/expired/revoked/
+wrong-scope 403, tampered 401, both auth kinds observed in the server log; evidence at
+`D:/agency-merge-backups/d6-actuator-evidence.json`. Also fixed en route in `fada9cb`:
+`TaskStore` explicit transactions are serialized by an in-process lock (the api intake and
+the dispatcher share one aiosqlite connection; concurrent `BEGIN IMMEDIATE` used to raise
+"cannot start a transaction within a transaction"). Still open: `POST /v1/agents` stays 503
+(spec-pinned, see #21e — enablement is an owner decision); production peer certificates
+from a real PKI and multi-node consensus beyond the single-host demo; fencing-token commit
+for downstream task execution (intake consumes nonces; resource-side fencing stays with the
+execution actuator). Tokens are plaintext over HTTP — bind servers to loopback or
+terminate TLS.
 
 ## 19. Dispatcher/task-store operational bounds (2026-11-20) — PARTIALLY CLOSED `3a3cd91`, `a34d90d`
 Tasks persist in `data/tasks.db` (`AGENCY_TASKS_DB`); claims are atomic across the api and
