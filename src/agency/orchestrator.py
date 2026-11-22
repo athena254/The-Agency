@@ -1647,11 +1647,11 @@ class AgencyOrchestrator:
             # R-02: only completed outputs thread into dependent subtasks.
             outputs_by_id[subtask.subtask_id] = output
 
-            # Verify
-            verification = self._verifier.verify(
-                result=output,
-                criteria=["completeness", "accuracy", "safety"],
-            )
+            # Verify. No task-specific criteria exist on this path, so none are
+            # fabricated: check-category names are not task requirements, and
+            # passing them made any answer that lacked the meta-words (e.g. "42")
+            # fail completeness — the gap-10 independent-checker strictness bug.
+            verification = self._verifier.verify(result=output)
 
             # Store evidence
             finding = Finding(

@@ -186,7 +186,13 @@ class AgentVerifier:
         *,
         criteria: list[VerificationCriterion] | None = None,
     ) -> CheckOutcome:
-        """Ensure the result is non-empty and mentions each criterion."""
+        """Ensure the result is non-empty and mentions each criterion.
+
+        Each criterion's exact ``name`` string is substring-matched against the
+        output text. ``criteria`` are therefore task-specific requirement names
+        the caller expects to see mentioned — not the verifier's own check
+        category names; passing those only tests the output for meta-words.
+        """
         text = _as_text(result).strip()
         if not text:
             return CheckOutcome(passed=False, score=0.0, details="result is empty.")
