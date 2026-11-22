@@ -88,11 +88,39 @@ FILE_PLANS: dict[str, tuple[tuple[str, str], ...]] = {
         ),
         (
             "src/main.rs",
-            "the thin HTTP binary: `use shorty::Shortener;` fn main() reads HOST/PORT"
-            " from env, TcpListener::bind, accept loop, read one HTTP/1.1 request,"
-            " parse method + path, then: GET / -> 200 JSON status; POST /shorten ->"
-            " parse JSON body, shorten() -> 200 JSON; GET /<id> -> 301/302 with"
-            " Location or 404. Write responses with write_all. Keep it small.",
+            "the thin HTTP binary. Follow this scaffold EXACTLY, filling only the"
+            " four marked bodies:\n"
+            "```rust\n"
+            "use shorty::Shortener;\n"
+            "use std::collections::HashMap;\n"
+            "use std::io::{Read, Write};\n"
+            "use std::net::TcpListener;\n"
+            "use std::sync::{Arc, Mutex};\n"
+            "\n"
+            "fn respond(stream: &mut std::net::TcpStream, status: &str, body: &str, extra: &str) {\n"
+            "    // TODO-1: write_all a response with status line, Content-Type: application/json,\n"
+            "    // Content-Length, optional extra header line, blank line, body\n"
+            "}\n"
+            "\n"
+            "fn main() {\n"
+            "    let host = std::env::var(\"HOST\").unwrap_or_else(|_| \"127.0.0.1\".into());\n"
+            "    let port: u16 = std::env::var(\"PORT\").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);\n"
+            "    let shortener = Arc::new(Mutex::new(Shortener::new()));\n"
+            "    let listener = TcpListener::bind((host.as_str(), port)).expect(\"bind\");\n"
+            "    for stream in listener.incoming() {\n"
+            "        let mut stream = match stream { Ok(s) => s, Err(_) => continue };\n"
+            "        let mut buf = [0u8; 65536];\n"
+            "        let n = stream.read(&mut buf).unwrap_or(0);\n"
+            "        let req = String::from_utf8_lossy(&buf[..n]).to_string();\n"
+            "        // TODO-2: parse method (first word) and path (second token) from req\n"
+            "        // TODO-3: route: GET / -> 200 JSON status; POST /shorten -> extract the JSON\n"
+            "        //   body's \"url\" field (substring search is fine), shorten(); GET /<id> ->\n"
+            "        //   resolve() -> 302 with Location or 404\n"
+            "        // TODO-4: call respond(...)\n"
+            "    }\n"
+            "}\n"
+            "```\n"
+            "Fill the TODO bodies; keep everything else as written. No dependencies.",
         ),
     ),
     "go": (
