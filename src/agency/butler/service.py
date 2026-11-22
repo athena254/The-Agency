@@ -35,6 +35,7 @@ from agency.butler.config import ButlerConfig
 from agency.butler.context import ThreadContextEngine
 from agency.butler.decision import JevDecisionModel, RoutingDecision, TypeSafeJevClient
 from agency.butler.documents import DocumentError, load_base
+from agency.butler.knowledge import augment_description, select_knowledge
 from agency.butler.persona import PersonaFraming
 from agency.butler.router import MessageRouter
 from agency.butler.threads import Thread, ThreadMessage, ThreadStore, Workspace
@@ -834,9 +835,14 @@ class ButlerService:
             target=agent.id,
             evidence={"message_length": len(message)},
         )
+        # Agency knowledge rides in the task description: the orchestrator's
+        # strict execution context drops caller-supplied prompt-side keys, so
+        # the description is the only channel into the agent's prompt. The
+        # block is labelled context-only and bounded (see butler.knowledge).
+        knowledge_block = select_knowledge(message)
         task = await self._orchestrator.submit_task(
             title=f"Butler message from {context.get('sender', 'unknown')}",
-            description=message,
+            description=augment_description(message, knowledge_block),
             agent_id=agent.id,
             context=context,
         )
@@ -962,7 +968,14 @@ class ButlerService:
         return str(getattr(response, "response", response))
 
     async def _http_llm(self, prompt: str, context: dict[str, Any]) -> str:
-        """Route via an OpenAI-compatible HTTP endpoint (lazy import)."""
+        """Route via an OpenAI-compatible HTTP endpoint (lazy import).
+
+        The endpoint defaults to OpenAI but is overridden by
+        ``BUTLER_LLM_BASE_URL`` (full chat-completions URL) so proxies and
+        compatible providers (e.g. CentAI) work unchanged. ``max_tokens``
+        must leave room for reasoning models, whose hidden reasoning tokens
+        count against the budget before any visible content is produced.
+        """
         _ = context
         api_key = os.environ.get(self._config.api_key_env_var, "")
         if not api_key:
@@ -972,14 +985,15 @@ class ButlerService:
         except ImportError as exc:
             raise RuntimeError("httpx is required for HTTP LLM routing.") from exc
         model = self._config.llm_model or "gpt-4o-mini"
+        url = self._config.llm_base_url.strip() or "https://api.openai.com/v1/chat/completions"
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
-                "https://api.openai.com/v1/chat/completions",
+                url,
                 headers={"Authorization": f"Bearer {api_key}"},
                 json={
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 32,
+                    "max_tokens": 512,
                     "temperature": 0,
                 },
             )

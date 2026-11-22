@@ -31,7 +31,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, NoReturn
 
 import httpx
 import structlog
@@ -121,7 +121,7 @@ def _client(
     return httpx.Client(base_url=base, timeout=timeout, headers=headers or _headers())
 
 
-def _fail(message: str, *, code: int = 1) -> None:
+def _fail(message: str, *, code: int = 1) -> NoReturn:
     err_console.print(f"[bold red]Error:[/bold red] {message}")
     raise typer.Exit(code)
 
@@ -1606,6 +1606,8 @@ def consensus_sign_grant(
         expires_at_ms=expires_at_ms,
         affected_consumers=[],
     )
+    if grant.attestation is None:
+        _fail("issued grant has no affected-set attestation; a grant header requires one")
     payload = {
         "proposal_id": grant.proposal_id,
         "task_id": grant.task_id,
@@ -1616,14 +1618,10 @@ def consensus_sign_grant(
         "issued_at_ms": grant.issued_at_ms,
         "expires_at_ms": grant.expires_at_ms,
         "affected_consumers": list(grant.affected_consumers),
-        "attestation": (
-            None
-            if grant.attestation is None
-            else {
-                "attestor_peer_id": grant.attestation.attestor_peer_id,
-                "signature": grant.attestation.signature.hex(),
-            }
-        ),
+        "attestation": {
+            "attestor_peer_id": grant.attestation.attestor_peer_id,
+            "signature": grant.attestation.signature.hex(),
+        },
         "signature": grant.signature.hex(),
     }
     header = base64.b64encode(_json.dumps(payload).encode("utf-8")).decode("ascii")

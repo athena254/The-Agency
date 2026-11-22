@@ -18,10 +18,15 @@ test('read-only registry surfaces declare their gates', async ({ page }) => {
   await expect(page.getByText(/Read-only listing of what is stored/)).toBeVisible()
 })
 
-test('Lattice and Forge remain honestly locked', async ({ page }) => {
+test('Lattice shows real ballot governance; Forge stays honestly locked', async ({ page }) => {
   await gotoMC(page, '/lattice')
-  await expect(page.getByText('Peer authority is not built yet')).toBeVisible()
-  await expect(page.getByText('D-01 consensus policy')).toBeVisible()
+  // Slice D replaced the locked panel with grant-gated ballot governance; the
+  // honesty contract is now "real ballots only, never signs, no key material".
+  await expect(
+    page.getByText('Governance: open proposals, affected parties, evidence, and real human ballots.'),
+  ).toBeVisible()
+  await expect(page.getByText('Real ballots only.')).toBeVisible()
+  await expect(page.getByText(/explicit human attestation \(decision D-06\)/)).toBeVisible()
 
   await gotoMC(page, '/forge')
   await expect(page.getByText('Native coding actions wait for P2/P3')).toBeVisible()

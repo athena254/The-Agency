@@ -232,6 +232,13 @@ class LLMAdapter:
             self._api_key = api_key or os.environ.get("AGENCY_LLM_API_KEY", "")
             self._base_url = base_url or os.environ.get("AGENCY_LLM_BASE_URL", "")
             self._max_tokens = max_tokens
+            # Reasoning models spend hidden tokens on reasoning_content before
+            # any visible output; the 1024 default can be consumed entirely by
+            # reasoning, leaving tool-loop replies empty. Allow an env override
+            # (defensively parsed; invalid values keep the constructor default).
+            _env_max_tokens = os.environ.get("AGENCY_LLM_MAX_TOKENS", "").strip()
+            if _env_max_tokens.isdigit() and int(_env_max_tokens) > 0:
+                self._max_tokens = int(_env_max_tokens)
             self._temperature = temperature
             self._timeout = timeout
             self._proxy = proxy or os.environ.get("AGENCY_LLM_PROXY", "")

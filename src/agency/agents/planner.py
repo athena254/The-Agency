@@ -306,18 +306,29 @@ def _resolve_default_strategy() -> DecomposeStrategy:
     strategy; any live provider gets the LLM-backed strategy with the regex
     strategy as its guaranteed fallback. Selection only reads configuration
     and never performs a network call; the strategy-owned adapter is built
-    with a bounded completion budget.
+    with a bounded completion budget. An unusable configuration — an invalid
+    provider name, a broken adapter — must never raise out of planner
+    construction: the regex strategy is the guaranteed floor, so any
+    resolution failure falls back to it with an honest log line.
     """
+    import structlog
+
     from agency.llm.adapter import LLMAdapter
     from agency.llm.config import ProviderKind, load_config
 
-    config = load_config(load_dotenv=False)
-    if config.provider is ProviderKind.ECHO:
+    try:
+        config = load_config(load_dotenv=False)
+        if config.provider is ProviderKind.ECHO:
+            return _default_strategy
+        bounded = config.model_copy(
+            update={"max_tokens": _LLM_PLAN_MAX_TOKENS, "temperature": _LLM_PLAN_TEMPERATURE}
+        )
+        return make_llm_strategy(LLMAdapter(config=bounded))
+    except Exception as exc:  # noqa: BLE001 — resolution must not break planner construction
+        structlog.get_logger(__name__).warning(
+            "planner.llm_strategy_unavailable", reason=type(exc).__name__
+        )
         return _default_strategy
-    bounded = config.model_copy(
-        update={"max_tokens": _LLM_PLAN_MAX_TOKENS, "temperature": _LLM_PLAN_TEMPERATURE}
-    )
-    return make_llm_strategy(LLMAdapter(config=bounded))
 
 
 class AgentPlanner:

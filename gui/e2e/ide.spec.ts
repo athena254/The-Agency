@@ -21,7 +21,7 @@ test('chat turn produces a reply or an honest error', async ({ page }) => {
   // note appears. Both are honest outcomes.
   await expect(
     page.getByText(/thinking|failed|unavailable|timed out|could not/i).first(),
-  ).toBeHidden({ timeout: 30_000 }).catch(() => {
+  ).toBeHidden({ timeout: 60_000 }).catch(() => {
     // The "thinking" state may already be gone when the first assertion runs.
   })
   await expect(
@@ -29,5 +29,5 @@ test('chat turn produces a reply or an honest error', async ({ page }) => {
       .locator('li')
       .filter({ hasText: /Butler|Request failed|could not|timed out|unavailable/i })
       .first(),
-  ).toBeVisible({ timeout: 30_000 })
+  ).toBeVisible({ timeout: 60_000 })
 })
