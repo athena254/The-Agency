@@ -1,0 +1,11 @@
+{
+  "plugins": {
+    "enabledPlugins": {
+      "android-emulator@zcode-plugins-official": true,
+      "ios-simulator@zcode-plugins-official": true,
+      "design@zcode-plugins-official": true,
+      "visualize@zcode-plugins-official": true
+    },
+    "visualizeDefaultOffMigrated": true
+  }
+}
