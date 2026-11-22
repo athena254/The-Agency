@@ -190,3 +190,65 @@ def test_review_never_retries_refusals(tmp_path, monkeypatch) -> None:
     report = run_review(repo, ["a.py"], use_llm=True, llm=stub)
     assert report.gate == "FAIL"  # fail-closed
     assert stub.calls == 1  # refusals are never retried
+
+
+# --------------------------------------------------------------------------- #
+# cross-family fallback judge: when the primary reviewer's provider is down,
+# an independent judge (hermes CLI) may score the change instead
+# --------------------------------------------------------------------------- #
+def test_review_falls_back_to_independent_judge(tmp_path, monkeypatch) -> None:
+    import subprocess as _sp
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for args in (
+        ["git", "init", "-b", "main", str(repo)],
+        ["git", "-C", str(repo), "config", "user.email", "t@t.com"],
+        ["git", "-C", str(repo), "config", "user.name", "t"],
+    ):
+        _sp.run(args, check=True, capture_output=True)
+    (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
+    _sp.run(["git", "-C", str(repo), "add", "."], check=True, capture_output=True)
+    _sp.run(["git", "-C", str(repo), "commit", "-m", "i"], check=True, capture_output=True)
+
+    class _DownForever:
+        async def generate(self, prompt: str, context: object = None) -> str:
+            raise RuntimeError("503 burst")
+
+    class _HermesJudgeStub:
+        calls = 0
+
+        async def generate(self, prompt: str, context: object = None) -> str:
+            _HermesJudgeStub.calls += 1
+            assert "SERVICE CONTRACT" not in prompt  # it judges the real prompt
+            return '{"score": 4, "findings": [], "summary": "independent judge: clean"}'
+
+    report = run_review(repo, ["a.py"], use_llm=True, llm=_DownForever(), fallback_llm=_HermesJudgeStub())
+    assert report.gate == "PASS"
+    assert _HermesJudgeStub.calls == 1
+    assert "review_fallback_judge" in report.caveats
+    assert "heuristic_review" not in report.caveats
+
+
+def test_review_fallback_failure_still_fails_closed(tmp_path, monkeypatch) -> None:
+    import subprocess as _sp
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for args in (
+        ["git", "init", "-b", "main", str(repo)],
+        ["git", "-C", str(repo), "config", "user.email", "t@t.com"],
+        ["git", "-C", str(repo), "config", "user.name", "t"],
+    ):
+        _sp.run(args, check=True, capture_output=True)
+    (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
+    _sp.run(["git", "-C", str(repo), "add", "."], check=True, capture_output=True)
+    _sp.run(["git", "-C", str(repo), "commit", "-m", "i"], check=True, capture_output=True)
+
+    class _AllDown:
+        async def generate(self, prompt: str, context: object = None) -> str:
+            raise RuntimeError("503 burst")
+
+    report = run_review(repo, ["a.py"], use_llm=True, llm=_AllDown(), fallback_llm=_AllDown())
+    assert report.gate == "FAIL"
+    assert "review_fallback_judge" not in report.caveats

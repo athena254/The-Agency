@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -38,6 +39,38 @@ MAX_ROUNDS = 5
 MAX_LINT_LINE_LENGTH = 120
 REVIEW_RETRY_DELAY_S = 60.0
 REVIEW_MAX_PROVIDER_RETRIES = 2
+
+
+def build_hermes_judge() -> Any | None:
+    """A cross-family fallback judge: the hermes CLI, if installed.
+
+    Returned object quacks like the LLM adapter (async ``generate``), so the
+    ordinary review machinery parses its verdict. ``None`` when hermes is not
+    on PATH — callers then fail closed as usual.
+    """
+    exe = shutil.which("hermes")
+    if exe is None:
+        return None
+
+    class _HermesJudge:
+        async def generate(self, prompt: str, context: Any = None) -> str:
+            proc = await asyncio.create_subprocess_exec(
+                exe,
+                "-z",
+                prompt,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                out, err = await asyncio.wait_for(proc.communicate(), timeout=900)
+            except asyncio.TimeoutError:
+                proc.kill()
+                raise RuntimeError("hermes judge timed out") from None
+            if proc.returncode != 0:
+                raise RuntimeError(f"hermes judge exited {proc.returncode}")
+            return out.decode("utf-8", errors="replace")
+
+    return _HermesJudge()
 
 ReviewGate = Literal["PASS", "FAIL"]
 Severity = Literal["low", "medium", "high", "critical"]
@@ -618,6 +651,7 @@ def run_review(
     tests_report: Any = None,
     delta_base_sha: str = "",
     shadow_llm: Any = None,
+    fallback_llm: Any = None,
     **kwargs: Any,
 ) -> ReviewReport:
     real_root = _resolve_root(root)
@@ -661,6 +695,7 @@ def run_review(
             delta_scope = delta_base_sha
 
     used_llm = False
+    fallback_used = False
     rounds_done = 0
     final_score = 0
     final_findings: list[ReviewFinding] = []
@@ -690,26 +725,48 @@ def run_review(
                         logger.warning("forge.review_provider_retry", attempt=attempt + 1)
                         time.sleep(REVIEW_RETRY_DELAY_S)
             except _LLMReviewError:
-                # Heuristic remains the scorer of last resort, but the failed
-                # LLM gate keeps an unresolved high finding so the gate fails.
-                logger.warning("forge.review_llm_failed_closed")
-                score, heuristic_findings, _ = _one_round(
-                    real_root,
-                    changed_paths,
-                    test_paths=test_paths,
-                    test_timeout_s=test_timeout_s,
-                    run_tests_flag=run_tests_flag,
-                )
-                findings = [
-                    *heuristic_findings,
-                    ReviewFinding(
-                        path="",
-                        line=1,
-                        rule_id=_LLM_FAILURE_RULE,
-                        severity="high",
-                        message=_LLM_FAILURE_MESSAGE,
-                    ),
-                ]
+                # Cross-family fallback judge: when the primary reviewer's
+                # provider is down, an independent second family (e.g. the
+                # hermes CLI) may judge instead — maker stays != checker.
+                fallback_used = False
+                if fallback_llm is not None:
+                    try:
+                        score, findings, _ = _llm_review_one_round(
+                            fallback_llm,
+                            real_root,
+                            changed_paths,
+                            test_paths,
+                            test_timeout_s,
+                            run_tests_flag,
+                            tests_report=tests_report,
+                            delta_base_sha=delta_scope,
+                        )
+                        used_llm = True
+                        fallback_used = True
+                        logger.warning("forge.review_fallback_judge_used")
+                    except _LLMReviewError:
+                        fallback_used = False
+                if not fallback_used:
+                    # Heuristic remains the scorer of last resort, but the failed
+                    # LLM gate keeps an unresolved high finding so the gate fails.
+                    logger.warning("forge.review_llm_failed_closed")
+                    score, heuristic_findings, _ = _one_round(
+                        real_root,
+                        changed_paths,
+                        test_paths=test_paths,
+                        test_timeout_s=test_timeout_s,
+                        run_tests_flag=run_tests_flag,
+                    )
+                    findings = [
+                        *heuristic_findings,
+                        ReviewFinding(
+                            path="",
+                            line=1,
+                            rule_id=_LLM_FAILURE_RULE,
+                            severity="high",
+                            message=_LLM_FAILURE_MESSAGE,
+                        ),
+                    ]
             # The prompt is identical each round; a second call only adds cost.
             break
         score, findings, _ = _one_round(
@@ -767,6 +824,8 @@ def run_review(
     caveats = list(CAVEATS)
     if used_llm:
         caveats = [c for c in caveats if c != "heuristic_review"]
+    if fallback_used:
+        caveats.append("review_fallback_judge")
     if run_tests_flag or tests_report is not None:
         caveats = [c for c in caveats if c != "tests_not_run"]
     if delta_unresolved:

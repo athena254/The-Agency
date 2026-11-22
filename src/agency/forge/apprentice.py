@@ -29,7 +29,7 @@ from agency.forge.coding_agent import MAX_EDITS, run_coding_agent
 from agency.forge.external_agent import ExternalAgentReport, _failure_detail
 from agency.forge.inspection import MAX_FILES, inspect_changes
 from agency.forge.pipeline import CAVEATS as _PIPELINE_CAVEATS
-from agency.forge.reviewer import ReviewReport, run_review
+from agency.forge.reviewer import ReviewReport, build_hermes_judge, run_review
 from agency.forge.security_scan import scan_changes
 
 logger = structlog.get_logger(__name__)
@@ -679,6 +679,7 @@ def run_apprentice(
                 list(applied_paths),
                 use_llm=True,
                 tests_report=coding.tests,
+                fallback_llm=build_hermes_judge(),
             )
         except Exception:  # noqa: BLE001
             review_error = True
