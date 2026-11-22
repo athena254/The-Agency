@@ -27,16 +27,7 @@ def _strip_yolo(argv: list[str]) -> tuple[bool, list[str]]:
 
 def main() -> None:
     yolo, argv = _strip_yolo(sys.argv[1:])
-    if argv and argv[0] in (
-        "code",
-        "tools",
-        "tool",
-        "ship",
-        "status",
-        "metrics",
-        "calibrate-export",
-        "calibrate-score",
-    ):
+    if argv and argv[0] in ("code", "tools", "tool", "ship", "status"):
         from agency.cli.main import app as agency_app
 
         agency_app(args=["forge", *argv])

@@ -94,28 +94,6 @@ class AgencyApplication:
             last_block_app_hash=self._state.state_root,
         )
 
-    def check_tx(self, tx: bytes) -> tuple[int, str]:
-        """Deterministic mempool admission precheck (CheckTx).
-
-        Mirrors ``process_proposal``'s record-level checks against committed
-        state only. Expiry is intentionally NOT checked here: it depends on
-        block BFT time, which a CheckTx request does not carry; expiry is
-        enforced deterministically at ProcessProposal/FinalizeBlock. A
-        committed replay is refused here, so a rebroadcast can neither enter
-        the mempool nor reach a block. Return is ``(code, log)`` with
-        ``code == 0`` meaning admitted for the mempool.
-        """
-        ctx = BlockContext(
-            height=self._height,
-            chain_id="agency",
-            bft_time_ms=0,
-            membership_epoch=self._membership.epoch,
-            membership_root=self._membership.root,
-        )
-        if _is_valid_proposal_ballot(tx, ctx, self._membership, self._committed_seq):
-            return 0, "ok"
-        return 1, "invalid ballot: rejected by deterministic precheck"
-
     def prepare_proposal(self, txs: list[bytes], max_tx_bytes: int) -> list[bytes]:
         """Proposer-only selection: whole txs in order up to the byte cap."""
 

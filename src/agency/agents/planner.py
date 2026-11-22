@@ -4,20 +4,14 @@
 :class:`Subtask` nodes with explicit dependencies, then matches each subtask
 to a capable specialist via the :class:`~agency.agents.registry.AgentRegistry`.
 
-Decomposition is pluggable: pass ``strategy`` to use your own splitter, else
-the default resolver picks an LLM-backed splitter when a live provider is
-configured (:func:`make_llm_strategy`) and the deterministic regex splitter
-(:func:`_default_strategy`) for echo/offline — where it also remains the
-guaranteed fallback for every LLM failure.
+Decomposition is pluggable: pass ``strategy`` to use an LLM-backed splitter,
+otherwise a deterministic heuristic splits the task description into steps.
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 import re
-from collections.abc import Callable, Coroutine
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable
 from enum import Enum
 from threading import RLock
 from typing import Any
@@ -153,184 +147,6 @@ def _default_strategy(task: str) -> list[SubtaskSpec]:
     ]
 
 
-# ---------------------------------------------------------------------- #
-# LLM-backed decomposition (gaps #21f) — live providers only. The regex
-# strategy above stays the offline floor and the guaranteed fallback.
-# ---------------------------------------------------------------------- #
-
-LLM_DECOMPOSE_MAX_SUBTASKS = 6
-_LLM_TITLE_MAX = 200
-_LLM_DESCRIPTION_MAX = 2000
-_LLM_TASK_PROMPT_MAX = 4000
-# Bounded completion budget for the strategy-owned adapter: six short
-# subtasks fit inside it, and a truncated (budget-exhausted) reply is invalid
-# JSON and falls back. See _resolve_default_strategy.
-_LLM_PLAN_MAX_TOKENS = 1024
-_LLM_PLAN_TEMPERATURE = 0.2
-
-# Prompt hygiene: only the task text goes out — no tool definitions, no
-# system/memory content — and the reply schema is pinned to exactly three
-# keys per subtask.
-_DECOMPOSE_PROMPT = """Decompose the task below into at most {max_subtasks} sequential subtasks that together complete it.
-Reply with ONLY a JSON array - no prose, no code fences. Each element must be an object with exactly these keys:
-- "title": short imperative summary (max 200 chars)
-- "description": one or two sentences of concrete instructions
-- "required_capabilities": array of short lowercase keywords (e.g. "research", "write", "test", "code", "review") describing the specialist role
-
-Rules: 1 to {max_subtasks} items, keep the original task's scope, no extra keys, order items by execution order.
-
-Example reply shape: [{{"title": "Gather data", "description": "Collect the raw inputs.", "required_capabilities": ["research"]}}]
-
-Task: {task}"""
-
-
-def _run_awaitable_blocking(awaitable: Coroutine[Any, Any, str]) -> str:
-    """Drive an async adapter call to completion from sync strategy code.
-
-    Outside an event loop this is plain ``asyncio.run``; inside a running loop
-    (the orchestrator calls the sync ``plan`` seam from async methods) the
-    awaitable runs on a short-lived helper thread with its own loop. Either
-    way the calling thread blocks for at most the adapter timeout.
-    """
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(awaitable)
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, awaitable).result()
-
-
-def _extract_json_array(text: str) -> Any:
-    """Parse the JSON array out of a reply; a single code fence is tolerated,
-    prose around the array is not."""
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        first_newline = stripped.find("\n")
-        if first_newline == -1:
-            return None
-        stripped = stripped[first_newline + 1 :]
-        end = stripped.rfind("```")
-        if end != -1:
-            stripped = stripped[:end]
-        stripped = stripped.strip()
-    try:
-        return json.loads(stripped)
-    except json.JSONDecodeError:
-        return None
-
-
-def _parse_llm_plan(text: str, *, max_subtasks: int) -> list[SubtaskSpec] | None:
-    """Strictly parse and validate an LLM decomposition reply.
-
-    Returns the mapped :class:`SubtaskSpec` list, or ``None`` on any schema,
-    type, bound or count violation (count cap included) — callers fall back
-    to the regex strategy instead of salvaging a partial reply.
-    """
-    payload = _extract_json_array(text)
-    if not isinstance(payload, list) or not 1 <= len(payload) <= max_subtasks:
-        return None
-    specs: list[SubtaskSpec] = []
-    for item in payload:
-        if not isinstance(item, dict):
-            return None
-        if set(item) - {"title", "description", "required_capabilities"}:
-            return None
-        title = item.get("title")
-        if not isinstance(title, str) or not title.strip() or len(title.strip()) > _LLM_TITLE_MAX:
-            return None
-        description = item.get("description", "")
-        if not isinstance(description, str) or len(description.strip()) > _LLM_DESCRIPTION_MAX:
-            return None
-        caps = item.get("required_capabilities", [])
-        if isinstance(caps, str):
-            caps = [caps]
-        if not isinstance(caps, list) or not all(isinstance(cap, str) for cap in caps):
-            return None
-        specs.append(
-            SubtaskSpec(
-                title=title.strip(), description=description.strip(), required_capabilities=caps
-            )
-        )
-    return specs
-
-
-def make_llm_strategy(
-    adapter: Any,
-    *,
-    max_subtasks: int = LLM_DECOMPOSE_MAX_SUBTASKS,
-    fallback: DecomposeStrategy | None = None,
-) -> DecomposeStrategy:
-    """Return a sync decomposition strategy backed by ``adapter.generate``.
-
-    The prompt carries only the task text and output size is bounded by the
-    adapter's ``max_tokens``. Any failure — malformed or over-cap reply,
-    timeout, provider error, empty plan — falls back to ``fallback``
-    (default the deterministic regex strategy) with an honest log line that
-    never includes reply content.
-    """
-    floor = fallback or _default_strategy
-
-    def strategy(task: str) -> list[SubtaskSpec]:
-        prompt = _DECOMPOSE_PROMPT.format(
-            max_subtasks=max_subtasks, task=task.strip()[:_LLM_TASK_PROMPT_MAX]
-        )
-        try:
-            raw = _run_awaitable_blocking(adapter.generate(prompt))
-        except Exception as exc:  # noqa: BLE001 — any failure must fall back to the regex floor
-            # Provider failure must degrade to the regex floor, never
-            # propagate; log the class only (replies can echo task content).
-            logger.warning(
-                "planner.llm_decompose_failed",
-                reason="provider_error",
-                error_class=type(exc).__name__,
-            )
-            return floor(task)
-        specs = _parse_llm_plan(raw, max_subtasks=max_subtasks)
-        if specs is None:
-            logger.warning(
-                "planner.llm_decompose_failed",
-                reason="invalid_llm_output",
-                reply_chars=len(raw),
-            )
-            return floor(task)
-        logger.info("planner.llm_decomposed", subtasks=len(specs), cap=max_subtasks)
-        return specs
-
-    return strategy
-
-
-def _resolve_default_strategy() -> DecomposeStrategy:
-    """Pick the default decomposition strategy from the ambient LLM config.
-
-    Echo/offline (the hermetic default) keeps the deterministic regex
-    strategy; any live provider gets the LLM-backed strategy with the regex
-    strategy as its guaranteed fallback. Selection only reads configuration
-    and never performs a network call; the strategy-owned adapter is built
-    with a bounded completion budget. An unusable configuration — an invalid
-    provider name, a broken adapter — must never raise out of planner
-    construction: the regex strategy is the guaranteed floor, so any
-    resolution failure falls back to it with an honest log line.
-    """
-    import structlog
-
-    from agency.llm.adapter import LLMAdapter
-    from agency.llm.config import ProviderKind, load_config
-
-    try:
-        config = load_config(load_dotenv=False)
-        if config.provider is ProviderKind.ECHO:
-            return _default_strategy
-        bounded = config.model_copy(
-            update={"max_tokens": _LLM_PLAN_MAX_TOKENS, "temperature": _LLM_PLAN_TEMPERATURE}
-        )
-        return make_llm_strategy(LLMAdapter(config=bounded))
-    except Exception as exc:  # noqa: BLE001 — resolution must not break planner construction
-        structlog.get_logger(__name__).warning(
-            "planner.llm_strategy_unavailable", reason=type(exc).__name__
-        )
-        return _default_strategy
-
-
 class AgentPlanner:
     """Decomposes tasks and assigns subtasks to specialist agents.
 
@@ -339,10 +155,7 @@ class AgentPlanner:
     registry:
         Runtime registry used to find capable agents.
     strategy:
-        Optional decomposition function. When omitted, the default resolver
-        picks the LLM-backed splitter for a live provider and the
-        deterministic regex splitter for echo/offline (see
-        :func:`_resolve_default_strategy`).
+        Optional decomposition function; defaults to a deterministic splitter.
     auto_assign:
         When ``True`` (default) each subtask is immediately matched to the
         best available agent holding the first required capability.
@@ -356,7 +169,7 @@ class AgentPlanner:
         auto_assign: bool = True,
     ) -> None:
         self._registry = registry
-        self._strategy = strategy if strategy is not None else _resolve_default_strategy()
+        self._strategy = strategy or _default_strategy
         self._auto_assign = auto_assign
         self._plans: dict[str, TaskGraph] = {}
         self._lock = RLock()
@@ -536,7 +349,6 @@ class AgentPlanner:
 
 
 __all__ = [
-    "LLM_DECOMPOSE_MAX_SUBTASKS",
     "AgentPlanner",
     "PlanStatus",
     "PlanSummary",
@@ -544,5 +356,4 @@ __all__ = [
     "SubtaskSpec",
     "SubtaskStatus",
     "TaskGraph",
-    "make_llm_strategy",
 ]

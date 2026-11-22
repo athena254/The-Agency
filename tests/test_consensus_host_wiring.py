@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+import struct
 
 from typer.testing import CliRunner
 
@@ -11,18 +12,6 @@ from agency.consensus.abci.host import ABCIHost
 from tests.test_consensus_app_state import ballot, proposal
 from tests.test_consensus_grants import BFT_TIME_MS, consumers
 from tests.test_consensus_grants import setup4 as grants_setup4
-
-
-def _varint(value: int) -> bytes:
-    out = bytearray()
-    while True:
-        byte = value & 0x7F
-        value >>= 7
-        if value:
-            out.append(byte | 0x80)
-        else:
-            out.append(byte)
-            return bytes(out)
 
 
 def _recv(sock, n):
@@ -35,24 +24,11 @@ def _recv(sock, n):
     return bytes(buf)
 
 
-def _read_varint(sock):
-    value = 0
-    shift = 0
-    while True:
-        first = _recv(sock, 1)
-        if not first:
-            return None
-        byte = first[0]
-        value |= (byte & 0x7F) << shift
-        if not byte & 0x80:
-            return value
-        shift += 7
-
-
 def _read_frame(sock):
-    length = _read_varint(sock)
-    if length is None:
+    header = _recv(sock, 4)
+    if header is None:
         return None
+    (length,) = struct.unpack(">I", header)
     if length == 0:
         return b""
     return _recv(sock, length)
@@ -135,14 +111,14 @@ def test_host_wiring_durable_result(tmp_path):
             body += encode_message_field(1, t)
         req = encode_message_field(20, body)
         s = socket.create_connection(("127.0.0.1", host.port), timeout=5)
-        s.sendall(_varint(len(req)) + req)
+        s.sendall(struct.pack(">I", len(req)) + req)
         resp = _read_frame(s)
         s.close()
         assert resp is not None
         # commit
         req2 = encode_message_field(11, b"")
         s = socket.create_connection(("127.0.0.1", host.port), timeout=5)
-        s.sendall(_varint(len(req2)) + req2)
+        s.sendall(struct.pack(">I", len(req2)) + req2)
         _read_frame(s)
         s.close()
     finally:

@@ -452,11 +452,9 @@ async def test_mixed_classic_failure_keeps_checks_and_risk_coverage_without_succ
     assert result.output == first + "\n\nsecond failure body"
     assert result.assessment.output_sha256 == hashlib.sha256(result.output.encode()).hexdigest()
     assert [s.subtask_id for s in result.assessment.subtasks] == ["a", "b"]
-    # Gap-10 fix: the classic path fabricates no criteria, so a completed
-    # non-empty output no longer fails completeness for lacking meta-words.
-    # Both outputs now verify the same: passed completeness/safety on "a",
-    # accuracy honestly not performed, failed subtask "b" not performed.
-    assert result.assessment.verification == "needs_review"
+    assert result.assessment.verification == (
+        "needs_review" if first.startswith("completeness") else "failed"
+    )
     assert result.assessment.risk_status == "partially_assessed"
     assert len(await orch._evidence_store.list_findings()) == 1
     memory.assert_not_called()

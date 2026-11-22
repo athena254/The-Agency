@@ -16,7 +16,7 @@ from agency.butler.config import ButlerConfig
 from agency.butler.service import ButlerExecutionError, ButlerService
 from agency.butler.threads import ThreadStore
 from agency.memory.sms.models import MemoryItem
-from agency.orchestrator import AgencyOrchestrator, _compose_subtask_task_text
+from agency.orchestrator import AgencyOrchestrator
 from agency.tools.base import BetaPrincipal
 
 _RECALL_PREFIX = (
@@ -68,12 +68,7 @@ async def test_classic_execution_receives_recalled_context_as_quoted_data(runtim
     prompt = model.prompts[0]
     assert recalled in prompt
     assert prompt.count(recalled) == 1
-    # R-02 appends the subtask assignment after the grounding block, so the
-    # recall block is no longer the prompt tail. The A1 guarantees still hold:
-    # the untrusted-data header appears exactly once and the recall data is
-    # still appended as its own paragraph, JSON-quoted, never bare.
-    assert prompt.count(_RECALL_PREFIX) == 1
-    assert ("\n\n" + _RECALL_PREFIX + json.dumps(recalled, ensure_ascii=False)) in prompt
+    assert prompt.endswith("\n\n" + _RECALL_PREFIX + json.dumps(recalled, ensure_ascii=False))
 
 
 @pytest.mark.asyncio
@@ -151,8 +146,7 @@ async def test_tool_domains_receive_same_quoted_reference_block(
     [None, {}, {"memory_context": None}, {"memory_context": ""}, {"memory_context": " \n\t"}],
 )
 async def test_empty_recall_preserves_effective_prompt(runtime, domain, context) -> None:
-    """A1-T03: no-memory paths add no recall header; the only addition since
-    R-02 is the subtask assignment suffix after the grounding block."""
+    """A1-T03: no-memory paths retain the pre-repair prompt assembly."""
     from agency.agents.general import GENERAL_SYSTEM_PROMPT
     from agency.agents.research import RESEARCH_SYSTEM_PROMPT
 
@@ -162,17 +156,7 @@ async def test_empty_recall_preserves_effective_prompt(runtime, domain, context)
     task = await orch.submit_task("Fixture", description, agent.id)
     original = deepcopy(context)
     if domain == "memory":
-        # The planner's fallback for this description is a single subtask
-        # titled "Execute task" carrying the description verbatim, with no
-        # dependencies, so the composed text has no dependency block.
-        expected = _compose_subtask_task_text(
-            system_context=orch._system_context(description, context, channel="Telegram gateway"),
-            parent_title="Fixture",
-            subtask_title="Execute task",
-            subtask_description=description,
-            position=1,
-            total=1,
-        )
+        expected = orch._system_context(description, context, channel="Telegram gateway")
     else:
         domain_prompt = GENERAL_SYSTEM_PROMPT if domain == "general" else RESEARCH_SYSTEM_PROMPT
         expected_system = (

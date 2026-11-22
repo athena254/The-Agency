@@ -786,11 +786,6 @@ class GrantLedger:
     def pinned_validators(self) -> Mapping[str, PeerPublicKey]:
         return dict(self._validators)
 
-    @property
-    def revoked_digests(self) -> frozenset[str]:
-        """Digests revoked on this ledger; resource-side fencing reads this."""
-        return frozenset(self._revoked_digests)
-
     def issue(
         self,
         issuer: PeerIdentity,

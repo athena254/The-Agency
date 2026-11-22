@@ -22,7 +22,6 @@ from uuid import uuid4
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
-from agency.forge.diff import build_diff_bundle, delta_paths, head_sha
 from agency.forge.inspection import (
     MAX_FILE_BYTES,
     _resolve_root,
@@ -93,11 +92,6 @@ class ReviewReport(BaseModel):
     max_rounds: int = Field(default=MAX_ROUNDS, ge=1, le=MAX_ROUNDS)
     findings: tuple[ReviewFinding, ...] = ()
     unresolved_high: int = Field(default=0, ge=0)
-    reviewed_sha: str = ""
-    delta_base_sha: str = ""
-    shadow_score: int | None = Field(default=None, ge=0, le=5)
-    shadow_gate: str = ""
-    shadow_findings: tuple[ReviewFinding, ...] = ()
     caveats: tuple[str, ...] = CAVEATS
     note: str = "Heuristic review; not a human review; does not authorize merge or deploy."
 
@@ -145,10 +139,6 @@ class ReviewStore:
             return None
         return ReviewReport.model_validate_json(row[0])
 
-    def list_reports(self) -> list[ReviewReport]:
-        cursor = self._conn.execute("SELECT document FROM forge_review_reports ORDER BY created_at")
-        return [ReviewReport.model_validate_json(row[0]) for row in cursor.fetchall()]
-
     def close(self) -> None:
         self._conn.commit()
         self._conn.close()
@@ -158,32 +148,6 @@ class ReviewStore:
 
     def __exit__(self, *_exc: object) -> None:
         self.close()
-
-
-_LINTABLE_SUFFIXES = frozenset(
-    {
-        ".py",
-        ".go",
-        ".rs",
-        ".ts",
-        ".tsx",
-        ".mts",
-        ".cts",
-        ".js",
-        ".mjs",
-        ".cjs",
-        ".java",
-        ".kt",
-        ".c",
-        ".h",
-        ".cpp",
-        ".hpp",
-        ".rb",
-        ".php",
-        ".swift",
-        ".cs",
-    }
-)
 
 
 def _lint_check(root: Path, path: str) -> list[ReviewFinding]:
@@ -202,41 +166,43 @@ def _lint_check(root: Path, path: str) -> list[ReviewFinding]:
         return findings
     if not os.path.isfile(candidate) or st.st_size > MAX_FILE_BYTES:
         return findings
-    suffix = candidate.suffix.lower()
-    if suffix not in _LINTABLE_SUFFIXES:
+    if candidate.suffix.lower() != ".py":
         return findings
     try:
         text = candidate.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return findings
-    display = "/".join(parts)
     for lineno, line in enumerate(text.splitlines(), start=1):
         if len(line) > MAX_LINT_LINE_LENGTH:
             findings.append(
                 ReviewFinding(
-                    path=display,
+                    path="/".join(parts),
                     line=lineno,
                     rule_id="LINT001",
-                    severity="medium" if suffix == ".py" else "low",
+                    severity="medium",
                     message=f"LINT001 line too long ({len(line)} > {MAX_LINT_LINE_LENGTH})",
                 )
             )
-        if suffix == ".py":
-            stripped = line.strip()
-            if stripped == "except:" or stripped.startswith("except :"):
-                findings.append(
-                    ReviewFinding(
-                        path=display,
-                        line=lineno,
-                        rule_id="LINT002",
-                        severity="medium",
-                        message="LINT002 bare except",
-                    )
+        stripped = line.strip()
+        if stripped == "except:" or stripped.startswith("except :"):
+            findings.append(
+                ReviewFinding(
+                    path="/".join(parts),
+                    line=lineno,
+                    rule_id="LINT002",
+                    severity="medium",
+                    message="LINT002 bare except",
                 )
+            )
+        if "eval(" in line or "exec(" in line:
+            # security scan already covers; mark high here too for visibility
+            pass
+    # trailing whitespace / tabs
+    for lineno, line in enumerate(text.splitlines(), start=1):
         if line != line.rstrip(" \t"):
             findings.append(
                 ReviewFinding(
-                    path=display,
+                    path="/".join(parts),
                     line=lineno,
                     rule_id="LINT003",
                     severity="low",
@@ -364,9 +330,8 @@ _REVIEW_BODY_LIMIT = 6000
 _REVIEW_TRUNCATION_MARK = "...[change set truncated for review]"
 
 _REVIEW_PROMPT_HEADER = (
-    "You are a code reviewer for a software factory. Given the change set, "
-    "the actual diff content, and the automated findings below, produce a "
-    "JSON object with keys: "
+    "You are a code reviewer for a software factory. Given the change set and "
+    "automated findings below, produce a JSON object with keys: "
     '"score" (integer 0-5), "findings" (list of objects with keys path, line, '
     "rule_id, severity (low/medium/high/critical), message, resolved (bool)), "
     '"summary" (short string). Score 5 means clean. High/critical findings '
@@ -374,25 +339,19 @@ _REVIEW_PROMPT_HEADER = (
     "Severity rubric: low = style or naming only; medium = missing validation "
     "or error handling; high = security or correctness bug in the changed "
     "paths; critical = secret leak, injection, or protected-path edit. Every "
-    "finding must cite the exact path and line it applies to, and every cited "
-    "path must appear in the CHANGE SET below. If you are "
+    "finding must cite the exact path and line it applies to. If you are "
     "uncertain about a piece of the change, lower the score and name what is "
     "unverified in the summary. Do not invent files, lines, or findings that "
-    "are not supported by the change set and DIFF below. When the diff is "
-    "truncated or paths are listed as not shown, review what is visible and "
-    "name the omission in the summary.\n\n"
+    "are not supported by the change set below.\n\n"
 )
 
 
-def _review_prompt(findings_summary: dict[str, Any], diff_text: str = "") -> str:
+def _review_prompt(findings_summary: dict[str, Any]) -> str:
     """Render the deterministic review LLM prompt from one findings snapshot."""
     body = json.dumps(findings_summary, indent=2)
     if len(body) > _REVIEW_BODY_LIMIT:
         body = body[:_REVIEW_BODY_LIMIT] + "\n" + _REVIEW_TRUNCATION_MARK
-    prompt = f"{_REVIEW_PROMPT_HEADER}CHANGE SET:\n{body}"
-    if diff_text:
-        prompt += "\n\nDIFF (actual change content; truncated paths are marked):\n" + diff_text
-    return prompt
+    return f"{_REVIEW_PROMPT_HEADER}CHANGE SET:\n{body}"
 
 
 def _llm_review_one_round(
@@ -403,32 +362,21 @@ def _llm_review_one_round(
     test_timeout_s: int,
     run_tests_flag: bool,
     tests_report: Any = None,
-    delta_base_sha: str = "",
 ) -> tuple[int, list[ReviewFinding], str]:
     """Run one LLM review round. Raise :class:`_LLMReviewError` on any failure.
 
     Errors, refusals and malformed responses are all failures: the caller must
     fail the gate closed rather than fall back to a passing heuristic verdict.
-    The prompt carries the actual diff content (bounded, risk-ranked), not
-    just metadata. Findings citing a path outside the change set are kept but
-    demoted to low-severity ``LLM_UNVERIFIED`` citations — never silently
-    trusted, never dropped.
+    No prompt or response text is ever retained in the returned findings.
     """
     from agency.forge.inspection import inspect_changes
     from agency.forge.security_scan import scan_changes
 
     try:
-        reviewed_paths = changed_paths
-        if delta_base_sha:
-            delta = delta_paths(root, delta_base_sha)
-            if delta is not None:
-                reviewed_paths = list(delta)
-        insp = inspect_changes(root, reviewed_paths)
-        sec = scan_changes(root, reviewed_paths)
-        bundle = build_diff_bundle(root, reviewed_paths)
+        insp = inspect_changes(root, changed_paths)
+        sec = scan_changes(root, changed_paths)
         findings_summary: dict[str, Any] = {
-            "changed_paths": reviewed_paths,
-            "review_scope": "delta" if delta_base_sha else "full",
+            "changed_paths": changed_paths,
             "inspection_rejected": [r.reason for r in insp.rejected],
             "security_findings": [
                 {
@@ -469,7 +417,7 @@ def _llm_review_one_round(
                 tests_info = "error"
         findings_summary["tests"] = tests_info
 
-        prompt = _review_prompt(findings_summary, diff_text=bundle.text)
+        prompt = _review_prompt(findings_summary)
     except Exception as exc:  # noqa: BLE001
         logger.warning("forge.review_llm_evidence_error", error_class=type(exc).__name__)
         raise _LLMReviewError from None
@@ -511,7 +459,6 @@ def _llm_review_one_round(
     raw_findings = data.get("findings") or []
     if not isinstance(raw_findings, list):
         raise _LLMReviewError
-    cited_paths = {p.replace("\\", "/") for p in reviewed_paths}
     for raw in raw_findings:
         if not isinstance(raw, dict):
             continue
@@ -522,20 +469,11 @@ def _llm_review_one_round(
             line = int(raw.get("line", 1) or 1)
         except (TypeError, ValueError):
             line = 1
-        path = str(raw.get("path", ""))[:512]
-        rule_id = str(raw.get("rule_id", "LLM")).strip()[:64] or "LLM"
-        # Hallucination guard: a finding citing a path outside the change set
-        # is kept for visibility but demoted so it can never block on its own.
-        if path and path not in cited_paths:
-            rule_id = "LLM_UNVERIFIED"
-            sev = "low"
-        # No LLM free text is ever persisted (test-enforced invariant): the
-        # finding stays actionable through its structured citation instead.
         llm_findings.append(
             ReviewFinding(
-                path=path,
+                path=str(raw.get("path", ""))[:512],
                 line=max(1, line),
-                rule_id=rule_id,
+                rule_id=(str(raw.get("rule_id", "LLM")).strip()[:64] or "LLM"),
                 severity=sev,
                 message=_LLM_FINDING_MESSAGE,
                 resolved=bool(raw.get("resolved", False)),
@@ -603,8 +541,6 @@ def run_review(
     llm: Any = None,
     use_llm: bool = False,
     tests_report: Any = None,
-    delta_base_sha: str = "",
-    shadow_llm: Any = None,
     **kwargs: Any,
 ) -> ReviewReport:
     real_root = _resolve_root(root)
@@ -636,17 +572,6 @@ def run_review(
         llm = build_review_llm()
     llm_requested = bool(use_llm and llm is not None)
 
-    # Delta re-review scope (frozen-tree follow-up): re-review only what
-    # changed since the recorded base sha. An unresolvable base falls back to
-    # the full change set and says so.
-    delta_scope = ""
-    delta_unresolved = False
-    if delta_base_sha:
-        if delta_paths(real_root, delta_base_sha) is None:
-            delta_unresolved = True
-        else:
-            delta_scope = delta_base_sha
-
     used_llm = False
     rounds_done = 0
     final_score = 0
@@ -663,7 +588,6 @@ def run_review(
                     test_timeout_s,
                     run_tests_flag,
                     tests_report=tests_report,
-                    delta_base_sha=delta_scope,
                 )
                 used_llm = True
             except _LLMReviewError:
@@ -709,45 +633,11 @@ def run_review(
     )
     gate: ReviewGate = "PASS" if (final_score >= threshold and unresolved_high == 0) else "FAIL"
 
-    # Shadow reviewer (omniscient VERIFIER-CONTRACT pattern): same rubric on a
-    # second model, recorded as SHADOW_* fields, never gating. Divergence is
-    # the drift alarm that feeds the gate-calibration loop; a shadow failure
-    # is recorded as absent, never as a pass.
-    shadow_score: int | None = None
-    shadow_gate = ""
-    shadow_findings: tuple[ReviewFinding, ...] = ()
-    if llm_requested and shadow_llm is not None:
-        try:
-            s_score, s_findings, _ = _llm_review_one_round(
-                shadow_llm,
-                real_root,
-                changed_paths,
-                test_paths,
-                test_timeout_s,
-                run_tests_flag,
-                tests_report=tests_report,
-                delta_base_sha=delta_scope,
-            )
-            shadow_score = s_score
-            shadow_findings = tuple(s_findings)
-            s_unresolved = sum(
-                1
-                for f in shadow_findings
-                if (not f.resolved) and f.severity in ("high", "critical")
-            )
-            shadow_gate = "PASS" if (s_score >= threshold and s_unresolved == 0) else "FAIL"
-            if shadow_gate != gate:
-                logger.info("forge.review_shadow_divergence", gate=gate, shadow_gate=shadow_gate)
-        except _LLMReviewError:
-            logger.warning("forge.review_shadow_unavailable")
-
     caveats = list(CAVEATS)
     if used_llm:
         caveats = [c for c in caveats if c != "heuristic_review"]
     if run_tests_flag or tests_report is not None:
         caveats = [c for c in caveats if c != "tests_not_run"]
-    if delta_unresolved:
-        caveats.append("delta_base_unresolved")
 
     note = (
         "LLM-assisted review; not a human review; does not authorize merge or deploy."
@@ -765,11 +655,6 @@ def run_review(
         max_rounds=max_rounds,
         findings=tuple(final_findings),
         unresolved_high=unresolved_high,
-        reviewed_sha=head_sha(real_root),
-        delta_base_sha=delta_scope,
-        shadow_score=shadow_score,
-        shadow_gate=shadow_gate,
-        shadow_findings=shadow_findings,
         caveats=tuple(caveats),
         note=note,
     )

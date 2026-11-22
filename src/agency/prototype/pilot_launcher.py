@@ -84,8 +84,6 @@ class Settings:
     config: _Config
     provider_config: LLMConfig
     port: int
-    tls_certfile: Path | None = None
-    tls_keyfile: Path | None = None
 
 
 _RUNTIME_NAMES = frozenset({"owner.token", "pilot.db.recover.lock"}) | frozenset(
@@ -446,19 +444,11 @@ def _coding_executor(
 
 
 def validate(
-    config_path: Path,
-    data_dir: Path,
-    *,
-    port: int = 8766,
-    check: bool = False,
-    tls_certfile: Path | None = None,
-    tls_keyfile: Path | None = None,
+    config_path: Path, data_dir: Path, *, port: int = 8766, check: bool = False
 ) -> Settings:
     """Validate explicit inputs without provisioning or opening any store."""
     if not config_path.is_absolute() or not data_dir.is_absolute() or not 1 <= port <= 65535:
         raise LauncherError("invalid_paths_or_port")
-    if (tls_certfile is None) != (tls_keyfile is None):
-        raise LauncherError("tls_cert_and_key_required")
     _paths(config_path, data_dir, check=check)
     if (data_dir / "owner.token").exists():
         _read_token(data_dir / "owner.token")
@@ -498,15 +488,7 @@ def validate(
         )
     except (ValueError, TypeError, OSError, LauncherError, PilotError):
         raise LauncherError("invalid_configuration") from None
-    return Settings(
-        data_dir,
-        config_path,
-        config,
-        provider,
-        port,
-        tls_certfile=tls_certfile,
-        tls_keyfile=tls_keyfile,
-    )
+    return Settings(data_dir, config_path, config, provider, port)
 
 
 def _token(path: Path) -> SecretStr:
@@ -575,33 +557,6 @@ async def _close_orchestrator_resources(orchestrator: Any) -> None:
         raise failure
 
 
-def build_server_config(app: Any, settings: Settings) -> Any:
-    """Build the Uvicorn server config; optional TLS termination is fail-closed.
-
-    TLS is additive only: the loopback bind, bearer, CSRF, and ACL checks are
-    untouched, and TLS is never configured from a half-supplied pair.
-    """
-    import uvicorn
-
-    certfile = settings.tls_certfile
-    keyfile = settings.tls_keyfile
-    if (certfile is None) != (keyfile is None):
-        raise LauncherError("tls_cert_and_key_required")
-    return uvicorn.Config(
-        app,
-        host="127.0.0.1",
-        port=settings.port,
-        workers=1,
-        reload=False,
-        proxy_headers=False,
-        forwarded_allow_ips="",
-        access_log=False,
-        log_level="warning",
-        ssl_certfile=None if certfile is None else str(certfile),
-        ssl_keyfile=None if keyfile is None else str(keyfile),
-    )
-
-
 async def serve(settings: Settings) -> None:
     """Own fresh concrete resources and the Uvicorn app in this loop/thread."""
     import uvicorn
@@ -619,13 +574,7 @@ async def serve(settings: Settings) -> None:
     from agency.prototype.app import create_app
     from agency.telegram.budget_store import BetaBudgetStore
 
-    current = validate(
-        settings.config_path,
-        settings.data_dir,
-        port=settings.port,
-        tls_certfile=settings.tls_certfile,
-        tls_keyfile=settings.tls_keyfile,
-    )
+    current = validate(settings.config_path, settings.data_dir, port=settings.port)
     if current != settings:
         raise LauncherError("configuration_changed")
     stack = AsyncExitStack()
@@ -735,10 +684,21 @@ async def serve(settings: Settings) -> None:
             bearer_secret=token,
         )
         app = create_app(butler=butler, pilot=pilot, authenticator=authenticator)
-        server = uvicorn.Server(build_server_config(app, settings))
+        server = uvicorn.Server(
+            uvicorn.Config(
+                app,
+                host="127.0.0.1",
+                port=settings.port,
+                workers=1,
+                reload=False,
+                proxy_headers=False,
+                forwarded_allow_ips="",
+                access_log=False,
+                log_level="warning",
+            )
+        )
         print(f"Owner token file: {settings.data_dir / 'owner.token'}")
-        scheme = "https" if settings.tls_certfile is not None else "http"
-        print(f"Owner pilot: {scheme}://127.0.0.1:{settings.port}/pilot")
+        print(f"Owner pilot: http://127.0.0.1:{settings.port}/pilot")
         await server.serve()
     except Exception:  # noqa: BLE001 -- sanitize startup/resource failures
         raise LauncherError("startup_or_shutdown_failed") from None
@@ -762,18 +722,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--check", action="store_true")
-    parser.add_argument("--tls-certfile", type=Path, default=None)
-    parser.add_argument("--tls-keyfile", type=Path, default=None)
     try:
         args = parser.parse_args(argv)
-        settings = validate(
-            args.config,
-            args.data_dir,
-            port=args.port,
-            check=args.check,
-            tls_certfile=args.tls_certfile,
-            tls_keyfile=args.tls_keyfile,
-        )
+        settings = validate(args.config, args.data_dir, port=args.port, check=args.check)
         if args.check:
             print("configuration_valid (read-only; live provider not verified)")
             return 0

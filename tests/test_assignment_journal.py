@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import threading
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +18,6 @@ from agency.autonomy.assignment_journal import (
 ASSIGNMENT = "asg_" + "1" * 32
 SECOND_ASSIGNMENT = "asg_" + "2" * 32
 TASK = "task_" + "1" * 32
-SECOND_TASK = "task_" + "2" * 32
 WORKER = "worker_" + "1" * 32
 GRANT = "a" * 64
 RESULT = "b" * 64
@@ -73,26 +70,21 @@ def test_state_and_outbox_commit_together(tmp_path: Path) -> None:
     db_path = tmp_path / "atomic.db"
     with AssignmentJournal(db_path) as journal:
         assign(journal)
-        # Block the outbox insert from a second connection: the transition must
-        # abort atomically — no state change, no partial outbox row.
-        with sqlite3.connect(db_path) as conn:
-            conn.execute(
-                "CREATE TRIGGER block_outbox BEFORE INSERT ON outbox "
-                "BEGIN SELECT RAISE(ABORT, 'blocked'); END"
-            )
-            conn.commit()
-        with pytest.raises(ValueError):
-            journal.transition(assignment_id=ASSIGNMENT, generation=0, state="RUNNING", at=110)
-        with sqlite3.connect(db_path) as conn:
-            state = conn.execute(
-                "SELECT state FROM assignments WHERE assignment_id=?", (ASSIGNMENT,)
-            ).fetchone()
-            count = conn.execute("SELECT COUNT(*) FROM outbox").fetchone()
-        assert state is not None and state[0] == "ASSIGNED"
-        assert count is not None and count[0] == 1
-        with sqlite3.connect(db_path) as conn:
-            conn.execute("DROP TRIGGER block_outbox")
-            conn.commit()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TRIGGER block_outbox BEFORE INSERT ON outbox "
+            "BEGIN SELECT RAISE(ABORT, 'blocked'); END"
+        )
+        conn.commit()
+    with pytest.raises(ValueError), AssignmentJournal(db_path) as journal:
+        journal.transition(assignment_id=ASSIGNMENT, generation=0, state="RUNNING", at=110)
+    with sqlite3.connect(db_path) as conn:
+        state = conn.execute(
+            "SELECT state FROM assignments WHERE assignment_id=?", (ASSIGNMENT,)
+        ).fetchone()
+        count = conn.execute("SELECT COUNT(*) FROM outbox").fetchone()
+    assert state is not None and state[0] == "ASSIGNED"
+    assert count is not None and count[0] == 1
 
 
 def test_rejected_transition_leaves_no_outbox_row() -> None:
@@ -302,148 +294,3 @@ async def test_async_context_manager_closes_store() -> None:
         assert journal.get(ASSIGNMENT).state == "ASSIGNED"
     with pytest.raises(ValueError):
         journal.get(ASSIGNMENT)
-
-
-# --------------------------------------------------------------------------
-# Cross-restart reconciliation of never-dispatched ASSIGNED rows (gaps.md #20).
-# The owner writes ASSIGNED->RUNNING and dispatches with no await in between,
-# so an ASSIGNED row seen at open comes from a killed process and provably
-# never started; open-time recovery resolves it honestly.
-# --------------------------------------------------------------------------
-
-
-def _states_by_assignment(entries: Any) -> dict[str, list[str]]:
-    states: dict[str, list[str]] = {}
-    for entry in entries:
-        states.setdefault(entry.assignment_id, []).append(entry.state)
-    return states
-
-
-def test_reopen_resolves_never_dispatched_assigned_rows_exactly_once(tmp_path: Path) -> None:
-    db_path = tmp_path / "restart.db"
-    with AssignmentJournal(db_path) as journal:
-        # The killed-process window: ASSIGNED committed, dispatch never ran.
-        assign(journal, ASSIGNMENT, at=100)
-        assign(journal, SECOND_ASSIGNMENT, task_id=SECOND_TASK, at=110)
-    with AssignmentJournal(db_path) as reopened:
-        # Honest resolution: FAILED (never started), no invented result digest.
-        for assignment_id, at in ((ASSIGNMENT, 100), (SECOND_ASSIGNMENT, 110)):
-            record = reopened.get(assignment_id)
-            assert record.state == "FAILED"
-            assert record.result_digest is None
-            assert record.updated_at == at  # own last time value, no invented clock
-        # Audit trail: FAILED written directly from ASSIGNED — no RUNNING entry
-        # in between — is the durable proof of "recovered at startup".
-        states = _states_by_assignment(reopened.outbox())
-        assert states[ASSIGNMENT] == ["ASSIGNED", "FAILED"]
-        assert states[SECOND_ASSIGNMENT] == ["ASSIGNED", "FAILED"]
-        reopened.verify()  # integrity chains still verify
-    # Exactly once: the next start finds nothing left to resolve.
-    with AssignmentJournal(db_path) as again:
-        assert [entry.state for entry in again.outbox()] == [
-            "ASSIGNED",
-            "ASSIGNED",
-            "FAILED",
-            "FAILED",
-        ]
-
-
-def test_reopen_reconciliation_never_touches_running_rows(tmp_path: Path) -> None:
-    db_path = tmp_path / "running.db"
-    with AssignmentJournal(db_path) as journal:
-        assign(journal, ASSIGNMENT, at=100)
-        journal.transition(assignment_id=ASSIGNMENT, generation=0, state="RUNNING", at=110)
-        assign(journal, SECOND_ASSIGNMENT, task_id=SECOND_TASK, at=120)  # never dispatched
-    with AssignmentJournal(db_path) as reopened:
-        # RUNNING work may belong to a live owner (gap 19 lease discipline): it
-        # keeps the pre-existing UNCERTAIN recovery and is never FAILED by the
-        # ASSIGNED reconciliation, never auto-resumed.
-        assert reopened.get(ASSIGNMENT).state == "UNCERTAIN"
-        assert reopened.get(SECOND_ASSIGNMENT).state == "FAILED"
-        states = _states_by_assignment(reopened.outbox())
-        assert states[ASSIGNMENT] == ["ASSIGNED", "RUNNING", "UNCERTAIN"]
-        assert states[SECOND_ASSIGNMENT] == ["ASSIGNED", "FAILED"]
-
-
-def test_reopen_leaves_terminal_rows_untouched(tmp_path: Path) -> None:
-    db_path = tmp_path / "terminal.db"
-    with AssignmentJournal(db_path) as journal:
-        assign(journal, ASSIGNMENT, at=100)
-        journal.transition(assignment_id=ASSIGNMENT, generation=0, state="RUNNING", at=110)
-        journal.transition(
-            assignment_id=ASSIGNMENT, generation=0, state="COMPLETED", at=120, result_digest=RESULT
-        )
-        assign(journal, SECOND_ASSIGNMENT, generation=1, at=130)
-        journal.transition(assignment_id=SECOND_ASSIGNMENT, generation=1, state="RUNNING", at=140)
-        journal.transition(assignment_id=SECOND_ASSIGNMENT, generation=1, state="FAILED", at=150)
-        before = {aid: journal.get(aid) for aid in (ASSIGNMENT, SECOND_ASSIGNMENT)}
-        outbox_len = len(journal.outbox())
-    with AssignmentJournal(db_path) as reopened:
-        # Terminal rows are immutable: same state, times, digests, no new rows.
-        for assignment_id, record in before.items():
-            assert reopened.get(assignment_id) == record
-        assert len(reopened.outbox()) == outbox_len
-
-
-def test_reconciliation_error_fails_closed_and_propagates(tmp_path: Path) -> None:
-    db_path = tmp_path / "closed.db"
-    with AssignmentJournal(db_path) as journal:
-        assign(journal, at=100)
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            "CREATE TRIGGER block_outbox BEFORE INSERT ON outbox "
-            "BEGIN SELECT RAISE(ABORT, 'blocked'); END"
-        )
-        conn.commit()
-    # The injected journal error fires inside recovery and must propagate from
-    # the constructor (fail closed), leaving the durable row untouched.
-    with pytest.raises(AssignmentJournalError, match="recovery"):
-        AssignmentJournal(db_path)
-    with sqlite3.connect(db_path) as conn:
-        state = conn.execute(
-            "SELECT state FROM assignments WHERE assignment_id=?", (ASSIGNMENT,)
-        ).fetchone()
-        count = conn.execute("SELECT COUNT(*) FROM outbox").fetchone()
-    assert state is not None and state[0] == "ASSIGNED"
-    assert count is not None and count[0] == 1
-    # Crash-mid-reconciliation semantics: the rolled-back row is left ASSIGNED
-    # for the next start, which then resolves it exactly once.
-    with sqlite3.connect(db_path) as conn:
-        conn.execute("DROP TRIGGER block_outbox")
-        conn.commit()
-    with AssignmentJournal(db_path) as restarted:
-        assert restarted.get(ASSIGNMENT).state == "FAILED"
-        assert [entry.state for entry in restarted.outbox()] == ["ASSIGNED", "FAILED"]
-
-
-def test_concurrent_starts_reconcile_exactly_once(tmp_path: Path) -> None:
-    db_path = tmp_path / "concurrent.db"
-    with AssignmentJournal(db_path) as journal:
-        assign(journal, ASSIGNMENT, at=100)
-        assign(journal, SECOND_ASSIGNMENT, task_id=SECOND_TASK, at=110)
-    barrier = threading.Barrier(2)
-    failures: list[BaseException] = []
-
-    def start() -> None:
-        try:
-            barrier.wait()
-            with AssignmentJournal(db_path):
-                pass
-        except BaseException as exc:  # noqa: BLE001 — a losing start fails closed
-            failures.append(exc)
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        for future in (pool.submit(start), pool.submit(start)):
-            future.result(timeout=60)
-    # Two concurrent starts serialize on the journal's write lock: at most one
-    # may fail closed, and neither may double-resolve a row.
-    assert len(failures) <= 1
-    assert all(isinstance(exc, AssignmentJournalError) for exc in failures)
-    with AssignmentJournal(db_path) as final:
-        assert final.get(ASSIGNMENT).state == "FAILED"
-        assert final.get(SECOND_ASSIGNMENT).state == "FAILED"
-        failed = [entry for entry in final.outbox() if entry.state == "FAILED"]
-        assert sorted(entry.assignment_id for entry in failed) == sorted(
-            [ASSIGNMENT, SECOND_ASSIGNMENT]
-        )
-        final.verify()

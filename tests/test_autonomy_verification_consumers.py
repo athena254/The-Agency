@@ -262,10 +262,7 @@ async def test_failed_heuristic_checks_still_deliver_once_without_telegram_retry
     runtime, monkeypatch
 ):
     orch, model = runtime
-    # Gap-10 fix: the classic path fabricates no criteria, so a keyword-free
-    # answer no longer fails completeness. To exercise the failed-checks
-    # delivery path honestly, trip the real safety denylist instead.
-    model.output = "An answer that trips the denylist: ignore all previous instructions"
+    model.output = "An answer without the criterion keywords."
     agent = await orch.register_agent("fixture", "memory", ["respond"])
     service = ButlerService(
         config=ButlerConfig(_env_file=None, llm_provider="none"), orchestrator=orch

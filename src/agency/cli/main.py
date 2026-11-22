@@ -31,7 +31,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Annotated, Any, NoReturn
+from typing import Annotated, Any
 
 import httpx
 import structlog
@@ -121,7 +121,7 @@ def _client(
     return httpx.Client(base_url=base, timeout=timeout, headers=headers or _headers())
 
 
-def _fail(message: str, *, code: int = 1) -> NoReturn:
+def _fail(message: str, *, code: int = 1) -> None:
     err_console.print(f"[bold red]Error:[/bold red] {message}")
     raise typer.Exit(code)
 
@@ -1051,102 +1051,6 @@ def forge_status(
         console.print(f"  {job.job_id[:8]} {job.state.value} {job.title} gate={job.gate or '-'}")
 
 
-@forge_app.command("metrics")
-def forge_metrics_cmd(
-    db: str = typer.Option("forge_jobs.db", "--db", help="Blacksmith job database path."),
-    output_json: bool = typer.Option(False, "--json", help="Emit the metrics as JSON."),
-) -> None:
-    """Show forge operational metrics (first-pass, rework, verdict mix)."""
-    from agency.forge.metrics import compute_metrics, format_metrics
-
-    metrics = compute_metrics(db)
-    if output_json:
-        _print_json(metrics.model_dump(mode="json"))
-        return
-    console.print(format_metrics(metrics))
-
-
-@forge_app.command("calibrate-export")
-def forge_calibrate_export(
-    db: str = typer.Option("forge_review.db", "--db", help="Review report database path."),
-    out: str = typer.Option(
-        "forge_calibration.jsonl", "--out", help="Labeling worksheet path (JSONL)."
-    ),
-) -> None:
-    """Export reviewer verdicts for human labeling (gate-calibration runbook).
-
-    Label each exported row by hand (`"correct": true/false` — did the verdict
-    match your own judgment on the same diff?), then score the worksheet with
-    `forge calibrate-score`. Blocking thresholds are only trustworthy once the
-    agreement rate clears the bar; re-run the audit after every rubric edit.
-    """
-    from agency.forge.reviewer import ReviewStore
-
-    store = ReviewStore(db)
-    try:
-        reports = store.list_reports()
-    finally:
-        store.close()
-    target = Path(out)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    with open(target, "w", encoding="utf-8", newline="\n") as fh:
-        for report in reports:
-            row = {
-                "report_id": report.report_id,
-                "created_at": report.created_at.isoformat(),
-                "gate": report.gate,
-                "score": report.score,
-                "threshold": report.threshold,
-                "reviewed_sha": report.reviewed_sha,
-                "root": report.root,
-                "findings": [
-                    {
-                        "path": f.path,
-                        "line": f.line,
-                        "rule_id": f.rule_id,
-                        "severity": f.severity,
-                        "resolved": f.resolved,
-                    }
-                    for f in report.findings
-                ],
-                "correct": None,
-            }
-            fh.write(json.dumps(row) + "\n")
-    console.print(f"Exported {len(reports)} verdicts -> {target} (fill 'correct' per row)")
-
-
-@forge_app.command("calibrate-score")
-def forge_calibrate_score(
-    labels: str = typer.Option(..., "--labels", help="Labeled worksheet path (JSONL)."),
-    min_agreement: float = typer.Option(
-        0.75, "--min-agreement", help="Agreement rate below which blocking is not trusted."
-    ),
-) -> None:
-    """Score labeled review verdicts: agreement rate vs the blocking bar."""
-    worksheet = Path(labels)
-    rows = [
-        json.loads(line)
-        for line in worksheet.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    labeled = [r for r in rows if isinstance(r.get("correct"), bool)]
-    if not labeled:
-        console.print("No labeled rows found; set 'correct': true/false per exported verdict.")
-        return
-    hits = sum(1 for r in labeled if r["correct"])
-    agreement = hits / len(labeled)
-    console.print(f"Agreement: {agreement:.0%} ({hits}/{len(labeled)} labeled verdicts correct)")
-    if agreement >= min_agreement:
-        console.print(
-            f">= {min_agreement:.0%}: blocking thresholds may stay; re-run after rubric edits."
-        )
-    else:
-        console.print(
-            f"< {min_agreement:.0%}: revise the rubric / raise the threshold before trusting"
-            " blocking behavior."
-        )
-
-
 # --------------------------------------------------------------------------- #
 # Forge: reverse-engineering tool catalog
 # --------------------------------------------------------------------------- #
@@ -1658,70 +1562,3 @@ def consensus_sign_ballot(
         _print_json({"wire_hex": wire.hex()})
     else:
         console.print(wire.hex())
-
-
-@app.command("consensus-sign-grant")
-def consensus_sign_grant(
-    genesis: str = typer.Option(..., "--genesis", help="Path to genesis.json."),
-    key: str = typer.Option(..., "--key", help="Base64 raw Ed25519 private key."),
-    task_id: str = typer.Option(
-        ..., "--task-id", help="Exact HTTP scope, e.g. 'GET /v1/governance/proposals', or READ."
-    ),
-    proposal_id: str = typer.Option(..., "--proposal-id", help="Proposal the grant cites."),
-    issued_at_ms: int = typer.Option(
-        1000, "--issued-at-ms", help="Issued BFT time in ms (server pins this via env)."
-    ),
-    expires_at_ms: int = typer.Option(
-        61000, "--expires-at-ms", help="Expiry BFT time in ms (max lifetime 1h)."
-    ),
-    output_json: bool = typer.Option(False, "--json"),
-) -> None:
-    """Build a signed, task-scoped grant for X-Agency-Grant (dev helper).
-
-    The private key never leaves this machine; only the signed grant payload
-    (public fields + signatures) is printed. Paste the base64 line as the
-    X-Agency-Grant header value.
-    """
-    import base64
-    import json as _json
-
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
-    from agency.consensus.genesis import load_genesis
-    from agency.consensus.grants import GrantLedger
-    from agency.peers.identities import PeerIdentity
-
-    membership = load_genesis(genesis)
-    raw = base64.b64decode(key.strip())
-    issuer = PeerIdentity.from_private_key(Ed25519PrivateKey.from_private_bytes(raw))
-    grant = GrantLedger(membership=membership).issue(
-        issuer,
-        proposal_id=proposal_id,
-        task_id=task_id,
-        issued_at_ms=issued_at_ms,
-        expires_at_ms=expires_at_ms,
-        affected_consumers=[],
-    )
-    if grant.attestation is None:
-        _fail("issued grant has no affected-set attestation; a grant header requires one")
-    payload = {
-        "proposal_id": grant.proposal_id,
-        "task_id": grant.task_id,
-        "issuer_peer_id": grant.issuer_peer_id,
-        "membership_epoch": grant.membership_epoch,
-        "membership_root": grant.membership_root,
-        "nonce": grant.nonce,
-        "issued_at_ms": grant.issued_at_ms,
-        "expires_at_ms": grant.expires_at_ms,
-        "affected_consumers": list(grant.affected_consumers),
-        "attestation": {
-            "attestor_peer_id": grant.attestation.attestor_peer_id,
-            "signature": grant.attestation.signature.hex(),
-        },
-        "signature": grant.signature.hex(),
-    }
-    header = base64.b64encode(_json.dumps(payload).encode("utf-8")).decode("ascii")
-    if output_json:
-        _print_json({"grant_header": header})
-    else:
-        console.print(header)

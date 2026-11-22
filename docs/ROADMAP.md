@@ -1,21 +1,5 @@
 # The Agency — Roadmap (honest implemented / partial / planned)
 
-> November 22, 2026 update: a multi-workstream build session landed on `main`: the Forge
-> improvements wave (apprentice builder, multi-language gates, static transport shells,
-> review-gate hardening — `48fb5dd`), R-02 real subtask-specific specialist dispatch with
-> dependency outputs (`bf9d89d`), the independent-checker strictness fix (`8a9a48f`),
-> factory-managed default agents (slices 1-3: governed prompt records + idempotent
-> fail-closed blueprint seeding + Butler routing through factory-issued identities),
-> gap-10 second-provider live qualification on Google plus the adapter's google
-> detection/default fix (`182faec`, `2a909be`), KI-02 thread-warning sweep (proven
-> absence) and KI-04 recovery diagnostics (`2d66ba4`, `ae27bb5`), and an optional
-> fail-closed TLS-termination path with a local test-CA harness for the owner pilot
-> launcher (`0fe1d0c`/`4810b82`/`5d328fa`). The two corrections below that were still
-> live in the Nov-19 notes ("ABCI in-flight, not landed"; "gui/ has no test suite") are
-> now fixed in the table. The current source-backed ledger remains
-> [CURRENT_STATE.md](CURRENT_STATE.md); production/daily-driver gates remain open and
-> none of this is a production-readiness claim.
-
 > November 19, 2026 update: the current source-backed feature ledger is [CURRENT_STATE.md](CURRENT_STATE.md). The active engineering order is P0 reproducible baseline -> P1 end-to-end identity/budget/audit -> P2 peer application authority -> P3 isolation/privacy/recovery -> P4 Factory/skills/Forge integration -> P5 deployment operations -> P6 independent release review. See [PRODUCTION_READINESS_PLAN.md](PRODUCTION_READINESS_PLAN.md) for dependencies and acceptance criteria. The owner decisions D-01–D-05 are approved and recorded in [OWNER_DECISIONS_D01_D05.md](OWNER_DECISIONS_D01_D05.md). The hermetic Python suite, owner pilot service/API/UI, persistent task workspace and Mission Control console now exist as bounded local surfaces; none of them is production readiness or peer authority.
 
 > **Normative direction:** `docs/SOURCE_CONSOLIDATED_BRIEF.md` §§45–46 (priorities and
@@ -70,9 +54,9 @@
 | Lattice + governance + reputation | Partial (single-process prototype) | `src/agency/lattice/`; process-local state, best-effort mirroring, `user` override; not peer consensus |
 | API server + CLI | Partial | `src/agency/api/server.py` (`/v1` closed except health), `src/agency/cli/main.py`; prototype `/api` and `/api/pilot` surfaces are separate |
 | CI / CD workflows | Exists, outcome unverified at this SHA | `.github/workflows/ci.yml`, `cd.yml`; `feat/self-improve-forge` added to CI triggers on Nov 19, but no exact-SHA run is certified in this docs pass |
-| Coding agent / Forge | Partial | Forge v2 pipeline (inspection, security scan, isolated tests, LLM/static review with real-diff gate, evidence store) + Blacksmith orchestration + apprentice builder with multi-language gates and static transport shells are on `main` (Nov 22 wave `48fb5dd`); owner factory coding exposed over the pilot API (`/api/pilot/coding-tasks`) gated on an opt-in fixture repo; merge/release stay human-gated by design, reviewer-gate calibration is still pending |
+| Coding agent / Forge | Partial | `agents/coding.py` operator over Forge with protected-path guardrail; owner factory coding exposed over the pilot API (`/api/pilot/coding-tasks`) and console coding page, gated on an opt-in fixture repo; merge/release remain planned |
 | Peer protocol slice A | Implemented (contracts only) | `src/agency/peers/`: identities, canonical serialization, envelope binding, membership/epoch types, redaction, durable hash-chained log; no transport, executor, actuator or consensus |
-| ABCI app + codec (Wave 0) | Implemented (hermetic + live lab proof) | `src/agency/consensus/abci/` (authoritative codec/wire/socket host) is on `main`; real four-peer CometBFT 0.38.26 live run PASS recorded in `docs/SLICE_C_LIVE_EVIDENCE.md`. Recorded deviations (proposal-kind records, live revocation channel) remain open. |
+| ABCI app + codec (Wave 0) | In-flight, not landed | Work exists in `C:\Users\PC\.zcode\worktrees\5ab0\The-Agency`; canonical tree has no `src/agency/consensus/abci/` yet. Left untouched pending owner direction. |
 | Prototype factories (dark/ghost) | Prototypes only | Standalone; not an integrated Forge |
 
 ### New partial foundations and remaining planned systems
@@ -81,7 +65,7 @@
 |------|-------|----------------------------------------------|
 | Durable thread / workspace / task store | Implemented (local owner) | Public authenticated API awaits P2; project model pending |
 | Owner pilot API / UI | Implemented (local) | Live provider, real-browser and restart/crash qualification; coding is exposed over `/api/pilot/*` behind an opt-in fixture gate |
-| Mission Control | Implemented (local) | Bearer wiring, live observe-backed panels and the committed Playwright + axe suite (26 tests) landed Nov 21; remaining tails: Dashboard task counts are pilot-surface-only, Memories/Evidence/Skills read-only until the /v1 gates open, Forge page still shows an illustrative locked panel |
+| Mission Control | Implemented (local) | Add GUI tests; wire live telemetry or honest empty states; resolve pilot-mode bearer wiring |
 | Agent Factory (versioned) | Partial v1 | Versioned blueprints, approval, L0/UNKNOWN activation; no evaluation, autonomous creation or restart rehydration |
 | Prompt library (factory) | Partial v1 | Versioned prompt records, deterministic composition, bundled segments + REAP packs; runtime consumption and Forge tool-availability params implemented |
 | Skill registry (Agency-native) | Partial | Versioned metadata, lifecycle evidence, explicit permissions; skill runtime binding pending |
