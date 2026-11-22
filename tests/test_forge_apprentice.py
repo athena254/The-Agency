@@ -9,8 +9,11 @@ from pathlib import Path
 
 import pytest
 
+from agency.forge import apprentice as apprentice_module
 from agency.forge.apprentice import (
+    _FILE_CONTRACT,
     _OUTPUT_CONTRACT,
+    _parse_content,
     _parse_files,
     detect_apprentice_language,
     run_apprentice,
@@ -26,6 +29,7 @@ def _blank_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in list(os.environ):
         if name.upper().startswith(_LLM_ENV_PREFIXES):
             monkeypatch.setenv(name, "")
+    monkeypatch.setattr(apprentice_module, "_FILE_RETRY_DELAY_S", 0.0)
 
 
 def _git_repo(tmp_path: Path) -> Path:
@@ -46,13 +50,22 @@ def _git_repo(tmp_path: Path) -> Path:
 
 
 class _StubLLM:
-    def __init__(self, response: str | Exception) -> None:
-        self.response = response
+    """Answers per-file calls in sequence (one file per apprentice call)."""
+
+    def __init__(self, responses: list[str | Exception]) -> None:
+        self.responses = list(responses)
+        self.prompts: list[str] = []
 
     async def generate(self, prompt: str, context: object = None) -> str:
-        if isinstance(self.response, Exception):
-            raise self.response
-        return self.response
+        self.prompts.append(prompt)
+        item = self.responses.pop(0) if self.responses else ""
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+def _file(content: str) -> str:
+    return json.dumps({"content": content})
 
 
 def test_parse_files_accepts_plain_and_fenced_json() -> None:
@@ -76,9 +89,21 @@ def test_parse_files_rejects_malformed_answers(bad: str) -> None:
     assert _parse_files(bad) is None
 
 
+def test_parse_content_accepts_plain_and_fenced_json() -> None:
+    assert _parse_content('{"content": "x = 1\\n"}') == "x = 1\n"
+    assert _parse_content("```json\n{\"content\": \"x\"}\n```") == "x"
+    assert _parse_content("no json") is None
+    assert _parse_content('{"content": ""}') is None
+
+
 def test_output_contract_is_binding_in_prompt() -> None:
     assert "ONLY one JSON object" in _OUTPUT_CONTRACT
     assert '"files"' in _OUTPUT_CONTRACT
+    assert '"content"' in _FILE_CONTRACT
+
+
+def test_file_plans_cover_all_languages() -> None:
+    assert set(apprentice_module.FILE_PLANS) == {"rust", "go", "python", "node"}
 
 
 def test_detect_apprentice_language_from_manifests(tmp_path: Path) -> None:
@@ -96,17 +121,11 @@ def test_detect_apprentice_language_from_manifests(tmp_path: Path) -> None:
 
 def test_apprentice_pass_path_builds_and_gates(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path)
-    answer = json.dumps(
-        {
-            "files": [
-                {"path": "app.py", "content": "VALUE = 41\n"},
-                {
-                    "path": "test_app.py",
-                    "content": "import app\n\ndef test_value():\n    assert app.VALUE == 41\n",
-                },
-            ],
-            "summary": "minimal",
-        }
+    stub = _StubLLM(
+        [
+            _file("VALUE = 41\n"),
+            _file("import app\n\ndef test_value():\n    assert app.VALUE == 41\n"),
+        ]
     )
     report = run_apprentice(
         repo,
@@ -115,7 +134,7 @@ def test_apprentice_pass_path_builds_and_gates(tmp_path: Path) -> None:
         run_tests_flag=True,
         test_paths=["test_app.py"],
         run_review_flag=False,
-        llm=_StubLLM(answer),
+        llm=stub,
     )
     assert report.gate == "PASS", report.failure_detail
     assert report.tests is not None and report.tests.gate == "PASS"
@@ -123,15 +142,20 @@ def test_apprentice_pass_path_builds_and_gates(tmp_path: Path) -> None:
     assert report.command == ("apprentice", "hy4-flash:free")
     assert "apprentice_generated" in report.caveats
     assert "review_not_run" in report.caveats
+    # per-file protocol: exactly one planned file per call
+    assert len(stub.prompts) == 2
+    assert "NOW WRITE exactly one file: app.py" in stub.prompts[0]
+    assert "NOW WRITE exactly one file: test_app.py" in stub.prompts[1]
 
 
 def test_apprentice_fail_closed_on_unparsable_answer(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path)
     report = run_apprentice(
-        repo, ["unused"], "task", run_review_flag=False, llm=_StubLLM("I cannot comply")
+        repo, ["unused"], "task", run_review_flag=False, llm=_StubLLM(["I cannot comply"])
     )
     assert report.gate == "FAIL"
     assert "unparsable" in report.failure_detail
+    assert "app.py" in report.failure_detail  # the first planned python file
 
 
 def test_apprentice_fail_closed_on_llm_error(tmp_path: Path) -> None:
@@ -141,15 +165,26 @@ def test_apprentice_fail_closed_on_llm_error(tmp_path: Path) -> None:
         ["unused"],
         "task",
         run_review_flag=False,
-        llm=_StubLLM(RuntimeError("429 burst")),
+        llm=_StubLLM([RuntimeError("429 burst"), RuntimeError("503 burst")]),
     )
     assert report.gate == "FAIL"
     assert "LLM call failed" in report.failure_detail
 
 
-def test_apprentice_fail_closed_without_llm(tmp_path: Path, monkeypatch) -> None:
-    from agency.forge import apprentice as apprentice_module
+def test_apprentice_recovers_from_one_bad_file_answer(tmp_path: Path) -> None:
+    repo = _git_repo(tmp_path)
+    stub = _StubLLM(
+        [
+            "garbage no json",
+            _file("VALUE = 7\n"),
+            _file("import app\n\ndef test_v():\n    assert app.VALUE == 7\n"),
+        ]
+    )
+    report = run_apprentice(repo, ["unused"], "task", run_review_flag=False, llm=stub)
+    assert report.gate == "PASS", report.failure_detail
 
+
+def test_apprentice_fail_closed_without_llm(tmp_path: Path, monkeypatch) -> None:
     repo = _git_repo(tmp_path)
     monkeypatch.setattr(apprentice_module, "build_apprentice_llm", lambda: None)
     report = run_apprentice(repo, ["unused"], "task", run_review_flag=False)
@@ -159,17 +194,11 @@ def test_apprentice_fail_closed_without_llm(tmp_path: Path, monkeypatch) -> None
 
 def test_apprentice_failing_tests_feed_the_retry_tail(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path)
-    answer = json.dumps(
-        {
-            "files": [
-                {"path": "app.py", "content": "VALUE = 1\n"},
-                {
-                    "path": "test_app.py",
-                    "content": "import app\n\ndef test_value():\n    assert app.VALUE == 2\n",
-                },
-            ],
-            "summary": "wrong on purpose",
-        }
+    stub = _StubLLM(
+        [
+            _file("VALUE = 1\n"),
+            _file("import app\n\ndef test_value():\n    assert app.VALUE == 2\n"),
+        ]
     )
     report = run_apprentice(
         repo,
@@ -178,18 +207,20 @@ def test_apprentice_failing_tests_feed_the_retry_tail(tmp_path: Path) -> None:
         run_tests_flag=True,
         test_paths=["test_app.py"],
         run_review_flag=False,
-        llm=_StubLLM(answer),
+        llm=stub,
     )
     assert report.gate == "FAIL"
     assert report.tests is not None and report.tests.gate == "FAIL"
     assert "test output tail" in report.failure_detail
 
 
-def test_apprentice_refuses_protected_paths(tmp_path: Path) -> None:
+def test_apprentice_refuses_protected_paths(tmp_path: Path, monkeypatch) -> None:
     repo = _git_repo(tmp_path)
-    answer = '{"files": [{"path": ".env", "content": "SECRET=1"}], "summary": "nope"}'
+    monkeypatch.setattr(
+        apprentice_module, "FILE_PLANS", {"python": ((".env", "protected probe"),)}
+    )
     report = run_apprentice(
-        repo, ["unused"], "task", run_review_flag=False, llm=_StubLLM(answer)
+        repo, ["unused"], "task", run_review_flag=False, llm=_StubLLM([_file("SECRET=1")])
     )
     assert report.gate == "FAIL"
     assert "refused" in report.failure_detail

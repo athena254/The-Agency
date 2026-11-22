@@ -2,8 +2,10 @@
 
 The apprentice is the Agency's task LLM (a factory-issued spawn, not an
 external CLI striker). It receives the rendered work order plus
-language-specific implementation notes, answers with one bounded JSON file
-list, and those files are applied through the existing gated coding agent
+language-specific implementation notes and writes ONE FILE PER CALL (small
+generations finish inside the free provider's duration window; one long
+multi-file call does not). The files are applied through the existing gated
+coding agent
 (worktree isolation, protected paths, inspection, security scan, tests).
 An independent review round then scores the result. Fail-closed throughout:
 an unparsable answer, an LLM error, or a gate failure yields a FAIL report
@@ -45,6 +47,40 @@ _OUTPUT_CONTRACT = (
     " shell commands, no patches, no diffs — full file contents only. At most"
     f" {MAX_EDITS} files; each file under 1 MiB."
 )
+
+_FILE_CONTRACT = (
+    "\n\nOUTPUT FORMAT (binding): respond with ONLY one JSON object, no prose,"
+    ' no code fences:\n{"content": "<the complete file content>"}\n'
+    "Full file contents only — no shell commands, no patches, no explanations."
+)
+
+# The file plan per language is fixed (the work order and notes already pin
+# the layout), so the apprentice generates ONE FILE PER CALL. Small calls
+# stay under the free provider's ~90s generation kill-switch; one long
+# multi-file call does not. This is also the context-economy doctrine: the
+# model never re-carries earlier files.
+FILE_PLANS: dict[str, tuple[tuple[str, str], ...]] = {
+    "rust": (
+        ("Cargo.toml", "the crate manifest (name shorty, edition 2021, NO dependencies)"),
+        ("src/main.rs", "the complete service including inline #[cfg(test)] mod tests"),
+    ),
+    "go": (
+        ("go.mod", "the module manifest (module shorty)"),
+        ("main.go", "the complete service"),
+        ("main_test.go", "the tests for the service"),
+    ),
+    "python": (
+        ("app.py", "the complete service"),
+        ("test_app.py", "the pytest tests for app.py"),
+    ),
+    "node": (
+        ("package.json", 'the manifest (type module, scripts.test = "node --test test/app.test.ts")'),
+        ("src/app.ts", "the complete service"),
+        ("test/app.test.ts", "the node:test tests for src/app.ts"),
+    ),
+}
+
+_FILE_RETRY_DELAY_S = 30.0
 
 _LANGUAGE_NOTES: dict[str, str] = {
     "rust": (
@@ -149,6 +185,31 @@ def _parse_files(response: str) -> list[tuple[str, str]] | None:
     return files
 
 
+def _parse_content(response: str) -> str | None:
+    """Extract one file's content from the per-file JSON contract."""
+    text = (response or "").strip()
+    if text.startswith("```"):
+        first_newline = text.find("\n")
+        if first_newline != -1:
+            text = text[first_newline + 1 :]
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        data = json.loads(text[start : end + 1])
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    content = data.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return None
+    return content
+
+
 def _empty_reports(root: Path) -> tuple[Any, Any]:
     return inspect_changes(root, []), scan_changes(root, [])
 
@@ -205,17 +266,41 @@ def run_apprentice(
         return _fail("no apprentice LLM configured; run refused (fail closed)")
 
     notes = _LANGUAGE_NOTES[detect_apprentice_language(real_repo)]
-    prompt = f"{task}\n\nIMPLEMENTATION NOTES (language-specific, binding):\n{notes}{_OUTPUT_CONTRACT}"
+    plan = FILE_PLANS[detect_apprentice_language(real_repo)]
 
-    try:
-        response = _generate(llm, prompt)
-    except Exception as exc:  # noqa: BLE001 - provider errors fail the build honestly
-        logger.warning("forge.apprentice_llm_call_failed", error_class=type(exc).__name__)
-        return _fail(f"apprentice LLM call failed: {type(exc).__name__}")
+    # One file per call: small generations finish well inside the free
+    # provider's duration window, where one long multi-file call does not.
+    files: list[tuple[str, str]] = []
+    for path, purpose in plan:
+        prompt = (
+            f"{task}\n\nIMPLEMENTATION NOTES (language-specific, binding):\n{notes}\n\n"
+            f"NOW WRITE exactly one file: {path} — {purpose}."
+            f"{_FILE_CONTRACT}"
+        )
+        response: str | None = None
+        last_error: str | None = None
+        for attempt in range(2):
+            try:
+                response = _generate(llm, prompt)
+                last_error = None
+            except Exception as exc:  # noqa: BLE001 - provider bursts fail honestly
+                last_error = f"LLM call failed: {type(exc).__name__}"
+                logger.warning(
+                    "forge.apprentice_file_call_failed", file=path, error_class=type(exc).__name__
+                )
+            if response is not None and _parse_content(response) is not None:
+                break
+            if attempt == 0:
+                import time as _time
 
-    files = _parse_files(response)
-    if files is None:
-        return _fail("apprentice returned unparsable output; expected the JSON files contract")
+                _time.sleep(_FILE_RETRY_DELAY_S)
+        if last_error is not None and response is None:
+            return _fail(f"{path}: {last_error}")
+        content = _parse_content(response or "")
+        if content is None:
+            return _fail(f"{path}: apprentice returned unparsable output (file contract)")
+        files.append((path, content))
+        logger.info("forge.apprentice_file_generated", file=path, chars=len(content))
 
     # run_coding_agent enforces worktree isolation, protected paths, size caps
     # and per-file limits; write_file creates-or-overwrites inside the worktree.
@@ -317,6 +402,7 @@ apprentice = run_apprentice
 
 __all__ = [
     "APPRENTICE_MODEL",
+    "FILE_PLANS",
     "apprentice",
     "build_apprentice_llm",
     "detect_apprentice_language",
