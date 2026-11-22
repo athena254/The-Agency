@@ -146,6 +146,19 @@ async def create_task(
                 detail=f"unknown agent_id {payload.agent_id!r}",
             )
     task_input = dict(payload.input)
+    # "grant_digest" is a server-reserved key (gaps.md #18): a client-supplied
+    # value is always stripped, and only the verified digest of a grant-admitted
+    # intake is stamped here so the downstream executor fences the consequential
+    # execution on it (orchestrator._execute_fenced). Bearer intakes carry no
+    # digest and stay byte-for-byte unchanged.
+    task_input.pop("grant_digest", None)
+    grant_digest = getattr(request.state, "grant_id", None)
+    if (
+        getattr(request.state, "auth_kind", "unknown") == "grant"
+        and isinstance(grant_digest, str)
+        and grant_digest
+    ):
+        task_input["grant_digest"] = grant_digest
     if payload.agent_id is not None:
         task_input["agent_id"] = payload.agent_id
     try:

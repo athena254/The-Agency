@@ -31,6 +31,7 @@ from agency import __version__
 from agency.api.auth import Principal, TokenRegistry
 from agency.api.authority import (
     GRANT_HEADER,
+    attach_fencing_commit,
     attach_grant_authority,
     detach_grant_authority,
     intake_dependency,
@@ -152,6 +153,9 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     config = getattr(application.state, "butler_config", None) or ButlerConfig()
     service = getattr(application.state, "butler", None)
     task_store: TaskStore | None = None
+    # Defined even on the library-injected-service path (no server-owned
+    # dispatcher there); the built path below re-reads app.state.
+    orchestrator: AgencyOrchestrator | None = None
     if service is None:
         orchestrator = getattr(application.state, "orchestrator", None)
         if orchestrator is None:
@@ -178,6 +182,10 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # Pinned genesis + grant ledger when available — enables the signed-grant
     # alternative on POST /v1/message (gaps.md #18 route swap).
     attach_grant_authority(application)
+    # Resource-side fencing commit for grant-admitted tasks (gaps.md #18):
+    # this process shares the task queue with the api server, so its
+    # dispatcher must fence grant-admitted claims exactly like the api one.
+    fencing_commit = attach_fencing_commit(application, orchestrator)
     try:
         yield
     finally:
@@ -185,6 +193,11 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             await service.stop()
         except Exception:
             log.exception("butler.shutdown_failed")
+        if fencing_commit is not None:
+            try:
+                await fencing_commit.close()
+            except Exception:
+                log.exception("butler.fencing_store_close_failed")
         if task_store is not None:
             try:
                 await task_store.close()

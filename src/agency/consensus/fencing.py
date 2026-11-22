@@ -226,6 +226,11 @@ class FencingStateStore:
         self._receipts: list[FinalityReceipt] = []
         self._last_chain: str = _GENESIS_CHAIN
         self._conn: sqlite3.Connection | None = sqlite3.connect(str(db_path))
+        # Shared-backend discipline (gaps.md #9/#19): WAL keeps readers
+        # unblocked while the single writer connection commits; a no-op for
+        # ``:memory:`` stores.
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
         try:

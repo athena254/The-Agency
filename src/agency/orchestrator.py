@@ -39,6 +39,12 @@ from agency.agents.prompts import issued_system_prompt
 from agency.agents.registry import AgentRegistry as RuntimeAgentRegistry
 from agency.agents.verifier import AgentVerifier
 from agency.bridges.coordinator import ExternalCoordinator
+from agency.consensus.fencing import FencingStoreError, FinalityReceipt
+from agency.consensus.fencing_commit import (
+    EXECUTED_OUTCOME_COMPLETED,
+    FencingCommitOutcome,
+    GrantFencingCommit,
+)
 from agency.dispatch import TaskDispatcher
 from agency.evidence.store.models import (
     Finding,
@@ -224,9 +230,17 @@ class AgencyOrchestrator:
         blacksmith_ops: BlacksmithOps | None = None,
         audit_db_path: str | None = None,
         evidence_db_path: str | None = None,
+        grant_fencing: GrantFencingCommit | None = None,
     ) -> None:
         self._config = config or {}
         self._blacksmith_ops = blacksmith_ops
+        # Resource-side grant fencing (gaps.md #18): commits a fencing token
+        # bound to (grant digest, task id) around the consequential execution
+        # of a grant-admitted task. ``None`` keeps every grant-admitted task
+        # fail-closed (refused, never executed unfenced); bearer tasks are
+        # unaffected either way. Server lifespans install the fencer via
+        # :meth:`attach_grant_fencing` once the genesis grant ledger exists.
+        self._grant_fencing = grant_fencing
         self._log = structlog.get_logger(__name__)
 
         # LLM — shared adapter for all agent execution. Falls back to
@@ -481,6 +495,17 @@ class AgencyOrchestrator:
         """True once ``start()`` launched the queue consumer."""
 
         return self._dispatcher is not None
+
+    def attach_grant_fencing(self, fencer: GrantFencingCommit) -> None:
+        """Install the resource-side grant fencing commit (gaps.md #18).
+
+        Called by server lifespans after the pinned genesis grant ledger is
+        attached; the dispatcher may already be running because no
+        grant-admitted task can exist before intake verification, which
+        requires that same ledger.
+        """
+
+        self._grant_fencing = fencer
 
     async def wait_task_result(self, task_id: str, *, timeout: float | None = None) -> Task:
         """Wait until a queued task reaches a terminal state; return its final state.
@@ -1151,7 +1176,7 @@ class AgencyOrchestrator:
                 # direct callers transition PENDING -> RUNNING here.
                 if task.status is not TaskStatus.RUNNING:
                     task = await self._task_manager.update_status(task_id, TaskStatus.RUNNING)
-                return await self._execute_running(task, context, recalled_context)
+                return await self._execute_fenced(task, context, recalled_context)
             except (Exception, asyncio.CancelledError):
                 # COMPLETED is terminal. Keep RUNNING until required writes finish;
                 # cleanup failure must not replace the original exception/cancellation.
@@ -1162,6 +1187,107 @@ class AgencyOrchestrator:
                 raise
             finally:
                 self._task_locks.pop(task_id, None)
+
+    async def _execute_fenced(
+        self,
+        task: Task,
+        context: dict[str, Any] | None,
+        recalled_context: str,
+    ) -> ExecutionResult:
+        """Fence grant-admitted tasks around the consequential execution (gaps.md #18).
+
+        Intake verified the §12 grant, consumed its nonce and stamped the
+        verified digest server-side on the task record (``input["grant_digest"]``).
+        Here the executor commits the resource-side fencing token bound to
+        (grant digest, task id) before the pipeline runs and records an
+        idempotent finality receipt after it, so a re-executed attempt replays
+        the receipt instead of re-running the work. Fail closed: a revoked
+        grant, a fencing store error or a missing fencer refuses the execution
+        with an honest FAILED outcome. Tasks admitted without a grant (the
+        bearer path and internally created tasks) run byte-for-byte unchanged.
+        """
+
+        fencer = self._grant_fencing
+        digest = task.input.get("grant_digest") if isinstance(task.input, dict) else None
+        if not isinstance(digest, str) or not digest:
+            return await self._execute_running(task, context, recalled_context)
+        if fencer is None:
+            return await self._refuse_fenced(task, "grant fencing unavailable; execution refused")
+        fence = fencer.begin(grant_digest=digest, resource_id=task.task_id)
+        if fence.outcome is FencingCommitOutcome.REPLAYED:
+            assert fence.receipt is not None  # REPLAYED always carries the receipt
+            return await self._complete_from_receipt(task.task_id, fence.receipt)
+        if fence.outcome is not FencingCommitOutcome.COMMITTED or fence.token is None:
+            reason = "grant fencing refused: " + fence.outcome.value
+            if fence.detail:
+                reason += f" ({fence.detail})"
+            return await self._refuse_fenced(task, reason)
+        token = fence.token
+        result = await self._execute_running(task, context, recalled_context)
+        try:
+            fencer.finalize(
+                grant_digest=digest,
+                resource_id=task.task_id,
+                token=token,
+                outcome=result.status.value,
+            )
+        except FencingStoreError as exc:
+            # The attempt ran, but its receipt is refused (stale epoch: a
+            # concurrent attempt committed this digest first). Fail closed; a
+            # terminal record another writer already stored stands (CAS).
+            return await self._refuse_fenced(
+                task, f"grant fencing receipt refused: {exc}", attempts=result.attempts
+            )
+        return result
+
+    async def _refuse_fenced(
+        self, task: Task, reason: str, *, attempts: int = 0
+    ) -> ExecutionResult:
+        """Record an honest FAILED outcome for a fenced-off execution attempt."""
+
+        with suppress(ValueError):
+            # A concurrent writer's terminal record stands (CAS discipline,
+            # gaps.md #19); refusal never overwrites a stored outcome blind.
+            await self._task_manager.update_status(task.task_id, TaskStatus.FAILED, error=reason)
+        self._log.warning("task.grant_fencing_refused", task_id=task.task_id, reason=reason)
+        return ExecutionResult(
+            task_id=task.task_id,
+            status=ExecutionStatus.FAILED,
+            output=reason,
+            error="grant_fencing_refused",
+            attempts=attempts,
+            duration_s=0.0,
+        )
+
+    async def _complete_from_receipt(
+        self, task_id: str, receipt: FinalityReceipt
+    ) -> ExecutionResult:
+        """Replayed execution: this grant's receipt already records the outcome."""
+
+        executed_ok = receipt.outcome == EXECUTED_OUTCOME_COMPLETED
+        reason = f"grant fencing receipt replayed: {receipt.outcome}"
+        with suppress(ValueError):
+            await self._task_manager.update_status(
+                task_id,
+                TaskStatus.COMPLETED if executed_ok else TaskStatus.FAILED,
+                output={
+                    "summary": receipt.outcome,
+                    "fencing_receipt_digest": receipt.digest(),
+                    "fencing_replayed": True,
+                }
+                if executed_ok
+                else None,
+                error=None if executed_ok else reason,
+            )
+        self._log.info("task.grant_fencing_replayed", task_id=task_id, outcome=receipt.outcome)
+        return ExecutionResult(
+            task_id=task_id,
+            status=ExecutionStatus.COMPLETED if executed_ok else ExecutionStatus.FAILED,
+            output=reason,
+            error=None if executed_ok else "grant_fencing_replayed",
+            attempts=0,
+            duration_s=0.0,
+        )
 
     async def _execute_forge(self, task: Task) -> ExecutionResult:
         """Forge-domain work is managed by BlacksmithOps — never the chat path.
