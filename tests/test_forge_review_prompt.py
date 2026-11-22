@@ -24,16 +24,3 @@ def test_review_prompt_marks_truncation_explicitly() -> None:
     assert "...[change set truncated for review]" in prompt
     small = {"k": "x"}
     assert "change set truncated" not in _review_prompt(small)
-
-
-def test_review_prompt_includes_diff_section() -> None:
-    prompt = _review_prompt({"tests": "not_run"}, diff_text="--- path: a.py ---\n+X = 1\n")
-    assert "DIFF (actual change content" in prompt
-    assert "+X = 1" in prompt
-    assert "DIFF (actual change content" not in _review_prompt({"tests": "not_run"})
-
-
-def test_review_prompt_requires_citations_from_change_set() -> None:
-    prompt = _review_prompt({"tests": "not_run"})
-    assert "every cited path must appear in the CHANGE SET" in prompt
-    assert "paths are listed as not shown" in prompt

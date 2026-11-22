@@ -27,8 +27,6 @@ import structlog
 from fastapi import FastAPI, HTTPException, Request, status
 
 from agency.api.auth import Principal, require_principal
-from agency.consensus.fencing import FencingStateStore
-from agency.consensus.fencing_commit import GrantFencingCommit
 from agency.consensus.grant_guard import enforce_grant
 from agency.consensus.grants import (
     GrantError,
@@ -319,43 +317,3 @@ def detach_grant_authority(application: FastAPI) -> None:
         close()
     for name in ("peer_authority", "peer_membership", "grant_ledger", "grant_bft_time_ms"):
         setattr(application.state, name, None)
-
-
-# --------------------------------------------------------------------------- #
-# Downstream fencing commit (gaps.md #18 fencing-token tail)
-# --------------------------------------------------------------------------- #
-
-FENCING_DB_ENV: Final = "AGENCY_FENCING_DB"
-
-
-def attach_fencing_commit(application: FastAPI, orchestrator: Any) -> GrantFencingCommit | None:
-    """Install the downstream grant-fencing commit on ``orchestrator`` (gaps.md #18).
-
-    Built only when a pinned genesis grant ledger exists — the same posture
-    that opens the intake grant path. The executor then commits a fencing
-    token bound to (grant digest, task id) before the consequential pipeline
-    of a grant-admitted task runs and records an idempotent finality receipt
-    after it. ``AGENCY_FENCING_DB`` points the fencing store at a durable WAL
-    file; without it the store is per-process in-memory, mirroring
-    ``AGENCY_GRANT_STORE_DB``. Without a grant ledger no fencer is built and
-    the intake grant path is 503 anyway, so no grant-admitted task can exist;
-    an orchestrator without a fencer refuses grant-admitted tasks fail-closed.
-
-    Returns the fencer (also stored on ``app.state.fencing_commit``), or
-    ``None`` when there is nothing to fence with.
-    """
-
-    ledger = getattr(application.state, "grant_ledger", None)
-    if ledger is None:
-        return None
-    db_path = os.environ.get(FENCING_DB_ENV, "").strip() or ":memory:"
-    try:
-        fencer = GrantFencingCommit(store=FencingStateStore(db_path=db_path), ledger=ledger)
-    except Exception as exc:  # noqa: BLE001 - startup must not crash
-        log.warning("api.fencing_commit_failed", error_type=type(exc).__name__)
-        return None
-    application.state.fencing_commit = fencer
-    attach = getattr(orchestrator, "attach_grant_fencing", None)
-    if callable(attach):
-        attach(fencer)
-    return fencer

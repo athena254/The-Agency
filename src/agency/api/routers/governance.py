@@ -61,12 +61,7 @@ class BallotRequest(BaseModel):
 
 @router.get("/proposals")
 async def list_proposals(request: Request) -> dict[str, Any]:
-    """List all open governance proposals.
-
-    Includes the affected-party set (``eligible_voters``) and the recorded
-    votes with cited evidence so a human reviewer sees what a ballot decides
-    on (Slice D: UI shows affected parties, status, evidence).
-    """
+    """List all open governance proposals."""
     lattice = _get_lattice(request)
     proposals = await lattice.list_open_proposals()
     return {
@@ -78,17 +73,6 @@ async def list_proposals(request: Request) -> dict[str, Any]:
                 "quorum_required": p.quorum_required,
                 "status": p.status,
                 "vote_count": len(p.votes),
-                "eligible_voters": list(p.eligible_voters),
-                "votes": [
-                    {
-                        "voter_id": v.voter_id,
-                        "decision": v.decision,
-                        "evidence": list(v.evidence),
-                        "weight": v.weight,
-                        "timestamp": v.timestamp.isoformat(),
-                    }
-                    for v in p.votes
-                ],
                 "expires_at": p.expires_at.isoformat() if p.expires_at else None,
             }
             for p in proposals

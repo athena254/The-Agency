@@ -57,7 +57,6 @@ from agency.agents.coding_bootstrap import bootstrap_coding_agent
 from agency.agents.registry import AgentRegistry as RuntimeAgentRegistry
 from agency.api.auth import Principal, TokenRegistry, principal_dependency
 from agency.api.authority import (
-    attach_fencing_commit,
     attach_grant_authority,
     detach_grant_authority,
     require_peer_authority,
@@ -70,7 +69,6 @@ from agency.api.routers import memory as memory_router
 from agency.api.routers import tasks as tasks_router
 from agency.autonomy.blacksmith import activate_blacksmith
 from agency.bridges.coordinator import ExternalCoordinator
-from agency.consensus.fencing_commit import GrantFencingCommit
 from agency.evidence.store.store import EvidenceStore
 from agency.factory.prompts import PromptRegistry
 from agency.factory.requested_agent import RequestedAgentRequest, RequestedAgentService
@@ -234,7 +232,6 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     memory_lifecycle: TieredMemoryEngine | None = None
     task_store: TaskStore | None = None
     orchestrator: AgencyOrchestrator | None = None
-    fencing_commit: GrantFencingCommit | None = None
     lease: LatticeLease | None = None
     primary: BaseException | None = None
     state_names = (
@@ -255,7 +252,6 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         "peer_membership",
         "grant_ledger",
         "grant_bft_time_ms",
-        "fencing_commit",
     )
     for name in state_names:
         setattr(application.state, name, None)
@@ -378,12 +374,6 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         # ballot route, the grant-verifying HTTP dependency and — gaps.md #18
         # route swap — the grant path on the intake routes).
         attach_grant_authority(application)
-        # Resource-side fencing commit for grant-admitted tasks (gaps.md #18):
-        # built when the pinned genesis grant ledger exists; the executor then
-        # fences every consequential execution of a grant task on (grant
-        # digest, task id). Without a ledger the grant intake path stays 503,
-        # so no grant-admitted task can exist and nothing is fenced.
-        fencing_commit = attach_fencing_commit(application, orchestrator)
 
         log.info("api.startup", version=__version__)
         yield
@@ -405,8 +395,6 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             closers = []
             if orchestrator is not None:
                 closers.append(orchestrator.stop)
-            if fencing_commit is not None:
-                closers.append(fencing_commit.close)
             if lease is not None:
                 closers.append(lease.release)
             closers.append(close_grant_authority)

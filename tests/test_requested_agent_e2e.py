@@ -188,9 +188,7 @@ async def test_classic_task_refines_prompt_from_assessment_evidence(tmp_path) ->
         assert factory.get("scout", "1.0.0").status is BlueprintStatus.REVOKED
         refined = prompts.get("purpose-scout", "1.0.1")
         assert refined.status is PromptStatus.PUBLISHED
-        # Since 8a9a48f the classic path fabricates no criteria, so the honest
-        # "ok" output no longer fails a fabricated completeness check; the real
-        # observation it emits is the short output (2 < 64 chars).
+        assert "check failed" in refined.body
         assert "short output" in refined.body
     finally:
         await orch.stop()

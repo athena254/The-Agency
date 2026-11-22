@@ -11,7 +11,6 @@ import argparse
 import asyncio
 import json
 import sys
-import traceback
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
@@ -100,12 +99,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"error": code}), file=sys.stderr)
         return 1
     except Exception:  # noqa: BLE001 -- fail closed with a fixed public code
-        # Fail closed with the fixed public code on the machine-readable
-        # channel (never raw storage errors, config, bearer or provider
-        # credentials), but keep the root cause on stderr (KI-04): discarding
-        # the traceback left a failing child with no diagnostics beyond the
-        # fixed code, so a recovery harness could not establish why.
-        traceback.print_exc()
+        # No paths, raw storage errors, config, bearer or provider credentials.
         print(json.dumps({"error": "recovery_unavailable"}), file=sys.stderr)
         return 1
 

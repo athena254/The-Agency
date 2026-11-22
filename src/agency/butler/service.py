@@ -39,7 +39,6 @@ from agency.butler.knowledge import augment_description, select_knowledge
 from agency.butler.persona import PersonaFraming
 from agency.butler.router import MessageRouter
 from agency.butler.threads import Thread, ThreadMessage, ThreadStore, Workspace
-from agency.factory.default_agents import DEFAULT_AGENT_DOMAINS, seed_default_agent_blueprints
 from agency.kernel.audit import AuditEntry, AuditLog
 from agency.kernel.identity import Agent
 from agency.kernel.tasks import TaskStatus
@@ -58,8 +57,6 @@ if TYPE_CHECKING:
         NativeCodingOutcome,
         NativeCodingRequest,
     )
-    from agency.factory.prompts import PromptRegistry
-    from agency.factory.service import AgentFactory
     from agency.lattice.api import Lattice
     from agency.llm.metered import MeteredModel
     from agency.tools.registry import ToolRegistry
@@ -68,7 +65,14 @@ log = structlog.get_logger(__name__)
 
 LLMCallable = Callable[[str, dict[str, Any]], Any | Awaitable[Any]]
 
-_DEFAULT_DOMAINS: tuple[str, ...] = DEFAULT_AGENT_DOMAINS
+_DEFAULT_DOMAINS: tuple[str, ...] = (
+    "personal",
+    "work",
+    "business",
+    "security",
+    "research",
+    "general",
+)
 
 
 @dataclass(frozen=True)
@@ -104,10 +108,6 @@ class ButlerService:
         memory_store: MemoryStore | None = None,
         llm: LLMCallable | None = None,
         thread_store: ThreadStore | None = None,
-        factory: AgentFactory | None = None,
-        prompt_registry: PromptRegistry | None = None,
-        seed_authorizer: Callable[[str, str], bool] | None = None,
-        seed_approver: str = "",
     ) -> None:
         self._config = config or ButlerConfig()
         self._orchestrator = orchestrator or AgencyOrchestrator()
@@ -127,16 +127,6 @@ class ButlerService:
         self._decision_model: JevDecisionModel | None = None
         self._persona: PersonaFraming | None = None
         self._persona_disabled = False
-        # Optional governed-seeding wiring: when a factory + prompt registry
-        # are provided, default agents are factory-issued identities (see
-        # ``agency.factory.default_agents``); the authorizer/approver pair is
-        # mandatory then (fail closed). The caller owns the factory and must
-        # wire its kernel/runtime registries to the orchestrator's registries
-        # so issued identities are resolvable during execution.
-        self._factory = factory
-        self._prompt_registry = prompt_registry
-        self._seed_authorizer = seed_authorizer
-        self._seed_approver = seed_approver
         self._log = structlog.get_logger(__name__)
         self._started = False
         self._seeded = False
@@ -275,14 +265,7 @@ class ButlerService:
             await self.start()
 
     async def _ensure_default_agents(self) -> None:
-        """Seed one agent per default domain if the router/orchestrator is empty.
-
-        Factory mode (a factory and prompt registry are wired): default agents
-        are governed, factory-issued identities — an explicit seed authorizer
-        and approver are mandatory (fail closed, no ungoverned fallback), so a
-        seeding failure is loud and aborts startup. Legacy mode (no factory):
-        plain ``register_agent`` agents as before.
-        """
+        """Seed one agent per default domain if the router/orchestrator is empty."""
         if self._seeded:
             return
         existing = {a.domain.strip().lower() for a in self._router.list_agents()}
@@ -291,37 +274,6 @@ class ButlerService:
             existing |= {a.domain.strip().lower() for a in orch_agents}
         except Exception:  # noqa: BLE001 — optional seeding must not break startup.
             self._log.warning("butler.seed_list_failed")
-        if self._factory is not None or self._prompt_registry is not None:
-            self._seed_factory_agents(existing)
-        else:
-            await self._seed_legacy_agents(existing)
-        self._seeded = True
-
-    def _seed_factory_agents(self, existing: set[str]) -> None:
-        """Register factory-issued default agents into the router."""
-        if self._factory is None or self._prompt_registry is None:
-            raise ValueError(
-                "butler factory seeding requires both factory and prompt_registry (fail closed)."
-            )
-        if self._seed_authorizer is None or not self._seed_approver.strip():
-            raise ValueError(
-                "butler factory seeding requires an explicit seed_authorizer and "
-                "seed_approver (fail closed; no self-approval)."
-            )
-        issued = seed_default_agent_blueprints(
-            self._factory,
-            self._prompt_registry,
-            self._seed_authorizer,
-            approver=self._seed_approver,
-        )
-        for domain, agent in issued.items():
-            if domain in existing:
-                continue
-            self._router.register_agent(agent)
-            self._log.info("butler.factory_agent_seeded", domain=domain, agent_id=agent.id)
-
-    async def _seed_legacy_agents(self, existing: set[str]) -> None:
-        """Seed plain agents per default domain (offline/hermetic path)."""
         for domain in _DEFAULT_DOMAINS:
             if domain not in existing:
                 try:
@@ -334,6 +286,7 @@ class ButlerService:
                     self._log.info("butler.agent_seeded", domain=domain, agent_id=agent.id)
                 except Exception:  # noqa: BLE001 — continue seeding other domains.
                     self._log.exception("butler.seed_failed", domain=domain)
+        self._seeded = True
 
     # ------------------------------------------------------------------ #
     # Core API

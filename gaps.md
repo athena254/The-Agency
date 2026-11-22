@@ -3,15 +3,14 @@
 Found while implementing `RequestedAgentService` (`src/agency/factory/requested_agent.py`).
 Ordered by production risk. **Avoid these patterns; all agents are free to fix them.**
 
-**Status 2026-11-22 (full-gap sweep + build session):** 18 of 20 closed — gaps 1-9, 11-16,
-19 and 20; gap 10 is CLOSED (the last open leg — a second live provider for comparison —
-was qualified the same day; details below); gap 18 is partially closed (§12 grant path live
-on the authed intake routes, fenced downstream at the executor, live 4-peer actuator demo
-PASS; an optional fail-closed TLS-termination path with a local test-CA harness landed
-`0fe1d0c`/`4810b82`/`5d328fa`; real-PKI certificates remain external). Gap 17 remains open
-for an external reason (no real PAK repository to wire against); gaps 18-20 were added by
-the intake workstream (2026-11-20). Gap 21 is partially closed: (d) and now (f) are closed
-(commit references below); (e) stays deliberately blocked.
+**Status 2026-11-22 (full-gap sweep):** 17 of 20 closed — gaps 1-9, 11-16, 19 and 20; gaps 18
+(§12 grant path live on the authed intake routes, live 4-peer actuator demo PASS; real PKI +
+multi-node consensus remain) and 10 (live adapter + live task qualified on CentAI
+`hy4-flash:free` 2026-11-22; improve leg + soak remain) are partially closed — commit
+references below; gap 20's ref is on `gap/autonomy-execution`, the Tier6 refs landed on
+`main` (`37095b9`) and the consolidation line (`f981282`). Gap 17 remains open for an
+external reason (no real PAK repository to wire against); gaps 18-20 were added by the
+intake workstream (2026-11-20).
 
 ## 1. Capability ⇄ Factory circular import (structural) — CLOSED `5399d37`
 `canonical_sha256` moved to the neutral `src/agency/core/hashing.py`; `factory.coding_models`
@@ -64,7 +63,7 @@ registration, with a per-service lifetime cap (`MAX_LIFETIME_LEARNED_SKILLS = 32
 `PromptRegistry`, `AgentFactory` and `SkillRegistry` set `journal_mode=WAL` +
 `synchronous=NORMAL` on their connections; one writer connection per process stands.
 
-## 10. No live-provider qualification of this flow — CLOSED (2026-11-22, live, two providers)
+## 10. No live-provider qualification of this flow — PARTIALLY CLOSED (2026-11-22, live)
 Qualified live on an OpenAI-compatible provider (CentAI `api.cent-ai.dev/v1`, model
 `hy4-flash:free`, configured via `AGENCY_LLM_PROVIDER=openai` + `AGENCY_LLM_BASE_URL` +
 `AGENCY_LLM_API_KEY` in the untracked `.env`; key is never committed): (a) the Agency's own
@@ -73,39 +72,7 @@ marker; (b) a real task ran through the full dispatcher pipeline — live planne
 live executor (`attempts=1`), correct result (`42`), audit entries, memory write, terminal
 `completed`, clean shutdown. The verifier scored the subtasks `0.667/failed` on a correct
 answer — the known independent-checker strictness open item, recorded honestly as findings.
-Still open: a second provider for comparison. The multi-restart and concurrency soak — the
-last unqualified leg — was exercised live the same day (2026-11-22): `scripts/quality_soak.py`
-(written uncommitted in the `D:/agency-wave-soak` worktree at `4e49a91` — evidence only, no
-branch; Ruff check/format clean; no new unit tests, the script is evidence-producing) ran
-both legs against hy4-flash:free with the file-backed shared stores (`AGENCY_TASKS_DB` /
-`AGENCY_AUDIT_DB` / `AGENCY_EVIDENCE_DB` / `AGENCY_MEMORY_DB` per-leg temp dir, lease TTL 45
-s). Concurrency leg: 10 independently verifiable tasks (exact-number / exact-marker mix) on
-one SQLite queue drained by TWO dispatcher processes sharing the file — 10/10 terminal
-`completed`, every completed output carried its exact expected token, exactly one execution
-and one CAS terminal write per task across both processes (no duplicate side effects), the
-deliberate terminal-CAS probe was refused 10/10 (`YIELDED_TERMINAL`), 16 subtask audit
-entries / 16 evidence findings, workers exited 0. Restart leg: 6 tasks, dispatcher process
-w1 killed mid-flight (Windows tree-kill via `taskkill /F /T`; the uv venv trampoline makes
-`Popen.pid` the launcher, so the kill targets the tree and the lease-owning interpreter pid
-is taken from the worker's own ready report) while holding 2 RUNNING leases — the
-expired-only probe fired immediately after the kill requeued 0 (orphaned fresh leases and
-the survivor's heartbeated leases all untouched), once the TTL lapsed a fresh
-`AGENCY_TASKS_RECOVER=1` dispatcher requeued exactly the 2 orphaned claims and re-executed
-them to `completed` with correct outputs; 6/6 terminal, no task lost, one execution + one
-terminal write per task across all three workers, no pre-kill terminal record overwritten
-(output digests unchanged), the killed process's partial audit trail intact (append-only,
-1 entry before the kill → 7 after, pre-kill digests verified), terminal-CAS probe refused
-6/6. Free-tier capacity was healthy in this window: 0 provider backoffs, 0 planner-regex
-fallbacks, 0 executor retries across both legs — recorded as observed absence, not forced
-passes; the provider-aware backoff and planner fallback remain the guards for dips. The
-harness itself was fixed once during qualification (uv-trampoline pid handling; the first
-dry run honestly failed with "no RUNNING claim owned by a killable worker" because the
-lease owner carried the interpreter pid while `Popen` tracked the launcher). Evidence:
-`D:/agency-merge-backups/soak-evidence.json` (per-leg verdicts/reasons, per-task final
-status + output digest, audit/evidence counts, CAS-yield and probe counts, restart
-timeline; per-worker logs and SQLite stores under `D:/agency-soak-runs/`). Both legs
-`pass`; no secrets in the evidence (key-value scan before write). The
-improve leg was qualified live the same day (2026-11-22): the offline `test_requested_agent_
+Still open: multi-restart and concurrency soak, and a second provider for comparison. The
 improve leg was qualified live the same day (2026-11-22): the offline `test_requested_agent_
 e2e` flow re-run with the live provider driving planner/executor — `request_agent` → live
 task → `improve_agent` re-versioned `scout` 1.0.0→1.0.1 (`prompt_refined=True`, atomic
@@ -119,37 +86,8 @@ LLM (unit-tested credential separation; the un-overridden default stays Google-o
 sub-gate (`rc=0`) and the LLM review round all executed, gate `PASS score 4`, sole caveat
 `not_a_human_review`. Free-tier capacity dips surface as 60s timeouts / transient 503s —
 the provider-aware backoff retries them and the gate fails closed with honest caveats when
-the provider stays unavailable (observed and verified live). The soak is now exercised
-(both legs `pass`, evidence above); full production certification is still not claimed —
-single host, single provider, no beta enablement.
-
-**Second provider — CLOSED the same day (2026-11-22, live):** the remaining open leg — a
-second provider for comparison — was qualified on Google (`ProviderKind.GOOGLE`, config
-default `gemini-3.5-flash-lite`, `AGENCY_LLM_PROVIDER=google` + `AGENCY_LLM_API_KEY` /
-`AGENCY_LLM_MODEL`): (a) the adapter leg round-tripped the exact expected marker through
-dotenv → `load_config` → `LLMAdapter.generate` (1 attempt, no backoffs); (b) a real task ran
-the full dispatcher pipeline — live planner (3 subtasks), live executor, exact correct
-output, terminal `completed`, audit/evidence/memory all written, 0 provider errors. Both
-CentAI legs re-ran green in the same comparison (`scripts/second_provider_comparison.py`,
-commit `182faec`; hermetic tests for its arg handling/offline refusal/
-secret-scan `tests/test_second_provider_comparison.py`; per-provider JSON evidence at
-`D:/agency-second-provider/evidence/second-provider-evidence.json`, secret-scanned before
-write; the key was never read into any artifact). The long-standing independent-checker
-strictness item recorded above — the verifier scoring a correct answer `0.667/failed` — is
-CLOSED (`8a9a48f`): the orchestrator had been passing the verifier's own check-category
-names ("completeness"/"accuracy"/"safety") as if they were output-mention requirements, so
-a correct keyword-free answer failed the fabricated completeness check; it now verifies
-what was actually checked (completeness/safety honestly, accuracy recorded
-`not_performed`/`no_trusted_accuracy_oracle`), and safety enforcement is pinned to survive.
-The live Google task leg observed the fixed verdict honestly (`needs_review`, no fabricated
-failure). Also fixed from the qualification (`2a909be`): the legacy `LLMAdapter()` env path
-neither detected `GOOGLE_API_KEY`/`GEMINI_API_KEY` nor had a google default model — it fell
-through to the Pollinations default and 404'd; detection + default now mirror
-`config.py`. Honest limits: one qualification run per provider (the multi-restart and
-concurrency soak legs ran on CentAI only; not re-run on Google), free-tier dips observed on
-both (CentAI 503 retried by the provider-aware backoff; `gemini-4-hydrogen` rate-limited on
-this key — the qualification uses the config-default model), and full production
-certification is still not claimed: single host, no beta enablement.
+the provider stays unavailable (observed and verified live). Do not claim full production
+certification until the soak is exercised.
 
 ## 11. GitHub-imported skills are metadata-only — CLOSED `36bd00f`
 `ext-*` skills are created with the same documentation-only sentinel as gap 4; promotion and
@@ -194,7 +132,7 @@ repository/manifest format is available to wire against (`docs/opensource/pak.md
 A2-Security-Advisors-LTD `pak`/`schema` docs were 404 at implementation time). Connect a real
 PAK repository and verify the sync flow against its manifest format when one exists.
 
-## 18. External HTTP intake — route swap live on the authed intake routes — PARTIALLY CLOSED `8604f8a`, `11854fa`, `37095b9`, `f981282`, `fada9cb`, `2566588`
+## 18. External HTTP intake — route swap live on the authed intake routes — PARTIALLY CLOSED `8604f8a`, `11854fa`, `37095b9`, `f981282`, `fada9cb`
 Landed: the §12 actuator-side enforcement primitives — a grant-verifying HTTP dependency,
 genesis registry seeding and scoped read opening (`8604f8a`, adapted to the merged router
 posture in `2eb4603`, async-bridge fix `37095b9`), memory owner-scope binding, finality-gated
@@ -219,42 +157,12 @@ wrong-scope 403, tampered 401, both auth kinds observed in the server log; evide
 `D:/agency-merge-backups/d6-actuator-evidence.json`. Also fixed en route in `fada9cb`:
 `TaskStore` explicit transactions are serialized by an in-process lock (the api intake and
 the dispatcher share one aiosqlite connection; concurrent `BEGIN IMMEDIATE` used to raise
-"cannot start a transaction within a transaction"). Downstream fencing-token commit closed
-(`2566588`, branch `gap/18-fencing-commit`): the `POST /v1/tasks` grant path stamps the
-verified grant digest server-side on the task record (`input["grant_digest"]`; any
-client-supplied value is always stripped, bearer intakes unchanged), and the executor —
-`AgencyOrchestrator._execute_fenced`, the single seam both the dispatcher and inline
-callers pass through — commits the resource-side fencing token bound to (grant digest,
-task id) before the consequential pipeline runs and records an idempotent finality receipt
-after it, on the existing `FencingStateStore` (`agency.consensus.fencing_commit`, now WAL
-per gap-19 discipline). A re-executed attempt replays the existing receipt instead of
-re-running the work; a grant revoked after intake, a fencing-store error, and an
-orchestrator without a fencer all refuse the execution fail-closed with honest FAILED
-outcomes (`task.grant_fencing_refused`); the api and butler lifespans both attach the
-fencer (`attach_fencing_commit`, `AGENCY_FENCING_DB` for a durable store, per-process
-in-memory otherwise — mirroring `AGENCY_GRANT_STORE_DB`). Honest limits: the grant object
-is not re-verified at the executor (only the intake-verified digest is held there, and the
-nonce was consumed at the point of use, so re-verification would be a replay by
-construction); a crash between execution and receipt commit leaves the effect without a
-receipt (external-resource reconciliation stays a follow-up, as in
-`agency.consensus.fencing`); a concurrent duplicate commit of the same digest is refused
-by the store's append-only receipt log (stale epoch). Still open: `POST /v1/agents` stays
-503 (spec-pinned, see #21e — enablement is an owner decision); production peer
-certificates from a real PKI. The multi-node-consensus item is materially covered by the
-landed Slice C live proof (`docs/SLICE_C_LIVE_EVIDENCE.md`: four real cometbft 0.38.26
-validators on loopback, each with its own ABCI host child over TCP, real
-`/broadcast_tx_sync`/`/tx`/`/commit` RPC, repeat runs PASS — what remains there is
-real-PKI certificates, not consensus). Tokens are plaintext over HTTP — bind servers to
-loopback or terminate TLS. The TLS termination leg advanced 2026-11-22 (`0fe1d0c`,
-`4810b82`, `5d328fa`): the owner pilot launcher accepts optional
-`--tls-certfile`/`--tls-keyfile` (both-or-nothing, fail closed on a half pair via
-`tls_cert_and_key_required`, defense-in-depth re-check in the server-config builder;
-loopback bind, bearer, CSRF and ACL posture unchanged), and `scripts/gen_test_ca.py`
-generates a local test-only CA + server leaf (SANs for localhost/127.0.0.1, refuses
-overwrite, documented LOCAL TESTS ONLY / never deploy). The hermetic e2e makes a real HTTPS
-request against the launched app with the chain verified through the generated CA
-(`verify=False` nowhere). Production peer certificates from a real PKI remain external and
-no other HTTP surface is TLS-wired in this change.
+"cannot start a transaction within a transaction"). Still open: `POST /v1/agents` stays 503
+(spec-pinned, see #21e — enablement is an owner decision); production peer certificates
+from a real PKI and multi-node consensus beyond the single-host demo; fencing-token commit
+for downstream task execution (intake consumes nonces; resource-side fencing stays with the
+execution actuator). Tokens are plaintext over HTTP — bind servers to loopback or
+terminate TLS.
 
 ## 19. Dispatcher/task-store operational bounds (2026-11-20) — CLOSED `3a3cd91`, `a34d90d`, `11f7600`
 Tasks persist in `data/tasks.db` (`AGENCY_TASKS_DB`); claims are atomic across the api and
@@ -308,25 +216,13 @@ dispatched/dispatch_failed/dispatch_uncertain/dispatch_skipped. With
 `assignment_journal_path` configured, the durable A5 `AssignmentJournal` records
 ASSIGNED→RUNNING→terminal atomically with its outbox rows under its bounded id scheme (real
 ids stay in the proof bundle and the new `RunResult.dispatches` field); progressed records
-are never re-dispatched, and journal errors fail closed by propagating. Cross-restart
-reconciliation of never-dispatched ASSIGNED rows — dispatch and its ASSIGNED→RUNNING write
-share no intervening await, so a row still ASSIGNED at journal open comes from a killed
-process and provably never started — is CLOSED `ea998d7` (2026-11-22): the journal's
-open-time recovery, which already flipped interrupted RUNNING rows to UNCERTAIN, now also
-claims every stuck ASSIGNED row with an atomic ASSIGNED→FAILED write plus its own
-hash-chained outbox entry, whose FAILED-directly-from-ASSIGNED signature (no RUNNING entry
-in between, no invented digest or clock) is the audit record of "never dispatched,
-resolved at startup". RUNNING rows keep the UNCERTAIN recovery and are never resolved by
-the new path (live-owner lease discipline), terminal rows are untouched, concurrent starts
-serialize on the write lock so nothing double-resolves, a crash mid-recovery rolls back and
-leaves rows for the next start, and journal errors propagate fail closed from the
-constructor. Re-dispatch through the delegate was rejected deliberately: plan ids are fresh
-uuid4s and the journal stores no free text, so the subtask payload, parent task binding and
-agent id exist nowhere durable to honestly re-dispatch from. Forge-domain
+are never re-dispatched, and journal errors fail closed by propagating. Forge-domain
 children keep routing through BlacksmithOps (owned by
-`docs/PLAN_BLACKSMITH_FORGE_ORCHESTRATOR.md`, unchanged). Still out of scope:
-parallel/dependency-aware dispatch (sequential in plan order today), and the pre-existing
-umbrella parent execution alongside the children.
+`docs/PLAN_BLACKSMITH_FORGE_ORCHESTRATOR.md`, unchanged). Still out of scope: cross-restart
+reconciliation of never-dispatched ASSIGNED rows (dispatch and its ASSIGNED→RUNNING write
+share no intervening await, so the window is a killed process), parallel/dependency-aware
+dispatch (sequential in plan order today), and the pre-existing umbrella parent execution
+alongside the children.
 
 ## 21. Task-lifecycle audit items (2026-11-20 audit, disposition 2026-11-21)
 Of the three audit items outside gap 19: (d) delegated child tasks' results never returned
@@ -346,25 +242,7 @@ create/revoke agents"); `tests/test_agent_intake_boundary.py` pins that `AGENCY_
 does NOT open it. The D6 grant-verifier dependency has now landed (see #18); route
 enablement still requires the full verifier swap on consequential routes and an explicit
 owner decision, not a bearer-token switch. (f) task decomposition is
-regex-only (`agents/planner.py::_default_strategy`) — CLOSED
-`fd87401` (2026-11-22, live): an LLM-backed decomposition strategy landed on the existing
-`AgentPlanner` strategy seam (`agents/planner.py::make_llm_strategy`); the default-strategy
-resolver picks it whenever the configured provider is not echo/offline and asks the LLM to
-split the task into 1-6 subtasks (short title + description + suggested lowercase
-capabilities from the planner vocabulary), parsed and validated strictly (exact key set,
-count cap, string bounds; one code fence tolerated). Any failure — malformed or
-budget-truncated reply, over-cap plan, empty completion, timeout, provider error — falls
-back to the regex `_default_strategy` with an honest `planner.llm_decompose_failed` log
-(class only, never reply content). Prompt hygiene: only the task text goes out (bounded to
-4000 chars) — no tool definitions, no system/memory content; the strategy-owned adapter
-caps output (1024 tokens, temp 0.2). Selection reads configuration only (no network call)
-and stays regex under echo, so the hermetic suite is untouched
-(`tests/test_planner_decomposition.py` stubs the adapter). The regex strategy remains the
-offline floor and the guaranteed fallback. Live-validated on CentAI `hy4-flash:free`: 3/3
-sample tasks produced 5-subtask plans within the cap (an earlier run honestly fell back on
-a budget-truncated reply and an empty free-tier completion, which motivated the 512→1024
-token budget); evidence `D:/agency-merge-backups/decomp-evidence.json`, script
-`scripts/decompose_live_demo.py`. Honest caveats: the sync `plan` seam blocks the calling
-thread for the bounded LLM call (on the orchestrator's legacy `_execute_running` path that
-thread is the event loop), and subtasks still reuse whole-task prompts downstream
-(unchanged).
+regex-only (`agents/planner.py::_default_strategy`) — REMAINS: the `AgentPlanner` strategy
+seam is already pluggable, but with the hermetic echo provider an LLM-backed splitter cannot
+be validated offline (no API keys on this machine, #10); adding an untestable live path was
+rejected as not a clean bounded improvement.

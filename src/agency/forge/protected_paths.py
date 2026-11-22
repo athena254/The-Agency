@@ -68,18 +68,6 @@ def is_protected(path: object) -> bool:
         ".drone.yml",
     }:
         return True
-    # Self-modification surfaces: agent/skill/hook/MCP control directories are
-    # the mechanism a factory would use to rewrite its own rules, so an
-    # automatic writer never touches them. Agents may propose changes as
-    # reviewed work; they may not commit them.
-    if any(part in {".claude", ".zcode", ".factory", ".claude-plugin"} for part in parts):
-        return True
-    if basename == ".mcp.json":
-        return True
-    # Governance constitution files live at the repository root only; a
-    # "src/agents.md" is a document like any other.
-    if parts[0] in {"agents.md", "claude.md", "gemini.md", "mission.md"}:
-        return True
     for parent, child in pairwise(parts):
         if parent == ".github" and child == "workflows":
             return True

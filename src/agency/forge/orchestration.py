@@ -28,8 +28,6 @@ from agency.forge.cost import CostStore, record_cost
 from agency.forge.evidence import EvidenceReport, EvidenceStore
 from agency.forge.external_agent import ExternalAgentReport, run_external_agent
 from agency.forge.merge_queue import MergeQueueReport, MergeQueueStore, evaluate_merge
-from agency.forge.reviewer import ReviewReport
-from agency.forge.work_order import WorkOrder, render_work_order
 
 if TYPE_CHECKING:
     # Imported lazily at runtime: agency.autonomy.__init__ imports engine,
@@ -68,7 +66,6 @@ class ForgeJob(BaseModel):
     acceptance: tuple[str, ...] = ()
     test_paths: tuple[str, ...] = ()
     state: JobState = JobState.QUEUED
-    language: str = Field(default="", max_length=32)
     attempts: int = Field(default=0, ge=0)
     report_id: str = ""
     gate: str = ""
@@ -132,7 +129,6 @@ class BlacksmithOps:
         audit_sink: Callable[[str, dict[str, Any]], None] | None = None,
         max_retries: int = DEFAULT_MAX_RETRIES,
         worktree_root: str | Path | None = None,
-        shadow_llm: Any = None,
     ) -> None:
         if max_retries < 0 or max_retries > 5:
             raise ValueError("max_retries must be in [0, 5].")
@@ -150,7 +146,6 @@ class BlacksmithOps:
         )
         self._max_attempts = max_retries + 1
         self._worktree_root = worktree_root
-        self._shadow_llm = shadow_llm
         self._audit_sink = audit_sink
         self._owned: list[Any] = []
         self.evidence = evidence if evidence is not None else self._own(EvidenceStore(":memory:"))
@@ -186,7 +181,6 @@ class BlacksmithOps:
         *,
         acceptance: tuple[str, ...] | list[str] = (),
         test_paths: tuple[str, ...] | list[str] = (),
-        language: str = "",
     ) -> ForgeJob:
         if not isinstance(repo, str) or not Path(repo).is_absolute():
             raise ValueError(f"repo must be an absolute path, got {repo!r}.")
@@ -204,7 +198,6 @@ class BlacksmithOps:
             repo=repo,
             acceptance=acc,
             test_paths=tests,
-            language=str(language or "").strip()[:32],
             state=JobState.QUEUED,
             created_at=now,
             updated_at=now,
@@ -256,36 +249,15 @@ class BlacksmithOps:
             "job_dispatched",
             f"attempt {job.attempts + 1}",
         )
-        # The striker receives a rendered work order, not a bare task string:
-        # boundaries, work rules, acceptance criteria, the test command, and —
-        # on retries — the previous attempt's bounded failure tail.
-        order = WorkOrder(
-            title=job.title,
-            task=job.task,
-            repo=job.repo,
-            acceptance=job.acceptance,
-            test_paths=job.test_paths,
-            attempt=job.attempts,
-            max_attempts=self._max_attempts,
-            failure_tail=job.failure_detail if job.attempts > 1 else "",
-        )
-        # Optional kwargs are only forwarded when set so custom runners with
-        # fixed signatures keep working.
-        runner_kwargs: dict[str, Any] = {}
-        if self._shadow_llm is not None:
-            runner_kwargs["shadow_llm"] = self._shadow_llm
-        if job.language:
-            runner_kwargs["language"] = job.language
         try:
             report = self._runner(
                 job.repo,
                 list(self._command),
-                render_work_order(order),
+                job.task,
                 branch=f"blacksmith-{job.job_id[:8]}-a{job.attempts}",
                 worktree_root=self._worktree_root,
                 run_tests_flag=bool(job.test_paths),
                 test_paths=list(job.test_paths) or None,
-                **runner_kwargs,
             )
         except Exception as exc:  # noqa: BLE001 - a worker crash must fail the job honestly
             detail = f"{type(exc).__name__}: {exc}"[:MAX_DETAIL_CHARS]
@@ -296,14 +268,6 @@ class BlacksmithOps:
                 detail,
             )
             return self._maybe_block(job)
-        # Dispatch ledger: one entry per attempt. External CLI agents expose no
-        # token metering, so cost stays 0.0 — an honest "not metered", never a
-        # fabricated bill.
-        record_cost(
-            self._costs,
-            run_id=f"{job.job_id[:40]}#a{job.attempts}"[:128],
-            model=self._model,
-        )
         return self.record_verdict(job.job_id, report)
 
     def record_verdict(self, job_id: str, report: ExternalAgentReport) -> ForgeJob:
@@ -315,6 +279,7 @@ class BlacksmithOps:
             "changed_paths": tuple(report.changed_paths),
             "artifact_sha256": digest,
         }
+        record_cost(self._costs, run_id=job_id, model=self._model, cost_usd=0.0)
         if report.isolation_violations:
             detail = "isolation violations: " + ", ".join(report.isolation_violations)
             job = self._transition(
@@ -326,10 +291,6 @@ class BlacksmithOps:
             return self._maybe_block(job)
         if str(report.gate) != "PASS":
             detail = (report.failure_detail or f"gate {report.gate}")[:MAX_DETAIL_CHARS]
-            citations = _review_citations(report.review)
-            if citations:
-                detail = f"{detail} | review findings: {citations}"
-            detail = detail[:MAX_DETAIL_CHARS]
             job = self._transition(
                 job.model_copy(update={**base, "failure_detail": detail}),
                 JobState.FAILED,
@@ -505,22 +466,6 @@ class BlacksmithOps:
         self._conn.close()
         for store in self._owned:
             store.close()
-
-
-def _review_citations(review: ReviewReport | None, limit: int = 5) -> str:
-    """Bounded structured citations of a review's blocking findings.
-
-    Path:line:rule:severity only — no LLM prose is ever copied into the job
-    record. Unresolved high/critical findings first; falls back to any
-    unresolved finding so retries always know what to address.
-    """
-    if review is None:
-        return ""
-    unresolved = [f for f in review.findings if not f.resolved]
-    blocking = [f for f in unresolved if f.severity in ("high", "critical")]
-    flagged = blocking or unresolved
-    parts = [f"{f.path or '-'}:{f.line} {f.rule_id} ({f.severity})" for f in flagged[:limit]]
-    return "; ".join(parts)
 
 
 __all__ = [

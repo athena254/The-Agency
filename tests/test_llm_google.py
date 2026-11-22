@@ -125,20 +125,3 @@ def test_google_key_format_accepts_both_prefixes(prefix: str) -> None:
     for provider in ("google", "gemini"):
         ok, reason = check_key_format(provider, key)
         assert ok, reason
-
-
-def test_executor_env_path_google_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The adapter's env-path default for google is the google default model.
-
-    The legacy ``LLMAdapter()`` env path (no explicit config/model) resolves the
-    provider from credentials; a missing per-provider default sent google
-    requests to the Pollinations fallback model, which 404s on the Gemini
-    endpoint (observed live during the gap-10 second-provider qualification).
-    """
-    monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
-    for key in ("LLM_PROVIDER", "AGENCY_LLM_PROVIDER", "AGENCY_LLM_MODEL"):
-        monkeypatch.delenv(key, raising=False)
-    adapter = LLMAdapter()
-    assert adapter.provider == "google"
-    assert adapter.model == "gemini-3.5-flash-lite"
-    assert adapter._default_model() == "gemini-3.5-flash-lite"

@@ -6,11 +6,6 @@ v2: static security scan + bounded isolated test runner + composed pipeline.
 
 from __future__ import annotations
 
-from agency.forge.apprentice import (
-    build_apprentice_llm,
-    detect_apprentice_language,
-    run_apprentice,
-)
 from agency.forge.backlog import (
     MAX_ITEMS as MAX_BACKLOG_ITEMS,
 )
@@ -31,12 +26,6 @@ from agency.forge.cost import (
     CostReport,
     CostStore,
     record_cost,
-)
-from agency.forge.diff import (
-    DiffBundle,
-    build_diff_bundle,
-    delta_paths,
-    head_sha,
 )
 from agency.forge.evidence import (
     EvidenceReport,
@@ -73,11 +62,6 @@ from agency.forge.merge_queue import (
     MergeQueueReport,
     MergeQueueStore,
     evaluate_merge,
-)
-from agency.forge.metrics import (
-    ForgeMetrics,
-    compute_metrics,
-    format_metrics,
 )
 from agency.forge.pipeline import (
     ForgePipelineReport,
@@ -145,13 +129,11 @@ __all__ = [
     "CostEntry",
     "CostReport",
     "CostStore",
-    "DiffBundle",
     "EvidenceReport",
     "EvidenceStore",
     "ExternalAgentReport",
     "ExternalAgentStore",
     "FileRecord",
-    "ForgeMetrics",
     "ForgePipelineReport",
     "ForgePipelineStore",
     "GenerateReport",
@@ -182,22 +164,15 @@ __all__ = [
     "WorktreeError",
     "WorktreeInfo",
     "available_tools",
-    "build_apprentice_llm",
-    "build_diff_bundle",
     "build_test_command",
     "capture_evidence",
-    "compute_metrics",
     "create_worktree",
-    "delta_paths",
-    "detect_apprentice_language",
     "detect_language",
     "evaluate_merge",
     "forge_tool_params",
-    "format_metrics",
     "generate_app",
     "generate_timer",
     "get_tool",
-    "head_sha",
     "inspect_changes",
     "install_hint",
     "is_available",
@@ -206,7 +181,6 @@ __all__ = [
     "rea_prompt_params",
     "record_cost",
     "remove_worktree",
-    "run_apprentice",
     "run_coding_agent",
     "run_external_agent",
     "run_holdout",
