@@ -27,6 +27,12 @@ from agency.forge.cost import (
     CostStore,
     record_cost,
 )
+from agency.forge.diff import (
+    DiffBundle,
+    build_diff_bundle,
+    delta_paths,
+    head_sha,
+)
 from agency.forge.evidence import (
     EvidenceReport,
     EvidenceStore,
@@ -129,6 +135,7 @@ __all__ = [
     "CostEntry",
     "CostReport",
     "CostStore",
+    "DiffBundle",
     "EvidenceReport",
     "EvidenceStore",
     "ExternalAgentReport",
@@ -164,8 +171,10 @@ __all__ = [
     "WorktreeError",
     "WorktreeInfo",
     "available_tools",
+    "build_diff_bundle",
     "build_test_command",
     "capture_evidence",
+    "delta_paths",
     "create_worktree",
     "detect_language",
     "evaluate_merge",
@@ -173,6 +182,7 @@ __all__ = [
     "generate_app",
     "generate_timer",
     "get_tool",
+    "head_sha",
     "inspect_changes",
     "install_hint",
     "is_available",

@@ -234,3 +234,80 @@ async def test_llm_review_with_running_event_loop(
     assert report.review is not None
     assert report.review.gate == "PASS"
     assert "heuristic_review" not in report.review.caveats
+
+
+# --------------------------------------------------------------------------- #
+# hallucination guard: uncited paths are demoted, never trusted
+# --------------------------------------------------------------------------- #
+_FOREIGN_JSON = (
+    '{"score": 4, "findings": ['
+    '{"path": "ghost.py", "line": 3, "rule_id": "LLM900", "severity": "critical", '
+    '"message": "invented"}, '
+    '{"path": "base.py", "line": 1, "rule_id": "LLM901", "severity": "high", '
+    '"message": "real citation"}], "summary": "one hallucinated"}'
+)
+
+
+class _CapturingLLM(_StubLLM):
+    def __init__(self, response: str) -> None:
+        super().__init__(response)
+        self.prompts: list[str] = []
+
+    async def generate(self, prompt: str, context: Any = None) -> str:
+        self.prompts.append(prompt)
+        return await super().generate(prompt, context)
+
+
+def test_llm_finding_with_uncited_path_is_demoted(tmp_path: Path, monkeypatch) -> None:
+    from agency.forge.reviewer import run_review
+
+    repo = _git_repo(tmp_path)
+    _configure_provider(monkeypatch)
+    stub = _CapturingLLM(_FOREIGN_JSON)
+    _patch_generate(monkeypatch, stub)
+    report = run_review(repo, ["base.py"], use_llm=True)
+    rules = {f.rule_id: f for f in report.findings}
+    assert "LLM_UNVERIFIED" in rules
+    assert rules["LLM_UNVERIFIED"].severity == "low"
+    assert rules["LLM_UNVERIFIED"].path == "ghost.py"
+    assert "LLM901" in rules
+    assert rules["LLM901"].severity == "high"
+
+
+# --------------------------------------------------------------------------- #
+# frozen-tree delta re-review
+# --------------------------------------------------------------------------- #
+def test_delta_re_review_scopes_prompt_and_records_shas(tmp_path: Path, monkeypatch) -> None:
+    from agency.forge.diff import head_sha
+    from agency.forge.reviewer import run_review
+
+    repo = _git_repo(tmp_path)
+    base = head_sha(repo)
+    assert base
+    (repo / "extra.py").write_text("EXTRA = 1\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-m", "extra"], check=True, capture_output=True
+    )
+    _configure_provider(monkeypatch)
+    stub = _CapturingLLM(_CLEAN_JSON)
+    _patch_generate(monkeypatch, stub)
+    report = run_review(repo, ["base.py"], use_llm=True, delta_base_sha=base)
+    assert report.delta_base_sha == base
+    assert report.reviewed_sha == head_sha(repo)
+    assert report.gate == "PASS"
+    assert '"extra.py"' in stub.prompts[0]
+    assert '"base.py"' not in stub.prompts[0]
+
+
+def test_delta_base_unresolved_falls_back_with_caveat(tmp_path: Path, monkeypatch) -> None:
+    from agency.forge.reviewer import run_review
+
+    repo = _git_repo(tmp_path)
+    _configure_provider(monkeypatch)
+    stub = _CapturingLLM(_CLEAN_JSON)
+    _patch_generate(monkeypatch, stub)
+    report = run_review(repo, ["base.py"], use_llm=True, delta_base_sha="deadbeef" * 5)
+    assert report.delta_base_sha == ""
+    assert "delta_base_unresolved" in report.caveats
+    assert '"base.py"' in stub.prompts[0]
