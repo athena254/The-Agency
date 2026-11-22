@@ -161,6 +161,12 @@ class TaskStore:
         self._conn: aiosqlite.Connection | None = None
         self._initialized = False
         self._init_lock = asyncio.Lock()
+        # One aiosqlite connection is shared by every caller in this process
+        # (api intake + dispatcher loop), and aiosqlite only serializes single
+        # statements — not multi-statement transactions. Without this lock, a
+        # second coroutine can slip its BEGIN IMMEDIATE between another's
+        # BEGIN and COMMIT ("cannot start a transaction within a transaction").
+        self._tx_lock = asyncio.Lock()
         self._owner_id = owner_id or _default_owner_id()
         self._lease_seconds = _resolve_lease_seconds(lease_seconds)
 
@@ -416,37 +422,38 @@ class TaskStore:
 
         await self.initialize()
         conn = self.connection
-        await conn.execute("BEGIN IMMEDIATE")
-        try:
-            cursor = await conn.execute(
-                f"SELECT {_TASK_COLUMNS} FROM tasks WHERE status = ? "
-                "ORDER BY priority DESC, seq ASC LIMIT 1",
-                (TaskStatus.PENDING.value,),
-            )
-            row = await cursor.fetchone()
-            if row is None:
-                await conn.execute("COMMIT")
-                return None
-            now = utcnow()
-            lease_expires_at = _iso(now + timedelta(seconds=self._lease_seconds))
-            await conn.execute(
-                "UPDATE tasks SET status = ?, updated_at = ?, lease_owner = ?, "
-                "lease_expires_at = ? WHERE task_id = ?",
-                (
-                    TaskStatus.RUNNING.value,
-                    _iso(now),
-                    self._owner_id,
-                    lease_expires_at,
-                    row["task_id"],
-                ),
-            )
-            await conn.execute("COMMIT")
-        except BaseException:
+        async with self._tx_lock:  # serialize with the other explicit transactions
+            await conn.execute("BEGIN IMMEDIATE")
             try:
-                await conn.execute("ROLLBACK")
-            except aiosqlite.Error:
-                pass
-            raise
+                cursor = await conn.execute(
+                    f"SELECT {_TASK_COLUMNS} FROM tasks WHERE status = ? "
+                    "ORDER BY priority DESC, seq ASC LIMIT 1",
+                    (TaskStatus.PENDING.value,),
+                )
+                row = await cursor.fetchone()
+                if row is None:
+                    await conn.execute("COMMIT")
+                    return None
+                now = utcnow()
+                lease_expires_at = _iso(now + timedelta(seconds=self._lease_seconds))
+                await conn.execute(
+                    "UPDATE tasks SET status = ?, updated_at = ?, lease_owner = ?, "
+                    "lease_expires_at = ? WHERE task_id = ?",
+                    (
+                        TaskStatus.RUNNING.value,
+                        _iso(now),
+                        self._owner_id,
+                        lease_expires_at,
+                        row["task_id"],
+                    ),
+                )
+                await conn.execute("COMMIT")
+            except BaseException:
+                try:
+                    await conn.execute("ROLLBACK")
+                except aiosqlite.Error:
+                    pass
+                raise
         task = _task_from_row(row)
         task.status = TaskStatus.RUNNING
         task.updated_at = now
@@ -579,25 +586,38 @@ class TaskStore:
     # ------------------------------------------------------------------ #
 
     class _Transaction:
-        """Async context manager wrapping an explicit transaction."""
+        """Async context manager wrapping an explicit transaction.
+
+        Serialized by ``TaskStore._tx_lock``: the store holds ONE aiosqlite
+        connection shared by every in-process caller, so concurrent
+        BEGIN/COMMIT sequences must not interleave.
+        """
 
         def __init__(self, store: TaskStore) -> None:
             self._store = store
 
         async def __aenter__(self) -> aiosqlite.Connection:
+            await self._store._tx_lock.acquire()
             conn = self._store.connection
-            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                await conn.execute("BEGIN IMMEDIATE")
+            except BaseException:
+                self._store._tx_lock.release()
+                raise
             return conn
 
         async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
             conn = self._store.connection
-            if exc_type is None:
-                await conn.execute("COMMIT")
-            else:
-                try:
-                    await conn.execute("ROLLBACK")
-                except aiosqlite.Error:
-                    pass
+            try:
+                if exc_type is None:
+                    await conn.execute("COMMIT")
+                else:
+                    try:
+                        await conn.execute("ROLLBACK")
+                    except aiosqlite.Error:
+                        pass
+            finally:
+                self._store._tx_lock.release()
 
     def _transaction(self) -> TaskStore._Transaction:
         return TaskStore._Transaction(self)

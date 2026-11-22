@@ -56,7 +56,11 @@ from agency.agents.bootstrap import (
 from agency.agents.coding_bootstrap import bootstrap_coding_agent
 from agency.agents.registry import AgentRegistry as RuntimeAgentRegistry
 from agency.api.auth import Principal, TokenRegistry, principal_dependency
-from agency.api.authority import require_peer_authority
+from agency.api.authority import (
+    attach_grant_authority,
+    detach_grant_authority,
+    require_peer_authority,
+)
 from agency.api.routers import agents as agents_router
 from agency.api.routers import bridges as bridges_router
 from agency.api.routers import evidence as evidence_router
@@ -367,28 +371,9 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
                     )
 
         # Wire peer authority from a pinned genesis if available (opens the
-        # ballot route and the grant-verifying HTTP dependency).
-        try:
-            from agency.consensus.genesis import load_genesis
-            from agency.consensus.grants import GrantLedger
-            from agency.peers.authority import PeerAuthority, PeerRegistry
-
-            genesis_path = os.environ.get("AGENCY_GENESIS_PATH", "data/consensus/genesis.json")
-            if os.path.exists(genesis_path):
-                membership = load_genesis(genesis_path)
-                registry = PeerRegistry()
-                for member in membership.members:
-                    registry.register_public_key(member.peer_id, member.public_key)
-                application.state.peer_authority = PeerAuthority(membership, registry)
-                application.state.peer_membership = membership
-                application.state.grant_ledger = GrantLedger(membership=membership)
-                application.state.grant_bft_time_ms = int(
-                    os.environ.get("AGENCY_GRANT_BFT_TIME_MS", "1000")
-                )
-                log.info("api.startup.peer_authority_loaded", path=genesis_path)
-        except BaseException as exc:  # noqa: BLE001 - startup must not crash
-            application.state.peer_authority = None
-            log.warning("api.startup.peer_authority_failed", error_type=type(exc).__name__)
+        # ballot route, the grant-verifying HTTP dependency and — gaps.md #18
+        # route swap — the grant path on the intake routes).
+        attach_grant_authority(application)
 
         log.info("api.startup", version=__version__)
         yield
@@ -401,11 +386,18 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
         async def cleanup() -> BaseException | None:
             error: BaseException | None = None
+
+            async def close_grant_authority() -> None:
+                # Releases the durable grant store's SQLite connection (a
+                # no-op for the in-memory ledger) and clears the state.
+                detach_grant_authority(application)
+
             closers = []
             if orchestrator is not None:
                 closers.append(orchestrator.stop)
             if lease is not None:
                 closers.append(lease.release)
+            closers.append(close_grant_authority)
             if evidence_store is not None:
                 closers.append(evidence_store.close)
             if memory_lifecycle is not None:
@@ -462,15 +454,18 @@ def create_app() -> FastAPI:
         # The ASGI path can include root_path when mounted behind a prefix.
         # Public: GET health. Enabled + authenticated: ENABLED_AUTHED_PREFIXES
         # (route dependencies authenticate; the middleware refuses to route
-        # them at all when no token registry is configured). Everything else
-        # fails closed exactly as before.
+        # them at all when no token registry is configured). A signed intake
+        # grant (X-Agency-Grant, verified by the route dependency against the
+        # pinned grant ledger) also reaches the enabled prefixes — the grant
+        # path is a first-class alternative to bearer tokens, gaps.md #18.
+        # Everything else fails closed exactly as before.
         path = request.scope["path"]
         root = request.scope.get("root_path", "")
         if root and path.startswith(root + "/"):
             path = path[len(root) :]
         # Signed ballots carry their own authority (Ed25519 envelope verified
         # by PeerAuthority); they must reach the router to be verified.
-        from agency.api.authority import _is_read_scope, _writes_open
+        from agency.api.authority import GRANT_HEADER, _is_read_scope, _writes_open
 
         is_ballot = path == "/v1/governance/ballot"
         is_health = request.method == "GET" and path == "/v1/health"
@@ -479,13 +474,13 @@ def create_app() -> FastAPI:
         is_scoped_write = _writes_open() and path.startswith("/v1/")
         if is_health or is_ballot or is_scoped_read or is_scoped_write:
             return await call_next(request)
-        if (
-            any(
-                path == prefix or path.startswith(prefix + "/")
-                for prefix in ENABLED_AUTHED_PREFIXES
-            )
-            and getattr(application.state, "token_registry", None) is not None
-        ):
+        has_grant_intake = (
+            getattr(application.state, "grant_ledger", None) is not None
+            and request.headers.get(GRANT_HEADER) is not None
+        )
+        if any(
+            path == prefix or path.startswith(prefix + "/") for prefix in ENABLED_AUTHED_PREFIXES
+        ) and (getattr(application.state, "token_registry", None) is not None or has_grant_intake):
             return await call_next(request)
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
