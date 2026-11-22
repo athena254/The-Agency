@@ -75,7 +75,7 @@ def test_bundle_per_file_truncation_records_the_path(tmp_path: Path) -> None:
 def test_bundle_respects_total_budget(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path)
     for i in range(12):
-        (repo / f"file_{i}.py").write_text("line = %d\n" % i + "pad\n" * 900, encoding="utf-8")
+        (repo / f"file_{i}.py").write_text(f"line = {i}\n" + "pad\n" * 900, encoding="utf-8")
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True, capture_output=True)
     bundle = build_diff_bundle(repo, [f"file_{i}.py" for i in range(12)])
     assert bundle.total_bytes <= 60_000

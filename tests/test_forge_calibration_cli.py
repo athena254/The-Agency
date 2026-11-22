@@ -35,7 +35,8 @@ def test_calibrate_export_writes_labeling_worksheet(tmp_path) -> None:
     result = CliRunner().invoke(app, ["forge", "calibrate-export", "--db", db, "--out", out])
     assert result.exit_code == 0
     assert "Exported 1 verdicts" in result.output
-    row = json.loads(open(out, encoding="utf-8").readline())
+    with open(out, encoding="utf-8") as handle:
+        row = json.loads(handle.readline())
     assert row["gate"] == "PASS"
     assert row["score"] == 5
     assert row["correct"] is None
