@@ -383,14 +383,17 @@ class BlacksmithOps:
         return job
 
     def resurrect_blocked(self) -> tuple[ForgeJob, ...]:
-        """Re-queue every BLOCKED job with a fresh attempt budget (audited).
+        """Re-queue every BLOCKED/UNCERTAIN job with a fresh budget (audited).
 
         Self-reliance: a run may spend two full attempt budgets per job before
         giving up — provider windows come and go, and a blocked job from this
-        same run is worth one more pass without human prodding.
+        same run is worth one more pass without human prodding. UNCERTAIN jobs
+        (crash-recovery leftovers, including a killed orchestrator) get the
+        same honest second chance.
         """
         rows = self._conn.execute(
-            "SELECT document FROM forge_jobs WHERE state = ?", (JobState.BLOCKED.value,)
+            "SELECT document FROM forge_jobs WHERE state = ? OR state = ?",
+            (JobState.BLOCKED.value, JobState.UNCERTAIN.value),
         ).fetchall()
         revived: list[ForgeJob] = []
         for document in rows:
