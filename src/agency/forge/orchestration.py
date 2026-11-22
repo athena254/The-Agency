@@ -131,6 +131,7 @@ class BlacksmithOps:
         audit_sink: Callable[[str, dict[str, Any]], None] | None = None,
         max_retries: int = DEFAULT_MAX_RETRIES,
         worktree_root: str | Path | None = None,
+        shadow_llm: Any = None,
     ) -> None:
         if max_retries < 0 or max_retries > 5:
             raise ValueError("max_retries must be in [0, 5].")
@@ -148,6 +149,7 @@ class BlacksmithOps:
         )
         self._max_attempts = max_retries + 1
         self._worktree_root = worktree_root
+        self._shadow_llm = shadow_llm
         self._audit_sink = audit_sink
         self._owned: list[Any] = []
         self.evidence = evidence if evidence is not None else self._own(EvidenceStore(":memory:"))
@@ -264,6 +266,11 @@ class BlacksmithOps:
             max_attempts=self._max_attempts,
             failure_tail=job.failure_detail if job.attempts > 1 else "",
         )
+        # The shadow kwarg is only forwarded when configured so custom
+        # runners with fixed signatures keep working.
+        shadow_kwargs: dict[str, Any] = (
+            {"shadow_llm": self._shadow_llm} if self._shadow_llm is not None else {}
+        )
         try:
             report = self._runner(
                 job.repo,
@@ -273,6 +280,7 @@ class BlacksmithOps:
                 worktree_root=self._worktree_root,
                 run_tests_flag=bool(job.test_paths),
                 test_paths=list(job.test_paths) or None,
+                **shadow_kwargs,
             )
         except Exception as exc:  # noqa: BLE001 - a worker crash must fail the job honestly
             detail = f"{type(exc).__name__}: {exc}"[:MAX_DETAIL_CHARS]

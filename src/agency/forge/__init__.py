@@ -69,6 +69,11 @@ from agency.forge.merge_queue import (
     MergeQueueStore,
     evaluate_merge,
 )
+from agency.forge.metrics import (
+    ForgeMetrics,
+    compute_metrics,
+    format_metrics,
+)
 from agency.forge.pipeline import (
     ForgePipelineReport,
     ForgePipelineStore,
@@ -141,6 +146,7 @@ __all__ = [
     "ExternalAgentReport",
     "ExternalAgentStore",
     "FileRecord",
+    "ForgeMetrics",
     "ForgePipelineReport",
     "ForgePipelineStore",
     "GenerateReport",
@@ -174,11 +180,13 @@ __all__ = [
     "build_diff_bundle",
     "build_test_command",
     "capture_evidence",
+    "compute_metrics",
     "delta_paths",
     "create_worktree",
     "detect_language",
     "evaluate_merge",
     "forge_tool_params",
+    "format_metrics",
     "generate_app",
     "generate_timer",
     "get_tool",

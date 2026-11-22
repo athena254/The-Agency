@@ -311,3 +311,58 @@ def test_delta_base_unresolved_falls_back_with_caveat(tmp_path: Path, monkeypatc
     assert report.delta_base_sha == ""
     assert "delta_base_unresolved" in report.caveats
     assert '"base.py"' in stub.prompts[0]
+
+
+# --------------------------------------------------------------------------- #
+# shadow reviewer: same rubric, second model, recorded — never gating
+# --------------------------------------------------------------------------- #
+_SHADOW_FAIL_JSON = (
+    '{"score": 1, "findings": [{"path": "base.py", "line": 2, "rule_id": "SH1", '
+    '"severity": "high", "message": "x"}], "summary": "shadow disagrees"}'
+)
+
+
+def test_shadow_reviewer_records_divergence_without_gating(tmp_path: Path, monkeypatch) -> None:
+    from agency.forge.reviewer import run_review
+
+    repo = _git_repo(tmp_path)
+    _configure_provider(monkeypatch)
+    primary = _CapturingLLM(_CLEAN_JSON)
+    _patch_generate(monkeypatch, primary)
+    shadow = _StubLLM(_SHADOW_FAIL_JSON)
+    report = run_review(repo, ["base.py"], use_llm=True, shadow_llm=shadow)
+    assert report.gate == "PASS"  # the gate never sees the shadow verdict
+    assert report.shadow_gate == "FAIL"
+    assert report.shadow_score == 1
+    assert report.shadow_findings
+    assert report.shadow_findings[0].rule_id == "SH1"
+
+
+def test_shadow_reviewer_failure_is_recorded_as_absent(tmp_path: Path, monkeypatch) -> None:
+    from agency.forge.reviewer import run_review
+
+    repo = _git_repo(tmp_path)
+    _configure_provider(monkeypatch)
+    primary = _CapturingLLM(_CLEAN_JSON)
+    _patch_generate(monkeypatch, primary)
+
+    class _BrokenShadow:
+        async def generate(self, prompt: str, context: Any = None) -> str:
+            raise RuntimeError("shadow provider down")
+
+    report = run_review(repo, ["base.py"], use_llm=True, shadow_llm=_BrokenShadow())
+    assert report.gate == "PASS"
+    assert report.shadow_gate == ""
+    assert report.shadow_score is None
+
+
+def test_no_shadow_llm_means_absent_shadow_fields(tmp_path: Path, monkeypatch) -> None:
+    from agency.forge.reviewer import run_review
+
+    repo = _git_repo(tmp_path)
+    _configure_provider(monkeypatch)
+    primary = _CapturingLLM(_CLEAN_JSON)
+    _patch_generate(monkeypatch, primary)
+    report = run_review(repo, ["base.py"], use_llm=True)
+    assert report.shadow_gate == ""
+    assert report.shadow_score is None

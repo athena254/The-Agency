@@ -489,6 +489,7 @@ def run_external_agent(
     test_timeout_s: int = DEFAULT_TEST_TIMEOUT_S,
     run_review_flag: bool = True,
     llm: Any = None,
+    shadow_llm: Any = None,
     cleanup: bool = False,
     protected_paths: Iterable[str] | None = None,
 ) -> ExternalAgentReport:

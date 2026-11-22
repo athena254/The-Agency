@@ -1051,6 +1051,102 @@ def forge_status(
         console.print(f"  {job.job_id[:8]} {job.state.value} {job.title} gate={job.gate or '-'}")
 
 
+@forge_app.command("metrics")
+def forge_metrics_cmd(
+    db: str = typer.Option("forge_jobs.db", "--db", help="Blacksmith job database path."),
+    output_json: bool = typer.Option(False, "--json", help="Emit the metrics as JSON."),
+) -> None:
+    """Show forge operational metrics (first-pass, rework, verdict mix)."""
+    from agency.forge.metrics import compute_metrics, format_metrics
+
+    metrics = compute_metrics(db)
+    if output_json:
+        _print_json(metrics.model_dump(mode="json"))
+        return
+    console.print(format_metrics(metrics))
+
+
+@forge_app.command("calibrate-export")
+def forge_calibrate_export(
+    db: str = typer.Option("forge_review.db", "--db", help="Review report database path."),
+    out: str = typer.Option(
+        "forge_calibration.jsonl", "--out", help="Labeling worksheet path (JSONL)."
+    ),
+) -> None:
+    """Export reviewer verdicts for human labeling (gate-calibration runbook).
+
+    Label each exported row by hand (`"correct": true/false` — did the verdict
+    match your own judgment on the same diff?), then score the worksheet with
+    `forge calibrate-score`. Blocking thresholds are only trustworthy once the
+    agreement rate clears the bar; re-run the audit after every rubric edit.
+    """
+    from agency.forge.reviewer import ReviewStore
+
+    store = ReviewStore(db)
+    try:
+        reports = store.list_reports()
+    finally:
+        store.close()
+    target = Path(out)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with open(target, "w", encoding="utf-8", newline="\n") as fh:
+        for report in reports:
+            row = {
+                "report_id": report.report_id,
+                "created_at": report.created_at.isoformat(),
+                "gate": report.gate,
+                "score": report.score,
+                "threshold": report.threshold,
+                "reviewed_sha": report.reviewed_sha,
+                "root": report.root,
+                "findings": [
+                    {
+                        "path": f.path,
+                        "line": f.line,
+                        "rule_id": f.rule_id,
+                        "severity": f.severity,
+                        "resolved": f.resolved,
+                    }
+                    for f in report.findings
+                ],
+                "correct": None,
+            }
+            fh.write(json.dumps(row) + "\n")
+    console.print(f"Exported {len(reports)} verdicts -> {target} (fill 'correct' per row)")
+
+
+@forge_app.command("calibrate-score")
+def forge_calibrate_score(
+    labels: str = typer.Option(..., "--labels", help="Labeled worksheet path (JSONL)."),
+    min_agreement: float = typer.Option(
+        0.75, "--min-agreement", help="Agreement rate below which blocking is not trusted."
+    ),
+) -> None:
+    """Score labeled review verdicts: agreement rate vs the blocking bar."""
+    worksheet = Path(labels)
+    rows = [
+        json.loads(line)
+        for line in worksheet.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    labeled = [r for r in rows if isinstance(r.get("correct"), bool)]
+    if not labeled:
+        console.print("No labeled rows found; set 'correct': true/false per exported verdict.")
+        return
+    hits = sum(1 for r in labeled if r["correct"])
+    agreement = hits / len(labeled)
+    console.print(f"Agreement: {agreement:.0%} ({hits}/{len(labeled)} labeled verdicts correct)")
+    if agreement >= min_agreement:
+        console.print(
+            f">= {min_agreement:.0%}: blocking thresholds may stay; re-run after rubric edits."
+        )
+    else:
+        console.print(
+            f"< {min_agreement:.0%}: revise the rubric / raise the threshold before trusting"
+            " blocking behavior."
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Forge: reverse-engineering tool catalog
 # --------------------------------------------------------------------------- #

@@ -108,6 +108,7 @@ def run_pipeline(
     test_timeout_s: int = 120,
     run_review_flag: bool = True,
     llm: Any = None,
+    shadow_llm: Any = None,
 ) -> ForgePipelineReport:
     real_root = Path(root)
     if not real_root.is_absolute():
@@ -122,7 +123,10 @@ def run_pipeline(
 
     review: ReviewReport | None = None
     if run_review_flag:
-        review = run_review(real_root, changed_paths, use_llm=True, llm=llm, tests_report=tests)
+        review = run_review(
+            real_root, changed_paths, use_llm=True, llm=llm, tests_report=tests,
+            shadow_llm=shadow_llm,
+        )
 
     overall: PipelineGate = "PASS"
     if inspection.gate != "PASS":

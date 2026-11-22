@@ -95,6 +95,9 @@ class ReviewReport(BaseModel):
     unresolved_high: int = Field(default=0, ge=0)
     reviewed_sha: str = ""
     delta_base_sha: str = ""
+    shadow_score: int | None = Field(default=None, ge=0, le=5)
+    shadow_gate: str = ""
+    shadow_findings: tuple[ReviewFinding, ...] = ()
     caveats: tuple[str, ...] = CAVEATS
     note: str = "Heuristic review; not a human review; does not authorize merge or deploy."
 
@@ -141,6 +144,12 @@ class ReviewStore:
         if row is None:
             return None
         return ReviewReport.model_validate_json(row[0])
+
+    def list_reports(self) -> list[ReviewReport]:
+        cursor = self._conn.execute(
+            "SELECT document FROM forge_review_reports ORDER BY created_at"
+        )
+        return [ReviewReport.model_validate_json(row[0]) for row in cursor.fetchall()]
 
     def close(self) -> None:
         self._conn.commit()
@@ -573,6 +582,7 @@ def run_review(
     use_llm: bool = False,
     tests_report: Any = None,
     delta_base_sha: str = "",
+    shadow_llm: Any = None,
     **kwargs: Any,
 ) -> ReviewReport:
     real_root = _resolve_root(root)
@@ -677,6 +687,40 @@ def run_review(
     )
     gate: ReviewGate = "PASS" if (final_score >= threshold and unresolved_high == 0) else "FAIL"
 
+    # Shadow reviewer (omniscient VERIFIER-CONTRACT pattern): same rubric on a
+    # second model, recorded as SHADOW_* fields, never gating. Divergence is
+    # the drift alarm that feeds the gate-calibration loop; a shadow failure
+    # is recorded as absent, never as a pass.
+    shadow_score: int | None = None
+    shadow_gate = ""
+    shadow_findings: tuple[ReviewFinding, ...] = ()
+    if llm_requested and shadow_llm is not None:
+        try:
+            s_score, s_findings, _ = _llm_review_one_round(
+                shadow_llm,
+                real_root,
+                changed_paths,
+                test_paths,
+                test_timeout_s,
+                run_tests_flag,
+                tests_report=tests_report,
+                delta_base_sha=delta_scope,
+            )
+            shadow_score = s_score
+            shadow_findings = tuple(s_findings)
+            s_unresolved = sum(
+                1
+                for f in shadow_findings
+                if (not f.resolved) and f.severity in ("high", "critical")
+            )
+            shadow_gate = "PASS" if (s_score >= threshold and s_unresolved == 0) else "FAIL"
+            if shadow_gate != gate:
+                logger.info(
+                    "forge.review_shadow_divergence", gate=gate, shadow_gate=shadow_gate
+                )
+        except _LLMReviewError:
+            logger.warning("forge.review_shadow_unavailable")
+
     caveats = list(CAVEATS)
     if used_llm:
         caveats = [c for c in caveats if c != "heuristic_review"]
@@ -703,6 +747,9 @@ def run_review(
         unresolved_high=unresolved_high,
         reviewed_sha=head_sha(real_root),
         delta_base_sha=delta_scope,
+        shadow_score=shadow_score,
+        shadow_gate=shadow_gate,
+        shadow_findings=shadow_findings,
         caveats=tuple(caveats),
         note=note,
     )
