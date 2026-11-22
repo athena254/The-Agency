@@ -339,6 +339,8 @@ class LLMAdapter:
         """Auto-detect provider from available credentials."""
         if os.environ.get("OPENAI_API_KEY"):
             return "openai"
+        if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
+            return "google"
         if os.environ.get("ANTHROPIC_API_KEY"):
             return "anthropic"
         if os.environ.get("OPENROUTER_API_KEY"):
@@ -358,6 +360,7 @@ class LLMAdapter:
             "anthropic": "claude-3-5-haiku-20241022",
             "openrouter": "qwen/qwen3.8-27b:free",
             "pollinations": "openai-fast",
+            "google": "gemini-3.5-flash-lite",
             "inception": "mercury-3",
             "inceptionlabs": "mercury-3",
             "inception-labs": "mercury-3",
