@@ -43,6 +43,13 @@ class ButlerConfig(BaseSettings):
         default="LLM_API_KEY",
         description="Name of the env var holding the LLM API key (value is read lazily).",
     )
+    llm_base_url: str = Field(
+        default="",
+        description=(
+            "Full OpenAI-compatible chat-completions endpoint for HTTP LLM routing "
+            "(e.g. https://api.cent-ai.dev/v1/chat/completions). Empty = OpenAI default."
+        ),
+    )
     max_message_length: int = Field(
         default=8000, ge=1, le=1_000_000, description="Max accepted message length in chars."
     )
