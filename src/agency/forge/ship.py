@@ -1,11 +1,17 @@
 """Forge Ship slice: locally merge a worktree branch into its target.
 
-Human approval is REQUIRED by default. A local ``git merge --ff-only``
-the worktree's branch into the target branch in the worktree's main repo
-(plus branch/worktree cleanup and a proof event) happens only when the
-pipeline gate and the smoke gate are both PASS and either a human approval
-is granted or auto-merge is explicitly opted into via ``allow_auto_merge=True``.
+Human approval is REQUIRED by default. The fast-forward happens only when the
+pipeline gate and the smoke gate are both PASS and either a human approval is
+granted or auto-merge is explicitly opted into via ``allow_auto_merge=True``.
 No release is authorized.
+
+Branch-ownership rules (never desync a checkout):
+- target checked out in the main repo: refuse when that repo is dirty, then
+  ``checkout`` + ``merge --ff-only`` there (the working tree updates honestly);
+- target checked out in a sibling worktree: refuse (updating the ref behind
+  that worktree's back corrupts its index/HEAD view);
+- target checked out nowhere: ``git fetch . <source>:<target>`` — a ref-only
+  fast-forward that touches no working tree and still fails on non-ff.
 """
 
 from __future__ import annotations
@@ -198,19 +204,59 @@ def ship_branch(
         except Exception as exc:  # noqa: BLE001
             blocked.append(str(exc))
 
+    # Branch-ownership map: fast-forward only in the checkout that owns the
+    # target branch. Updating a checked-out branch behind git's back desyncs
+    # that checkout's index/HEAD and shows the merge as staged deletions.
+    target_checkout: Path | None = None
     if not blocked:
-        # Merge in the main repo: checkout target, then ff-only merge.
-        co = _git(main_repo, ["checkout", target_branch])
-        stdout_parts.append(co.stdout)
-        stderr_parts.append(co.stderr)
-        if co.returncode != 0:
-            blocked.append(f"checkout_failed:{co.stderr.strip()}")
+        try:
+            wt_list = _git(main_repo, ["worktree", "list", "--porcelain"])
+            current_wt: Path | None = None
+            for line in wt_list.stdout.splitlines():
+                if line.startswith("worktree "):
+                    current_wt = Path(line[len("worktree "):].strip())
+                elif line.startswith("branch ") and current_wt is not None:
+                    branch = line[len("branch "):].strip().removeprefix("refs/heads/")
+                    if branch == target_branch:
+                        target_checkout = current_wt
+                        break
+        except Exception as exc:  # noqa: BLE001
+            blocked.append(f"worktree_list_failed:{exc}")
+
+    if not blocked and target_checkout is not None:
+        if target_checkout.resolve() != main_repo.resolve():
+            # Target is checked out in a sibling worktree: refuse rather than
+            # desync it.
+            blocked.append(f"target_checked_out_elsewhere:{target_checkout}")
+        elif _git(main_repo, ["status", "--porcelain"]).stdout.strip():
+            # Main repo owns the branch but is dirty: a checkout would hijack
+            # or entangle the user's working tree.
+            blocked.append("main_repo_dirty")
+
+    if not blocked:
+        if target_checkout is not None and target_checkout.resolve() == main_repo.resolve():
+            # Merge in the owning main repo: checkout target, ff-only merge.
+            co = _git(main_repo, ["checkout", target_branch])
+            stdout_parts.append(co.stdout)
+            stderr_parts.append(co.stderr)
+            if co.returncode != 0:
+                blocked.append(f"checkout_failed:{co.stderr.strip()}")
+            else:
+                mg = _git(main_repo, ["merge", "--ff-only", source_branch])
+                stdout_parts.append(mg.stdout)
+                stderr_parts.append(mg.stderr)
+                if mg.returncode != 0:
+                    blocked.append(f"merge_failed:{mg.stderr.strip() or mg.stdout.strip()}")
+                else:
+                    merged = True
         else:
-            mg = _git(main_repo, ["merge", "--ff-only", source_branch])
-            stdout_parts.append(mg.stdout)
-            stderr_parts.append(mg.stderr)
-            if mg.returncode != 0:
-                blocked.append(f"merge_failed:{mg.stderr.strip() or mg.stdout.strip()}")
+            # Target not checked out anywhere: update the ref in place with a
+            # fetch fast-forward (fails on non-ff; never touches a worktree).
+            ff = _git(main_repo, ["fetch", ".", f"{source_branch}:{target_branch}"])
+            stdout_parts.append(ff.stdout)
+            stderr_parts.append(ff.stderr)
+            if ff.returncode != 0:
+                blocked.append(f"fast_forward_failed:{ff.stderr.strip() or ff.stdout.strip()}")
             else:
                 merged = True
 
