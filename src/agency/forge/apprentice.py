@@ -231,7 +231,8 @@ fn read_request(stream: &mut std::net::TcpStream) -> Option<String> {
                         None
                     }
                 })
-                .unwrap_or(0);
+                .unwrap_or(0)
+                .min(1024 * 1024);
             let body_start = idx + 4;
             while buf.len() < body_start + content_length {
                 match stream.read(&mut chunk) {
