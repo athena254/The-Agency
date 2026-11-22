@@ -49,9 +49,7 @@ def test_calibrate_score_reports_agreement(tmp_path) -> None:
         {"report_id": "b", "correct": True},
         {"report_id": "c", "correct": False},
     ]
-    labels.write_text(
-        "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8", newline="\n"
-    )
+    labels.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8", newline="\n")
     result = CliRunner().invoke(app, ["forge", "calibrate-score", "--labels", str(labels)])
     assert result.exit_code == 0
     assert "Agreement: 67%" in result.output
@@ -62,9 +60,7 @@ def test_calibrate_score_above_bar(tmp_path) -> None:
     labels = tmp_path / "labeled.jsonl"
     rows = [{"report_id": str(i), "correct": True} for i in range(4)]
     rows.append({"report_id": "x", "correct": False})
-    labels.write_text(
-        "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8", newline="\n"
-    )
+    labels.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8", newline="\n")
     result = CliRunner().invoke(app, ["forge", "calibrate-score", "--labels", str(labels)])
     assert result.exit_code == 0
     assert "Agreement: 80%" in result.output

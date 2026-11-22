@@ -54,9 +54,7 @@ def compute_metrics(db_path: str | Path) -> ForgeMetrics:
         )
     conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
     try:
-        rows = conn.execute(
-            f"SELECT state, attempts, document FROM {_SCHEMA_TABLE}"  # noqa: S608 - fixed table name
-        ).fetchall()
+        rows = conn.execute(f"SELECT state, attempts, document FROM {_SCHEMA_TABLE}").fetchall()
     except sqlite3.OperationalError:
         # Fresh/foreign database without the jobs table: honest zeros.
         return ForgeMetrics(

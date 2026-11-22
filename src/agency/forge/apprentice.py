@@ -37,7 +37,12 @@ logger = structlog.get_logger(__name__)
 APPRENTICE_MODEL = "hy4-flash:free"
 DEFAULT_TEST_TIMEOUT_S = 240
 
-_BASE_CAVEATS = ("apprentice_generated", "agent_output_unverified", *_PIPELINE_CAVEATS, "review_not_run")
+_BASE_CAVEATS = (
+    "apprentice_generated",
+    "agent_output_unverified",
+    *_PIPELINE_CAVEATS,
+    "review_not_run",
+)
 
 _OUTPUT_CONTRACT = (
     "\n\nOUTPUT FORMAT (binding): respond with ONLY one JSON object, no prose,"
@@ -74,97 +79,123 @@ FILE_PLANS: dict[str, tuple[tuple[str, str], ...]] = {
     "rust": (
         (
             "Cargo.toml",
-            "the crate manifest: [package] name = \"shorty\", version = \"0.1.0\","
-            " edition = \"2021\"; NO [dependencies] section.",
+            (
+                'the crate manifest: [package] name = "shorty", version = "0.1.0",'
+                ' edition = "2021"; NO [dependencies] section.'
+            ),
         ),
         (
             "src/lib.rs",
-            "the logic library: `pub struct Shortener` (HashMap<String,String> behind"
-            " std::sync::Mutex, AtomicU64 counter), `pub fn new()`, `pub fn shorten(&self,"
-            " url: &str) -> String` (counter-based id, validate scheme http/https else"
-            " panic-free empty result), `pub fn resolve(&self, id: &str) ->"
-            " Option<String>`; end with `#[cfg(test)] mod tests` covering roundtrip +"
-            " unknown + distinct ids. Keep it small and simple (KISS).",
+            (
+                "the logic library: `pub struct Shortener` (HashMap<String,String> behind"
+                " std::sync::Mutex, AtomicU64 counter), `pub fn new()`, `pub fn shorten(&self,"
+                " url: &str) -> String` (counter-based id, validate scheme http/https else"
+                " panic-free empty result), `pub fn resolve(&self, id: &str) ->"
+                " Option<String>`; end with `#[cfg(test)] mod tests` covering roundtrip +"
+                " unknown + distinct ids. Keep it small and simple (KISS)."
+            ),
         ),
         (
             "src/main.rs",
-            "factory-provided transport shim (see STATIC_FILES): the apprentice owns"
-            " the logic and tests in src/lib.rs; the fixed HTTP shell is"
-            " infrastructure, not creative work.",
+            (
+                "factory-provided transport shim (see STATIC_FILES): the apprentice owns"
+                " the logic and tests in src/lib.rs; the fixed HTTP shell is"
+                " infrastructure, not creative work."
+            ),
         ),
     ),
     "go": (
         ("go.mod", "the module manifest: module shorty; go 1.22."),
         (
             "shorty.go",
-            "package main. The whole service logic: `func NewMux() *http.ServeMux`"
-            " registering GET / -> 200 JSON status, POST /shorten -> 200 JSON"
-            ' {"short":"<id>"} (400 on missing/invalid url; reject urls containing'
-            ' control chars), GET /<id> -> http.Redirect 302 to the stored url (404'
-            " unknown). In-memory map + counter id in a struct with a sync.Mutex."
-            " Do NOT declare func main() — main.go is factory-provided and declares"
-            " it already. Keep it small (KISS).",
+            (
+                "package main. The whole service logic: `func NewMux() *http.ServeMux`"
+                " registering GET / -> 200 JSON status, POST /shorten -> 200 JSON"
+                ' {"short":"<id>"} (400 on missing/invalid url; reject urls containing'
+                " control chars), GET /<id> -> http.Redirect 302 to the stored url (404"
+                " unknown). In-memory map + counter id in a struct with a sync.Mutex."
+                " Do NOT declare func main() — main.go is factory-provided and declares"
+                " it already. Keep it small (KISS)."
+            ),
         ),
         (
             "main_test.go",
-            "tests via net/http/httptest against NewMux(): shorten 200+id, resolve 302"
-            " Location, unknown 404, invalid 400. NO subprocesses.",
+            (
+                "tests via net/http/httptest against NewMux(): shorten 200+id, resolve 302"
+                " Location, unknown 404, invalid 400. NO subprocesses."
+            ),
         ),
         (
             "main.go",
-            "factory-provided server shim (see STATIC_FILES): main() reads HOST/PORT"
-            " and serves NewMux().",
+            (
+                "factory-provided server shim (see STATIC_FILES): main() reads HOST/PORT"
+                " and serves NewMux()."
+            ),
         ),
     ),
     "python": (
         (
             "app.py",
-            "the service logic. Expose `def make_store() -> dict`,"
-            " `def handle_shorten(store, body_bytes: bytes) -> tuple[int, dict]`"
-            " (200 with {'short': id} for a valid http(s) url in the JSON body;"
-            " 400 otherwise), `def handle_resolve(store, short_id: str) ->"
-            " tuple[int, dict, dict]` ((302, {'Location': url}, {}) or"
-            " (404, {}, {'error': ...})), and `def make_handler(store)` returning a"
-            " http.server.BaseHTTPRequestHandler subclass that uses those functions."
-            " Keep it small (KISS).",
+            (
+                "the service logic. Expose `def make_store() -> dict`,"
+                " `def handle_shorten(store, body_bytes: bytes) -> tuple[int, dict]`"
+                " (200 with {'short': id} for a valid http(s) url in the JSON body;"
+                " 400 otherwise), `def handle_resolve(store, short_id: str) ->"
+                " tuple[int, dict, dict]` ((302, {'Location': url}, {}) or"
+                " (404, {}, {'error': ...})), and `def make_handler(store)` returning a"
+                " http.server.BaseHTTPRequestHandler subclass that uses those functions."
+                " Keep it small (KISS)."
+            ),
         ),
         (
             "test_app.py",
-            "pytest tests importing app and exercising handle_shorten/handle_resolve"
-            " directly on make_store() (shorten 200+id, resolve 302 Location, unknown"
-            " 404, invalid 400). NO subprocesses, NO real sockets.",
+            (
+                "pytest tests importing app and exercising handle_shorten/handle_resolve"
+                " directly on make_store() (shorten 200+id, resolve 302 Location, unknown"
+                " 404, invalid 400). NO subprocesses, NO real sockets."
+            ),
         ),
         (
             "server.py",
-            "factory-provided server shim (see STATIC_FILES): imports app.make_handler,"
-            " serves on HOST/PORT.",
+            (
+                "factory-provided server shim (see STATIC_FILES): imports app.make_handler,"
+                " serves on HOST/PORT."
+            ),
         ),
     ),
     "node": (
         (
             "package.json",
-            'the manifest: {"name": "shorty", "type": "module", "scripts": {"test":'
-            ' "node --test test/app.test.ts"}}. No dependencies.',
+            (
+                'the manifest: {"name": "shorty", "type": "module", "scripts": {"test":'
+                ' "node --test test/app.test.ts"}}. No dependencies.'
+            ),
         ),
         (
             "src/app.ts",
-            "the service logic. Export `export function shorten(url: string): string`"
-            " (returns a short id; throws/returns empty on invalid), `export function"
-            " resolve(id: string): string | null`, and `export function createHandler():"
-            " (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse)"
-            " => void` implementing the routes. Erasable TypeScript only (no"
-            " enums/namespaces). Keep it small.",
+            (
+                "the service logic. Export `export function shorten(url: string): string`"
+                " (returns a short id; throws/returns empty on invalid), `export function"
+                " resolve(id: string): string | null`, and `export function createHandler():"
+                " (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse)"
+                " => void` implementing the routes. Erasable TypeScript only (no"
+                " enums/namespaces). Keep it small."
+            ),
         ),
         (
             "test/app.test.ts",
-            "node:test tests importing src/app.ts: shorten returns an id,"
-            " resolve returns the url / null for unknown, invalid input handled. NO"
-            " subprocesses, NO real sockets.",
+            (
+                "node:test tests importing src/app.ts: shorten returns an id,"
+                " resolve returns the url / null for unknown, invalid input handled. NO"
+                " subprocesses, NO real sockets."
+            ),
         ),
         (
             "src/server.ts",
-            "factory-provided server shim (see STATIC_FILES): imports createHandler,"
-            " serves on HOST/PORT.",
+            (
+                "factory-provided server shim (see STATIC_FILES): imports createHandler,"
+                " serves on HOST/PORT."
+            ),
         ),
     ),
 }
@@ -353,7 +384,10 @@ func main() {
 	}
 }
 """,
-    ("python", "server.py"): r'''"""Factory-provided server shim: serve the apprentice-built handler."""
+    (
+        "python",
+        "server.py",
+    ): r'''"""Factory-provided server shim: serve the apprentice-built handler."""
 
 import os
 from http.server import HTTPServer
@@ -413,12 +447,15 @@ def build_apprentice_llm() -> Any | None:
 
 def _generate(llm: Any, prompt: str) -> str:
     """Bridge the async LLM adapter from sync code (reviewer's pattern)."""
+    reply: str
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(llm.generate(prompt))
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        return executor.submit(lambda: asyncio.run(llm.generate(prompt))).result()
+        reply = asyncio.run(llm.generate(prompt))
+    else:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            reply = executor.submit(lambda: asyncio.run(llm.generate(prompt))).result()
+    return reply
 
 
 def _parse_files(response: str) -> list[tuple[str, str]] | None:
@@ -557,8 +594,7 @@ def run_apprentice(
             logger.info("forge.apprentice_static_file", file=path)
             continue
         prompt = (
-            f"{COMPACT_CONTRACT}\nNOW WRITE exactly one file: {path} — {purpose}."
-            f"{_FILE_CONTRACT}"
+            f"{COMPACT_CONTRACT}\nNOW WRITE exactly one file: {path} — {purpose}.{_FILE_CONTRACT}"
         )
         response: str | None = None
         last_error: str | None = None
@@ -587,9 +623,7 @@ def run_apprentice(
 
     # run_coding_agent enforces worktree isolation, protected paths, size caps
     # and per-file limits; write_file creates-or-overwrites inside the worktree.
-    edits: list[tuple[str, str, str]] = [
-        ("write_file", path, content) for path, content in files
-    ]
+    edits: list[tuple[str, str, str]] = [("write_file", path, content) for path, content in files]
     try:
         coding = run_coding_agent(
             real_repo,
@@ -677,7 +711,7 @@ def run_apprentice(
         security=coding.security,
         tests=coding.tests,
         review=review,
-        gate="PASS" if overall == "PASS" else "FAIL",  # type: ignore[arg-type]
+        gate="PASS" if overall == "PASS" else "FAIL",
         caveats=tuple(caveats),
     )
     logger.info(

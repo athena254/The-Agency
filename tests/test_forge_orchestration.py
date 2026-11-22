@@ -342,8 +342,12 @@ def test_failed_gate_records_review_citations(tmp_path) -> None:
             gate="FAIL",
             score=2,
             findings=(
-                ReviewFinding(path="src/x.py", line=7, rule_id="LLM901", severity="high", message="m"),
-                ReviewFinding(path="src/y.py", line=2, rule_id="LINT002", severity="low", message="m"),
+                ReviewFinding(
+                    path="src/x.py", line=7, rule_id="LLM901", severity="high", message="m"
+                ),
+                ReviewFinding(
+                    path="src/y.py", line=2, rule_id="LINT002", severity="low", message="m"
+                ),
             ),
         )
         return _report("FAIL", failure="gate FAIL").model_copy(update={"review": review})

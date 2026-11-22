@@ -248,6 +248,10 @@ def test_ship_ref_only_fast_forward_when_target_not_checked_out(tmp_path: Path):
     # ref moved, working tree untouched
     assert _git_out(repo, "rev-parse", "main") == feature_sha
     assert _git_out(repo, "rev-parse", "HEAD") == dev_sha
-    status = [x for x in _git_out(repo, "status", "--porcelain").splitlines() if ".forge-proof.jsonl" not in x]
+    status = [
+        x
+        for x in _git_out(repo, "status", "--porcelain").splitlines()
+        if ".forge-proof.jsonl" not in x
+    ]
     assert status == []
     assert (repo / "dev.txt").read_text(encoding="utf-8") == "dev work\n"

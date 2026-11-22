@@ -146,9 +146,7 @@ class ReviewStore:
         return ReviewReport.model_validate_json(row[0])
 
     def list_reports(self) -> list[ReviewReport]:
-        cursor = self._conn.execute(
-            "SELECT document FROM forge_review_reports ORDER BY created_at"
-        )
+        cursor = self._conn.execute("SELECT document FROM forge_review_reports ORDER BY created_at")
         return [ReviewReport.model_validate_json(row[0]) for row in cursor.fetchall()]
 
     def close(self) -> None:
@@ -739,9 +737,7 @@ def run_review(
             )
             shadow_gate = "PASS" if (s_score >= threshold and s_unresolved == 0) else "FAIL"
             if shadow_gate != gate:
-                logger.info(
-                    "forge.review_shadow_divergence", gate=gate, shadow_gate=shadow_gate
-                )
+                logger.info("forge.review_shadow_divergence", gate=gate, shadow_gate=shadow_gate)
         except _LLMReviewError:
             logger.warning("forge.review_shadow_unavailable")
 

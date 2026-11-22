@@ -214,9 +214,9 @@ def ship_branch(
             current_wt: Path | None = None
             for line in wt_list.stdout.splitlines():
                 if line.startswith("worktree "):
-                    current_wt = Path(line[len("worktree "):].strip())
+                    current_wt = Path(line[len("worktree ") :].strip())
                 elif line.startswith("branch ") and current_wt is not None:
-                    branch = line[len("branch "):].strip().removeprefix("refs/heads/")
+                    branch = line[len("branch ") :].strip().removeprefix("refs/heads/")
                     if branch == target_branch:
                         target_checkout = current_wt
                         break

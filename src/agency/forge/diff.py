@@ -216,11 +216,11 @@ def build_diff_bundle(root: str | Path, changed_paths: list[str]) -> DiffBundle:
 
 __all__ = [
     "BUNDLE_EXHAUSTED_MARK",
-    "DiffBundle",
     "FILE_TRUNCATION_MARK",
     "MAX_PER_FILE_BYTES",
     "MAX_PRIORITY_PER_FILE_BYTES",
     "MAX_TOTAL_BYTES",
+    "DiffBundle",
     "build_diff_bundle",
     "delta_paths",
     "head_sha",

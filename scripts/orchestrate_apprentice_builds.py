@@ -96,9 +96,15 @@ def _init_repo(path: Path) -> Path:
     if not readme.exists():
         readme.write_text(f"# {path.name}\n\nApprentice-built URL shortener.\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(path), "add", "."], check=True, capture_output=True)
-    done = subprocess.run(["git", "-C", str(path), "diff", "--cached", "--quiet"], capture_output=True)
+    done = subprocess.run(
+        ["git", "-C", str(path), "diff", "--cached", "--quiet"],
+        check=False,
+        capture_output=True,
+    )
     if done.returncode != 0:
-        subprocess.run(["git", "-C", str(path), "commit", "-m", "init"], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(path), "commit", "-m", "init"], check=True, capture_output=True
+        )
     return path
 
 
@@ -175,13 +181,20 @@ def main() -> int:
                     entry["smoke"] = {"gate": smoke.gate, "status": smoke.status_code}
                     holdout = run_holdout(
                         wt,
-                        [{"name": f"acceptance-{lang}", "command": [sys.executable, str(ACCEPTANCE_SCRIPT), "--lang", lang]}],
+                        [
+                            {
+                                "name": f"acceptance-{lang}",
+                                "command": [sys.executable, str(ACCEPTANCE_SCRIPT), "--lang", lang],
+                            }
+                        ],
                         timeout_s=300,
                     )
                     scenario = holdout.scenarios[0] if holdout.scenarios else None
                     entry["holdout"] = {
                         "gate": scenario.gate if scenario else holdout.gate,
-                        "tail": ((scenario.stderr or scenario.stdout or "")[-500:] if scenario else ""),
+                        "tail": (
+                            (scenario.stderr or scenario.stdout or "")[-500:] if scenario else ""
+                        ),
                     }
                 else:
                     entry["verification"] = "worktree not found"
@@ -199,7 +212,7 @@ def main() -> int:
 
 
 def job_id8(job: object) -> str:
-    return str(getattr(job, "job_id"))[:8]
+    return str(job.job_id)[:8]
 
 
 if __name__ == "__main__":

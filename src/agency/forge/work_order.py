@@ -70,9 +70,11 @@ def render_work_order(order: WorkOrder) -> str:
         "",
         "BOUNDARIES (hard):",
         "- Never touch protected paths: " + ", ".join(protected_paths()),
-        "- Also enforced (fail-closed): CI configs (.github/workflows, .gitlab-ci.yml, ...),"
-        " agent/skill/hook control surfaces (.claude, .zcode, .mcp.json, .factory), and the"
-        " repo-root governance files (AGENTS.md, CLAUDE.md, GEMINI.md, MISSION.md).",
+        (
+            "- Also enforced (fail-closed): CI configs (.github/workflows, .gitlab-ci.yml, ...),"
+            " agent/skill/hook control surfaces (.claude, .zcode, .mcp.json, .factory), and the"
+            " repo-root governance files (AGENTS.md, CLAUDE.md, GEMINI.md, MISSION.md)."
+        ),
         "- Change nothing outside this worktree; do not modify sibling repos.",
         "- No network installs, no subprocess use, no edits to CI or gates.",
         "",

@@ -104,4 +104,7 @@ def test_forge_metrics_cli(tmp_path) -> None:
     db = str(tmp_path / "jobs.db")
     result = CliRunner().invoke(app, ["forge", "metrics", "--db", db, "--json"])
     assert result.exit_code == 0
-    assert '"total_jobs": 0' in result.output.replace(" ", "").replace('":', '":') or "total_jobs" in result.output
+    assert (
+        '"total_jobs": 0' in result.output.replace(" ", "").replace('":', '":')
+        or "total_jobs" in result.output
+    )

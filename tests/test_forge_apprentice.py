@@ -91,7 +91,7 @@ def test_parse_files_rejects_malformed_answers(bad: str) -> None:
 
 def test_parse_content_accepts_plain_and_fenced_json() -> None:
     assert _parse_content('{"content": "x = 1\\n"}') == "x = 1\n"
-    assert _parse_content("```json\n{\"content\": \"x\"}\n```") == "x"
+    assert _parse_content('```json\n{"content": "x"}\n```') == "x"
     assert _parse_content("no json") is None
     assert _parse_content('{"content": ""}') is None
 
@@ -238,9 +238,7 @@ def test_apprentice_failing_tests_feed_the_retry_tail(tmp_path: Path) -> None:
 
 def test_apprentice_refuses_protected_paths(tmp_path: Path, monkeypatch) -> None:
     repo = _git_repo(tmp_path)
-    monkeypatch.setattr(
-        apprentice_module, "FILE_PLANS", {"python": ((".env", "protected probe"),)}
-    )
+    monkeypatch.setattr(apprentice_module, "FILE_PLANS", {"python": ((".env", "protected probe"),)})
     report = run_apprentice(
         repo, ["unused"], "task", run_review_flag=False, llm=_StubLLM([_file("SECRET=1")])
     )
@@ -289,7 +287,9 @@ def test_smoke_build_command_per_language(tmp_path: Path) -> None:
         '{"scripts": {"test": "node --test test/app.test.ts"}}', encoding="utf-8"
     )
     (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "server.ts").write_text('import { createHandler } from "./app.ts";\n', encoding="utf-8")
+    (tmp_path / "src" / "server.ts").write_text(
+        'import { createHandler } from "./app.ts";\n', encoding="utf-8"
+    )
     (tmp_path / "src" / "app.ts").write_text("export const x = 1;\n", encoding="utf-8")
     assert build_command(tmp_path, 8080) == ["node", "src/server.ts"]
 
