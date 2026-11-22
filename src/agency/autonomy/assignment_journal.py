@@ -13,10 +13,14 @@ one is rejected before any state changes.
 
 The module reads no clock, generates no randomness and opens no network. All
 time values arrive from the caller. At open, assignments left ``RUNNING`` are
-flipped to ``UNCERTAIN`` with their own last time value; they are never
-auto-resumed. The outbox is an at-least-once reconciliation hint, not proof of
-exactly-once external effects: consumers must still deduplicate, and this
-module performs no effects itself.
+flipped to ``UNCERTAIN`` with their own last time value, and assignments still
+``ASSIGNED`` are flipped to ``FAILED`` the same way: the owner moves
+ASSIGNED→RUNNING and dispatches with no await in between, so an ``ASSIGNED``
+row at open provably never started, and the FAILED entry written directly from
+ASSIGNED (no RUNNING entry in between) is the audit record of that recovery.
+Neither kind is ever auto-resumed. The outbox is an at-least-once
+reconciliation hint, not proof of exactly-once external effects: consumers
+must still deduplicate, and this module performs no effects itself.
 
 Rows carry canonical integrity digests and the outbox is an append-only
 hash chain, so edits, gaps and reordering make opening fail closed. As with
@@ -311,7 +315,8 @@ class AssignmentJournal:
 
     ``:memory:`` is supported for hermetic tests; persisted deployments use a
     file path with WAL and ``synchronous=FULL``. Opening verifies every row and
-    the whole outbox chain, then marks interrupted ``RUNNING`` work uncertain.
+    the whole outbox chain, then marks interrupted ``RUNNING`` work uncertain
+    and never-started ``ASSIGNED`` work failed.
     """
 
     def __init__(self, db_path: str | Path = ":memory:") -> None:
@@ -428,8 +433,24 @@ class AssignmentJournal:
         self._last_chain = previous
 
     def _recover(self) -> None:
-        running = [record for record in self._records.values() if record.state == "RUNNING"]
-        if not running:
+        """Resolve interrupted work at open; never resumes or re-dispatches it.
+
+        ``RUNNING`` rows belong to a process that died mid-execution: their fate
+        is unknown, so they become ``UNCERTAIN``. ``ASSIGNED`` rows are past the
+        point of no return in the other direction: the owner writes
+        ASSIGNED→RUNNING and then dispatches with no await in between, so an
+        ``ASSIGNED`` row at open provably never started and honestly fails. Both
+        recoveries commit atomically (one transaction) with their own outbox
+        entries, so concurrent starts serialize and a crash mid-recovery leaves
+        the rows for the next start.
+        """
+        pending: list[tuple[AssignmentRecord, str]] = [
+            (record, "UNCERTAIN") for record in self._records.values() if record.state == "RUNNING"
+        ]
+        pending.extend(
+            (record, "FAILED") for record in self._records.values() if record.state == "ASSIGNED"
+        )
+        if not pending:
             return
         conn = self._db()
         conn.execute("BEGIN IMMEDIATE")
@@ -438,13 +459,13 @@ class AssignmentJournal:
             seq = self._outbox[-1].seq if self._outbox else 0
             updated: list[AssignmentRecord] = []
             logged: list[OutboxEntry] = []
-            for record in running:
+            for record, state in pending:
                 body = _event_body(
                     assignment_id=record.assignment_id,
                     task_id=record.task_id,
                     worker_id=record.worker_id,
                     generation=record.generation,
-                    state="UNCERTAIN",
+                    state=state,
                     at=record.updated_at,
                     grant_digest=record.grant_digest,
                     result_digest=record.result_digest,
@@ -458,7 +479,7 @@ class AssignmentJournal:
                     worker_id=record.worker_id,
                     grant_digest=record.grant_digest,
                     generation=record.generation,
-                    state="UNCERTAIN",
+                    state=state,
                     result_digest=record.result_digest,
                     created_at=record.created_at,
                     updated_at=record.updated_at,
@@ -473,7 +494,7 @@ class AssignmentJournal:
                     (
                         seq,
                         record.assignment_id,
-                        "UNCERTAIN",
+                        state,
                         record.generation,
                         canonical_json(body).decode("utf-8"),
                         integrity,
@@ -486,7 +507,7 @@ class AssignmentJournal:
                     OutboxEntry(
                         seq=seq,
                         assignment_id=record.assignment_id,
-                        state="UNCERTAIN",
+                        state=state,
                         generation=record.generation,
                         body=body,
                         integrity_digest=integrity,
