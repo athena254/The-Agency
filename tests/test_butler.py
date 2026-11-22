@@ -11,10 +11,14 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from agency.agents.prompts import issued_system_prompt
 from agency.butler.config import ButlerConfig
 from agency.butler.router import MessageRouter
 from agency.butler.server import create_app
 from agency.butler.service import ButlerService
+from agency.factory.default_agents import DEFAULT_AGENT_DOMAINS
+from agency.factory.prompts import PromptRegistry
+from agency.factory.service import AgentFactory
 from agency.orchestrator import AgencyOrchestrator
 
 
@@ -118,3 +122,89 @@ async def test_http_message_flow() -> None:
             )
             assert resp.status_code == 503
             assert resp.json() == {"detail": "Peer authorization is unavailable."}
+
+
+# ------------------------------------------------------------------ #
+# Factory-issued default agents (PLAN_FACTORY_MANAGED_DEFAULT_AGENTS #3)
+# ------------------------------------------------------------------ #
+
+
+def _allow_approve_and_recover(actor: str, permission: str) -> bool:
+    return permission in {"agent.approve", "agent.recover"}
+
+
+def _wired_service(tmp_path) -> tuple[ButlerService, AgentFactory, PromptRegistry]:
+    orchestrator = AgencyOrchestrator(memory_db_path=":memory:")
+    prompts = PromptRegistry(str(tmp_path / "prompts.db"))
+    factory = AgentFactory(
+        str(tmp_path / "factory.db"),
+        authorizer=_allow_approve_and_recover,
+        allowed_capabilities=set(DEFAULT_AGENT_DOMAINS) | {"respond"},
+        kernel_registry=orchestrator._identity_registry,
+        runtime_registry=orchestrator._runtime_registry,
+        is_prompt_published=prompts.is_published,
+        prompt_resolver=prompts,
+    )
+    service = ButlerService(
+        config=ButlerConfig(),
+        orchestrator=orchestrator,
+        factory=factory,
+        prompt_registry=prompts,
+        seed_authorizer=_allow_approve_and_recover,
+        seed_approver="human-lead",
+    )
+    return service, factory, prompts
+
+
+@pytest.mark.asyncio
+async def test_factory_wired_seeding_registers_factory_issued_agents(tmp_path) -> None:
+    service, factory, prompts = _wired_service(tmp_path)
+    await service.start()
+    try:
+        by_domain = {a.domain: a for a in service.router.list_agents()}
+        assert set(by_domain) == set(DEFAULT_AGENT_DOMAINS)
+        for domain, agent in by_domain.items():
+            assert agent.metadata["factory"] == "agent-factory-v1"
+            assert agent.metadata["blueprint_id"] == f"{domain}-agent"
+            prompt = issued_system_prompt(agent)
+            assert prompt
+            assert agent.metadata["system_prompt"] == prompt
+            # The orchestrator resolves the issued identity at execution time.
+            resolved = service.orchestrator._identity_registry.get(agent.id)
+            assert resolved is agent
+        # Re-start must not duplicate anything (idempotent seeding).
+        agents_after = service.router.list_agents()
+        assert len(agents_after) == len(DEFAULT_AGENT_DOMAINS)
+    finally:
+        await service.stop()
+        factory.close()
+        prompts.close()
+
+
+@pytest.mark.asyncio
+async def test_factory_wired_without_authorizer_fails_closed(tmp_path) -> None:
+    service, factory, prompts = _wired_service(tmp_path)
+    service._seed_authorizer = None
+    with pytest.raises(ValueError, match="fail closed"):
+        await service.start()
+    factory.close()
+    prompts.close()
+
+
+@pytest.mark.asyncio
+async def test_partially_wired_factory_fails_closed(tmp_path) -> None:
+    service, factory, prompts = _wired_service(tmp_path)
+    service._prompt_registry = None
+    with pytest.raises(ValueError, match="prompt_registry"):
+        await service.start()
+    factory.close()
+    prompts.close()
+
+
+@pytest.mark.asyncio
+async def test_legacy_seeding_unchanged_without_factory(service: ButlerService) -> None:
+    agents = service.router.list_agents()
+    assert {a.domain for a in agents} == set(DEFAULT_AGENT_DOMAINS)
+    for agent in agents:
+        assert "factory" not in agent.metadata
+        assert "system_prompt" not in agent.metadata
