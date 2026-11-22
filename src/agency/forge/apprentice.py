@@ -102,7 +102,8 @@ FILE_PLANS: dict[str, tuple[tuple[str, str], ...]] = {
             ' {"short":"<id>"} (400 on missing/invalid url; reject urls containing'
             ' control chars), GET /<id> -> http.Redirect 302 to the stored url (404'
             " unknown). In-memory map + counter id in a struct with a sync.Mutex."
-            " Keep it small (KISS).",
+            " Do NOT declare func main() — main.go is factory-provided and declares"
+            " it already. Keep it small (KISS).",
         ),
         (
             "main_test.go",
@@ -573,7 +574,15 @@ def run_apprentice(
     applied_paths = tuple(path for path, _content in files)
 
     if coding.gate != "PASS":
-        detail = f"apprentice build failed: {coding.note}"
+        tests_state = "not_run" if coding.tests is None else coding.tests.gate
+        detail = (
+            "apprentice build failed:"
+            f" inspection={coding.inspection.gate}"
+            f" security={coding.security.gate}"
+            f" tests={tests_state}"
+            f" edits_applied={coding.edits_applied}"
+            f" | {coding.note}"
+        )
         if coding.tests is not None and coding.tests.gate != "PASS":
             tail = _failure_detail(coding.tests.stdout, coding.tests.stderr, limit=400)
             if tail:
