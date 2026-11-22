@@ -158,7 +158,7 @@ def main() -> int:
             (
                 "hermes-striker",
                 lambda repo, command, task, **kw: run_external_agent(
-                    repo, ["hermes", "-z", "--yolo"], task, timeout_s=1800, **kw
+                    repo, ["hermes", "--yolo", "-z"], task, timeout_s=1800, **kw
                 ),
             ),
             (
