@@ -5,13 +5,14 @@ Ordered by production risk. **Avoid these patterns; all agents are free to fix t
 
 **Status 2026-11-22 (full-gap sweep):** 17 of 20 closed — gaps 1-9, 11-16, 19 and 20; gaps 18
 (§12 grant path live on the authed intake routes, live 4-peer actuator demo PASS; real PKI +
-multi-node consensus remain) and 10 (live adapter + live task qualified on CentAI
-`hy4-flash:free` 2026-11-22; improve leg + soak remain) are partially closed — commit
-references below; gap 20's ref is on `gap/autonomy-execution`, the Tier6 refs landed on
-`main` (`37095b9`) and the consolidation line (`f981282`). Gap 17 remains open for an
-external reason (no real PAK repository to wire against); gaps 18-20 were added by the
-intake workstream (2026-11-20). Gap 21 is partially closed: (d) and now (f) are closed
-(commit references below); (e) stays deliberately blocked.
+multi-node consensus remain) and 10 (live adapter, live task, improve leg and the
+multi-restart/concurrency soak qualified on CentAI `hy4-flash:free` 2026-11-22; a second
+provider for comparison remains) are partially closed — commit references below; gap 20's
+ref is on `gap/autonomy-execution`, the Tier6 refs landed on `main` (`37095b9`) and the
+consolidation line (`f981282`). Gap 17 remains open for an external reason (no real PAK
+repository to wire against); gaps 18-20 were added by the intake workstream (2026-11-20).
+Gap 21 is partially closed: (d) and now (f) are closed (commit references below); (e) stays
+deliberately blocked.
 
 ## 1. Capability ⇄ Factory circular import (structural) — CLOSED `5399d37`
 `canonical_sha256` moved to the neutral `src/agency/core/hashing.py`; `factory.coding_models`
@@ -73,7 +74,39 @@ marker; (b) a real task ran through the full dispatcher pipeline — live planne
 live executor (`attempts=1`), correct result (`42`), audit entries, memory write, terminal
 `completed`, clean shutdown. The verifier scored the subtasks `0.667/failed` on a correct
 answer — the known independent-checker strictness open item, recorded honestly as findings.
-Still open: multi-restart and concurrency soak, and a second provider for comparison. The
+Still open: a second provider for comparison. The multi-restart and concurrency soak — the
+last unqualified leg — was exercised live the same day (2026-11-22): `scripts/quality_soak.py`
+(written uncommitted in the `D:/agency-wave-soak` worktree at `4e49a91` — evidence only, no
+branch; Ruff check/format clean; no new unit tests, the script is evidence-producing) ran
+both legs against hy4-flash:free with the file-backed shared stores (`AGENCY_TASKS_DB` /
+`AGENCY_AUDIT_DB` / `AGENCY_EVIDENCE_DB` / `AGENCY_MEMORY_DB` per-leg temp dir, lease TTL 45
+s). Concurrency leg: 10 independently verifiable tasks (exact-number / exact-marker mix) on
+one SQLite queue drained by TWO dispatcher processes sharing the file — 10/10 terminal
+`completed`, every completed output carried its exact expected token, exactly one execution
+and one CAS terminal write per task across both processes (no duplicate side effects), the
+deliberate terminal-CAS probe was refused 10/10 (`YIELDED_TERMINAL`), 16 subtask audit
+entries / 16 evidence findings, workers exited 0. Restart leg: 6 tasks, dispatcher process
+w1 killed mid-flight (Windows tree-kill via `taskkill /F /T`; the uv venv trampoline makes
+`Popen.pid` the launcher, so the kill targets the tree and the lease-owning interpreter pid
+is taken from the worker's own ready report) while holding 2 RUNNING leases — the
+expired-only probe fired immediately after the kill requeued 0 (orphaned fresh leases and
+the survivor's heartbeated leases all untouched), once the TTL lapsed a fresh
+`AGENCY_TASKS_RECOVER=1` dispatcher requeued exactly the 2 orphaned claims and re-executed
+them to `completed` with correct outputs; 6/6 terminal, no task lost, one execution + one
+terminal write per task across all three workers, no pre-kill terminal record overwritten
+(output digests unchanged), the killed process's partial audit trail intact (append-only,
+1 entry before the kill → 7 after, pre-kill digests verified), terminal-CAS probe refused
+6/6. Free-tier capacity was healthy in this window: 0 provider backoffs, 0 planner-regex
+fallbacks, 0 executor retries across both legs — recorded as observed absence, not forced
+passes; the provider-aware backoff and planner fallback remain the guards for dips. The
+harness itself was fixed once during qualification (uv-trampoline pid handling; the first
+dry run honestly failed with "no RUNNING claim owned by a killable worker" because the
+lease owner carried the interpreter pid while `Popen` tracked the launcher). Evidence:
+`D:/agency-merge-backups/soak-evidence.json` (per-leg verdicts/reasons, per-task final
+status + output digest, audit/evidence counts, CAS-yield and probe counts, restart
+timeline; per-worker logs and SQLite stores under `D:/agency-soak-runs/`). Both legs
+`pass`; no secrets in the evidence (key-value scan before write). The
+improve leg was qualified live the same day (2026-11-22): the offline `test_requested_agent_
 improve leg was qualified live the same day (2026-11-22): the offline `test_requested_agent_
 e2e` flow re-run with the live provider driving planner/executor — `request_agent` → live
 task → `improve_agent` re-versioned `scout` 1.0.0→1.0.1 (`prompt_refined=True`, atomic
@@ -87,8 +120,9 @@ LLM (unit-tested credential separation; the un-overridden default stays Google-o
 sub-gate (`rc=0`) and the LLM review round all executed, gate `PASS score 4`, sole caveat
 `not_a_human_review`. Free-tier capacity dips surface as 60s timeouts / transient 503s —
 the provider-aware backoff retries them and the gate fails closed with honest caveats when
-the provider stays unavailable (observed and verified live). Do not claim full production
-certification until the soak is exercised.
+the provider stays unavailable (observed and verified live). The soak is now exercised
+(both legs `pass`, evidence above); full production certification is still not claimed —
+single host, single provider, no beta enablement.
 
 ## 11. GitHub-imported skills are metadata-only — CLOSED `36bd00f`
 `ext-*` skills are created with the same documentation-only sentinel as gap 4; promotion and
