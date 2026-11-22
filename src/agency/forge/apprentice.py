@@ -198,17 +198,25 @@ fn main() {
             respond(&mut stream, "200 OK", "{\"status\":\"ok\",\"service\":\"shorty\"}", "");
         } else if method == "POST" && path == "/shorten" {
             let url = extract_json_string_field(&req, "url").unwrap_or("").to_string();
-            if url.is_empty() || !(url.starts_with("http://") || url.starts_with("https://")) {
+            let id = if url.is_empty() || !(url.starts_with("http://") || url.starts_with("https://")) {
+                String::new()
+            } else {
+                shortener.lock().unwrap().shorten(&url)
+            };
+            if id.is_empty() {
                 respond(&mut stream, "400 Bad Request", "{\"error\":\"invalid url\"}", "");
             } else {
-                let id = shortener.lock().unwrap().shorten(&url);
                 respond(&mut stream, "200 OK", &format!("{{\"short\":\"{}\",\"url\":\"{}\"}}", id, url), "");
             }
         } else if method == "GET" && path.len() > 1 {
-            let id = path[1..].to_string();
-            match shortener.lock().unwrap().resolve(&id) {
-                Some(url) => respond(&mut stream, "302 Found", "", &format!("Location: {}\r\n", url)),
-                None => respond(&mut stream, "404 Not Found", "{\"error\":\"not found\"}", ""),
+            let id = path.get(1..).unwrap_or("").to_string();
+            if id.is_empty() {
+                respond(&mut stream, "404 Not Found", "{\"error\":\"not found\"}", "");
+            } else {
+                match shortener.lock().unwrap().resolve(&id) {
+                    Some(url) => respond(&mut stream, "302 Found", "", &format!("Location: {}\r\n", url)),
+                    None => respond(&mut stream, "404 Not Found", "{\"error\":\"not found\"}", ""),
+                }
             }
         } else {
             respond(&mut stream, "404 Not Found", "{\"error\":\"not found\"}", "");
