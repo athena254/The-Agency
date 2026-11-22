@@ -73,7 +73,15 @@ def _node_entry(real: Path) -> list[str] | None:
             manifest = {}
         if isinstance(manifest, dict) and "start" in (manifest.get("scripts") or {}):
             return [_npm_cmd(), "run", "start"]
-    for rel in ("src/index.ts", "src/app.ts", "src/main.ts", "index.ts", "app.ts", "src/index.js"):
+    for rel in (
+        "src/server.ts",
+        "src/index.ts",
+        "src/app.ts",
+        "src/main.ts",
+        "index.ts",
+        "app.ts",
+        "src/index.js",
+    ):
         if (real / rel).is_file():
             return ["node", rel]
     return None
@@ -90,9 +98,11 @@ def build_command(root: str | Path, port: int) -> list[str]:
     if (real / "Cargo.toml").is_file():
         return ["cargo", "run", "--quiet"]
     if (real / "go.mod").is_file():
-        if (real / "main.go").is_file():
-            return ["go", "run", "main.go"]
+        # Multi-file modules (apprentice builds ship shorty.go + main.go):
+        # `go run .` compiles the whole package.
         return ["go", "run", "."]
+    if (real / "server.py").is_file():
+        return [sys.executable, "server.py"]
     for rel in _PYTHON_CANDIDATES:
         candidate = real / rel
         if not candidate.is_file():

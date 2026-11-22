@@ -138,7 +138,7 @@ def test_apprentice_pass_path_builds_and_gates(tmp_path: Path) -> None:
     )
     assert report.gate == "PASS", report.failure_detail
     assert report.tests is not None and report.tests.gate == "PASS"
-    assert set(report.changed_paths) == {"app.py", "test_app.py"}
+    assert set(report.changed_paths) == {"app.py", "test_app.py", "server.py"}
     assert report.command == ("apprentice", "hy4-flash:free")
     assert "apprentice_generated" in report.caveats
     assert "review_not_run" in report.caveats
@@ -271,16 +271,27 @@ def test_smoke_build_command_per_language(tmp_path: Path) -> None:
 
     (tmp_path / "go.mod").write_text("module x\n", encoding="utf-8")
     (tmp_path / "main.go").write_text("package main\n", encoding="utf-8")
-    assert build_command(tmp_path, 8080) == ["go", "run", "main.go"]
+    (tmp_path / "shorty.go").write_text("package main\n", encoding="utf-8")
+    assert build_command(tmp_path, 8080) == ["go", "run", "."]
     (tmp_path / "go.mod").unlink()
     (tmp_path / "main.go").unlink()
+    (tmp_path / "shorty.go").unlink()
+
+    (tmp_path / "server.py").write_text("import app\n", encoding="utf-8")
+    (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
+    import sys as _sys
+
+    assert build_command(tmp_path, 8080) == [_sys.executable, "server.py"]
+    (tmp_path / "server.py").unlink()
+    (tmp_path / "app.py").unlink()
 
     (tmp_path / "package.json").write_text(
         '{"scripts": {"test": "node --test test/app.test.ts"}}', encoding="utf-8"
     )
     (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "server.ts").write_text('import { createHandler } from "./app.ts";\n', encoding="utf-8")
     (tmp_path / "src" / "app.ts").write_text("export const x = 1;\n", encoding="utf-8")
-    assert build_command(tmp_path, 8080) == ["node", "src/app.ts"]
+    assert build_command(tmp_path, 8080) == ["node", "src/server.ts"]
 
     (tmp_path / "package.json").write_text(
         '{"scripts": {"start": "node build.js"}}', encoding="utf-8"

@@ -96,30 +96,47 @@ FILE_PLANS: dict[str, tuple[tuple[str, str], ...]] = {
     "go": (
         ("go.mod", "the module manifest: module shorty; go 1.22."),
         (
-            "main.go",
-            "the complete service. Wire handlers on an http.ServeMux (export"
-            " `func NewMux() *http.ServeMux` so tests can reach it) plus `func main()`"
-            " reading HOST/PORT and calling http.ListenAndServe.",
+            "shorty.go",
+            "package main. The whole service logic: `func NewMux() *http.ServeMux`"
+            " registering GET / -> 200 JSON status, POST /shorten -> 200 JSON"
+            ' {"short":"<id>"} (400 on missing/invalid url; reject urls containing'
+            ' control chars), GET /<id> -> http.Redirect 302 to the stored url (404'
+            " unknown). In-memory map + counter id in a struct with a sync.Mutex."
+            " Keep it small (KISS).",
         ),
         (
             "main_test.go",
             "tests via net/http/httptest against NewMux(): shorten 200+id, resolve 302"
             " Location, unknown 404, invalid 400. NO subprocesses.",
         ),
+        (
+            "main.go",
+            "factory-provided server shim (see STATIC_FILES): main() reads HOST/PORT"
+            " and serves NewMux().",
+        ),
     ),
     "python": (
         (
             "app.py",
-            "the complete service on http.server. Expose a handler class factory"
-            " (e.g. `def make_handler(store):` returning a"
-            " http.server.BaseHTTPRequestHandler subclass using `store`) plus `main()`"
-            " reading HOST/PORT, so tests can exercise handler logic without sockets.",
+            "the service logic. Expose `def make_store() -> dict`,"
+            " `def handle_shorten(store, body_bytes: bytes) -> tuple[int, dict]`"
+            " (200 with {'short': id} for a valid http(s) url in the JSON body;"
+            " 400 otherwise), `def handle_resolve(store, short_id: str) ->"
+            " tuple[int, dict, dict]` ((302, {'Location': url}, {}) or"
+            " (404, {}, {'error': ...})), and `def make_handler(store)` returning a"
+            " http.server.BaseHTTPRequestHandler subclass that uses those functions."
+            " Keep it small (KISS).",
         ),
         (
             "test_app.py",
-            "pytest tests importing app and exercising the handler logic directly"
-            " (shorten 200+id payload, resolve 302 target, unknown 404, invalid 400)."
-            " NO subprocesses, NO real sockets.",
+            "pytest tests importing app and exercising handle_shorten/handle_resolve"
+            " directly on make_store() (shorten 200+id, resolve 302 Location, unknown"
+            " 404, invalid 400). NO subprocesses, NO real sockets.",
+        ),
+        (
+            "server.py",
+            "factory-provided server shim (see STATIC_FILES): imports app.make_handler,"
+            " serves on HOST/PORT.",
         ),
     ),
     "node": (
@@ -130,16 +147,23 @@ FILE_PLANS: dict[str, tuple[tuple[str, str], ...]] = {
         ),
         (
             "src/app.ts",
-            "the complete service. Export `export function shorten(url: string):"
-            " { short: string; url: string }` and `export function resolve(id: string):"
-            " string | null`, plus server startup reading HOST/PORT with node:http."
-            " Erasable TypeScript only (no enums/namespaces).",
+            "the service logic. Export `export function shorten(url: string): string`"
+            " (returns a short id; throws/returns empty on invalid), `export function"
+            " resolve(id: string): string | null`, and `export function createHandler():"
+            " (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse)"
+            " => void` implementing the routes. Erasable TypeScript only (no"
+            " enums/namespaces). Keep it small.",
         ),
         (
             "test/app.test.ts",
             "node:test tests importing src/app.ts: shorten returns an id,"
             " resolve returns the url / null for unknown, invalid input handled. NO"
             " subprocesses, NO real sockets.",
+        ),
+        (
+            "src/server.ts",
+            "factory-provided server shim (see STATIC_FILES): imports createHandler,"
+            " serves on HOST/PORT.",
         ),
     ),
 }
@@ -270,6 +294,59 @@ fn main() {
         }
     }
 }
+""",
+    ("go", "main.go"): r"""package main
+
+import (
+	"log"
+	"net/http"
+	"os"
+)
+
+func getenv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func main() {
+	host := getenv("HOST", "127.0.0.1")
+	port := getenv("PORT", "8080")
+	addr := host + ":" + port
+	log.Printf("shorty listening on %s", addr)
+	if err := http.ListenAndServe(addr, NewMux()); err != nil {
+		log.Fatal(err)
+	}
+}
+""",
+    ("python", "server.py"): r'''"""Factory-provided server shim: serve the apprentice-built handler."""
+
+import os
+from http.server import HTTPServer
+
+from app import make_handler
+
+
+def main() -> None:
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "8080"))
+    server = HTTPServer((host, port), make_handler({}))
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
+''',
+    ("node", "src/server.ts"): r"""import { createServer } from "node:http";
+import { createHandler } from "./app.ts";
+
+const host = process.env.HOST ?? "127.0.0.1";
+const port = Number(process.env.PORT ?? "8080");
+
+createServer(createHandler()).listen(port, host, () => {
+  console.log(`shorty listening on ${host}:${port}`);
+});
 """,
 }
 
