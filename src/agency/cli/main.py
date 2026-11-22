@@ -1616,10 +1616,14 @@ def consensus_sign_grant(
         "issued_at_ms": grant.issued_at_ms,
         "expires_at_ms": grant.expires_at_ms,
         "affected_consumers": list(grant.affected_consumers),
-        "attestation": {
-            "attestor_peer_id": grant.attestation.attestor_peer_id,
-            "signature": grant.attestation.signature.hex(),
-        },
+        "attestation": (
+            None
+            if grant.attestation is None
+            else {
+                "attestor_peer_id": grant.attestation.attestor_peer_id,
+                "signature": grant.attestation.signature.hex(),
+            }
+        ),
         "signature": grant.signature.hex(),
     }
     header = base64.b64encode(_json.dumps(payload).encode("utf-8")).decode("ascii")
