@@ -4,8 +4,9 @@ Found while implementing `RequestedAgentService` (`src/agency/factory/requested_
 Ordered by production risk. **Avoid these patterns; all agents are free to fix them.**
 
 **Status 2026-11-22 (full-gap sweep):** 17 of 20 closed — gaps 1-9, 11-16, 19 and 20; gaps 18
-(§12 grant path live on the authed intake routes, live 4-peer actuator demo PASS; real PKI +
-multi-node consensus remain) and 10 (live adapter + live task qualified on CentAI
+(§12 grant path live on the authed intake routes and now fenced downstream at the executor,
+live 4-peer actuator demo PASS; real-PKI certificates remain) and 10 (live adapter + live
+task qualified on CentAI
 `hy4-flash:free` 2026-11-22; improve leg + soak remain) are partially closed — commit
 references below; gap 20's ref is on `gap/autonomy-execution`, the Tier6 refs landed on
 `main` (`37095b9`) and the consolidation line (`f981282`). Gap 17 remains open for an
@@ -133,7 +134,7 @@ repository/manifest format is available to wire against (`docs/opensource/pak.md
 A2-Security-Advisors-LTD `pak`/`schema` docs were 404 at implementation time). Connect a real
 PAK repository and verify the sync flow against its manifest format when one exists.
 
-## 18. External HTTP intake — route swap live on the authed intake routes — PARTIALLY CLOSED `8604f8a`, `11854fa`, `37095b9`, `f981282`, `fada9cb`
+## 18. External HTTP intake — route swap live on the authed intake routes — PARTIALLY CLOSED `8604f8a`, `11854fa`, `37095b9`, `f981282`, `fada9cb`, `2566588`
 Landed: the §12 actuator-side enforcement primitives — a grant-verifying HTTP dependency,
 genesis registry seeding and scoped read opening (`8604f8a`, adapted to the merged router
 posture in `2eb4603`, async-bridge fix `37095b9`), memory owner-scope binding, finality-gated
@@ -158,12 +159,33 @@ wrong-scope 403, tampered 401, both auth kinds observed in the server log; evide
 `D:/agency-merge-backups/d6-actuator-evidence.json`. Also fixed en route in `fada9cb`:
 `TaskStore` explicit transactions are serialized by an in-process lock (the api intake and
 the dispatcher share one aiosqlite connection; concurrent `BEGIN IMMEDIATE` used to raise
-"cannot start a transaction within a transaction"). Still open: `POST /v1/agents` stays 503
-(spec-pinned, see #21e — enablement is an owner decision); production peer certificates
-from a real PKI and multi-node consensus beyond the single-host demo; fencing-token commit
-for downstream task execution (intake consumes nonces; resource-side fencing stays with the
-execution actuator). Tokens are plaintext over HTTP — bind servers to loopback or
-terminate TLS.
+"cannot start a transaction within a transaction"). Downstream fencing-token commit closed
+(`2566588`, branch `gap/18-fencing-commit`): the `POST /v1/tasks` grant path stamps the
+verified grant digest server-side on the task record (`input["grant_digest"]`; any
+client-supplied value is always stripped, bearer intakes unchanged), and the executor —
+`AgencyOrchestrator._execute_fenced`, the single seam both the dispatcher and inline
+callers pass through — commits the resource-side fencing token bound to (grant digest,
+task id) before the consequential pipeline runs and records an idempotent finality receipt
+after it, on the existing `FencingStateStore` (`agency.consensus.fencing_commit`, now WAL
+per gap-19 discipline). A re-executed attempt replays the existing receipt instead of
+re-running the work; a grant revoked after intake, a fencing-store error, and an
+orchestrator without a fencer all refuse the execution fail-closed with honest FAILED
+outcomes (`task.grant_fencing_refused`); the api and butler lifespans both attach the
+fencer (`attach_fencing_commit`, `AGENCY_FENCING_DB` for a durable store, per-process
+in-memory otherwise — mirroring `AGENCY_GRANT_STORE_DB`). Honest limits: the grant object
+is not re-verified at the executor (only the intake-verified digest is held there, and the
+nonce was consumed at the point of use, so re-verification would be a replay by
+construction); a crash between execution and receipt commit leaves the effect without a
+receipt (external-resource reconciliation stays a follow-up, as in
+`agency.consensus.fencing`); a concurrent duplicate commit of the same digest is refused
+by the store's append-only receipt log (stale epoch). Still open: `POST /v1/agents` stays
+503 (spec-pinned, see #21e — enablement is an owner decision); production peer
+certificates from a real PKI. The multi-node-consensus item is materially covered by the
+landed Slice C live proof (`docs/SLICE_C_LIVE_EVIDENCE.md`: four real cometbft 0.38.26
+validators on loopback, each with its own ABCI host child over TCP, real
+`/broadcast_tx_sync`/`/tx`/`/commit` RPC, repeat runs PASS — what remains there is
+real-PKI certificates, not consensus). Tokens are plaintext over HTTP — bind servers to
+loopback or terminate TLS.
 
 ## 19. Dispatcher/task-store operational bounds (2026-11-20) — CLOSED `3a3cd91`, `a34d90d`, `11f7600`
 Tasks persist in `data/tasks.db` (`AGENCY_TASKS_DB`); claims are atomic across the api and

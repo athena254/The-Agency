@@ -36,3 +36,40 @@ intake that the source branch predated):
 - Tier6 track A (`2dc83cb`, GUI observe panels + forge ship CLI) intentionally NOT
   ported: GUI superseded by feat/mission-control-upgrade's observe pages; CLI is
   tangential to Slice C/D and can be cherry-picked later if wanted.
+
+## Fencing-commit seam (2026-11-22, `gap/18-fencing-commit`, gaps.md #18)
+
+The resource-side fencing the Boundaries note deferred is now wired for **task
+execution** (bridge execute stays closed and out of scope). Intake verifies the
+§12 grant, consumes its nonce and — grant path only — stamps the verified digest
+server-side on the task record (`input["grant_digest"]`; client-supplied values
+are always stripped). The downstream executor
+(`AgencyOrchestrator._execute_fenced`, the single seam between the RUNNING claim
+and the pipeline) then:
+
+1. commits a fencing token bound to (grant digest, task id) via
+   `agency.consensus.fencing_commit.GrantFencingCommit` on the existing
+   `FencingStateStore` (now WAL + synchronous=NORMAL) before the pipeline runs;
+2. executes the task under that token;
+3. records an idempotent finality receipt after it, so a re-executed attempt
+   replays the existing receipt instead of re-running the work, and a concurrent
+   duplicate commit of the same digest is refused by the append-only receipt log
+   (stale epoch).
+
+Fail closed: a grant revoked after intake, a fencing-store error, and an
+orchestrator without a fencer all refuse the execution with an honest FAILED
+outcome (`task.grant_fencing_refused`) — a grant-admitted task never runs
+unfenced. Bearer-admitted and internally created tasks bypass the seam
+byte-for-byte unchanged. The api and butler lifespans both attach the fencer
+(`attach_fencing_commit`): both processes share the task queue, so both fence
+their claims. `AGENCY_FENCING_DB` points the store at a durable WAL file
+(verified end-to-end in `tests/test_grant_fencing_execution.py`: receipt
+survives the server shutdown); without it the store is per-process in-memory,
+mirroring `AGENCY_GRANT_STORE_DB`. Honest limits: the executor holds only the
+intake-verified digest (re-verification there would be a replay by
+construction, the nonce being consumed at the point of use), and a crash between
+execution and receipt commit leaves the effect without a receipt —
+external-resource reconciliation remains a follow-up, as in
+`agency.consensus.fencing`. Hermetic coverage: `tests/test_grant_fencing_commit.py`
+(8) + `tests/test_grant_fencing_execution.py` (9), plus the intake regression
+groups.
