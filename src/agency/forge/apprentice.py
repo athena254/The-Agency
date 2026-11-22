@@ -181,6 +181,47 @@ fn extract_json_string_field<'a>(body: &'a str, field: &str) -> Option<&'a str> 
     Some(&value[..end])
 }
 
+fn read_request(stream: &mut std::net::TcpStream) -> Option<String> {
+    let mut buf: Vec<u8> = Vec::new();
+    let mut chunk = [0u8; 4096];
+    loop {
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(_) => return None,
+        }
+        if buf.len() > 512 * 1024 {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&buf).to_string();
+        if let Some(idx) = text.find("\r\n\r\n") {
+            let headers = &text[..idx];
+            let content_length: usize = headers
+                .lines()
+                .find_map(|line| {
+                    let mut it = line.split(':');
+                    let name = it.next()?.trim();
+                    if name.eq_ignore_ascii_case("content-length") {
+                        it.next()?.trim().parse().ok()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0);
+            let body_start = idx + 4;
+            while buf.len() < body_start + content_length {
+                match stream.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(m) => buf.extend_from_slice(&chunk[..m]),
+                    Err(_) => break,
+                }
+            }
+            break;
+        }
+    }
+    Some(String::from_utf8_lossy(&buf).to_string())
+}
+
 fn main() {
     let host = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".into());
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
@@ -188,9 +229,7 @@ fn main() {
     let listener = TcpListener::bind((host.as_str(), port)).expect("bind failed");
     for stream in listener.incoming() {
         let mut stream = match stream { Ok(s) => s, Err(_) => continue };
-        let mut buf = [0u8; 65536];
-        let n = stream.read(&mut buf).unwrap_or(0);
-        let req = String::from_utf8_lossy(&buf[..n]).to_string();
+        let req = read_request(&mut stream).unwrap_or_default();
         let mut parts = req.split_whitespace();
         let method = parts.next().unwrap_or("").to_string();
         let path = parts.next().unwrap_or("/").to_string();
@@ -198,7 +237,11 @@ fn main() {
             respond(&mut stream, "200 OK", "{\"status\":\"ok\",\"service\":\"shorty\"}", "");
         } else if method == "POST" && path == "/shorten" {
             let url = extract_json_string_field(&req, "url").unwrap_or("").to_string();
-            let id = if url.is_empty() || !(url.starts_with("http://") || url.starts_with("https://")) {
+            let id = if url.is_empty()
+                || !(url.starts_with("http://") || url.starts_with("https://"))
+                || url.contains('\r')
+                || url.contains('\n')
+            {
                 String::new()
             } else {
                 shortener.lock().unwrap().shorten(&url)
@@ -206,14 +249,18 @@ fn main() {
             if id.is_empty() {
                 respond(&mut stream, "400 Bad Request", "{\"error\":\"invalid url\"}", "");
             } else {
-                respond(&mut stream, "200 OK", &format!("{{\"short\":\"{}\",\"url\":\"{}\"}}", id, url), "");
+                respond(&mut stream, "200 OK", &format!("{{\"short\":\"{}\"}}", id), "");
             }
         } else if method == "GET" && path.len() > 1 {
             let id = path.get(1..).unwrap_or("").to_string();
             if id.is_empty() {
                 respond(&mut stream, "404 Not Found", "{\"error\":\"not found\"}", "");
             } else {
-                match shortener.lock().unwrap().resolve(&id) {
+                let resolved = {
+                    let guard = shortener.lock().unwrap();
+                    guard.resolve(&id)
+                };
+                match resolved {
                     Some(url) => respond(&mut stream, "302 Found", "", &format!("Location: {}\r\n", url)),
                     None => respond(&mut stream, "404 Not Found", "{\"error\":\"not found\"}", ""),
                 }
