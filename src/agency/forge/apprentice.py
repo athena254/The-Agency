@@ -59,59 +59,87 @@ _FILE_CONTRACT = (
 # stay under the free provider's ~90s generation kill-switch; one long
 # multi-file call does not. This is also the context-economy doctrine: the
 # model never re-carries earlier files.
+COMPACT_CONTRACT = (
+    "SERVICE CONTRACT (binding):\n"
+    "- URL shortener; standard library ONLY; no external dependencies; no network installs.\n"
+    "- Read HOST (default 127.0.0.1) and PORT (default 8080) from the environment.\n"
+    "- GET / -> 200 with a small JSON status body.\n"
+    '- POST /shorten, JSON body {"url": "<absolute http(s) url>"} -> 200 with JSON'
+    ' {"short": "<id>", "url": "<original>"}; missing/invalid url -> 400.\n'
+    "- GET /<id> -> 302 with Location header to the stored url; unknown id -> 404.\n"
+    "- In-memory map storage; short unique id (base62/counter/hash prefix).\n"
+)
+
 FILE_PLANS: dict[str, tuple[tuple[str, str], ...]] = {
     "rust": (
-        ("Cargo.toml", "the crate manifest (name shorty, edition 2021, NO dependencies)"),
-        ("src/main.rs", "the complete service including inline #[cfg(test)] mod tests"),
+        (
+            "Cargo.toml",
+            "the crate manifest: [package] name = \"shorty\", version = \"0.1.0\","
+            " edition = \"2021\"; [[bin]] name = \"shorty\", path = \"src/main.rs\";"
+            " NO [dependencies] section.",
+        ),
+        (
+            "src/main.rs",
+            "the complete service. Separate logic for tests: a `Shortener` struct with"
+            " `shorten(&self, url: &str) -> String` and `resolve(&self, id: &str) ->"
+            " Option<String>` over a Mutex<HashMap<String, String>>, plus `fn main()`"
+            " serving TcpListener + a minimal HTTP/1.1 request loop using them. End with"
+            " inline `#[cfg(test)] mod tests` covering shorten/resolve/unknown (NO"
+            " subprocesses, NO HTTP in tests).",
+        ),
     ),
     "go": (
-        ("go.mod", "the module manifest (module shorty)"),
-        ("main.go", "the complete service"),
-        ("main_test.go", "the tests for the service"),
+        ("go.mod", "the module manifest: module shorty; go 1.22."),
+        (
+            "main.go",
+            "the complete service. Wire handlers on an http.ServeMux (export"
+            " `func NewMux() *http.ServeMux` so tests can reach it) plus `func main()`"
+            " reading HOST/PORT and calling http.ListenAndServe.",
+        ),
+        (
+            "main_test.go",
+            "tests via net/http/httptest against NewMux(): shorten 200+id, resolve 302"
+            " Location, unknown 404, invalid 400. NO subprocesses.",
+        ),
     ),
     "python": (
-        ("app.py", "the complete service"),
-        ("test_app.py", "the pytest tests for app.py"),
+        (
+            "app.py",
+            "the complete service on http.server. Expose a handler class factory"
+            " (e.g. `def make_handler(store):` returning a"
+            " http.server.BaseHTTPRequestHandler subclass using `store`) plus `main()`"
+            " reading HOST/PORT, so tests can exercise handler logic without sockets.",
+        ),
+        (
+            "test_app.py",
+            "pytest tests importing app and exercising the handler logic directly"
+            " (shorten 200+id payload, resolve 302 target, unknown 404, invalid 400)."
+            " NO subprocesses, NO real sockets.",
+        ),
     ),
     "node": (
-        ("package.json", 'the manifest (type module, scripts.test = "node --test test/app.test.ts")'),
-        ("src/app.ts", "the complete service"),
-        ("test/app.test.ts", "the node:test tests for src/app.ts"),
+        (
+            "package.json",
+            'the manifest: {"name": "shorty", "type": "module", "scripts": {"test":'
+            ' "node --test test/app.test.ts"}}. No dependencies.',
+        ),
+        (
+            "src/app.ts",
+            "the complete service. Export `export function shorten(url: string):"
+            " { short: string; url: string }` and `export function resolve(id: string):"
+            " string | null`, plus server startup reading HOST/PORT with node:http."
+            " Erasable TypeScript only (no enums/namespaces).",
+        ),
+        (
+            "test/app.test.ts",
+            "node:test tests importing src/app.ts: shorten returns an id,"
+            " resolve returns the url / null for unknown, invalid input handled. NO"
+            " subprocesses, NO real sockets.",
+        ),
     ),
 }
 
 _FILE_RETRY_DELAY_S = 30.0
-
-_LANGUAGE_NOTES: dict[str, str] = {
-    "rust": (
-        "- Rust 2021 edition, standard library ONLY (no crates, no network installs).\n"
-        "- Files: Cargo.toml (name, edition = \"2021\", no [dependencies]), src/main.rs.\n"
-        "- Tests inline in src/main.rs under #[cfg(test)] mod tests (std-only assertions).\n"
-        "- The test gate runs: cargo test\n"
-        "- Read HOST (default 127.0.0.1) and PORT (default 8080) from std::env; bind TcpListener."
-    ),
-    "go": (
-        "- Go, standard library ONLY (net/http, encoding/json, os).\n"
-        "- Files: go.mod (module shorty; go 1.22), main.go, main_test.go.\n"
-        "- The test gate runs: go test ./...\n"
-        "- Read HOST (default 127.0.0.1) and PORT (default 8080) via os.Getenv."
-    ),
-    "node": (
-        "- TypeScript on Node >= 26 (native type stripping: erasable TS only —"
-        " no enums, no namespaces, plain type annotations).\n"
-        "- Files: package.json ({\"type\":\"module\", \"scripts\":{\"test\":\"node --test"
-        " test/app.test.ts\"}}), src/app.ts, test/app.test.ts.\n"
-        "- Built-in modules only (node:http, node:crypto) — NO npm installs.\n"
-        "- The test gate runs: npm test (which must invoke node --test).\n"
-        "- Read HOST (default 127.0.0.1) and PORT (default 8080) from process.env."
-    ),
-    "python": (
-        "- Python 3.12+, standard library ONLY (http.server, json, hashlib, secrets).\n"
-        "- Files: app.py, test_app.py (pytest, importing app.py from the repo root).\n"
-        "- The test gate runs: pytest test_app.py\n"
-        "- Read HOST (default 127.0.0.1) and PORT (default 8080) from os.environ."
-    ),
-}
 
 
 def detect_apprentice_language(root: str | Path) -> str:
@@ -265,16 +293,18 @@ def run_apprentice(
     if llm is None:
         return _fail("no apprentice LLM configured; run refused (fail closed)")
 
-    notes = _LANGUAGE_NOTES[detect_apprentice_language(real_repo)]
-    plan = FILE_PLANS[detect_apprentice_language(real_repo)]
+    lang = detect_apprentice_language(real_repo)
+    plan = FILE_PLANS[lang]
 
-    # One file per call: small generations finish well inside the free
-    # provider's duration window, where one long multi-file call does not.
+    # One file per call with a COMPACT prompt: the full work order stays in
+    # the job record for audit, but generation prompts carry only the service
+    # contract plus the single file's instruction. A reasoning model handed
+    # the whole build spec reasons about the entire app even when asked for
+    # one tiny manifest, blowing past the free provider's duration window.
     files: list[tuple[str, str]] = []
     for path, purpose in plan:
         prompt = (
-            f"{task}\n\nIMPLEMENTATION NOTES (language-specific, binding):\n{notes}\n\n"
-            f"NOW WRITE exactly one file: {path} — {purpose}."
+            f"{COMPACT_CONTRACT}\nNOW WRITE exactly one file: {path} — {purpose}."
             f"{_FILE_CONTRACT}"
         )
         response: str | None = None
