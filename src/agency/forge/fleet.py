@@ -70,9 +70,15 @@ class FleetRunner:
                 logger.info("forge.fleet_verdict", runner=name, gate="PASS")
                 return report
             last = report
-            if is_infrastructure_failure(report):
+            # Fail over on infrastructure trouble, and also when a worker
+            # produced NOTHING: an empty change set means the worker could not
+            # work (provider down, launch failure), not that the code is bad.
+            if is_infrastructure_failure(report) or not report.changed_paths:
                 logger.warning(
-                    "forge.fleet_failover", runner=name, detail=report.failure_detail[:200]
+                    "forge.fleet_failover",
+                    runner=name,
+                    reason="infra" if is_infrastructure_failure(report) else "no-changes",
+                    detail=report.failure_detail[:200],
                 )
                 continue
             # A genuine verdict: tests failed or the reviewer rejected the code.

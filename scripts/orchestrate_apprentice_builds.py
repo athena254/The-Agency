@@ -149,24 +149,25 @@ def main() -> int:
     # The fleet: in-process apprentice first (cheap, per-file protocol), then
     # the strikers — opencode and hermes CLIs — when the apprentice's provider
     # is down. Failover happens on infrastructure failures only.
+    # Hermes first among strikers: its model family is independent of the
+    # apprentice's CentAI backend; opencode's hy4-flash-free rides the same
+    # provider, so it is the last resort.
     fleet = FleetRunner(
         [
             ("apprentice", run_apprentice),
+            (
+                "hermes-striker",
+                lambda repo, command, task, **kw: run_external_agent(
+                    repo, ["hermes", "-z", "--yolo"], task, timeout_s=1800, **kw
+                ),
+            ),
             (
                 "opencode-striker",
                 lambda repo, command, task, **kw: run_external_agent(
                     repo,
                     ["opencode", "run", "--model", "opencode/hy4-flash-free", "--auto"],
                     task,
-                    **kw,
-                ),
-            ),
-            (
-                "hermes-striker",
-                lambda repo, command, task, **kw: run_external_agent(
-                    repo,
-                    ["hermes", "-z", "--yolo"],
-                    task,
+                    timeout_s=1800,
                     **kw,
                 ),
             ),
