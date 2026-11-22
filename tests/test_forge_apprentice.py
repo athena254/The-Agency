@@ -153,7 +153,8 @@ def test_apprentice_language_kwarg_overrides_empty_repo(tmp_path: Path) -> None:
     stub = _StubLLM(
         [
             _file('[package]\nname = "shorty"\nedition = "2021"\n'),
-            _file("fn main() {}\n"),
+            _file("pub struct Shortener;\n"),
+            _file("use shorty::Shortener;\nfn main() {}\n"),
         ]
     )
     report = run_apprentice(
@@ -161,7 +162,8 @@ def test_apprentice_language_kwarg_overrides_empty_repo(tmp_path: Path) -> None:
     )
     assert report.gate == "PASS", report.failure_detail
     assert "NOW WRITE exactly one file: Cargo.toml" in stub.prompts[0]
-    assert "NOW WRITE exactly one file: src/main.rs" in stub.prompts[1]
+    assert "NOW WRITE exactly one file: src/lib.rs" in stub.prompts[1]
+    assert "NOW WRITE exactly one file: src/main.rs" in stub.prompts[2]
 
 
 def test_apprentice_fail_closed_on_unparsable_answer(tmp_path: Path) -> None:

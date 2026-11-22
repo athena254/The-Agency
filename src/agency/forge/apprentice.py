@@ -75,17 +75,24 @@ FILE_PLANS: dict[str, tuple[tuple[str, str], ...]] = {
         (
             "Cargo.toml",
             "the crate manifest: [package] name = \"shorty\", version = \"0.1.0\","
-            " edition = \"2021\"; [[bin]] name = \"shorty\", path = \"src/main.rs\";"
-            " NO [dependencies] section.",
+            " edition = \"2021\"; NO [dependencies] section.",
+        ),
+        (
+            "src/lib.rs",
+            "the logic library: `pub struct Shortener` (HashMap<String,String> behind"
+            " std::sync::Mutex, AtomicU64 counter), `pub fn new()`, `pub fn shorten(&self,"
+            " url: &str) -> String` (counter-based id, validate scheme http/https else"
+            " panic-free empty result), `pub fn resolve(&self, id: &str) ->"
+            " Option<String>`; end with `#[cfg(test)] mod tests` covering roundtrip +"
+            " unknown + invalid. Keep it small and simple (KISS).",
         ),
         (
             "src/main.rs",
-            "the complete service. Separate logic for tests: a `Shortener` struct with"
-            " `shorten(&self, url: &str) -> String` and `resolve(&self, id: &str) ->"
-            " Option<String>` over a Mutex<HashMap<String, String>>, plus `fn main()`"
-            " serving TcpListener + a minimal HTTP/1.1 request loop using them. End with"
-            " inline `#[cfg(test)] mod tests` covering shorten/resolve/unknown (NO"
-            " subprocesses, NO HTTP in tests).",
+            "the thin HTTP binary: `use shorty::Shortener;` fn main() reads HOST/PORT"
+            " from env, TcpListener::bind, accept loop, read one HTTP/1.1 request,"
+            " parse method + path, then: GET / -> 200 JSON status; POST /shorten ->"
+            " parse JSON body, shorten() -> 200 JSON; GET /<id> -> 301/302 with"
+            " Location or 404. Write responses with write_all. Keep it small.",
         ),
     ),
     "go": (
