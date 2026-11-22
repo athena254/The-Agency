@@ -2,17 +2,19 @@
 
 Mounted by :mod:`agency.api.server` at ``/v1/tasks``.
 
-Endpoints (all bearer-token authenticated; see :mod:`agency.api.auth`)
+Endpoints (bearer token or signed grant; see :mod:`agency.api.auth` and
+:mod:`agency.api.authority`)
 -----------------------------------------------------------------------
-POST   /v1/tasks                    Submit a task (``tasks:write``).
+POST   /v1/tasks                    Submit a task (``tasks:write`` grant or bearer).
 GET    /v1/tasks                    List own tasks (``tasks:read``).
 GET    /v1/tasks/{task_id}          Fetch one own task + result (``tasks:read``).
 PATCH  /v1/tasks/{task_id}/status   Owner transitions; creators may cancel (``tasks:write``).
 POST   /v1/tasks/{task_id}/messages Append a structured message to an own task.
 
 Identity is bound server-side: ``created_by`` comes from the authenticated
-principal, never from the request body (owners may submit on behalf of an
-agent explicitly). Reads are scoped to the caller's own tasks unless the
+principal — the bearer caller or, on the grant path, the verified grant
+issuer peer id — never from the request body (owners may submit on behalf of
+an agent explicitly). Reads are scoped to the caller's own tasks unless the
 principal is the owner.
 """
 
@@ -25,6 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from agency.api.auth import Principal, principal_dependency
+from agency.api.authority import intake_dependency
 from agency.kernel.registry import AgentRegistry
 from agency.kernel.tasks import Task, TaskManager, TaskMessage, TaskStatus
 
@@ -120,9 +123,14 @@ def _scoped_created_by(principal: Principal, requested: str) -> str:
 async def create_task(
     payload: TaskCreateRequest,
     request: Request,
-    principal: Annotated[Principal, Depends(principal_dependency("tasks:write"))],
+    principal: Annotated[Principal, Depends(intake_dependency("POST /v1/tasks", "tasks:write"))],
 ) -> Task:
-    """Create and register a new task for dispatcher execution."""
+    """Create and register a new task for dispatcher execution.
+
+    Authenticated via bearer token or a valid signed, task-scoped grant
+    (``X-Agency-Grant`` scoped to ``POST /v1/tasks``); the grant path is
+    verified actuator-side and consumes the grant nonce (gaps.md #18).
+    """
     manager = _manager(request)
     description = payload.input.get("description")
     if isinstance(description, str) and len(description) > MAX_DESCRIPTION_CHARS:
@@ -159,6 +167,8 @@ async def create_task(
         created_by=task.created_by,
         principal=principal.caller_id,
         role=principal.role,
+        auth_kind=getattr(request.state, "auth_kind", "unknown"),
+        grant_id=getattr(request.state, "grant_id", None),
     )
     return task
 

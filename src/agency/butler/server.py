@@ -28,7 +28,13 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from agency import __version__
-from agency.api.auth import Principal, TokenRegistry, principal_dependency
+from agency.api.auth import Principal, TokenRegistry
+from agency.api.authority import (
+    GRANT_HEADER,
+    attach_grant_authority,
+    detach_grant_authority,
+    intake_dependency,
+)
 from agency.butler.config import ButlerConfig
 from agency.butler.service import ButlerService
 from agency.kernel.task_store import TaskStore
@@ -169,6 +175,9 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         log.exception("butler.startup_failed")
         raise
     log.info("butler.api_startup", version=__version__)
+    # Pinned genesis + grant ledger when available — enables the signed-grant
+    # alternative on POST /v1/message (gaps.md #18 route swap).
+    attach_grant_authority(application)
     try:
         yield
     finally:
@@ -181,6 +190,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
                 await task_store.close()
             except Exception:
                 log.exception("butler.task_store_close_failed")
+        detach_grant_authority(application)
         log.info("butler.api_shutdown")
 
 
@@ -208,15 +218,24 @@ def create_app(config: ButlerConfig | None = None) -> FastAPI:
     async def deny_unverified_authority(request: Request, call_next: Any) -> Any:
         # A mounted child receives a root-prefixed ASGI path. GET health is
         # public; /v1/message is served to authenticated callers (route
-        # dependency) when a token registry is configured. Everything else
-        # fails closed until peer identity and scoped reads are implemented.
+        # dependency) when a token registry is configured, and also to callers
+        # presenting a signed intake grant (X-Agency-Grant, verified by the
+        # route dependency against the pinned grant ledger — gaps.md #18).
+        # Everything else fails closed until peer identity and scoped reads
+        # are implemented.
         path = request.scope["path"]
         root = request.scope.get("root_path", "")
         if root and path.startswith(root + "/"):
             path = path[len(root) :]
         if request.method == "GET" and path == "/v1/health":
             return await call_next(request)
-        if path == "/v1/message" and getattr(application.state, "token_registry", None) is not None:
+        has_grant_intake = (
+            getattr(application.state, "grant_ledger", None) is not None
+            and request.headers.get(GRANT_HEADER) is not None
+        )
+        if path == "/v1/message" and (
+            getattr(application.state, "token_registry", None) is not None or has_grant_intake
+        ):
             return await call_next(request)
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -229,7 +248,9 @@ def create_app(config: ButlerConfig | None = None) -> FastAPI:
     async def post_message(
         payload: MessageRequest,
         request: Request,
-        principal: Annotated[Principal, Depends(principal_dependency("chat:send"))],
+        principal: Annotated[
+            Principal, Depends(intake_dependency("POST /v1/message", "chat:send"))
+        ],
     ) -> MessageResponse:
         service = _get_service(request)
         if len(payload.message) > service.config.max_message_length:
@@ -238,11 +259,19 @@ def create_app(config: ButlerConfig | None = None) -> FastAPI:
                 detail=f"message exceeds {service.config.max_message_length} chars.",
             )
         # Authenticated channel: the caller's identity is bound server-side
-        # (never to the request body), so thread selection and sender-scoped
-        # memory recall are safe to enable.
+        # (never to the request body) — the bearer caller or, on the grant
+        # path, the verified grant issuer — so thread selection and
+        # sender-scoped memory recall are safe to enable.
         sender = principal.caller_id
         agent = await service.route(payload.message, {"sender": sender})
         response = await service.handle_message(payload.message, sender, payload.context)
+        log.info(
+            "butler.api.message",
+            sender=sender,
+            role=principal.role,
+            auth_kind=getattr(request.state, "auth_kind", "unknown"),
+            grant_id=getattr(request.state, "grant_id", None),
+        )
         return MessageResponse(
             response=response, agent_id=agent.id, agent_name=agent.name, domain=agent.domain
         )
