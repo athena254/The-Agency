@@ -192,18 +192,48 @@ fn respond(stream: &mut std::net::TcpStream, status_line: &str, body: &str, extr
     let _ = stream.write_all(resp.as_bytes());
 }
 
-fn extract_json_string_field<'a>(body: &'a str, field: &str) -> Option<&'a str> {
+fn extract_json_string_field(body: &str, field: &str) -> Option<String> {
+    // Parse only the JSON body (never the request head) and match the key
+    // followed by a colon, so a "url" mentioned inside another string or a
+    // header line cannot hijack the value.
     let key = format!("\"{}\"", field);
-    let start = body.find(&key)? + key.len();
-    let rest = &body[start..];
-    let colon = rest.find(':')?;
-    let after = rest[colon + 1..].trim_start();
-    if !after.starts_with('"') {
-        return None;
+    let mut search_from = 0usize;
+    while let Some(pos) = body[search_from..].find(&key) {
+        let abs = search_from + pos;
+        let after_key = &body[abs + key.len()..];
+        if let Some(rest) = after_key.trim_start().strip_prefix(':') {
+            if let Some(value) = rest.trim_start().strip_prefix('"') {
+                let mut out = String::new();
+                let mut chars = value.chars();
+                while let Some(c) = chars.next() {
+                    match c {
+                        '"' => return Some(out),
+                        '\\' => match chars.next() {
+                            Some('n') => out.push('\n'),
+                            Some('r') => out.push('\r'),
+                            Some('t') => out.push('\t'),
+                            Some('"') => out.push('"'),
+                            Some('\\') => out.push('\\'),
+                            Some('/') => out.push('/'),
+                            Some('u') => {
+                                let hex: String = chars.by_ref().take(4).collect();
+                                if let Ok(cp) = u32::from_str_radix(&hex, 16) {
+                                    if let Some(ch) = char::from_u32(cp) {
+                                        out.push(ch);
+                                    }
+                                }
+                            }
+                            _ => {}
+                        },
+                        other => out.push(other),
+                    }
+                }
+                return None;
+            }
+        }
+        search_from = abs + key.len();
     }
-    let value = &after[1..];
-    let end = value.find('"')?;
-    Some(&value[..end])
+    None
 }
 
 fn read_request(stream: &mut std::net::TcpStream) -> Option<String> {
@@ -256,13 +286,14 @@ fn main() {
     for stream in listener.incoming() {
         let mut stream = match stream { Ok(s) => s, Err(_) => continue };
         let req = read_request(&mut stream).unwrap_or_default();
-        let mut parts = req.split_whitespace();
+        let (head, body) = req.split_once("\r\n\r\n").unwrap_or((req.as_str(), ""));
+        let mut parts = head.split_whitespace();
         let method = parts.next().unwrap_or("").to_string();
         let path = parts.next().unwrap_or("/").to_string();
         if method == "GET" && (path == "/" || path.is_empty()) {
             respond(&mut stream, "200 OK", "{\"status\":\"ok\",\"service\":\"shorty\"}", "");
         } else if method == "POST" && path == "/shorten" {
-            let url = extract_json_string_field(&req, "url").unwrap_or("").to_string();
+            let url = extract_json_string_field(body, "url").unwrap_or_default();
             let id = if url.is_empty()
                 || !(url.starts_with("http://") || url.starts_with("https://"))
                 || url.contains('\r')
