@@ -272,13 +272,25 @@ dispatched/dispatch_failed/dispatch_uncertain/dispatch_skipped. With
 `assignment_journal_path` configured, the durable A5 `AssignmentJournal` records
 ASSIGNED→RUNNING→terminal atomically with its outbox rows under its bounded id scheme (real
 ids stay in the proof bundle and the new `RunResult.dispatches` field); progressed records
-are never re-dispatched, and journal errors fail closed by propagating. Forge-domain
+are never re-dispatched, and journal errors fail closed by propagating. Cross-restart
+reconciliation of never-dispatched ASSIGNED rows — dispatch and its ASSIGNED→RUNNING write
+share no intervening await, so a row still ASSIGNED at journal open comes from a killed
+process and provably never started — is CLOSED `ea998d7` (2026-11-22): the journal's
+open-time recovery, which already flipped interrupted RUNNING rows to UNCERTAIN, now also
+claims every stuck ASSIGNED row with an atomic ASSIGNED→FAILED write plus its own
+hash-chained outbox entry, whose FAILED-directly-from-ASSIGNED signature (no RUNNING entry
+in between, no invented digest or clock) is the audit record of "never dispatched,
+resolved at startup". RUNNING rows keep the UNCERTAIN recovery and are never resolved by
+the new path (live-owner lease discipline), terminal rows are untouched, concurrent starts
+serialize on the write lock so nothing double-resolves, a crash mid-recovery rolls back and
+leaves rows for the next start, and journal errors propagate fail closed from the
+constructor. Re-dispatch through the delegate was rejected deliberately: plan ids are fresh
+uuid4s and the journal stores no free text, so the subtask payload, parent task binding and
+agent id exist nowhere durable to honestly re-dispatch from. Forge-domain
 children keep routing through BlacksmithOps (owned by
-`docs/PLAN_BLACKSMITH_FORGE_ORCHESTRATOR.md`, unchanged). Still out of scope: cross-restart
-reconciliation of never-dispatched ASSIGNED rows (dispatch and its ASSIGNED→RUNNING write
-share no intervening await, so the window is a killed process), parallel/dependency-aware
-dispatch (sequential in plan order today), and the pre-existing umbrella parent execution
-alongside the children.
+`docs/PLAN_BLACKSMITH_FORGE_ORCHESTRATOR.md`, unchanged). Still out of scope:
+parallel/dependency-aware dispatch (sequential in plan order today), and the pre-existing
+umbrella parent execution alongside the children.
 
 ## 21. Task-lifecycle audit items (2026-11-20 audit, disposition 2026-11-21)
 Of the three audit items outside gap 19: (d) delegated child tasks' results never returned
