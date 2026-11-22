@@ -490,10 +490,17 @@ def run_external_agent(
     run_review_flag: bool = True,
     llm: Any = None,
     shadow_llm: Any = None,
+    language: str = "",
     cleanup: bool = False,
     protected_paths: Iterable[str] | None = None,
 ) -> ExternalAgentReport:
-    """Run an external coding agent in an isolated worktree, then Forge gates."""
+    """Run an external coding agent in an isolated worktree, then Forge gates.
+
+    ``language`` is the job's language tag (informational here — the work
+    order text carries the actual contract); accepted so fleet callers can
+    forward it uniformly.
+    """
+    del language
     real_repo = Path(repo_root)
     if not real_repo.is_absolute():
         raise ValueError(f"repo_root must be an absolute path, got {repo_root!r}")

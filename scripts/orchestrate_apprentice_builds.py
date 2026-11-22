@@ -19,6 +19,8 @@ import time
 from pathlib import Path
 
 from agency.forge.apprentice import run_apprentice
+from agency.forge.external_agent import run_external_agent
+from agency.forge.fleet import FleetRunner
 from agency.forge.cost import CostStore
 from agency.forge.evidence import EvidenceStore
 from agency.forge.holdout import run_holdout
@@ -55,15 +57,28 @@ _LANGUAGE_HEADERS = {
 
 _SPEC_NOTES = {
     "rust": (
-        "Files: Cargo.toml (name shorty, edition 2021, NO [dependencies] section),"
-        " src/main.rs with inline #[cfg(test)] mod tests."
+        "Rust 2021 edition, std-lib ONLY (no crates). src/main.rs is the binary:"
+        " reads HOST/PORT from the environment and serves over TcpListener. Keep"
+        " the logic in src/lib.rs (Shortener with new/shorten/resolve) with inline"
+        " #[cfg(test)] tests. Test gate: cargo test."
     ),
-    "go": "Files: go.mod (module shorty), main.go, main_test.go.",
-    "python": "Files: app.py (http.server based), test_app.py (pytest).",
+    "go": (
+        "Go std-lib ONLY (net/http, encoding/json). package main; func main() reads"
+        " HOST/PORT and serves. Keep the handlers reachable to tests (for example"
+        " func NewMux() *http.ServeMux). Test gate: go test ./... (net/http/httptest)."
+    ),
+    "python": (
+        "Python 3.12+ std-lib ONLY (http.server). A runnable entry reads HOST/PORT"
+        " and serves; keep the request-handling logic importable (functions or a"
+        " handler factory) so pytest can test it without real sockets."
+        " Test gate: pytest."
+    ),
     "typescript": (
-        'Files: package.json (type module; scripts.test = "node --test test/app.test.ts"),'
-        " src/app.ts, test/app.test.ts. Erasable TypeScript only (no enums/namespaces);"
-        " built-in node:http and node:crypto modules."
+        "TypeScript on Node >= 26 (native type stripping: erasable TS only — no"
+        " enums/namespaces). node:http + node:crypto ONLY — no npm installs. An"
+        " entry file reads HOST/PORT and serves; export shorten/resolve/createHandler"
+        " so node:test can import them. package.json scripts.test must invoke"
+        " node --test. Test gate: npm test."
     ),
 }
 
@@ -131,9 +146,35 @@ def main() -> int:
     root.mkdir(parents=True, exist_ok=True)
     langs = [lang.strip() for lang in args.langs.split(",") if lang.strip()]
 
+    # The fleet: in-process apprentice first (cheap, per-file protocol), then
+    # the strikers — opencode and hermes CLIs — when the apprentice's provider
+    # is down. Failover happens on infrastructure failures only.
+    fleet = FleetRunner(
+        [
+            ("apprentice", run_apprentice),
+            (
+                "opencode-striker",
+                lambda repo, command, task, **kw: run_external_agent(
+                    repo,
+                    ["opencode", "run", "--model", "opencode/hy4-flash-free", "--auto"],
+                    task,
+                    **kw,
+                ),
+            ),
+            (
+                "hermes-striker",
+                lambda repo, command, task, **kw: run_external_agent(
+                    repo,
+                    ["hermes", "-z", "--yolo"],
+                    task,
+                    **kw,
+                ),
+            ),
+        ]
+    )
     ops = BlacksmithOps(
         args.db,
-        runner=run_apprentice,
+        runner=fleet,
         worktree_root=root / "worktrees",
         model="centai/hy4-flash:free",
         evidence=EvidenceStore(root / "evidence.db"),
@@ -155,16 +196,25 @@ def main() -> int:
             )
             print(f"=== queued {lang}: job {job_id8(jobs[lang])} ===", flush=True)
 
-        # Dispatch until nothing is dispatchable. The free provider needs
-        # breathing room between long generations, so failed attempts pace
-        # the next dispatch instead of hammering back-to-back.
-        while True:
-            done = ops.dispatch_next()
-            if done is None:
-                break
-            print(f"=== job {done.job_id[:8]} -> {done.state.value} ===", flush=True)
-            if done.state is JobState.FAILED:
-                time.sleep(45.0)
+        def drain() -> None:
+            # Dispatch until nothing is dispatchable. The free provider needs
+            # breathing room between long generations, so failed attempts pace
+            # the next dispatch instead of hammering back-to-back.
+            while True:
+                done = ops.dispatch_next()
+                if done is None:
+                    return
+                print(f"=== job {done.job_id[:8]} -> {done.state.value} ===", flush=True)
+                if done.state is JobState.FAILED:
+                    time.sleep(45.0)
+
+        drain()
+        # Self-reliance: give every BLOCKED job one fresh attempt budget
+        # (audited) before the run gives up on it.
+        revived = ops.resurrect_blocked()
+        if revived:
+            print(f"=== resurrected {len(revived)} blocked job(s); second pass ===", flush=True)
+            drain()
 
         for lang, job in jobs.items():
             final = ops.get(job.job_id)

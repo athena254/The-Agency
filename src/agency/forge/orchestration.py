@@ -298,11 +298,13 @@ class BlacksmithOps:
             return self._maybe_block(job)
         # Dispatch ledger: one entry per attempt. External CLI agents expose no
         # token metering, so cost stays 0.0 — an honest "not metered", never a
-        # fabricated bill.
+        # fabricated bill. The label names the runner that actually produced
+        # the report (fleet dispatches may land on any member).
+        runner_label = " ".join(report.command[:2]).strip() or self._model
         record_cost(
             self._costs,
             run_id=f"{job.job_id[:40]}#a{job.attempts}"[:128],
-            model=self._model,
+            model=runner_label[:128],
         )
         return self.record_verdict(job.job_id, report)
 
@@ -379,6 +381,30 @@ class BlacksmithOps:
                 job, JobState.BLOCKED, "job_blocked", "retries exhausted; escalate to human"
             )
         return job
+
+    def resurrect_blocked(self) -> tuple[ForgeJob, ...]:
+        """Re-queue every BLOCKED job with a fresh attempt budget (audited).
+
+        Self-reliance: a run may spend two full attempt budgets per job before
+        giving up — provider windows come and go, and a blocked job from this
+        same run is worth one more pass without human prodding.
+        """
+        rows = self._conn.execute(
+            "SELECT document FROM forge_jobs WHERE state = ?", (JobState.BLOCKED.value,)
+        ).fetchall()
+        revived: list[ForgeJob] = []
+        for document in rows:
+            job = ForgeJob.model_validate_json(document[0])
+            job = self._transition(
+                job.model_copy(update={"attempts": 0}),
+                JobState.QUEUED,
+                "job_resurrected",
+                "blocked job re-queued with a fresh attempt budget",
+            )
+            revived.append(job)
+        if revived:
+            logger.info("blacksmith.blocked_resurrected", count=len(revived))
+        return tuple(revived)
 
     def build_tool_job(
         self,

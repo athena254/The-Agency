@@ -38,6 +38,7 @@ from agency.forge.diff import (
     delta_paths,
     head_sha,
 )
+from agency.forge.fleet import FleetRunner, is_infrastructure_failure
 from agency.forge.evidence import (
     EvidenceReport,
     EvidenceStore,
@@ -150,6 +151,7 @@ __all__ = [
     "EvidenceStore",
     "ExternalAgentReport",
     "ExternalAgentStore",
+    "FleetRunner",
     "FileRecord",
     "ForgeMetrics",
     "ForgePipelineReport",
@@ -198,6 +200,7 @@ __all__ = [
     "generate_timer",
     "get_tool",
     "head_sha",
+    "is_infrastructure_failure",
     "inspect_changes",
     "install_hint",
     "is_available",

@@ -13,6 +13,7 @@ import asyncio
 import json
 import os
 import sqlite3
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,6 +36,8 @@ logger = structlog.get_logger(__name__)
 
 MAX_ROUNDS = 5
 MAX_LINT_LINE_LENGTH = 120
+REVIEW_RETRY_DELAY_S = 60.0
+REVIEW_MAX_PROVIDER_RETRIES = 2
 
 ReviewGate = Literal["PASS", "FAIL"]
 Severity = Literal["low", "medium", "high", "critical"]
@@ -62,7 +65,15 @@ _REFUSAL_MARKERS: tuple[str, ...] = (
 
 
 class _LLMReviewError(Exception):
-    """The configured reviewer could not produce a usable verdict."""
+    """The configured reviewer could not produce a usable verdict.
+
+    ``retryable`` marks provider-side failures (timeouts, 503/429 bursts) that
+    a patient wait may cure; refusals and malformed answers are never retried.
+    """
+
+    def __init__(self, message: str = "", *, retryable: bool = False) -> None:
+        super().__init__(message or _LLM_FAILURE_MESSAGE)
+        self.retryable = retryable
 
 
 class ReviewFinding(BaseModel):
@@ -486,7 +497,9 @@ def _llm_review_one_round(
         raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("forge.review_llm_call_failed", error_class=type(exc).__name__)
-        raise _LLMReviewError from None
+        raise _LLMReviewError(
+            f"provider error: {type(exc).__name__}", retryable=True
+        ) from None
 
     text = response.strip() if isinstance(response, str) else ""
     lowered = text.lower()
@@ -655,17 +668,27 @@ def run_review(
         rounds_done += 1
         if llm_requested:
             try:
-                score, findings, _ = _llm_review_one_round(
-                    llm,
-                    real_root,
-                    changed_paths,
-                    test_paths,
-                    test_timeout_s,
-                    run_tests_flag,
-                    tests_report=tests_report,
-                    delta_base_sha=delta_scope,
-                )
-                used_llm = True
+                # Provider failures get a patient retry: a down judge must not
+                # burn the builder's attempts when a short wait cures it.
+                for attempt in range(REVIEW_MAX_PROVIDER_RETRIES + 1):
+                    try:
+                        score, findings, _ = _llm_review_one_round(
+                            llm,
+                            real_root,
+                            changed_paths,
+                            test_paths,
+                            test_timeout_s,
+                            run_tests_flag,
+                            tests_report=tests_report,
+                            delta_base_sha=delta_scope,
+                        )
+                        used_llm = True
+                        break
+                    except _LLMReviewError as exc:
+                        if not exc.retryable or attempt == REVIEW_MAX_PROVIDER_RETRIES:
+                            raise
+                        logger.warning("forge.review_provider_retry", attempt=attempt + 1)
+                        time.sleep(REVIEW_RETRY_DELAY_S)
             except _LLMReviewError:
                 # Heuristic remains the scorer of last resort, but the failed
                 # LLM gate keeps an unresolved high finding so the gate fails.
