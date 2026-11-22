@@ -10,7 +10,8 @@ multi-node consensus remain) and 10 (live adapter + live task qualified on CentA
 references below; gap 20's ref is on `gap/autonomy-execution`, the Tier6 refs landed on
 `main` (`37095b9`) and the consolidation line (`f981282`). Gap 17 remains open for an
 external reason (no real PAK repository to wire against); gaps 18-20 were added by the
-intake workstream (2026-11-20).
+intake workstream (2026-11-20). Gap 21 is partially closed: (d) and now (f) are closed
+(commit references below); (e) stays deliberately blocked.
 
 ## 1. Capability ⇄ Factory circular import (structural) — CLOSED `5399d37`
 `canonical_sha256` moved to the neutral `src/agency/core/hashing.py`; `factory.coding_models`
@@ -242,7 +243,25 @@ create/revoke agents"); `tests/test_agent_intake_boundary.py` pins that `AGENCY_
 does NOT open it. The D6 grant-verifier dependency has now landed (see #18); route
 enablement still requires the full verifier swap on consequential routes and an explicit
 owner decision, not a bearer-token switch. (f) task decomposition is
-regex-only (`agents/planner.py::_default_strategy`) — REMAINS: the `AgentPlanner` strategy
-seam is already pluggable, but with the hermetic echo provider an LLM-backed splitter cannot
-be validated offline (no API keys on this machine, #10); adding an untestable live path was
-rejected as not a clean bounded improvement.
+regex-only (`agents/planner.py::_default_strategy`) — CLOSED
+`fd87401` (2026-11-22, live): an LLM-backed decomposition strategy landed on the existing
+`AgentPlanner` strategy seam (`agents/planner.py::make_llm_strategy`); the default-strategy
+resolver picks it whenever the configured provider is not echo/offline and asks the LLM to
+split the task into 1-6 subtasks (short title + description + suggested lowercase
+capabilities from the planner vocabulary), parsed and validated strictly (exact key set,
+count cap, string bounds; one code fence tolerated). Any failure — malformed or
+budget-truncated reply, over-cap plan, empty completion, timeout, provider error — falls
+back to the regex `_default_strategy` with an honest `planner.llm_decompose_failed` log
+(class only, never reply content). Prompt hygiene: only the task text goes out (bounded to
+4000 chars) — no tool definitions, no system/memory content; the strategy-owned adapter
+caps output (1024 tokens, temp 0.2). Selection reads configuration only (no network call)
+and stays regex under echo, so the hermetic suite is untouched
+(`tests/test_planner_decomposition.py` stubs the adapter). The regex strategy remains the
+offline floor and the guaranteed fallback. Live-validated on CentAI `hy4-flash:free`: 3/3
+sample tasks produced 5-subtask plans within the cap (an earlier run honestly fell back on
+a budget-truncated reply and an empty free-tier completion, which motivated the 512→1024
+token budget); evidence `D:/agency-merge-backups/decomp-evidence.json`, script
+`scripts/decompose_live_demo.py`. Honest caveats: the sync `plan` seam blocks the calling
+thread for the bounded LLM call (on the orchestrator's legacy `_execute_running` path that
+thread is the event loop), and subtasks still reuse whole-task prompts downstream
+(unchanged).
