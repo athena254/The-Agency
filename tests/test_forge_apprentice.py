@@ -154,16 +154,20 @@ def test_apprentice_language_kwarg_overrides_empty_repo(tmp_path: Path) -> None:
         [
             _file('[package]\nname = "shorty"\nedition = "2021"\n'),
             _file("pub struct Shortener;\n"),
-            _file("use shorty::Shortener;\nfn main() {}\n"),
         ]
     )
     report = run_apprentice(
         repo, ["unused"], "task", language="rust", run_review_flag=False, llm=stub
     )
     assert report.gate == "PASS", report.failure_detail
+    # src/main.rs is factory-static: exactly two LLM calls, three files
+    assert len(stub.prompts) == 2
     assert "NOW WRITE exactly one file: Cargo.toml" in stub.prompts[0]
     assert "NOW WRITE exactly one file: src/lib.rs" in stub.prompts[1]
-    assert "NOW WRITE exactly one file: src/main.rs" in stub.prompts[2]
+    assert set(report.changed_paths) == {"Cargo.toml", "src/lib.rs", "src/main.rs"}
+    from agency.forge.apprentice import STATIC_FILES
+
+    assert STATIC_FILES[("rust", "src/main.rs")].startswith("use shorty::Shortener;")
 
 
 def test_apprentice_fail_closed_on_unparsable_answer(tmp_path: Path) -> None:

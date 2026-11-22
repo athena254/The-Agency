@@ -84,43 +84,13 @@ FILE_PLANS: dict[str, tuple[tuple[str, str], ...]] = {
             " url: &str) -> String` (counter-based id, validate scheme http/https else"
             " panic-free empty result), `pub fn resolve(&self, id: &str) ->"
             " Option<String>`; end with `#[cfg(test)] mod tests` covering roundtrip +"
-            " unknown + invalid. Keep it small and simple (KISS).",
+            " unknown + distinct ids. Keep it small and simple (KISS).",
         ),
         (
             "src/main.rs",
-            "the thin HTTP binary. Follow this scaffold EXACTLY, filling only the"
-            " four marked bodies:\n"
-            "```rust\n"
-            "use shorty::Shortener;\n"
-            "use std::collections::HashMap;\n"
-            "use std::io::{Read, Write};\n"
-            "use std::net::TcpListener;\n"
-            "use std::sync::{Arc, Mutex};\n"
-            "\n"
-            "fn respond(stream: &mut std::net::TcpStream, status: &str, body: &str, extra: &str) {\n"
-            "    // TODO-1: write_all a response with status line, Content-Type: application/json,\n"
-            "    // Content-Length, optional extra header line, blank line, body\n"
-            "}\n"
-            "\n"
-            "fn main() {\n"
-            "    let host = std::env::var(\"HOST\").unwrap_or_else(|_| \"127.0.0.1\".into());\n"
-            "    let port: u16 = std::env::var(\"PORT\").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);\n"
-            "    let shortener = Arc::new(Mutex::new(Shortener::new()));\n"
-            "    let listener = TcpListener::bind((host.as_str(), port)).expect(\"bind\");\n"
-            "    for stream in listener.incoming() {\n"
-            "        let mut stream = match stream { Ok(s) => s, Err(_) => continue };\n"
-            "        let mut buf = [0u8; 65536];\n"
-            "        let n = stream.read(&mut buf).unwrap_or(0);\n"
-            "        let req = String::from_utf8_lossy(&buf[..n]).to_string();\n"
-            "        // TODO-2: parse method (first word) and path (second token) from req\n"
-            "        // TODO-3: route: GET / -> 200 JSON status; POST /shorten -> extract the JSON\n"
-            "        //   body's \"url\" field (substring search is fine), shorten(); GET /<id> ->\n"
-            "        //   resolve() -> 302 with Location or 404\n"
-            "        // TODO-4: call respond(...)\n"
-            "    }\n"
-            "}\n"
-            "```\n"
-            "Fill the TODO bodies; keep everything else as written. No dependencies.",
+            "factory-provided transport shim (see STATIC_FILES): the apprentice owns"
+            " the logic and tests in src/lib.rs; the fixed HTTP shell is"
+            " infrastructure, not creative work.",
         ),
     ),
     "go": (
@@ -175,6 +145,78 @@ FILE_PLANS: dict[str, tuple[tuple[str, str], ...]] = {
 }
 
 _FILE_RETRY_DELAY_S = 30.0
+
+# Factory-provided files: fixed infrastructure the apprentice does not
+# regenerate (a reasoning model burns its whole duration window reasoning
+# about raw HTTP parsing). Everything meaningful — the logic and the tests —
+# stays apprentice-owned.
+STATIC_FILES: dict[tuple[str, str], str] = {
+    ("rust", "src/main.rs"): r"""use shorty::Shortener;
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::sync::{Arc, Mutex};
+
+fn respond(stream: &mut std::net::TcpStream, status_line: &str, body: &str, extra: &str) {
+    let resp = format!(
+        "HTTP/1.1 {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{}Connection: close\r\n\r\n{}",
+        status_line,
+        body.len(),
+        extra,
+        body
+    );
+    let _ = stream.write_all(resp.as_bytes());
+}
+
+fn extract_json_string_field<'a>(body: &'a str, field: &str) -> Option<&'a str> {
+    let key = format!("\"{}\"", field);
+    let start = body.find(&key)? + key.len();
+    let rest = &body[start..];
+    let colon = rest.find(':')?;
+    let after = rest[colon + 1..].trim_start();
+    if !after.starts_with('"') {
+        return None;
+    }
+    let value = &after[1..];
+    let end = value.find('"')?;
+    Some(&value[..end])
+}
+
+fn main() {
+    let host = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".into());
+    let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
+    let shortener = Arc::new(Mutex::new(Shortener::new()));
+    let listener = TcpListener::bind((host.as_str(), port)).expect("bind failed");
+    for stream in listener.incoming() {
+        let mut stream = match stream { Ok(s) => s, Err(_) => continue };
+        let mut buf = [0u8; 65536];
+        let n = stream.read(&mut buf).unwrap_or(0);
+        let req = String::from_utf8_lossy(&buf[..n]).to_string();
+        let mut parts = req.split_whitespace();
+        let method = parts.next().unwrap_or("").to_string();
+        let path = parts.next().unwrap_or("/").to_string();
+        if method == "GET" && (path == "/" || path.is_empty()) {
+            respond(&mut stream, "200 OK", "{\"status\":\"ok\",\"service\":\"shorty\"}", "");
+        } else if method == "POST" && path == "/shorten" {
+            let url = extract_json_string_field(&req, "url").unwrap_or("").to_string();
+            if url.is_empty() || !(url.starts_with("http://") || url.starts_with("https://")) {
+                respond(&mut stream, "400 Bad Request", "{\"error\":\"invalid url\"}", "");
+            } else {
+                let id = shortener.lock().unwrap().shorten(&url);
+                respond(&mut stream, "200 OK", &format!("{{\"short\":\"{}\",\"url\":\"{}\"}}", id, url), "");
+            }
+        } else if method == "GET" && path.len() > 1 {
+            let id = path[1..].to_string();
+            match shortener.lock().unwrap().resolve(&id) {
+                Some(url) => respond(&mut stream, "302 Found", "", &format!("Location: {}\r\n", url)),
+                None => respond(&mut stream, "404 Not Found", "{\"error\":\"not found\"}", ""),
+            }
+        } else {
+            respond(&mut stream, "404 Not Found", "{\"error\":\"not found\"}", "");
+        }
+    }
+}
+""",
+}
 
 
 def detect_apprentice_language(root: str | Path) -> str:
@@ -344,6 +386,11 @@ def run_apprentice(
     # one tiny manifest, blowing past the free provider's duration window.
     files: list[tuple[str, str]] = []
     for path, purpose in plan:
+        static_content = STATIC_FILES.get((lang, path))
+        if static_content is not None:
+            files.append((path, static_content))
+            logger.info("forge.apprentice_static_file", file=path)
+            continue
         prompt = (
             f"{COMPACT_CONTRACT}\nNOW WRITE exactly one file: {path} — {purpose}."
             f"{_FILE_CONTRACT}"
