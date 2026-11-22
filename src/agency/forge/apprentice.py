@@ -685,10 +685,14 @@ def run_apprentice(
             logger.error("forge.apprentice_review_error")
 
     overall = "PASS"
+    review_note = ""
     if review is not None and review.gate != "PASS":
         overall = "FAIL"
     if review_error:
         overall = "FAIL"
+        # Name the judge outage honestly so the retry note (and any fleet
+        # logic) can tell "reviewer down" from "code rejected".
+        review_note = "review_llm_call_failed: reviewer provider unavailable; build gates passed"
 
     caveats = list(_BASE_CAVEATS)
     if coding.tests is not None:
@@ -707,6 +711,7 @@ def run_apprentice(
         task=task,
         exit_code=0 if overall == "PASS" else 1,
         changed_paths=applied_paths,
+        failure_detail=review_note,
         inspection=coding.inspection,
         security=coding.security,
         tests=coding.tests,
