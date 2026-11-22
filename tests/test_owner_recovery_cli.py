@@ -1,5 +1,6 @@
 """Actual local operator entrypoint; synthetic private stores and credentials only."""
 
+import asyncio
 import importlib.util
 import json
 import os
@@ -102,6 +103,11 @@ runpy.run_module('agency.prototype.owner_recovery',run_name='__main__')"""
     )
 
 
+def child_diag(result):
+    """KI-04: a failing child keeps its rc and captured streams in the assert."""
+    return f"rc={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
+
+
 async def test_cli_prepare_preview_accept_reopen_and_lock(tmp_path):
     path = tmp_path / "private"
     await installation(path)
@@ -109,13 +115,14 @@ async def test_cli_prepare_preview_accept_reopen_and_lock(tmp_path):
         "Offline operation unavailable"
     )
     unprepared = invoke(path, "--preview")
-    assert unprepared.returncode != 0
+    assert unprepared.returncode != 0, child_diag(unprepared)
     first = invoke(path, "--prepare")
-    assert first.returncode == 0, first.stderr
-    assert json.loads(first.stdout) == {"prepared": True}
-    assert json.loads(invoke(path, "--prepare").stdout) == {"prepared": True}
+    assert first.returncode == 0, child_diag(first)
+    assert json.loads(first.stdout) == {"prepared": True}, child_diag(first)
+    again = invoke(path, "--prepare")
+    assert json.loads(again.stdout) == {"prepared": True}, child_diag(again)
     preview = invoke(path, "--preview")
-    assert preview.returncode == 0, preview.stderr
+    assert preview.returncode == 0, child_diag(preview)
     data = json.loads(preview.stdout)
     assert len(data["snapshot"]["uncertain_turns"]) == 2
     assert len(data["snapshot"]["pending_intents"]) == 1
@@ -134,23 +141,19 @@ async def test_cli_prepare_preview_accept_reopen_and_lock(tmp_path):
         "receipt",
         "--accept-residual-uncertainty",
     )
-    assert accepted.returncode == 0, accepted.stderr
+    assert accepted.returncode == 0, child_diag(accepted)
     receipt = json.loads(accepted.stdout)["receipt"]
     assert receipt["receipt_id"]
     assert "t" * 64 not in accepted.stdout
-    assert (
-        json.loads(
-            invoke(
-                path,
-                "--accept",
-                data["snapshot_digest"],
-                "--request-id",
-                "receipt",
-                "--accept-residual-uncertainty",
-            ).stdout
-        )["receipt"]
-        == receipt
+    repeat = invoke(
+        path,
+        "--accept",
+        data["snapshot_digest"],
+        "--request-id",
+        "receipt",
+        "--accept-residual-uncertainty",
     )
+    assert json.loads(repeat.stdout)["receipt"] == receipt, child_diag(repeat)
     for name in ("pilot.db", "quota.db"):
         with closing(sqlite3.connect(path / name)) as db:
             assert tuple(db.iterdump()) == original[name]
@@ -163,7 +166,31 @@ async def test_cli_prepare_preview_accept_reopen_and_lock(tmp_path):
     await store.initialize()
     try:
         locked = invoke(path, "--preview")
-        assert locked.returncode != 0
-        assert locked.stdout == ""
+        assert locked.returncode != 0, child_diag(locked)
+        assert locked.stdout == "", child_diag(locked)
     finally:
         await store.close()
+
+
+def test_cli_unexpected_failure_keeps_root_cause_on_stderr(tmp_path, monkeypatch, capsys):
+    """KI-04: a failing recovery child retains its root cause on stderr.
+
+    The fixed public code stays on the machine-readable channel, but the
+    unexpected-exception path used to DISCARD the traceback, so a failed
+    child left no evidence beyond ``recovery_unavailable``.
+    """
+    path = tmp_path / "private"
+    asyncio.run(installation(path))
+    from agency.prototype import owner_recovery as cli
+
+    async def synthetic_failure(settings, args):
+        raise RuntimeError("synthetic unexpected failure")
+
+    monkeypatch.setattr(cli, "operate", synthetic_failure)
+    rc = cli.main(["--config", str(path / "owner.json"), "--data-dir", str(path), "--prepare"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    lines = err.strip().splitlines()
+    assert lines, err
+    assert json.loads(lines[-1]) == {"error": "recovery_unavailable"}, err
+    assert "RuntimeError: synthetic unexpected failure" in err, err
