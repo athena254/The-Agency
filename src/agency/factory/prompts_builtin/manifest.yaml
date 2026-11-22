@@ -358,6 +358,66 @@
       "kind": "SEGMENT",
       "file": "segments/reap-tool-availability.md",
       "provenance": "builtin:agency-factory/segments/reap-tool-availability"
+    },
+    {
+      "id": "default-agent-personal",
+      "version": "1.0.0",
+      "name": "Personal Default Agent",
+      "description": "Default personal-domain agent system prompt, ported verbatim from the legacy PERSONAL_SYSTEM_PROMPT constant.",
+      "domain": "personal",
+      "kind": "BASE",
+      "file": "default_agents/default-agent-personal.md",
+      "provenance": "builtin:agency-factory/default-agents/default-agent-personal"
+    },
+    {
+      "id": "default-agent-work",
+      "version": "1.0.0",
+      "name": "Work Default Agent",
+      "description": "Default work-domain agent system prompt, ported verbatim from the legacy WORK_SYSTEM_PROMPT constant.",
+      "domain": "work",
+      "kind": "BASE",
+      "file": "default_agents/default-agent-work.md",
+      "provenance": "builtin:agency-factory/default-agents/default-agent-work"
+    },
+    {
+      "id": "default-agent-business",
+      "version": "1.0.0",
+      "name": "Business Default Agent",
+      "description": "Default business-domain agent system prompt, ported verbatim from the legacy BUSINESS_SYSTEM_PROMPT constant.",
+      "domain": "business",
+      "kind": "BASE",
+      "file": "default_agents/default-agent-business.md",
+      "provenance": "builtin:agency-factory/default-agents/default-agent-business"
+    },
+    {
+      "id": "default-agent-security",
+      "version": "1.0.0",
+      "name": "Security Default Agent",
+      "description": "Default security-domain agent system prompt, ported verbatim from the legacy SECURITY_SYSTEM_PROMPT constant.",
+      "domain": "security",
+      "kind": "BASE",
+      "file": "default_agents/default-agent-security.md",
+      "provenance": "builtin:agency-factory/default-agents/default-agent-security"
+    },
+    {
+      "id": "default-agent-research",
+      "version": "1.0.0",
+      "name": "Research Default Agent",
+      "description": "Default research-domain agent system prompt, ported verbatim from the legacy RESEARCH_SYSTEM_PROMPT constant.",
+      "domain": "research",
+      "kind": "BASE",
+      "file": "default_agents/default-agent-research.md",
+      "provenance": "builtin:agency-factory/default-agents/default-agent-research"
+    },
+    {
+      "id": "default-agent-general",
+      "version": "1.0.0",
+      "name": "General Default Agent",
+      "description": "Default general-domain agent system prompt, ported verbatim from the legacy GENERAL_SYSTEM_PROMPT constant.",
+      "domain": "general",
+      "kind": "BASE",
+      "file": "default_agents/default-agent-general.md",
+      "provenance": "builtin:agency-factory/default-agents/default-agent-general"
     }
   ]
 }

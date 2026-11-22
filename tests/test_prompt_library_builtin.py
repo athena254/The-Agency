@@ -56,6 +56,26 @@ SEGMENT_IDS = {
     "reap-tool-availability",
 }
 
+DEFAULT_AGENT_PROMPT_IDS = {
+    "default-agent-personal",
+    "default-agent-work",
+    "default-agent-business",
+    "default-agent-security",
+    "default-agent-research",
+    "default-agent-general",
+}
+
+DEFAULT_AGENT_DOMAINS = {
+    "default-agent-personal": "personal",
+    "default-agent-work": "work",
+    "default-agent-business": "business",
+    "default-agent-security": "security",
+    "default-agent-research": "research",
+    "default-agent-general": "general",
+}
+
+ALL_BUILTIN_IDS = REAP_PACK_IDS | SEGMENT_IDS | DEFAULT_AGENT_PROMPT_IDS
+
 
 def test_manifest_and_license_present() -> None:
     assert MANIFEST_PATH.exists()
@@ -69,8 +89,8 @@ def test_manifest_and_license_present() -> None:
 def test_builtin_specs_cover_segments_and_all_reap_packs() -> None:
     specs = builtin_specs()
     ids = {spec.prompt_id for spec in specs}
-    assert ids == REAP_PACK_IDS | SEGMENT_IDS
-    assert len(specs) == len(REAP_PACK_IDS) + len(SEGMENT_IDS)
+    assert ids == ALL_BUILTIN_IDS
+    assert len(specs) == len(ALL_BUILTIN_IDS)
     by_id = {spec.prompt_id: spec for spec in specs}
     for pack_id in REAP_PACK_IDS:
         assert by_id[pack_id].kind is PromptKind.PACK
@@ -80,6 +100,12 @@ def test_builtin_specs_cover_segments_and_all_reap_packs() -> None:
         assert by_id[segment_id].kind is PromptKind.SEGMENT
         assert by_id[segment_id].status is PromptStatus.PUBLISHED
     assert by_id["reap-safety-scope"].kind is PromptKind.SEGMENT
+    for prompt_id in DEFAULT_AGENT_PROMPT_IDS:
+        assert by_id[prompt_id].kind is PromptKind.BASE
+        assert by_id[prompt_id].status is PromptStatus.PUBLISHED
+        assert by_id[prompt_id].domain == DEFAULT_AGENT_DOMAINS[prompt_id]
+        assert by_id[prompt_id].version == "1.0.0"
+        assert by_id[prompt_id].provenance.startswith("builtin:agency-factory/default-agents/")
 
 
 def test_every_builtin_body_is_nonblank_and_bounded() -> None:
@@ -99,7 +125,7 @@ def test_reap_packs_preserve_upstream_evidence_discipline() -> None:
 def test_ensure_builtin_prompts_is_idempotent(tmp_path) -> None:
     reg = PromptRegistry(str(tmp_path / "prompts.db"))
     try:
-        assert ensure_builtin_prompts(reg) == len(REAP_PACK_IDS | SEGMENT_IDS)
+        assert ensure_builtin_prompts(reg) == len(ALL_BUILTIN_IDS)
         assert ensure_builtin_prompts(reg) == 0
         assert reg.is_published("reap-safety-scope", "1.0.0") is True
         assert (
