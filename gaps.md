@@ -3,13 +3,12 @@
 Found while implementing `RequestedAgentService` (`src/agency/factory/requested_agent.py`).
 Ordered by production risk. **Avoid these patterns; all agents are free to fix them.**
 
-**Status 2026-11-22 (full-gap sweep):** 17 of 20 closed — gaps 1-9, 11-16, 19 and 20; gaps 18
-(§12 grant path live on the authed intake routes and now fenced downstream at the executor,
-live 4-peer actuator demo PASS; real-PKI certificates remain) and 10 (live adapter, live
-task, improve leg and the multi-restart/concurrency soak qualified on CentAI
-`hy4-flash:free` 2026-11-22; a second provider for comparison remains) are partially closed
-— commit references below; gap 20's ref is on `gap/autonomy-execution`, the Tier6 refs
-landed on `main` (`37095b9`) and the consolidation line (`f981282`). Gap 17 remains open
+**Status 2026-11-22 (full-gap sweep + build session):** 18 of 20 closed — gaps 1-9, 11-16,
+19 and 20; gap 10 is CLOSED (the last open leg — a second live provider for comparison —
+was qualified the same day; details below); gap 18 is partially closed (§12 grant path live
+on the authed intake routes, fenced downstream at the executor, live 4-peer actuator demo
+PASS; an optional fail-closed TLS-termination path with a local test-CA harness landed
+`0fe1d0c`/`4810b82`/`5d328fa`; real-PKI certificates remain external). Gap 17 remains open
 for an external reason (no real PAK repository to wire against); gaps 18-20 were added by
 the intake workstream (2026-11-20). Gap 21 is partially closed: (d) and now (f) are closed
 (commit references below); (e) stays deliberately blocked.
@@ -65,7 +64,7 @@ registration, with a per-service lifetime cap (`MAX_LIFETIME_LEARNED_SKILLS = 32
 `PromptRegistry`, `AgentFactory` and `SkillRegistry` set `journal_mode=WAL` +
 `synchronous=NORMAL` on their connections; one writer connection per process stands.
 
-## 10. No live-provider qualification of this flow — PARTIALLY CLOSED (2026-11-22, live)
+## 10. No live-provider qualification of this flow — CLOSED (2026-11-22, live, two providers)
 Qualified live on an OpenAI-compatible provider (CentAI `api.cent-ai.dev/v1`, model
 `hy4-flash:free`, configured via `AGENCY_LLM_PROVIDER=openai` + `AGENCY_LLM_BASE_URL` +
 `AGENCY_LLM_API_KEY` in the untracked `.env`; key is never committed): (a) the Agency's own
@@ -123,6 +122,34 @@ the provider-aware backoff retries them and the gate fails closed with honest ca
 the provider stays unavailable (observed and verified live). The soak is now exercised
 (both legs `pass`, evidence above); full production certification is still not claimed —
 single host, single provider, no beta enablement.
+
+**Second provider — CLOSED the same day (2026-11-22, live):** the remaining open leg — a
+second provider for comparison — was qualified on Google (`ProviderKind.GOOGLE`, config
+default `gemini-3.5-flash-lite`, `AGENCY_LLM_PROVIDER=google` + `AGENCY_LLM_API_KEY` /
+`AGENCY_LLM_MODEL`): (a) the adapter leg round-tripped the exact expected marker through
+dotenv → `load_config` → `LLMAdapter.generate` (1 attempt, no backoffs); (b) a real task ran
+the full dispatcher pipeline — live planner (3 subtasks), live executor, exact correct
+output, terminal `completed`, audit/evidence/memory all written, 0 provider errors. Both
+CentAI legs re-ran green in the same comparison (`scripts/second_provider_comparison.py`,
+commit `182faec`; hermetic tests for its arg handling/offline refusal/
+secret-scan `tests/test_second_provider_comparison.py`; per-provider JSON evidence at
+`D:/agency-second-provider/evidence/second-provider-evidence.json`, secret-scanned before
+write; the key was never read into any artifact). The long-standing independent-checker
+strictness item recorded above — the verifier scoring a correct answer `0.667/failed` — is
+CLOSED (`8a9a48f`): the orchestrator had been passing the verifier's own check-category
+names ("completeness"/"accuracy"/"safety") as if they were output-mention requirements, so
+a correct keyword-free answer failed the fabricated completeness check; it now verifies
+what was actually checked (completeness/safety honestly, accuracy recorded
+`not_performed`/`no_trusted_accuracy_oracle`), and safety enforcement is pinned to survive.
+The live Google task leg observed the fixed verdict honestly (`needs_review`, no fabricated
+failure). Also fixed from the qualification (`2a909be`): the legacy `LLMAdapter()` env path
+neither detected `GOOGLE_API_KEY`/`GEMINI_API_KEY` nor had a google default model — it fell
+through to the Pollinations default and 404'd; detection + default now mirror
+`config.py`. Honest limits: one qualification run per provider (the multi-restart and
+concurrency soak legs ran on CentAI only; not re-run on Google), free-tier dips observed on
+both (CentAI 503 retried by the provider-aware backoff; `gemini-4-hydrogen` rate-limited on
+this key — the qualification uses the config-default model), and full production
+certification is still not claimed: single host, no beta enablement.
 
 ## 11. GitHub-imported skills are metadata-only — CLOSED `36bd00f`
 `ext-*` skills are created with the same documentation-only sentinel as gap 4; promotion and
@@ -218,7 +245,16 @@ landed Slice C live proof (`docs/SLICE_C_LIVE_EVIDENCE.md`: four real cometbft 0
 validators on loopback, each with its own ABCI host child over TCP, real
 `/broadcast_tx_sync`/`/tx`/`/commit` RPC, repeat runs PASS — what remains there is
 real-PKI certificates, not consensus). Tokens are plaintext over HTTP — bind servers to
-loopback or terminate TLS.
+loopback or terminate TLS. The TLS termination leg advanced 2026-11-22 (`0fe1d0c`,
+`4810b82`, `5d328fa`): the owner pilot launcher accepts optional
+`--tls-certfile`/`--tls-keyfile` (both-or-nothing, fail closed on a half pair via
+`tls_cert_and_key_required`, defense-in-depth re-check in the server-config builder;
+loopback bind, bearer, CSRF and ACL posture unchanged), and `scripts/gen_test_ca.py`
+generates a local test-only CA + server leaf (SANs for localhost/127.0.0.1, refuses
+overwrite, documented LOCAL TESTS ONLY / never deploy). The hermetic e2e makes a real HTTPS
+request against the launched app with the chain verified through the generated CA
+(`verify=False` nowhere). Production peer certificates from a real PKI remain external and
+no other HTTP surface is TLS-wired in this change.
 
 ## 19. Dispatcher/task-store operational bounds (2026-11-20) — CLOSED `3a3cd91`, `a34d90d`, `11f7600`
 Tasks persist in `data/tasks.db` (`AGENCY_TASKS_DB`); claims are atomic across the api and
