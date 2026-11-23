@@ -7,11 +7,10 @@ from uuid import uuid4
 
 import pytest
 
-from agency.forge import apprentice as apprentice_module
 from agency.forge.external_agent import ExternalAgentReport
 from agency.forge.fleet import FleetRunner, is_infrastructure_failure
 from agency.forge.inspection import InspectionReport
-from agency.forge.reviewer import REVIEW_MAX_PROVIDER_RETRIES, REVIEW_RETRY_DELAY_S, run_review
+from agency.forge.reviewer import REVIEW_MAX_PROVIDER_RETRIES, run_review
 from agency.forge.security_scan import SecurityReport
 
 
@@ -85,7 +84,9 @@ def test_fleet_failover_on_infrastructure_failure() -> None:
 
 def test_fleet_does_not_fail_over_on_genuine_verdicts() -> None:
     calls: list[str] = []
-    strict = _runner("apprentice", _report("FAIL", failure="review findings: src/x.py:3 L901 (high)"), calls)
+    strict = _runner(
+        "apprentice", _report("FAIL", failure="review findings: src/x.py:3 L901 (high)"), calls
+    )
     never = _runner("opencode", _report("PASS"), calls)
     fleet = FleetRunner([("apprentice", strict), ("opencode", never)])
     report = fleet("D:/fake/repo", ["unused"], "task")
@@ -136,13 +137,10 @@ class _FlakyLLM:
         self.calls += 1
         if self.calls <= self.failures:
             raise RuntimeError("503 burst")
-        return (
-            '{"score": 5, "findings": [], "summary": "clean after recovery"}'
-        )
+        return '{"score": 5, "findings": [], "summary": "clean after recovery"}'
 
 
 def test_review_retries_through_provider_bursts(tmp_path, monkeypatch) -> None:
-    from pathlib import Path as _Path
     import subprocess as _sp
 
     repo = tmp_path / "repo"
@@ -165,7 +163,6 @@ def test_review_retries_through_provider_bursts(tmp_path, monkeypatch) -> None:
 
 
 def test_review_never_retries_refusals(tmp_path, monkeypatch) -> None:
-    from pathlib import Path as _Path
     import subprocess as _sp
 
     repo = tmp_path / "repo"
@@ -223,7 +220,9 @@ def test_review_falls_back_to_independent_judge(tmp_path, monkeypatch) -> None:
             assert "SERVICE CONTRACT" not in prompt  # it judges the real prompt
             return '{"score": 4, "findings": [], "summary": "independent judge: clean"}'
 
-    report = run_review(repo, ["a.py"], use_llm=True, llm=_DownForever(), fallback_llm=_HermesJudgeStub())
+    report = run_review(
+        repo, ["a.py"], use_llm=True, llm=_DownForever(), fallback_llm=_HermesJudgeStub()
+    )
     assert report.gate == "PASS"
     assert _HermesJudgeStub.calls == 1
     assert "review_fallback_judge" in report.caveats

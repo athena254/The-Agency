@@ -55,14 +55,18 @@ class FleetRunner:
         self.runners = list(runners)
         self.uses: list[str] = []
 
-    def __call__(self, repo_root: str, command: list[str], task: str, **kwargs: Any) -> ExternalAgentReport:
+    def __call__(
+        self, repo_root: str, command: list[str], task: str, **kwargs: Any
+    ) -> ExternalAgentReport:
         last: ExternalAgentReport | None = None
         last_error: Exception | None = None
         for name, runner in self.runners:
             try:
                 report = runner(repo_root, command, task, **kwargs)
             except Exception as exc:  # noqa: BLE001 - infra failures fail over honestly
-                logger.warning("forge.fleet_runner_raised", runner=name, error_class=type(exc).__name__)
+                logger.warning(
+                    "forge.fleet_runner_raised", runner=name, error_class=type(exc).__name__
+                )
                 last_error = exc
                 continue
             self.uses.append(name)

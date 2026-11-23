@@ -48,8 +48,8 @@ def build_hermes_judge() -> Any | None:
     ordinary review machinery parses its verdict. ``None`` when hermes is not
     on PATH — callers then fail closed as usual.
     """
-    exe = shutil.which("hermes")
-    if exe is None:
+    exe = shutil.which("hermes") or ""
+    if not exe:
         return None
 
     class _HermesJudge:
@@ -62,8 +62,8 @@ def build_hermes_judge() -> Any | None:
                 stderr=asyncio.subprocess.PIPE,
             )
             try:
-                out, err = await asyncio.wait_for(proc.communicate(), timeout=900)
-            except asyncio.TimeoutError:
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=900)
+            except TimeoutError:
                 proc.kill()
                 raise RuntimeError("hermes judge timed out") from None
             if proc.returncode != 0:
@@ -71,6 +71,7 @@ def build_hermes_judge() -> Any | None:
             return out.decode("utf-8", errors="replace")
 
     return _HermesJudge()
+
 
 ReviewGate = Literal["PASS", "FAIL"]
 Severity = Literal["low", "medium", "high", "critical"]
@@ -530,9 +531,7 @@ def _llm_review_one_round(
         raise
     except Exception as exc:  # noqa: BLE001
         logger.warning("forge.review_llm_call_failed", error_class=type(exc).__name__)
-        raise _LLMReviewError(
-            f"provider error: {type(exc).__name__}", retryable=True
-        ) from None
+        raise _LLMReviewError(f"provider error: {type(exc).__name__}", retryable=True) from None
 
     text = response.strip() if isinstance(response, str) else ""
     lowered = text.lower()
