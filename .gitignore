@@ -85,3 +85,7 @@ workspace/inbox/
 
 # Phased agent build prompts and logs
 .agent-prompts/
+
+# Zero-loss preservation artifacts (bundle/tars/patches/manifest) — kept on disk,
+# not versioned; git objects are independently preserved by preserve/* tags.
+/recovered/

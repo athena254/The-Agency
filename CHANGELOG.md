@@ -10,7 +10,7 @@ Release cut from `main` at `74c24a5` after the branch/worktree consolidation.
 - Optional fail-closed TLS termination on the owner pilot launcher, local test-only CA generator, and second-provider live qualification (`0fe1d0c`, `4810b82`, `5d328fa`, `182faec`).
 - Stash reconciliation: `tests/test_llm_model_selection.py` (six tests for cron/serious model selection and review-gate provider wiring) is the only genuinely unmerged artifact from the preserved WIP and is now part of the suite.
 - Zero-loss preservation of all four stashes and all non-merged remote tips via `preserve/*` tags, `recovered/agency-20261123-preservation.bundle`, patch/archive exports, and `recovered/pre-consolidation/.zcode/`.
-- CI static-check jobs now use Python 3.12, matching `mypy`'s configured `python_version = "3.12"` and the dev environment floor; fixes the 3.11 `openai`/`anthropic` import-not-found failures.
+- CI and CD static-check jobs now use Python 3.12, matching `mypy`'s configured `python_version = "3.12"` and the dev environment floor; fixes the 3.11 `openai`/`anthropic` import-not-found failures that had broken every recent pipeline.
 
 ### Intentionally excluded (preserved, not lost)
 - Forge MCP server work (`feat/forge-mcp` @ `31bac81`, point-in-time snapshot tag `preserve/inflight-mcp-20261124`). Kept out of 0.3.0 per release decision; available for a later release.

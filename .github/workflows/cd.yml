@@ -12,7 +12,9 @@ on:
         type: string
 
 env:
-  PYTHON_VERSION: "3.11"
+  # The dev environment floor is 3.12 (mypy is configured for 3.12 semantics);
+  # 3.11 static-check jobs fail to import the 3.12-only provider packages.
+  PYTHON_VERSION: "3.12"
   UV_VERSION: "0.13.1"
   # Use the interpreter actions/setup-python provides; never download one.
   UV_PYTHON_PREFERENCE: "only-system"
