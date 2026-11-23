@@ -1026,6 +1026,50 @@ def forge_code(
         raise typer.Exit(1)
 
 
+@forge_app.command("mcp")
+def forge_mcp(
+    transport: str = typer.Option("stdio", "--transport", "-t", help="stdio or http."),
+    host: str = typer.Option("127.0.0.1", "--host", help="HTTP bind host (loopback only)."),
+    port: int = typer.Option(8765, "--port", "-p", help="HTTP bind port."),
+    token_file: str = typer.Option("", "--token-file", help="File holding the bearer token."),
+) -> None:
+    """Serve the Forge over MCP so external agents can drive governed builds.
+
+    stdio needs no token (the caller already owns this process). HTTP requires
+    AGENCY_MCP_TOKEN or --token-file; with neither the command exits instead of
+    serving unauthenticated.
+    """
+    from agency.forge.mcp_server import McpConfig, create_http_app, serve_stdio
+
+    if transport not in ("stdio", "http"):
+        _fail("transport must be 'stdio' or 'http'")
+        return
+    token = ""
+    if token_file:
+        try:
+            token = Path(token_file).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            _fail(f"cannot read token file: {exc}")
+            return
+    elif os.environ.get("AGENCY_MCP_TOKEN"):
+        token = os.environ["AGENCY_MCP_TOKEN"]
+    if transport == "http":
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            _fail("HTTP transport binds loopback only")
+            return
+        if not token:
+            _fail("HTTP transport requires AGENCY_MCP_TOKEN or --token-file")
+            return
+        console.print(f"[green]Forge MCP listening[/green] on http://{host}:{port}/mcp")
+        import uvicorn
+
+        uvicorn.run(
+            create_http_app(McpConfig(token=token)), host=host, port=port, log_level="warning"
+        )
+        return
+    raise typer.Exit(serve_stdio(McpConfig(token=token)))
+
+
 @forge_app.command("status")
 def forge_status(
     db: str = typer.Option("forge_jobs.db", "--db", help="Blacksmith job database path."),
