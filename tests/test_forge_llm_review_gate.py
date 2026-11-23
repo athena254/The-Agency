@@ -43,6 +43,13 @@ _LLM_ENV_PREFIXES = (
     "AGENCY_MERCURY",
     "LOCAL_LLM_",
     "AGENCY_LOCAL_LLM_",
+    # Without these, a developer's .env GOOGLE_API_KEY/GEMINI_API_KEY leaks into
+    # every test here: build_review_llm prefers Google when those credentials
+    # exist, so the "configured provider" tests silently judge on Gemini instead
+    # of the stub and fail (or hit the network) on any machine with a Google key.
+    "GOOGLE_",
+    "GEMINI_",
+    "AGENCY_GOOGLE_",
 )
 
 

@@ -153,3 +153,49 @@ def test_build_review_llm_none_when_no_provider(monkeypatch):
     )
 
     assert build_review_llm() is None
+
+
+def test_agency_mode_skips_google_and_uses_the_configured_llm(monkeypatch):
+    """AGENCY_FORGE_REVIEW_PROVIDER=agency judges with the configured Agency LLM.
+
+    The escape hatch for a rate-limited Google key: without it the gate keeps
+    calling the failing provider and fails every review closed.
+    """
+    import agency.llm.config as llm_config
+    from agency.forge.reviewer import REVIEW_PROVIDER_ENV, build_review_llm
+
+    monkeypatch.setenv(REVIEW_PROVIDER_ENV, "agency")
+    monkeypatch.setattr(
+        llm_config,
+        "load_named_provider",
+        lambda name, **kw: _fake_config("google", "gemini-3.5-flash-lite", api_key="k"),
+    )
+    monkeypatch.setattr(
+        llm_config,
+        "load_config",
+        lambda **kw: _fake_config("openai", "hy4-flash:free", api_key="k"),
+    )
+
+    adapter = build_review_llm()
+    assert adapter is not None
+    assert adapter.provider == "openai"
+    assert adapter.model == "hy4-flash:free"
+
+
+def test_unknown_review_provider_mode_warns_and_falls_back_to_auto(monkeypatch):
+    import agency.llm.config as llm_config
+    from agency.forge import reviewer as reviewer_mod
+
+    monkeypatch.setenv(reviewer_mod.REVIEW_PROVIDER_ENV, "bogus")
+    assert reviewer_mod.review_provider_mode() == "auto"
+
+    # auto still prefers Google when credentials exist
+    monkeypatch.setattr(
+        llm_config,
+        "load_named_provider",
+        lambda name, **kw: _fake_config("google", "gemini-3.5-flash-lite", api_key="k"),
+    )
+    monkeypatch.setattr(llm_config, "load_config", lambda **kw: _fake_config("echo", "echo"))
+    adapter = reviewer_mod.build_review_llm()
+    assert adapter is not None
+    assert adapter.provider == "google"

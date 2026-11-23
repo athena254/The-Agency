@@ -40,6 +40,69 @@ MAX_LINT_LINE_LENGTH = 120
 REVIEW_RETRY_DELAY_S = 60.0
 REVIEW_MAX_PROVIDER_RETRIES = 2
 
+# Which provider the review gate prefers. ``auto`` (default) keeps the historic
+# behaviour: Google serious models when Google credentials exist, else the
+# configured Agency LLM. ``agency`` skips the Google preference and always uses
+# the configured Agency LLM — the escape hatch for a rate-limited Google key,
+# which otherwise fails the whole review gate closed (observed live with
+# ``gemini-4-hydrogen`` returning 429).
+REVIEW_PROVIDER_ENV = "AGENCY_FORGE_REVIEW_PROVIDER"
+_REVIEW_PROVIDER_MODES = ("auto", "google", "agency")
+
+
+def review_provider_mode() -> str:
+    """Resolve the configured review-provider preference; unknown values warn and
+    fall back to ``auto`` rather than silently disabling the gate."""
+    raw = os.environ.get(REVIEW_PROVIDER_ENV, "auto").strip().lower()
+    if raw in _REVIEW_PROVIDER_MODES:
+        return raw
+    logger.warning("forge.review_provider_unknown", value=raw or "<empty>")
+    return "auto"
+
+
+def build_review_llm() -> Any | None:
+    """Build the configured Agency LLM for the review gate.
+
+    The serious-work models (:mod:`agency.llm.serious_models`) are Google Gemini
+    models, so when Google credentials exist the gate runs them on the Google
+    provider even when the Agency's task LLM uses a different backend —
+    ``load_named_provider`` keeps the two providers' credentials and endpoints
+    apart. Without Google credentials the gate falls back to the configured
+    Agency LLM (``AGENCY_LLM_*`` / ``.env``). The echo/offline fallback is
+    treated as "no provider configured" and returns ``None`` so hermetic runs
+    never attempt a network call.
+
+    ``AGENCY_FORGE_REVIEW_PROVIDER=agency`` skips the Google preference entirely
+    and judges with the configured Agency LLM. Set it when the Google key is
+    rate-limited: the default path would otherwise fail every review closed.
+    """
+    try:
+        from agency.llm.adapter import LLMAdapter
+        from agency.llm.config import ProviderKind, load_config, load_named_provider
+        from agency.llm.serious_models import serious_model
+
+        mode = review_provider_mode()
+        google_config: Any = None
+        if mode != "agency":
+            try:
+                candidate = load_named_provider("google")
+            except ValueError:  # unknown preset — defensive; the name is hardcoded
+                candidate = None
+            if candidate is not None and candidate.api_key is not None:
+                google_config = candidate
+        if google_config is not None and mode != "agency":
+            return LLMAdapter(config=google_config.model_copy(update={"model": serious_model()}))
+        config = load_config()
+        if config.provider is ProviderKind.ECHO:
+            return None
+        if config.provider is ProviderKind.GOOGLE and mode != "agency":
+            # Task LLM already on Google: point it at the serious model.
+            config = config.model_copy(update={"model": serious_model()})
+        return LLMAdapter(config=config)
+    except Exception:  # noqa: BLE001
+        logger.warning("forge.review_llm_unavailable")
+        return None
+
 
 def build_hermes_judge() -> Any | None:
     """A cross-family fallback judge: the hermes CLI, if installed.
@@ -597,44 +660,6 @@ def _llm_review_one_round(
     return score, llm_findings, tests_note
 
 
-def build_review_llm() -> Any | None:
-    """Build the configured Agency LLM for the review gate.
-
-    The serious-work models (:mod:`agency.llm.serious_models`) are Google Gemini
-    models, so when Google credentials exist the gate runs them on the Google
-    provider even when the Agency's task LLM uses a different backend —
-    ``load_named_provider`` keeps the two providers' credentials and endpoints
-    apart. Without Google credentials the gate falls back to the configured
-    Agency LLM (``AGENCY_LLM_*`` / ``.env``). The echo/offline fallback is
-    treated as "no provider configured" and returns ``None`` so hermetic runs
-    never attempt a network call.
-    """
-    try:
-        from agency.llm.adapter import LLMAdapter
-        from agency.llm.config import ProviderKind, load_config, load_named_provider
-        from agency.llm.serious_models import serious_model
-
-        google_config: Any = None
-        try:
-            candidate = load_named_provider("google")
-        except ValueError:  # unknown preset — defensive; the name is hardcoded
-            candidate = None
-        if candidate is not None and candidate.api_key is not None:
-            google_config = candidate
-        if google_config is not None:
-            return LLMAdapter(config=google_config.model_copy(update={"model": serious_model()}))
-        config = load_config()
-        if config.provider is ProviderKind.ECHO:
-            return None
-        if config.provider is ProviderKind.GOOGLE:
-            # Task LLM already on Google: point it at the serious model.
-            config = config.model_copy(update={"model": serious_model()})
-        return LLMAdapter(config=config)
-    except Exception:  # noqa: BLE001
-        logger.warning("forge.review_llm_unavailable")
-        return None
-
-
 def run_review(
     root: str | Path,
     changed_paths: list[str] | None = None,
@@ -867,5 +892,6 @@ __all__ = [
     "ReviewReport",
     "ReviewStore",
     "build_review_llm",
+    "review_provider_mode",
     "run_review",
 ]
