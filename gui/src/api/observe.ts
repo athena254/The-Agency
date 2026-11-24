@@ -261,8 +261,8 @@ export function fetchObserveAgents(csrf: string | null): Promise<AgentsView> {
   return pilotRequest<AgentsView>('/api/pilot/observe/agents', { csrf })
 }
 
-export function fetchObserveTasks(csrf: string | null): Promise<TasksView> {
-  return pilotRequest<TasksView>('/api/pilot/observe/tasks', { csrf })
+export function fetchObserveTasks(csrf: string | null, limit = 50): Promise<TasksView> {
+  return pilotRequest<TasksView>(`/api/pilot/observe/tasks?limit=${limit}`, { csrf })
 }
 
 export function fetchObserveMemories(csrf: string | null, limit = 100): Promise<MemoryView> {
@@ -275,6 +275,14 @@ export function fetchObserveEvidence(csrf: string | null, limit = 100): Promise<
 
 export function fetchObserveAudit(csrf: string | null, limit = 50): Promise<AuditView> {
   return pilotRequest<AuditView>(`/api/pilot/observe/audit?limit=${limit}`, { csrf })
+}
+
+export function fetchObserveOwner(csrf: string | null): Promise<OwnerView> {
+  return pilotRequest<OwnerView>('/api/pilot/observe/owner', { csrf })
+}
+
+export function fetchObserveRuntime(csrf: string | null): Promise<RuntimeStatusView> {
+  return pilotRequest<RuntimeStatusView>('/api/pilot/observe/runtime', { csrf })
 }
 
 export function fetchObserveSkills(csrf: string | null): Promise<SkillsView> {

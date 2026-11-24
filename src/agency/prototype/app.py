@@ -56,6 +56,8 @@ from agency.admission.service import OwnerPilotService
 from agency.agents.assessment import ExecutionAssessment, bound_assessment
 from agency.butler.service import ButlerAuditError, ButlerService
 from agency.orchestrator import AgencyOrchestrator
+from agency.prototype.forge_api import close_forge
+from agency.prototype.forge_api import router as forge_router
 from agency.prototype.observe import router as observe_router
 from agency.prototype.owner_guard import guard_owner_bootstrap, guard_owner_request
 from agency.prototype.pilot import pilot_error_response
@@ -336,6 +338,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
                 await pilot.stop()
             finally:
                 application.state.pilot_started = False
+                close_forge(application)
         return
     service: ButlerService | None = getattr(application.state, "butler", None)
     if service is None:
@@ -351,6 +354,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             await service.stop()
         finally:
             application.state.butler_started = False
+            close_forge(application)
         application.state.chat_history.clear()
         log.info("prototype.api_shutdown")
 
@@ -360,6 +364,8 @@ def create_app(
     *,
     pilot: OwnerPilotService | None = None,
     authenticator: OwnerAuthenticator | None = None,
+    forge_db: str | Path | None = None,
+    forge_repo: str | Path | None = None,
 ) -> FastAPI:
     """Build the local prototype FastAPI application.
 
@@ -382,8 +388,16 @@ def create_app(
     application.state.butler_started = False
     application.state.csrf_token = secrets.token_urlsafe(32)
     application.state.chat_history = _ChatSessionHistory()
+    database = Path(forge_db) if forge_db is not None else Path.cwd() / "forge_jobs.db"
+    repository = Path(forge_repo) if forge_repo is not None else Path(__file__).resolve().parents[2]
+    application.state.forge_db = database if database.is_absolute() else None
+    application.state.forge_repo = (
+        repository if repository.is_absolute() and repository.is_dir() else None
+    )
+    application.state.forge_gateway = None
     application.include_router(pilot_router)
     application.include_router(observe_router)
+    application.include_router(forge_router)
 
     @application.exception_handler(PilotError)
     async def _pilot_error_handler(request: Request, exc: Exception) -> JSONResponse:

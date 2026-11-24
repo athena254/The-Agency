@@ -30,6 +30,15 @@ export interface PilotCapabilitiesView {
   uncertainty_blocked: boolean
 }
 
+export interface ToolStatusEntry {
+  enabled: boolean
+  guard: string
+  reason: string
+  tools?: string[]
+}
+
+export type ToolStatusResponse = Record<string, ToolStatusEntry>
+
 export interface SpendingSnapshot {
   enabled: boolean
   currency: string
@@ -172,6 +181,10 @@ export function fetchCapabilities(csrf: string | null): Promise<PilotCapabilitie
   return pilotRequest<PilotCapabilitiesView>('/api/pilot/capabilities', { csrf })
 }
 
+export function fetchToolStatus(csrf: string | null): Promise<ToolStatusResponse> {
+  return pilotRequest<ToolStatusResponse>('/api/pilot/tool-status', { csrf })
+}
+
 export function fetchSpending(csrf: string | null): Promise<SpendingSnapshot> {
   return pilotRequest<SpendingSnapshot>('/api/pilot/spending', { csrf })
 }
@@ -303,4 +316,131 @@ export function submitCodingTask(
 
 export function fetchCodingReceipt(csrf: string | null, taskId: string): Promise<CodingReceiptView> {
   return pilotRequest<CodingReceiptView>(`/api/pilot/coding-tasks/${taskId}`, { csrf })
+}
+
+export interface ForgeJob {
+  job_id: string
+  title: string
+  task: string
+  repo: string
+  acceptance: string[]
+  test_paths: string[]
+  state: string
+  language: string
+  attempts: number
+  report_id: string
+  gate: string
+  changed_paths: string[]
+  artifact_sha256: string
+  merge_report_id: string
+  failure_detail: string
+  cost_usd: number
+  created_at: string
+  updated_at: string
+  evidence_refs?: string[]
+  report_ref?: string
+}
+
+export interface ForgeStatus {
+  total: number
+  by_state: Record<string, number>
+  blocked: number | string[]
+  recent: ForgeJob[]
+}
+
+export interface ForgeMetrics {
+  total_jobs: number
+  by_state: Record<string, number>
+  passed: number
+  first_pass: number
+  rework: number
+  blocked: number
+  first_pass_rate: number
+  rework_rate: number
+  avg_attempts: number
+  verdict_mix: Record<string, number>
+}
+
+export interface ForgeStatusResponse {
+  status: ForgeStatus
+  caveats: string[]
+}
+
+export interface ForgeMetricsResponse {
+  metrics: ForgeMetrics
+  caveats: string[]
+}
+
+export interface ForgeJobResponse {
+  job: ForgeJob
+}
+
+export interface CreateForgeJobResponse {
+  job: ForgeJob
+  replayed: boolean
+  caveats: string[]
+}
+
+export interface ForgeJobInput {
+  request_id: string
+  title: string
+  task: string
+  language?: string
+  acceptance?: string[]
+  test_paths?: string[]
+}
+
+export function fetchForgeStatus(csrf: string | null): Promise<ForgeStatusResponse> {
+  return pilotRequest<ForgeStatusResponse>('/api/pilot/forge/status', { csrf })
+}
+
+export function fetchForgeMetrics(csrf: string | null): Promise<ForgeMetricsResponse> {
+  return pilotRequest<ForgeMetricsResponse>('/api/pilot/forge/metrics', { csrf })
+}
+
+export function fetchForgeJob(csrf: string | null, jobId: string): Promise<ForgeJobResponse> {
+  return pilotRequest<ForgeJobResponse>(`/api/pilot/forge/jobs/${encodeURIComponent(jobId)}`, {
+    csrf,
+  })
+}
+
+export function submitForgeJob(
+  csrf: string | null,
+  input: ForgeJobInput,
+): Promise<CreateForgeJobResponse> {
+  return pilotRequest<CreateForgeJobResponse>('/api/pilot/forge/jobs', {
+    method: 'POST',
+    body: input,
+    csrf,
+  })
+}
+
+export interface ForgeDispatchResult {
+  started: boolean
+  replayed: boolean
+  caveats: string[]
+}
+
+export interface ForgeDispatchLast {
+  ok: boolean
+  job_id: string | null
+  state: string | null
+  error: string | null
+}
+
+export interface ForgeDispatchStatus {
+  running: boolean
+  last: ForgeDispatchLast | null
+}
+
+export function dispatchForgeJob(csrf: string | null): Promise<ForgeDispatchResult> {
+  return pilotRequest<ForgeDispatchResult>('/api/pilot/forge/dispatch', {
+    method: 'POST',
+    body: {},
+    csrf,
+  })
+}
+
+export function fetchForgeDispatch(csrf: string | null): Promise<ForgeDispatchStatus> {
+  return pilotRequest<ForgeDispatchStatus>('/api/pilot/forge/dispatch', { csrf })
 }

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { Gauge, Wallet } from 'lucide-react'
-import { fetchCapabilities, fetchSpending, useCsrf } from '../api/pilot'
+import { Gauge, Wallet, Wrench } from 'lucide-react'
+import { fetchCapabilities, fetchSpending, fetchToolStatus, useCsrf } from '../api/pilot'
 import { useAuth } from '../stores/auth'
 import { Chip, LoadingBlock, PanelRow, PilotErrorNote } from './PilotShared'
 
@@ -16,6 +16,7 @@ export function CapabilitiesPanel() {
   const data = caps.data
 
   return (
+    <>
     <div className="mc-panel flex flex-col p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
         <h3 className="flex items-center gap-2 text-sm font-semibold text-text-1">
@@ -83,6 +84,61 @@ export function CapabilitiesPanel() {
             </dl>
           </div>
         </>
+      )}
+    </div>
+    <ToolStatusPanel />
+    </>
+  )
+}
+
+export function ToolStatusPanel() {
+  const token = useAuth((s) => s.ownerToken)
+  const csrf = useCsrf()
+  const status = useQuery({
+    queryKey: ['pilot-tool-status', token],
+    queryFn: () => fetchToolStatus(csrf),
+    enabled: Boolean(token),
+    refetchInterval: 30_000,
+  })
+  const data = status.data
+
+  return (
+    <div className="mc-panel flex flex-col p-5">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-text-1">
+          <Wrench size={14} className="text-text-3" /> Tool status
+        </h3>
+        <span className="mc-label">GET /api/pilot/tool-status</span>
+      </div>
+
+      {status.isLoading ? (
+        <LoadingBlock />
+      ) : status.error ? (
+        <PilotErrorNote error={status.error} />
+      ) : !data ? null : (
+        <ul className="divide-y divide-line">
+          {Object.entries(data).map(([name, entry]) => (
+            <li key={name} className="px-1 py-2.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm text-text-1">{name}</span>
+                <Chip tone={entry.enabled ? 'green' : 'amber'}>
+                  {entry.enabled ? 'enabled' : 'disabled'}
+                </Chip>
+                <Chip tone="muted">guard {entry.guard}</Chip>
+              </div>
+              <div className="mc-value mt-1 text-[11px] text-text-3">{entry.reason}</div>
+              {entry.tools?.length ? (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {entry.tools.map((tool) => (
+                    <Chip key={tool} tone="signal">
+                      {tool}
+                    </Chip>
+                  ))}
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   )

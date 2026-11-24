@@ -734,7 +734,13 @@ async def serve(settings: Settings) -> None:
             subject_id=settings.config.subject_id,
             bearer_secret=token,
         )
-        app = create_app(butler=butler, pilot=pilot, authenticator=authenticator)
+        app = create_app(
+            butler=butler,
+            pilot=pilot,
+            authenticator=authenticator,
+            forge_db=settings.data_dir / "forge_jobs.db",
+            forge_repo=Path(__file__).resolve().parents[2],
+        )
         server = uvicorn.Server(build_server_config(app, settings))
         print(f"Owner token file: {settings.data_dir / 'owner.token'}")
         scheme = "https" if settings.tls_certfile is not None else "http"

@@ -13,10 +13,14 @@ import {
   Sparkles,
   Wrench,
 } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
+  fetchObserveAudit,
   fetchObserveOverview,
+  fetchObserveOwner,
+  fetchObserveRuntime,
   fetchObserveSkills,
+  fetchObserveTasks,
   fetchObserveTools,
   type AgentsView,
   type AuditView,
@@ -54,17 +58,80 @@ function queryState(query: {
   return localState(query.data.available, query.data.reason)
 }
 
+function directState(query: {
+  isLoading: boolean
+  error: unknown
+  data: unknown
+}): SectionState {
+  if (query.error) return { kind: 'error', error: query.error }
+  if (query.isLoading || !query.data) return { kind: 'loading' }
+  return { kind: 'ready' }
+}
+
+function RefreshButton({
+  label,
+  busy,
+  onClick,
+}: {
+  label: string
+  busy: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className="mc-icon-btn"
+      onClick={onClick}
+      disabled={busy}
+      aria-label={label}
+      title={label}
+    >
+      <RefreshCw size={13} className={busy ? 'animate-spin' : ''} aria-hidden="true" />
+    </button>
+  )
+}
+
+function LimitSelect({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: number
+  onChange: (limit: number) => void
+}) {
+  return (
+    <label className="flex items-center gap-1.5">
+      <span className="mc-label">limit</span>
+      <select
+        className="mc-input w-auto py-1"
+        aria-label={label}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+      >
+        {[10, 25, 50, 100].map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
 function Section({
   title,
   icon: Icon,
   endpoint,
   state,
+  action,
   children,
 }: {
   title: string
   icon: LucideIcon
   endpoint: string
   state: SectionState
+  action?: ReactNode
   children: ReactNode
 }) {
   return (
@@ -74,6 +141,7 @@ function Section({
           <Icon size={14} className="text-text-3" /> {title}
         </h3>
         <div className="flex items-center gap-2">
+          {action}
           <span className="mc-label">{endpoint}</span>
           {state.kind === 'ready' ? <Chip tone="green">available</Chip> : null}
           {state.kind === 'loading' ? <Chip tone="muted">loading</Chip> : null}
@@ -395,6 +463,29 @@ export function ObservabilityPage() {
   const token = useAuth((s) => s.ownerToken)
   const csrf = useCsrf()
   const enabled = Boolean(token)
+  const [taskLimit, setTaskLimit] = useState(50)
+  const [auditLimit, setAuditLimit] = useState(50)
+
+  const directTasks = useQuery({
+    queryKey: ['observe-tasks-direct', token, taskLimit],
+    queryFn: () => fetchObserveTasks(csrf, taskLimit),
+    enabled,
+  })
+  const directAudit = useQuery({
+    queryKey: ['observe-audit-direct', token, auditLimit],
+    queryFn: () => fetchObserveAudit(csrf, auditLimit),
+    enabled,
+  })
+  const directOwner = useQuery({
+    queryKey: ['observe-owner-direct', token],
+    queryFn: () => fetchObserveOwner(csrf),
+    enabled,
+  })
+  const directRuntime = useQuery({
+    queryKey: ['observe-runtime-direct', token],
+    queryFn: () => fetchObserveRuntime(csrf),
+    enabled,
+  })
 
   const overview = useQuery({
     queryKey: ['observe-overview', token],
@@ -421,6 +512,10 @@ export function ObservabilityPage() {
     void overview.refetch()
     void skills.refetch()
     void tools.refetch()
+    void directTasks.refetch()
+    void directAudit.refetch()
+    void directOwner.refetch()
+    void directRuntime.refetch()
   }
 
   return (
@@ -549,6 +644,87 @@ export function ObservabilityPage() {
               >
                 {tools.data ? <ToolsBody view={tools.data} /> : null}
               </Section>
+            </div>
+            <div className="space-y-4">
+              <div className="mc-label">
+                Direct endpoint views · read-only · no write controls
+              </div>
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                <Section
+                  title="Tasks (direct)"
+                  icon={FolderKanban}
+                  endpoint="GET /api/pilot/observe/tasks"
+                  state={queryState(directTasks)}
+                  action={
+                    <>
+                      <LimitSelect
+                        label="Tasks limit"
+                        value={taskLimit}
+                        onChange={setTaskLimit}
+                      />
+                      <RefreshButton
+                        label="Refresh tasks endpoint"
+                        busy={directTasks.isFetching}
+                        onClick={() => void directTasks.refetch()}
+                      />
+                    </>
+                  }
+                >
+                  {directTasks.data ? <TasksBody view={directTasks.data} /> : null}
+                </Section>
+                <Section
+                  title="Audit (direct)"
+                  icon={ScrollText}
+                  endpoint="GET /api/pilot/observe/audit"
+                  state={queryState(directAudit)}
+                  action={
+                    <>
+                      <LimitSelect
+                        label="Audit limit"
+                        value={auditLimit}
+                        onChange={setAuditLimit}
+                      />
+                      <RefreshButton
+                        label="Refresh audit endpoint"
+                        busy={directAudit.isFetching}
+                        onClick={() => void directAudit.refetch()}
+                      />
+                    </>
+                  }
+                >
+                  {directAudit.data ? <AuditBody view={directAudit.data} /> : null}
+                </Section>
+                <Section
+                  title="Owner (direct)"
+                  icon={Gauge}
+                  endpoint="GET /api/pilot/observe/owner"
+                  state={queryState(directOwner)}
+                  action={
+                    <RefreshButton
+                      label="Refresh owner endpoint"
+                      busy={directOwner.isFetching}
+                      onClick={() => void directOwner.refetch()}
+                    />
+                  }
+                >
+                  {directOwner.data ? <OwnerBody view={directOwner.data} /> : null}
+                </Section>
+                <Section
+                  title="Runtime (direct)"
+                  icon={Activity}
+                  endpoint="GET /api/pilot/observe/runtime"
+                  state={directState(directRuntime)}
+                  action={
+                    <RefreshButton
+                      label="Refresh runtime endpoint"
+                      busy={directRuntime.isFetching}
+                      onClick={() => void directRuntime.refetch()}
+                    />
+                  }
+                >
+                  {directRuntime.data ? <RuntimeBody view={directRuntime.data} /> : null}
+                </Section>
+              </div>
             </div>
             <div className="mc-label text-right" role="status">
               collected {data.collected_at} · read-only · no write controls
