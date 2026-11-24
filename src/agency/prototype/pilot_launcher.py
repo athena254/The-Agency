@@ -738,7 +738,7 @@ async def serve(settings: Settings) -> None:
         server = uvicorn.Server(build_server_config(app, settings))
         print(f"Owner token file: {settings.data_dir / 'owner.token'}")
         scheme = "https" if settings.tls_certfile is not None else "http"
-        print(f"Owner pilot: {scheme}://127.0.0.1:{settings.port}/pilot")
+        print(f"Owner console: {scheme}://127.0.0.1:{settings.port}/mission-control")
         await server.serve()
     except Exception:  # noqa: BLE001 -- sanitize startup/resource failures
         raise LauncherError("startup_or_shutdown_failed") from None

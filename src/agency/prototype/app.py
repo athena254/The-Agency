@@ -45,7 +45,7 @@ from urllib.parse import urlsplit
 import structlog
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -577,10 +577,12 @@ def create_app(
         return FileResponse(index_file)
 
     @application.get("/", include_in_schema=False)
-    async def index() -> FileResponse:
-        index_file = STATIC_DIR / (
-            "pilot.html" if application.state.pilot_configured else "index.html"
-        )
+    async def index() -> Any:
+        if application.state.pilot_configured:
+            return RedirectResponse(
+                url="/mission-control", status_code=status.HTTP_307_TEMPORARY_REDIRECT
+            )
+        index_file = STATIC_DIR / "index.html"
         if not index_file.is_file():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

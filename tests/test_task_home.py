@@ -6,15 +6,19 @@ from httpx import ASGITransport, AsyncClient
 from agency.prototype.app import create_app
 
 
-async def test_configured_owner_home_is_the_same_persistent_workspace_as_pilot():
+async def test_configured_owner_home_is_the_unified_mission_control_ui():
     # Routing uses explicit owner configuration, not a provider or startup probe.
     app = create_app(pilot=object(), authenticator=object())
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://127.0.0.1", follow_redirects=True
+    ) as client:
         home = await client.get("/")
-        pilot = await client.get("/pilot")
-    assert home.status_code == pilot.status_code == 200
-    assert home.content == pilot.content
-    assert 'id="pilot-workspace"' in home.text
+        mission_control = await client.get("/mission-control")
+    assert home.status_code == mission_control.status_code == 200
+    assert str(home.url).endswith("/mission-control")
+    assert home.content == mission_control.content
+    assert 'id="root"' in home.text
+    assert "/assets/mission-control/assets/" in home.text
     assert home.headers["cache-control"] == "no-store"
     assert "frame-ancestors 'none'" in home.headers["content-security-policy"]
 
@@ -35,7 +39,9 @@ async def test_legacy_home_retains_chat_and_links_to_persistent_tasks():
 @pytest.mark.parametrize("path", ["/", "/pilot"])
 async def test_configured_home_has_the_same_strict_bootstrap_origin_guard(path):
     app = create_app(pilot=object(), authenticator=object())
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://127.0.0.1", follow_redirects=True
+    ) as client:
         foreign = await client.get(path, headers={"Origin": "http://localhost:9999"})
         same = await client.get(path, headers={"Origin": "http://127.0.0.1"})
     assert foreign.status_code == 403
@@ -45,6 +51,6 @@ async def test_configured_home_has_the_same_strict_bootstrap_origin_guard(path):
 async def test_task_workspace_explains_usage_is_attempt_counters_not_a_tool_event_log():
     app = create_app(pilot=object(), authenticator=object())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1") as client:
-        home = await client.get("/")
+        home = await client.get("/pilot")
     assert "These are attempt counters, not a tool event log" in home.text
     assert "not token usage or a bill" in home.text
