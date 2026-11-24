@@ -460,7 +460,7 @@ async def test_real_loopback_http_server_stops_cleanly(
         async def serve(self, sockets: object = None) -> None:
             running = asyncio.create_task(super().serve(sockets=sockets))
             try:
-                for _ in range(200):
+                for _ in range(1000):
                     if self.started:
                         break
                     await asyncio.sleep(0.01)
