@@ -14,6 +14,7 @@ from agency.forge.merge_queue import MergeQueueStore
 from agency.forge.orchestration import BlacksmithOps, JobState
 from agency.forge.security_scan import SecurityReport
 from agency.tools.registry import ToolRegistry
+from tests._fake_paths import FAKE_REPO
 
 MINI_ADD_CODE = """\
 def _add(a, b):
@@ -89,7 +90,7 @@ def test_submit_creates_queued_job(tmp_path) -> None:
 
     ops, events = _ops(tmp_path, runner)
     try:
-        job = ops.submit("Add x", "Add function x", "D:/fake/repo")
+        job = ops.submit("Add x", "Add function x", FAKE_REPO)
         assert job.state is JobState.QUEUED
         assert job.attempts == 0
         assert job.job_id
@@ -117,7 +118,7 @@ def test_dispatch_pass_lands_in_merge_queue(tmp_path) -> None:
     rep = _report()
     ops, events = _ops(tmp_path, lambda *a, **k: rep)
     try:
-        job = ops.submit("Add x", "Add function x", "D:/fake/repo")
+        job = ops.submit("Add x", "Add function x", FAKE_REPO)
         done = ops.dispatch_next()
         assert done is not None
         assert done.job_id == job.job_id
@@ -142,7 +143,7 @@ def test_dispatch_pass_lands_in_merge_queue(tmp_path) -> None:
 def test_fail_retries_then_blocks(tmp_path) -> None:
     ops, _ = _ops(tmp_path, lambda *a, **k: _report("FAIL", failure="tests failed"))
     try:
-        job = ops.submit("t", "task", "D:/fake/repo")
+        job = ops.submit("t", "task", FAKE_REPO)
         states = []
         for _ in range(3):
             done = ops.dispatch_next()
@@ -162,7 +163,7 @@ def test_isolation_violation_fails_even_on_pass(tmp_path) -> None:
     rep = _report("PASS", isolation=("src/evil.py",))
     ops, _ = _ops(tmp_path, lambda *a, **k: rep)
     try:
-        ops.submit("t", "task", "D:/fake/repo")
+        ops.submit("t", "task", FAKE_REPO)
         done = ops.dispatch_next()
         assert done is not None
         assert done.state is JobState.FAILED
@@ -175,8 +176,8 @@ def test_isolation_violation_fails_even_on_pass(tmp_path) -> None:
 def test_one_job_per_dispatch_and_queue_order(tmp_path) -> None:
     ops, _ = _ops(tmp_path, lambda *a, **k: _report())
     try:
-        j1 = ops.submit("first", "task 1", "D:/fake/repo")
-        j2 = ops.submit("second", "task 2", "D:/fake/repo")
+        j1 = ops.submit("first", "task 1", FAKE_REPO)
+        j2 = ops.submit("second", "task 2", FAKE_REPO)
         done = ops.dispatch_next()
         assert done is not None and done.job_id == j1.job_id
         assert ops.get(j2.job_id).state is JobState.QUEUED
@@ -187,7 +188,7 @@ def test_one_job_per_dispatch_and_queue_order(tmp_path) -> None:
 def test_crash_recovery_marks_dispatched_uncertain(tmp_path) -> None:
     ops, _ = _ops(tmp_path, lambda *a, **k: _report())
     try:
-        job = ops.submit("t", "task", "D:/fake/repo")
+        job = ops.submit("t", "task", FAKE_REPO)
         # simulate a crash mid-dispatch: row left DISPATCHED
         ops._conn.execute(
             "UPDATE forge_jobs SET state = ? WHERE job_id = ?",
@@ -212,7 +213,7 @@ def test_runner_exception_fails_honestly(tmp_path) -> None:
 
     ops, _ = _ops(tmp_path, boom)
     try:
-        ops.submit("t", "task", "D:/fake/repo")
+        ops.submit("t", "task", FAKE_REPO)
         done = ops.dispatch_next()
         assert done is not None
         assert done.state is JobState.FAILED
@@ -225,7 +226,7 @@ def test_runner_exception_fails_honestly(tmp_path) -> None:
 def test_status_reports_queue(tmp_path) -> None:
     ops, _ = _ops(tmp_path, lambda *a, **k: _report("FAIL", failure="no"))
     try:
-        ops.submit("t", "task", "D:/fake/repo")
+        ops.submit("t", "task", FAKE_REPO)
         for _ in range(3):
             ops.dispatch_next()
         status = ops.status()
@@ -289,7 +290,7 @@ def test_dispatch_renders_work_order_with_rules(tmp_path) -> None:
         ops.submit(
             "Add x",
             "Add function x",
-            "D:/fake/repo",
+            FAKE_REPO,
             acceptance=("x adds two numbers",),
             test_paths=("tests/test_x.py",),
         )
@@ -316,7 +317,7 @@ def test_retry_carries_failure_tail(tmp_path) -> None:
 
     ops, _ = _ops(tmp_path, runner)
     try:
-        ops.submit("Add x", "Add function x", "D:/fake/repo")
+        ops.submit("Add x", "Add function x", FAKE_REPO)
         first = ops.dispatch_next()
         assert first is not None and first.state is JobState.FAILED
         assert first.failure_detail == "boom"
@@ -354,7 +355,7 @@ def test_failed_gate_records_review_citations(tmp_path) -> None:
 
     ops, _ = _ops(tmp_path, runner)
     try:
-        ops.submit("Add x", "Add function x", "D:/fake/repo")
+        ops.submit("Add x", "Add function x", FAKE_REPO)
         done = ops.dispatch_next()
         assert done is not None and done.state is JobState.FAILED
         assert "review findings: src/x.py:7 LLM901 (high)" in done.failure_detail
@@ -373,7 +374,7 @@ def test_dispatch_records_one_cost_entry_per_attempt(tmp_path) -> None:
 
     ops, _ = _ops(tmp_path, runner, costs=costs)
     try:
-        ops.submit("Add x", "Add function x", "D:/fake/repo")
+        ops.submit("Add x", "Add function x", FAKE_REPO)
         ops.dispatch_next()
         entries = costs.list_entries()
         assert len(entries) == 1

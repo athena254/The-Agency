@@ -12,6 +12,7 @@ from agency.forge.fleet import FleetRunner, is_infrastructure_failure
 from agency.forge.inspection import InspectionReport
 from agency.forge.reviewer import REVIEW_MAX_PROVIDER_RETRIES, run_review
 from agency.forge.security_scan import SecurityReport
+from tests._fake_paths import FAKE_REPO
 
 
 @pytest.fixture(autouse=True)
@@ -76,7 +77,7 @@ def test_fleet_failover_on_infrastructure_failure() -> None:
     )
     striker = _runner("opencode", _report("PASS", command=("opencode", "run")), calls)
     fleet = FleetRunner([("apprentice", down), ("opencode", striker)])
-    report = fleet("D:/fake/repo", ["unused"], "task")
+    report = fleet(FAKE_REPO, ["unused"], "task")
     assert report.gate == "PASS"
     assert report.command == ("opencode", "run")
     assert calls == ["apprentice", "opencode"]
@@ -89,7 +90,7 @@ def test_fleet_does_not_fail_over_on_genuine_verdicts() -> None:
     )
     never = _runner("opencode", _report("PASS"), calls)
     fleet = FleetRunner([("apprentice", strict), ("opencode", never)])
-    report = fleet("D:/fake/repo", ["unused"], "task")
+    report = fleet(FAKE_REPO, ["unused"], "task")
     assert report.gate == "FAIL"
     assert calls == ["apprentice"]  # the second worker never burned
 
@@ -102,7 +103,7 @@ def test_fleet_returns_last_report_when_all_fail_on_infrastructure() -> None:
             ("b", _runner("b", _report("FAIL", failure="timeout waiting for provider"), calls)),
         ]
     )
-    report = fleet("D:/fake/repo", ["unused"], "task")
+    report = fleet(FAKE_REPO, ["unused"], "task")
     assert report.gate == "FAIL"
     assert calls == ["a", "b"]
     assert "timeout" in report.failure_detail
@@ -117,7 +118,7 @@ def test_fleet_all_runners_raise() -> None:
         ]
     )
     with pytest.raises(RuntimeError, match="every fleet runner raised"):
-        fleet("D:/fake/repo", ["unused"], "task")
+        fleet(FAKE_REPO, ["unused"], "task")
 
 
 def test_fleet_needs_runners() -> None:

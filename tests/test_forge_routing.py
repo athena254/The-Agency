@@ -20,6 +20,7 @@ from agency.forge.orchestration import BlacksmithOps
 from agency.forge.security_scan import SecurityReport
 from agency.kernel.registry import AgentRegistry as KernelRegistry
 from agency.orchestrator import AgencyOrchestrator
+from tests._fake_paths import FAKE_REPO
 
 
 def _pass_report() -> ExternalAgentReport:
@@ -101,7 +102,7 @@ def test_engine_spawns_blacksmith_for_build_task() -> None:
 async def test_forge_domain_routes_to_ops(tmp_path) -> None:
     ops = BlacksmithOps(str(tmp_path / "jobs.db"), runner=lambda *a, **k: _pass_report())
     orch = AgencyOrchestrator(
-        config={"forge_repo": "D:/fake/repo"},
+        config={"forge_repo": FAKE_REPO},
         memory_db_path=str(tmp_path / "memory.db"),
         blacksmith_ops=ops,
     )

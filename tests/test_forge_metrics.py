@@ -13,6 +13,7 @@ from agency.forge.inspection import InspectionReport
 from agency.forge.metrics import compute_metrics, format_metrics
 from agency.forge.orchestration import BlacksmithOps, JobState
 from agency.forge.security_scan import SecurityReport
+from tests._fake_paths import FAKE_REPO
 
 
 def _report(gate: str = "PASS") -> ExternalAgentReport:
@@ -50,9 +51,9 @@ def test_compute_metrics_first_pass_rework_and_verdict_mix(tmp_path) -> None:
     db = str(tmp_path / "jobs.db")
     ops = BlacksmithOps(db)
     try:
-        ops.submit("good", "task", "D:/fake/repo")
-        ops.submit("flaky", "task", "D:/fake/repo")
-        dead = ops.submit("dead", "task", "D:/fake/repo")
+        ops.submit("good", "task", FAKE_REPO)
+        ops.submit("flaky", "task", FAKE_REPO)
+        dead = ops.submit("dead", "task", FAKE_REPO)
     finally:
         ops.close()
 
@@ -92,7 +93,7 @@ def test_format_metrics_renders_the_numbers(tmp_path) -> None:
     db = str(tmp_path / "jobs.db")
     ops = BlacksmithOps(db)
     try:
-        ops.submit("solo", "task", "D:/fake/repo")
+        ops.submit("solo", "task", FAKE_REPO)
     finally:
         ops.close()
     text = format_metrics(compute_metrics(db))

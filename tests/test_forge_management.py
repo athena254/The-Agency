@@ -12,6 +12,7 @@ from agency.cli.main import app
 from agency.forge.orchestration import BlacksmithOps
 from agency.forge.reviewer import run_review
 from agency.forge.test_runner import TestReport
+from tests._fake_paths import FAKE_REPO
 
 
 def _test_report(root: str, gate: str = "PASS") -> TestReport:
@@ -42,7 +43,7 @@ def test_ingest_backlog_creates_jobs(tmp_path) -> None:
     ops = BlacksmithOps(str(tmp_path / "jobs.db"))
     try:
         prd = "# Add multiply\nImplement multiply in mathx.\n# Add divide\nImplement divide."
-        jobs = ops.ingest_backlog(prd, "D:/fake/repo")
+        jobs = ops.ingest_backlog(prd, FAKE_REPO)
         assert len(jobs) == 2
         assert jobs[0].title == "Add multiply"
         assert jobs[1].title == "Add divide"
@@ -56,7 +57,7 @@ def test_forge_status_cli_json(tmp_path) -> None:
     db = str(tmp_path / "jobs.db")
     ops = BlacksmithOps(db)
     try:
-        ops.submit("Add x", "Add function x", "D:/fake/repo")
+        ops.submit("Add x", "Add function x", FAKE_REPO)
     finally:
         ops.close()
     runner = CliRunner()
