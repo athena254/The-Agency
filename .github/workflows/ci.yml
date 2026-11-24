@@ -62,6 +62,7 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
         os: [ubuntu-latest, windows-latest]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -72,20 +73,24 @@ jobs:
         run: pip install "uv==${{ env.UV_VERSION }}"
       - name: Install dependencies
         run: uv sync --frozen --extra dev
-      - name: Run hermetic tests
+      - name: Run hermetic tests (shard ${{ matrix.shard }}/4)
+        shell: bash
         env:
           AGENCY_LLM_PROVIDER: echo
           AGENCY_LLM_MODEL: echo
           AGENCY_BETA_MODE: "0"
           TELEGRAM_BOT_TOKEN: ""
-        run: uv run --no-sync pytest tests/ -v --tb=short --cov=agency --cov-report=xml --cov-report=term-missing
+        run: |
+          mapfile -t TEST_FILES < <(find tests -type f -name 'test_*.py' -print | sort | awk -v s="${{ matrix.shard }}" 'NR % 4 == s - 1')
+          echo "shard ${{ matrix.shard }}/4: ${#TEST_FILES[@]} test modules"
+          uv run --no-sync pytest "${TEST_FILES[@]}" -v --tb=short --cov=agency --cov-report=xml --cov-report=term-missing
       - name: Core smoke script (offline)
         env:
           AGENCY_LLM_PROVIDER: echo
           AGENCY_LLM_MODEL: echo
         run: uv run --no-sync python scripts/agency_core_smoke.py
       - name: Upload coverage
-        if: matrix.python-version == '3.11' && matrix.os == 'ubuntu-latest'
+        if: matrix.python-version == '3.11' && matrix.os == 'ubuntu-latest' && matrix.shard == 1
         uses: actions/upload-artifact@v4
         with:
           name: coverage

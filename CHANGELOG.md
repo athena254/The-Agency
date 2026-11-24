@@ -11,6 +11,7 @@ Release cut from `main` at `74c24a5` after the branch/worktree consolidation.
 - Stash reconciliation: `tests/test_llm_model_selection.py` (six tests for cron/serious model selection and review-gate provider wiring) is the only genuinely unmerged artifact from the preserved WIP and is now part of the suite.
 - Zero-loss preservation of all four stashes and all non-merged remote tips via `preserve/*` tags, `recovered/agency-20261123-preservation.bundle`, patch/archive exports, and `recovered/pre-consolidation/.zcode/`.
 - CI and CD static-check jobs now use Python 3.12, matching `mypy`'s configured `python_version = "3.12"` and the dev environment floor; fixes the 3.11 `openai`/`anthropic` import-not-found failures that had broken every recent pipeline.
+- CI/CD test jobs are sharded 4 ways (307 test modules → 77/77/77/76 per shard) so no Ubuntu runner approaches the 50-minute communication-loss limit seen on unsharded full-suite runs.
 
 ### Intentionally excluded (preserved, not lost)
 - Forge MCP server work (`feat/forge-mcp` @ `31bac81`, point-in-time snapshot tag `preserve/inflight-mcp-20261124`). Kept out of 0.3.0 per release decision; available for a later release.

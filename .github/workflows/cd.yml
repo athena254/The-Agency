@@ -28,12 +28,13 @@ concurrency:
 
 jobs:
   gates:
-    name: Gate set at pinned revision (${{ matrix.os }})
+    name: Gate set at pinned revision (${{ matrix.os }}, shard ${{ matrix.shard }}/4)
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,13 +63,17 @@ jobs:
         run: uv run --no-sync ruff format --check src/ tests/
       - name: Strict mypy
         run: uv run --no-sync mypy src/
-      - name: Hermetic Python tests
+      - name: Hermetic Python tests (shard ${{ matrix.shard }}/4)
+        shell: bash
         env:
           AGENCY_LLM_PROVIDER: echo
           AGENCY_LLM_MODEL: echo
           AGENCY_BETA_MODE: "0"
           TELEGRAM_BOT_TOKEN: ""
-        run: uv run --no-sync pytest tests/ -q --tb=short
+        run: |
+          mapfile -t TEST_FILES < <(find tests -type f -name 'test_*.py' -print | sort | awk -v s="${{ matrix.shard }}" 'NR % 4 == s - 1')
+          echo "shard ${{ matrix.shard }}/4: ${#TEST_FILES[@]} test modules"
+          uv run --no-sync pytest "${TEST_FILES[@]}" -q --tb=short
       - name: Core smoke script (offline)
         env:
           AGENCY_LLM_PROVIDER: echo
