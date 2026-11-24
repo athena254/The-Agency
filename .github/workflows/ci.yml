@@ -22,7 +22,7 @@ concurrency:
 jobs:
   lint:
     name: Lint (Ruff)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -40,7 +40,7 @@ jobs:
 
   typecheck:
     name: Type Check (Mypy)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -61,7 +61,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
         shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
@@ -90,7 +90,7 @@ jobs:
           AGENCY_LLM_MODEL: echo
         run: uv run --no-sync python scripts/agency_core_smoke.py
       - name: Upload coverage
-        if: matrix.python-version == '3.11' && matrix.os == 'ubuntu-latest' && matrix.shard == 1
+        if: matrix.python-version == '3.11' && matrix.os == 'ubuntu-24.04' && matrix.shard == 1
         uses: actions/upload-artifact@v4
         with:
           name: coverage
@@ -98,7 +98,7 @@ jobs:
 
   ui-tests:
     name: UI Tests (Node)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Set up Node
@@ -110,7 +110,7 @@ jobs:
 
   security-scan:
     name: Security Scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python

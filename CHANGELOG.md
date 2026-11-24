@@ -12,6 +12,7 @@ Release cut from `main` at `74c24a5` after the branch/worktree consolidation.
 - Zero-loss preservation of all four stashes and all non-merged remote tips via `preserve/*` tags, `recovered/agency-20261123-preservation.bundle`, patch/archive exports, and `recovered/pre-consolidation/.zcode/`.
 - CI and CD static-check jobs now use Python 3.12, matching `mypy`'s configured `python_version = "3.12"` and the dev environment floor; fixes the 3.11 `openai`/`anthropic` import-not-found failures that had broken every recent pipeline.
 - CI/CD test jobs are sharded 4 ways (307 test modules → 77/77/77/76 per shard) so no Ubuntu runner approaches the 50-minute communication-loss limit seen on unsharded full-suite runs.
+- Ubuntu jobs pinned to `ubuntu-24.04`: on `ubuntu-latest` (26.04) several jobs passed all 1309 tests and smoke in ~3 min, then hung ~42 min in the runner's post-job orphan-process cleanup before losing communication.
 
 ### Included after final decision
 - Forge MCP server surface (`feat/forge-mcp` @ `31bac81`, merged in `c442429`): stdlib JSON-RPC MCP tools served over stdio and token-guarded HTTP, `agency forge mcp` CLI, plus reviewer/LLM-gate hardening and its tests. Point-in-time snapshot retained at `preserve/inflight-mcp-20261124`.
