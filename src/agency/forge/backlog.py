@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Self
@@ -16,6 +15,8 @@ from uuid import uuid4
 
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
+
+from agency.core.sqlite_store import open_store
 
 logger = structlog.get_logger(__name__)
 
@@ -75,12 +76,7 @@ class BacklogStore:
 
     def __init__(self, db_path: str | Path = "forge_backlog.db") -> None:
         self._db_path = Path(db_path)
-        if str(self._db_path) != ":memory:":
-            self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.executescript(_SCHEMA)
-        self._conn.commit()
+        self._conn = open_store(self._db_path, _SCHEMA)
 
     def save(self, report: BacklogReport) -> str:
         self._conn.execute(

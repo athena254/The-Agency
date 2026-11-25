@@ -32,7 +32,6 @@ import os
 import re
 import shlex
 import shutil
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -45,6 +44,7 @@ from uuid import uuid4
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
+from agency.core.sqlite_store import open_store
 from agency.forge.inspection import InspectionReport, inspect_changes
 from agency.forge.pipeline import CAVEATS as _PIPELINE_CAVEATS
 from agency.forge.reviewer import ReviewReport, run_review
@@ -176,12 +176,7 @@ class ExternalAgentStore:
 
     def __init__(self, db_path: str | Path = "forge_external_agent.db") -> None:
         self._db_path = Path(db_path)
-        if str(self._db_path) != ":memory:":
-            self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.executescript(_SCHEMA)
-        self._conn.commit()
+        self._conn = open_store(self._db_path, _SCHEMA)
 
     def save(self, report: ExternalAgentReport) -> str:
         self._conn.execute(
