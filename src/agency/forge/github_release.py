@@ -211,7 +211,9 @@ def plan_github_release(
         if local_tag.returncode == 0:
             blocked.append("tag_exists_locally")
 
-        remote_tag = _git(root_path, ["ls-remote", "--exit-code", "--tags", remote, f"refs/tags/{tag}"])
+        remote_tag = _git(
+            root_path, ["ls-remote", "--exit-code", "--tags", remote, f"refs/tags/{tag}"]
+        )
         if remote_tag.returncode == 0:
             blocked.append("tag_exists_on_remote")
 
@@ -273,7 +275,9 @@ def plan_github_release(
             else:
                 created = True
                 gate = "PASS"
-                proof_path = Path(proof_log) if proof_log else (root_path / ".forge-release-proof.jsonl")
+                proof_path = (
+                    Path(proof_log) if proof_log else (root_path / ".forge-release-proof.jsonl")
+                )
                 try:
                     _append_proof(
                         proof_path,

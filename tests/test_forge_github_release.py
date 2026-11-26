@@ -22,9 +22,7 @@ _REAL_RUN = subprocess.run
 
 
 def _git(repo: Path, *args: str) -> str:
-    proc = _REAL_RUN(
-        ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
-    )
+    proc = _REAL_RUN(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
     return proc.stdout.strip()
 
 
@@ -91,9 +89,7 @@ def test_dry_run_plans_exact_commands_and_creates_nothing(
     assert report.source_sha == _git(repo, "rev-parse", "HEAD")
     assert len(report.commands) == 3
     assert report.commands[0] == f"git -C {repo} tag -a v1.2.3 -m v1.2.3"
-    assert report.commands[1] == (
-        f"git -C {repo} push origin refs/tags/v1.2.3:refs/tags/v1.2.3"
-    )
+    assert report.commands[1] == (f"git -C {repo} push origin refs/tags/v1.2.3:refs/tags/v1.2.3")
     assert report.commands[2] == (
         "gh release create v1.2.3 --repo acme/widgets --title v1.2.3 "
         "--notes Release v1.2.3 --verify-tag"
