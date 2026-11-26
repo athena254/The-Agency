@@ -112,6 +112,16 @@ def test_snippet_is_bounded_and_marks_elision() -> None:
     assert "world" in result
 
 
+def test_snippet_stays_within_limit_when_both_ends_are_elided() -> None:
+    # A match deep in the document shows BOTH ellipsis markers; each marker
+    # consumes one of the `limit` characters allowed by the docstring.
+    text = ("alpha beta gamma delta ") * 30 + "target" + (" zeta eta theta iota") * 30
+    result = snippet(text, ["target"])
+    assert len(result) <= SNIPPET_LIMIT
+    assert result.startswith("…") and result.endswith("…")
+    assert "target" in result
+
+
 def test_snippet_returns_short_text_unchanged() -> None:
     assert snippet("short text", ["short"]) == "short text"
 
