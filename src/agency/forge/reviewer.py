@@ -37,7 +37,7 @@ logger = structlog.get_logger(__name__)
 
 MAX_ROUNDS = 5
 MAX_LINT_LINE_LENGTH = 120
-REVIEW_RETRY_DELAY_S = 60.0
+REVIEW_RETRY_DELAY_S = 5.0
 REVIEW_MAX_PROVIDER_RETRIES = 2
 
 # Which provider the review gate prefers. ``auto`` (default) keeps the historic
