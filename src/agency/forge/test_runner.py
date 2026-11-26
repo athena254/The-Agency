@@ -131,6 +131,87 @@ def _dir_size(path: Path) -> int:
     return total
 
 
+def _git_source_files(root: Path) -> list[str] | None:
+    """Tracked plus untracked-but-not-ignored files, or None outside a git repo."""
+    try:
+        proc = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+            ],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return [
+        part.replace("\\", "/")
+        for part in proc.stdout.decode("utf-8", "replace").split("\0")
+        if part
+    ]
+
+
+def _copy_git_source(root: Path, workdir: Path, cap: int) -> tuple[int, int] | str:
+    """Copy only source files into the isolated workdir, never caches or venvs."""
+    files = _git_source_files(root)
+    if files is None:
+        return "not a git repository"
+    total = 0
+    copied = 0
+    for relative in files:
+        parts = relative.split("/")
+        if not relative or relative.startswith("/") or ".." in parts or "." in parts:
+            continue
+        source = root.joinpath(*parts)
+        target = workdir.joinpath(*parts)
+        try:
+            if not source.is_file() or source.is_symlink():
+                continue
+            size = source.stat().st_size
+            if total + size > cap:
+                return f"source tree exceeds size cap {cap} bytes"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            total += size
+            copied += 1
+        except OSError as exc:
+            return f"copy failed: {type(exc).__name__}: {exc}"
+    return copied, total
+
+
+def _prepare_workdir(root: Path) -> tuple[Path, Path, str | None]:
+    """Build the isolated test workdir; return (tmpdir, workdir, error_note)."""
+    tmpdir = Path(tempfile.mkdtemp(prefix="forge-test-"))
+    workdir = tmpdir / "repo"
+    files = _git_source_files(root)
+    if files is not None:
+        result = _copy_git_source(root, workdir, MAX_REPO_BYTES)
+        if isinstance(result, str):
+            return tmpdir, workdir, result
+        return tmpdir, workdir, None
+    if _dir_size(root) > MAX_REPO_BYTES:
+        return tmpdir, workdir, f"repository exceeds size cap {MAX_REPO_BYTES} bytes"
+    try:
+        shutil.copytree(
+            root,
+            workdir,
+            symlinks=False,
+            ignore=shutil.ignore_patterns(*sorted(_IGNORED_NAMES), "*.pyc"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return tmpdir, workdir, f"copy failed: {type(exc).__name__}"
+    return tmpdir, workdir, None
+
+
 def run_tests(
     root: str | Path,
     test_paths: list[str],
@@ -163,7 +244,9 @@ def run_tests(
         )
     command = built
 
-    if _dir_size(real_root) > MAX_REPO_BYTES:
+    tmpdir, workdir, copy_error = _prepare_workdir(real_root)
+    if copy_error is not None:
+        shutil.rmtree(tmpdir, ignore_errors=True)
         return TestReport(
             report_id=report_id,
             created_at=created_at,
@@ -173,30 +256,7 @@ def run_tests(
             gate="ERROR",
             language=language,
             duration_s=0.0,
-            note=f"repository exceeds size cap {MAX_REPO_BYTES} bytes",
-        )
-
-    tmpdir = Path(tempfile.mkdtemp(prefix="forge-test-"))
-    workdir = tmpdir / "repo"
-    try:
-        shutil.copytree(
-            real_root,
-            workdir,
-            symlinks=False,
-            ignore=shutil.ignore_patterns(*sorted(_IGNORED_NAMES), "*.pyc"),
-        )
-    except Exception as exc:  # noqa: BLE001
-        shutil.rmtree(tmpdir, ignore_errors=True)
-        return TestReport(
-            report_id=report_id,
-            created_at=created_at,
-            root=str(real_root),
-            workdir=str(tmpdir),
-            command=tuple(command),
-            gate="ERROR",
-            language=language,
-            duration_s=0.0,
-            note=f"copy failed: {type(exc).__name__}",
+            note=copy_error,
         )
 
     start = time.monotonic()
