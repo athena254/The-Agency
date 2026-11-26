@@ -207,7 +207,8 @@ def snippet(text: str, terms: Sequence[str], *, limit: int = SNIPPET_LIMIT) -> s
     body = text[start:end].strip()
     prefix = "…" if start > 0 else ""
     suffix = "…" if end < len(text) else ""
-    return prefix + body + suffix
+    budget = limit - len(prefix) - len(suffix)
+    return prefix + body[:budget].rstrip() + suffix
 
 
 def query_terms(query: str) -> tuple[str, ...]:
