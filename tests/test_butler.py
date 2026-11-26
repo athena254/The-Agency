@@ -49,6 +49,37 @@ def test_detect_domains() -> None:
     assert router.detect_domain("verify this forensic evidence report") == "evidence"
 
 
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        pytest.param("scan for evidence", "security", id="security-before-evidence"),
+        pytest.param("remember the risk", "memory", id="memory-before-risk"),
+        pytest.param("firewall and proof", "security", id="security-before-evidence-2"),
+    ],
+)
+def test_detect_domain_ties_resolve_to_first_declared(message: str, expected: str) -> None:
+    router = MessageRouter()
+    assert router.detect_domain(message) == expected
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("   ", id="blank"),
+        pytest.param("xyzzy qwerty", id="no-hit"),
+    ],
+)
+def test_detect_domain_returns_none_without_signal(message: str) -> None:
+    router = MessageRouter()
+    assert router.detect_domain(message) is None
+
+
+def test_detect_domain_single_hit_unchanged() -> None:
+    router = MessageRouter()
+    assert router.detect_domain("scan for vulnerabilities and exploits") == "security"
+
+
 @pytest.mark.asyncio
 async def test_router_routes_to_correct_agent(service: ButlerService) -> None:
     agent = await service.route("check the firewall for intrusions", {"sender": "t"})
