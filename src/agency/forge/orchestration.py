@@ -12,7 +12,6 @@ auto-resumed.
 from __future__ import annotations
 
 import hashlib
-import sqlite3
 from collections.abc import Callable
 from datetime import UTC, datetime
 from enum import Enum
@@ -23,6 +22,7 @@ from uuid import uuid4
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
+from agency.core.sqlite_store import open_store
 from agency.forge.backlog import BacklogStore, slice_prd
 from agency.forge.cost import CostStore, record_cost
 from agency.forge.evidence import EvidenceReport, EvidenceStore
@@ -137,12 +137,7 @@ class BlacksmithOps:
         if max_retries < 0 or max_retries > 5:
             raise ValueError("max_retries must be in [0, 5].")
         self._db_path = Path(db_path)
-        if str(self._db_path) != ":memory:":
-            self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.executescript(_SCHEMA)
-        self._conn.commit()
+        self._conn = open_store(self._db_path, _SCHEMA)
         self._runner = runner if runner is not None else run_external_agent
         self._model = model
         self._command = (

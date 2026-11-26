@@ -14,7 +14,6 @@ import hashlib
 import os
 import shlex
 import shutil
-import sqlite3
 import stat
 import subprocess
 import tempfile
@@ -27,6 +26,7 @@ from uuid import uuid4
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
+from agency.core.sqlite_store import open_store
 from agency.forge.inspection import (
     MAX_FILE_BYTES,
     MAX_FILES,
@@ -98,12 +98,7 @@ CREATE TABLE IF NOT EXISTS forge_evidence_reports (
 class EvidenceStore:
     def __init__(self, db_path: str | Path = "forge_evidence.db") -> None:
         self._db_path = Path(db_path)
-        if str(self._db_path) != ":memory:":
-            self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.executescript(_SCHEMA)
-        self._conn.commit()
+        self._conn = open_store(self._db_path, _SCHEMA)
 
     def save(self, report: EvidenceReport) -> str:
         self._conn.execute(
