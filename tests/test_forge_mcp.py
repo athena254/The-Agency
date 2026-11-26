@@ -251,7 +251,7 @@ def test_status_reads_the_queue(tmp_path: Path) -> None:
 
 
 def test_concurrency_semaphore_rejects_the_fifth_call() -> None:
-    server = ForgeMcpServer(McpConfig(max_concurrent_calls=1))
+    server = ForgeMcpServer(McpConfig(max_concurrent_calls=1, queue_timeout_s=0.05))
 
     async def run() -> None:
         original = server._run_tool
@@ -289,6 +289,46 @@ def test_concurrency_semaphore_rejects_the_fifth_call() -> None:
         await asyncio.wait_for(first, timeout=5)
 
     asyncio.run(run())
+
+
+def test_excess_call_queues_until_a_slot_is_free() -> None:
+    server = ForgeMcpServer(McpConfig(max_concurrent_calls=1, queue_timeout_s=3.0))
+
+    async def run() -> None:
+        original = server._run_tool
+        release = threading.Event()
+
+        def slow(name: str, args: dict) -> dict:
+            release.wait(timeout=5)
+            return original(name, args)
+
+        server._run_tool = slow  # type: ignore[method-assign]
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {"name": "forge_capabilities", "arguments": {}},
+        }
+        first = asyncio.create_task(server.handle({**payload, "id": 1}))
+        await asyncio.sleep(0.05)
+        second = asyncio.create_task(server.handle({**payload, "id": 2}))
+        await asyncio.sleep(0.1)
+        assert not second.done()
+        release.set()
+        results = await asyncio.wait_for(asyncio.gather(first, second), timeout=5)
+        assert all(result is not None and "result" in result for result in results)
+
+    asyncio.run(run())
+
+
+def test_concurrency_config_is_environment_driven(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENCY_FORGE_MCP_MAX_CONCURRENT_CALLS", "12")
+    monkeypatch.setenv("AGENCY_FORGE_MCP_QUEUE_TIMEOUT_S", "2")
+    config = McpConfig()
+    assert config.max_concurrent_calls == 12
+    assert config.queue_timeout_s == 2.0
+
+    monkeypatch.setenv("AGENCY_FORGE_MCP_MAX_CONCURRENT_CALLS", "999")
+    assert McpConfig().max_concurrent_calls == 64
 
 
 # ---------------------------------------------------------------- HTTP transport

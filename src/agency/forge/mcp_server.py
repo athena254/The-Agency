@@ -64,6 +64,22 @@ CAVEATS = (
 )
 
 
+def _env_int(name: str, default: int, low: int, high: int) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+    return max(low, min(high, value))
+
+
+def _env_float(name: str, default: float, low: float, high: float) -> float:
+    try:
+        value = float(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+    return max(low, min(high, value))
+
+
 class McpError(Exception):
     """A JSON-RPC error with a stable public code."""
 
@@ -297,7 +313,12 @@ class McpConfig(BaseModel):
 
     token: str = ""
     default_db_dir: str = "."
-    max_concurrent_calls: int = 4
+    max_concurrent_calls: int = Field(
+        default_factory=lambda: _env_int("AGENCY_FORGE_MCP_MAX_CONCURRENT_CALLS", 4, 1, 64)
+    )
+    queue_timeout_s: float = Field(
+        default_factory=lambda: _env_float("AGENCY_FORGE_MCP_QUEUE_TIMEOUT_S", 30.0, 0.0, 300.0)
+    )
 
     @field_validator("token")
     @classmethod
@@ -318,7 +339,7 @@ class ForgeMcpServer:
         self.config = config or McpConfig()
         self._lock = threading.RLock()
         self._calls_in_flight = 0
-        self._semaphore = threading.BoundedSemaphore(self.config.max_concurrent_calls)
+        self._semaphore = asyncio.Semaphore(self.config.max_concurrent_calls)
 
     # -- discovery ---------------------------------------------------------- #
 
@@ -387,8 +408,17 @@ class ForgeMcpServer:
         tool = _TOOL_BY_NAME[name]
         _validate_args(tool, arguments)
 
-        if not self._semaphore.acquire(blocking=False):
-            raise _err(-32000, "too many concurrent calls")
+        if self.config.queue_timeout_s <= 0:
+            if self._semaphore.locked():
+                raise _err(-32000, "queue full: too many concurrent calls")
+            await self._semaphore.acquire()
+        else:
+            try:
+                await asyncio.wait_for(
+                    self._semaphore.acquire(), timeout=self.config.queue_timeout_s
+                )
+            except TimeoutError:
+                raise _err(-32000, "queue full: too many concurrent calls")
         try:
             if name in _SYNC_TOOLS:
                 output = await asyncio.to_thread(self._run_tool, name, arguments)

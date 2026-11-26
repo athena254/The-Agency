@@ -1032,6 +1032,12 @@ def forge_mcp(
     host: str = typer.Option("127.0.0.1", "--host", help="HTTP bind host (loopback only)."),
     port: int = typer.Option(8765, "--port", "-p", help="HTTP bind port."),
     token_file: str = typer.Option("", "--token-file", help="File holding the bearer token."),
+    max_concurrent: int = typer.Option(
+        0, "--max-concurrent", help="Concurrent MCP calls (0 = env/default, max 64)."
+    ),
+    queue_timeout: float = typer.Option(
+        -1.0, "--queue-timeout", help="Seconds to wait for a slot (-1 = env/default)."
+    ),
 ) -> None:
     """Serve the Forge over MCP so external agents can drive governed builds.
 
@@ -1053,6 +1059,11 @@ def forge_mcp(
             return
     elif os.environ.get("AGENCY_MCP_TOKEN"):
         token = os.environ["AGENCY_MCP_TOKEN"]
+    cfg_kwargs: dict[str, object] = {"token": token}
+    if max_concurrent > 0:
+        cfg_kwargs["max_concurrent_calls"] = max(1, min(64, max_concurrent))
+    if queue_timeout >= 0:
+        cfg_kwargs["queue_timeout_s"] = max(0.0, min(300.0, queue_timeout))
     if transport == "http":
         if host not in ("127.0.0.1", "localhost", "::1"):
             _fail("HTTP transport binds loopback only")
@@ -1064,10 +1075,10 @@ def forge_mcp(
         import uvicorn
 
         uvicorn.run(
-            create_http_app(McpConfig(token=token)), host=host, port=port, log_level="warning"
+            create_http_app(McpConfig(**cfg_kwargs)), host=host, port=port, log_level="warning"
         )
         return
-    raise typer.Exit(serve_stdio(McpConfig(token=token)))
+    raise typer.Exit(serve_stdio(McpConfig(**cfg_kwargs)))
 
 
 @forge_app.command("status")
