@@ -60,7 +60,7 @@ test('Lattice shows real ballot governance; Forge is an owner workspace', async 
   if (await dispatchButton.isDisabled()) {
     await expect(
       dispatch
-        .getByText(/unavailable in this runtime|owner token required|already running/i)
+        .getByText(/unavailable in this runtime|CSRF session required|already running/i)
         .first(),
     ).toBeVisible()
   }
