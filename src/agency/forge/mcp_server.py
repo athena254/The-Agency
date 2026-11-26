@@ -789,7 +789,7 @@ class ForgeMcpServer:
             "pipeline": str(report.gate).upper(),
             "security": str(report.security.gate).upper(),
             "tests": str(report.tests.gate).upper() if report.tests is not None else "FAIL",
-            "review": str(report.review.gate).upper(),
+            "review": str(report.review.gate).upper() if report.review is not None else "FAIL",
         }
         head = subprocess.run(
             ["git", "-C", str(root), "rev-parse", "HEAD"],

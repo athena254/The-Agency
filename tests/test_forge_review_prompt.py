@@ -12,7 +12,7 @@ def test_review_prompt_carries_rubric_and_evidence_rules() -> None:
         "low = style or naming",
         "critical = secret leak",
         "cite the exact path and line",
-        "lower the score and name what is unverified",
+        "do NOT lower the score for uncertainty alone",
         "Do not invent files, lines, or findings",
     ):
         assert marker in prompt, f"reviewer prompt lacks: {marker}"

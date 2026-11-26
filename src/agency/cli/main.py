@@ -1059,11 +1059,11 @@ def forge_mcp(
             return
     elif os.environ.get("AGENCY_MCP_TOKEN"):
         token = os.environ["AGENCY_MCP_TOKEN"]
-    cfg_kwargs: dict[str, object] = {"token": token}
+    config = McpConfig(token=token)
     if max_concurrent > 0:
-        cfg_kwargs["max_concurrent_calls"] = max(1, min(64, max_concurrent))
+        config = config.model_copy(update={"max_concurrent_calls": max(1, min(64, max_concurrent))})
     if queue_timeout >= 0:
-        cfg_kwargs["queue_timeout_s"] = max(0.0, min(300.0, queue_timeout))
+        config = config.model_copy(update={"queue_timeout_s": max(0.0, min(300.0, queue_timeout))})
     if transport == "http":
         if host not in ("127.0.0.1", "localhost", "::1"):
             _fail("HTTP transport binds loopback only")
@@ -1074,11 +1074,9 @@ def forge_mcp(
         console.print(f"[green]Forge MCP listening[/green] on http://{host}:{port}/mcp")
         import uvicorn
 
-        uvicorn.run(
-            create_http_app(McpConfig(**cfg_kwargs)), host=host, port=port, log_level="warning"
-        )
+        uvicorn.run(create_http_app(config), host=host, port=port, log_level="warning")
         return
-    raise typer.Exit(serve_stdio(McpConfig(**cfg_kwargs)))
+    raise typer.Exit(serve_stdio(config))
 
 
 @forge_app.command("status")
