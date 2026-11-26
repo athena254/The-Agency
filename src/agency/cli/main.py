@@ -1106,6 +1106,58 @@ def forge_status(
         console.print(f"  {job.job_id[:8]} {job.state.value} {job.title} gate={job.gate or '-'}")
 
 
+@forge_app.command("approvals")
+def forge_approvals(
+    db: str = typer.Option("forge_jobs.db", "--db", help="Blacksmith job database path."),
+    output_json: bool = typer.Option(False, "--json", help="Emit the briefs as JSON."),
+) -> None:
+    """List Forge jobs waiting for a human decision (read-only)."""
+    from agency.forge.approvals import list_briefs
+    from agency.forge.orchestration import BlacksmithOps
+
+    ops = BlacksmithOps(db)
+    try:
+        briefs = list_briefs(ops)
+    finally:
+        ops.close()
+    if output_json:
+        _print_json([brief.model_dump(mode="json") for brief in briefs])
+        return
+    if not briefs:
+        console.print("No jobs are awaiting a human decision.")
+    for brief in briefs:
+        console.print(
+            f"  {brief.job_id} {brief.title} gate={brief.gate or '-'} "
+            f"report={brief.report_id or '-'}"
+        )
+
+
+@forge_app.command("approve")
+def forge_approve(
+    job_id: str = typer.Argument(..., help="Job id awaiting a human decision."),
+    approver: str = typer.Option(..., "--approver", help="Named human approver."),
+    decision: str = typer.Option("approve", "--decision", help="approve or reject."),
+    note: str = typer.Option("", "--note", help="Bounded decision note."),
+    db: str = typer.Option("forge_jobs.db", "--db", help="Blacksmith job database path."),
+) -> None:
+    """Record a human decision. Never merges, releases or deploys."""
+    from agency.forge.approvals import ApprovalError, decide
+    from agency.forge.orchestration import BlacksmithOps
+
+    ops = BlacksmithOps(db)
+    try:
+        record = decide(ops, job_id, approver, decision, note=note)
+    except ApprovalError as exc:
+        _fail(str(exc))
+        return
+    finally:
+        ops.close()
+    console.print(
+        f"Recorded {record.decision} by {record.approver} for {record.job_id} "
+        f"(state={record.state_after}). No merge or release was performed."
+    )
+
+
 @forge_app.command("metrics")
 def forge_metrics_cmd(
     db: str = typer.Option("forge_jobs.db", "--db", help="Blacksmith job database path."),

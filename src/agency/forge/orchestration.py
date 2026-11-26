@@ -444,6 +444,14 @@ class BlacksmithOps:
         )
         return result
 
+    def awaiting_human(self) -> tuple[ForgeJob, ...]:
+        """All jobs waiting for a human decision, newest first."""
+        rows = self._conn.execute(
+            "SELECT document FROM forge_jobs WHERE state = ? ORDER BY updated_at DESC",
+            (JobState.AWAITING_HUMAN.value,),
+        ).fetchall()
+        return tuple(ForgeJob.model_validate_json(row[0]) for row in rows)
+
     def status(self) -> BlacksmithStatus:
         rows = self._conn.execute(
             "SELECT state, document FROM forge_jobs ORDER BY updated_at DESC"
