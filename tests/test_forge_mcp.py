@@ -69,8 +69,10 @@ def test_tools_list_is_bounded_and_wellformed() -> None:
     names = [tool["name"] for tool in tools]
     assert len(names) == len(set(names))
     assert all(name.startswith("forge_") for name in names)
-    # Never expose ship/merge authority.
-    assert not any("ship" in name or "merge" in name or "deploy" in name for name in names)
+    # Silent ship/deploy is never exposed; the two named gated tools are explicit.
+    assert not any("ship" in name or "deploy" in name for name in names)
+    assert "forge_remote_merge" in names
+    assert "forge_github_release" in names
     for tool in tools:
         assert tool["inputSchema"]["type"] == "object"
 

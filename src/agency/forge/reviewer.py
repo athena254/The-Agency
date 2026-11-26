@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import sqlite3
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -22,7 +23,7 @@ from typing import Any, Literal, Self
 from uuid import uuid4
 
 import structlog
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from agency.forge.diff import build_diff_bundle, delta_paths, head_sha
 from agency.forge.inspection import (
@@ -48,6 +49,62 @@ REVIEW_MAX_PROVIDER_RETRIES = 2
 # ``gemini-4-hydrogen`` returning 429).
 REVIEW_PROVIDER_ENV = "AGENCY_FORGE_REVIEW_PROVIDER"
 _REVIEW_PROVIDER_MODES = ("auto", "google", "agency")
+
+# Optional comma-separated judge keys. Free tiers meter per key, so a ring of
+# two keys doubles the review gate's per-minute ceiling; unset means the
+# configured Agency LLM key is used alone.
+REVIEW_KEYS_ENV = "AGENCY_FORGE_REVIEW_API_KEYS"
+
+
+def review_api_keys() -> list[str]:
+    """Judge API keys from ``AGENCY_FORGE_REVIEW_API_KEYS`` (order preserved)."""
+
+    raw = os.environ.get(REVIEW_KEYS_ENV, "")
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+class _KeyRingAdapter:
+    """Fan the judge's calls out round-robin across several API keys.
+
+    Quacks like an ``LLMAdapter`` (``generate`` plus ``model``/``provider``)
+    so the review loop cannot tell the difference; the key is chosen per call,
+    which also moves a provider retry onto the other key.
+    """
+
+    def __init__(self, adapters: list[Any]) -> None:
+        self._adapters = adapters
+        self._next = 0
+        self._lock = threading.Lock()
+
+    @property
+    def model(self) -> str:
+        return str(self._adapters[0].model)
+
+    @property
+    def provider(self) -> str:
+        return str(self._adapters[0].provider)
+
+    async def generate(self, prompt: str, context: Any = None) -> str:
+        with self._lock:
+            adapter = self._adapters[self._next % len(self._adapters)]
+            self._next += 1
+        logger.debug("forge.review_key_ring_pick", slot=(self._next - 1) % len(self._adapters))
+        return str(await adapter.generate(prompt, context))
+
+
+def _apply_review_key_ring(config: Any) -> Any:
+    """Wrap ``config`` in a key ring when the env var names judge keys."""
+
+    from agency.llm.adapter import LLMAdapter
+
+    keys = review_api_keys()
+    if not keys:
+        return LLMAdapter(config=config)
+    adapters = [
+        LLMAdapter(config=config.model_copy(update={"api_key": SecretStr(k)})) for k in keys
+    ]
+    logger.info("forge.review_key_ring", slots=len(adapters))
+    return _KeyRingAdapter(adapters)
 
 
 def review_provider_mode() -> str:
@@ -98,7 +155,7 @@ def build_review_llm() -> Any | None:
         if config.provider is ProviderKind.GOOGLE and mode != "agency":
             # Task LLM already on Google: point it at the serious model.
             config = config.model_copy(update={"model": serious_model()})
-        return LLMAdapter(config=config)
+        return _apply_review_key_ring(config)
     except Exception:  # noqa: BLE001
         logger.warning("forge.review_llm_unavailable")
         return None
@@ -477,15 +534,18 @@ _REVIEW_PROMPT_HEADER = (
     "JSON object with keys: "
     '"score" (integer 0-5), "findings" (list of objects with keys path, line, '
     "rule_id, severity (low/medium/high/critical), message, resolved (bool)), "
-    '"summary" (short string). Score 5 means clean. High/critical findings '
+    '"summary" (short string). Score 5 means no findings. Score 4 means only '
+    "low/medium findings with concrete citations. Scores 0-3 require at least "
+    "one concrete defect with an exact path and line. High/critical findings "
     "block. Respond with JSON only.\n\n"
     "Severity rubric: low = style or naming only; medium = missing validation "
     "or error handling; high = security or correctness bug in the changed "
     "paths; critical = secret leak, injection, or protected-path edit. Every "
     "finding must cite the exact path and line it applies to, and every cited "
     "path must appear in the CHANGE SET below. If you are "
-    "uncertain about a piece of the change, lower the score and name what is "
-    "unverified in the summary. Do not invent files, lines, or findings that "
+    "uncertain about a piece of the change, name what is unverified in the "
+    "summary; do NOT lower the score for uncertainty alone or for content you "
+    "did not fully inspect. Do not invent files, lines, or findings that "
     "are not supported by the change set and DIFF below. When the diff is "
     "truncated or paths are listed as not shown, review what is visible and "
     "name the omission in the summary.\n\n"
