@@ -1411,6 +1411,114 @@ def forge_learn(
     console.print("keys: " + ",".join(report.keys))
 
 
+@forge_app.command("critic")
+def forge_critic_cmd(
+    task_id: str = typer.Option(..., "--task-id", help="Bounded task identifier."),
+    diff_file: str = typer.Option(..., "--diff-file", help="Diff text to review."),
+    verdict_a: str = typer.Option("PASS", "--verdict-a", help="First critic verdict."),
+    verdict_b: str = typer.Option("FAIL", "--verdict-b", help="Second critic verdict."),
+    family_a: str = typer.Option("family-a", "--family-a", help="First model family."),
+    family_b: str = typer.Option("family-b", "--family-b", help="Second model family."),
+    author: str = typer.Option("", "--author", help="Optional author id; empty means independent."),
+    gold_file: str = typer.Option("", "--gold-file", help="Optional human-owned gold set JSON."),
+    results_file: str = typer.Option("", "--results-file", help="Optional prompt->output JSON."),
+) -> None:
+    """Run a bounded two-family critic quorum and optional gold-set grading."""
+    import json
+    from pathlib import Path
+
+    from agency.forge.gold_set import GoldSet, evaluate_gold_set
+    from agency.forge.quorum import run_quorum
+
+    diff = Path(diff_file).read_text(encoding="utf-8", errors="replace")
+    critics = [
+        {"critic_id": "critic-a", "model_family": family_a, "verdict": verdict_a},
+        {"critic_id": "critic-b", "model_family": family_b, "verdict": verdict_b},
+    ]
+    quorum = run_quorum(task_id, diff, critics, author_id=author)
+    console.print(f"quorum: {quorum.outcome}")
+    for result in quorum.results:
+        console.print(f"  {result.critic_id} {result.model_family}: {result.verdict}")
+
+    if gold_file:
+        payload = json.loads(Path(gold_file).read_text(encoding="utf-8"))
+        owner = str(payload.get("owner", ""))
+        gold = GoldSet(
+            set_id=str(payload.get("set_id", "gold")),
+            owner=owner,
+            tasks=payload.get("tasks", []),
+            version=int(payload.get("version", 1)),
+        )
+        observed = (
+            json.loads(Path(results_file).read_text(encoding="utf-8")) if results_file else {}
+        )
+        report = evaluate_gold_set(gold, observed)
+        console.print(f"gold set: {report.gate}")
+
+
+@forge_app.command("escalate")
+def forge_escalate_cmd(
+    db: str = typer.Option("forge_jobs.db", "--db", help="Job database path."),
+    sla_seconds: int = typer.Option(86400, "--sla", min=1, help="Wait budget before escalation."),
+) -> None:
+    """Suggest escalations for stalled human decisions; never approves a job."""
+    from agency.forge.escalation import EscalationPolicy, evaluate_escalation
+    from agency.forge.orchestration import BlacksmithOps
+
+    ops = BlacksmithOps(db)
+    try:
+        policy = EscalationPolicy(sla_seconds=sla_seconds)
+        suggestions = [
+            assessment
+            for job in ops.status().recent
+            if (assessment := evaluate_escalation(job, policy)).should_escalate
+        ]
+    finally:
+        ops.close()
+    if not suggestions:
+        console.print("No escalations suggested.")
+        return
+    for item in suggestions:
+        console.print(f"{item.job_id[:8]} {item.state} age={item.age_seconds}s: {item.suggestion}")
+
+
+@forge_app.command("health")
+def forge_health_cmd(
+    db: str = typer.Option("forge_jobs.db", "--db", help="Job database path."),
+) -> None:
+    """Report loop health and an honest halt recommendation."""
+    from agency.forge.loop_metrics import compute_loop_health
+
+    health = compute_loop_health(db)
+    console.print(health.render())
+
+
+@forge_app.command("schedule")
+def forge_schedule_cmd(
+    command: str = typer.Option(..., "--command", help="Command the generated unit would run."),
+    schedule: str = typer.Option(..., "--schedule", help="Bounded cron expression or description."),
+    description: str = typer.Option(
+        "The Agency Forge factory run", "--description", help="Unit description."
+    ),
+    service_name: str = typer.Option("agency-forge", "--service", help="Service name."),
+) -> None:
+    """Generate scheduling text only. Never installs, enables or starts a scheduler."""
+    from agency.forge.scheduler import SchedulerConfig, generate_schedule
+
+    bundle = generate_schedule(
+        SchedulerConfig(
+            command=command,
+            schedule=schedule,
+            description=description,
+            service_name=service_name,
+        )
+    )
+    console.print("[cron] " + bundle.cron_line)
+    console.print("[timer]\n" + bundle.timer)
+    console.print("[service]\n" + bundle.service)
+    console.print("generate-only: " + bundle.provenance)
+
+
 @forge_app.command("metrics")
 def forge_metrics_cmd(
     db: str = typer.Option("forge_jobs.db", "--db", help="Blacksmith job database path."),

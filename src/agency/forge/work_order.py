@@ -14,7 +14,7 @@ failure tail; the renderer includes it as a RETRY NOTE only when present.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal  # noqa: F401
+from typing import Literal, cast
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -23,6 +23,7 @@ from agency.forge.apprentice_policy import (
     PromotionEvidence,
     render_apprentice_policy,
 )
+from agency.forge.handoff import make_handoff, validate_handoff
 from agency.forge.protected_paths import protected_paths
 
 MAX_TASK_CHARS = 8000
@@ -59,6 +60,8 @@ class WorkOrder(BaseModel):
     job_class: str = ""
     tool_budget: int = 0
     promotion_evidence: PromotionEvidence | None = None
+    regression_required: bool = False
+    diff_budget_required: bool = False
 
     @field_validator("repo")
     @classmethod
@@ -136,6 +139,50 @@ def render_work_order(order: WorkOrder) -> str:
             f"- Write `{order.plan_path}` before editing any code.",
             "- Required headings: Goal, Approach, Files, Tests, Risks.",
             "- Forge refuses the result if that file is missing or incomplete.",
+        ]
+    envelope = make_handoff(
+        task_id=f"{order.title[:24]}-{order.attempt}",
+        from_="orchestrator",
+        to=order.role,
+        spec_ref=order.repo,
+        producer="blacksmith",
+        parent_id=None,
+        risk_class=cast(
+            Literal["low", "medium", "high"],
+            {"trivial": "low", "standard": "medium", "risky": "high"}.get(
+                order.job_class, "medium"
+            ),
+        ),
+        acceptance=order.acceptance or ("run the named tests", "report the real result"),
+        artifacts=order.test_paths or ("changed files",),
+        budget={"tools": order.tool_budget} if order.tool_budget else {},
+        evidence=("work_order",),
+        status="draft",
+    )
+    validation = validate_handoff(envelope)
+    if validation.ok:
+        lines += [
+            "",
+            "HANDOFF ENVELOPE:",
+            f"- task_id: {envelope.task_id}",
+            f"- from: {envelope.from_} -> to: {envelope.to}",
+            f"- risk_class: {envelope.risk_class}",
+            f"- spec_ref: {envelope.spec_ref}",
+            "- provenance: blacksmith; status: draft",
+        ]
+    if order.regression_required:
+        lines += [
+            "",
+            "REGRESSION PROOF (hard):",
+            "- Capture the failing test output in REGRESSION.md before writing the fix.",
+            "- Include task_id, gate, test command, non-zero return code and failure output.",
+            "- Forge rejects the fix without that proof.",
+        ]
+    if order.diff_budget_required:
+        lines += [
+            "",
+            "DIFF BUDGET (hard):",
+            "- Keep the change small. Oversized diffs need a written waiver with a named approver.",
         ]
     if order.failure_tail:
         lines += [

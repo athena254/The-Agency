@@ -464,6 +464,9 @@ class BlacksmithOps:
         runner_kwargs["route"] = job.route
         runner_kwargs["role"] = job.role
         runner_kwargs["tool_budget"] = job.tool_budget
+        runner_kwargs["parallel_gates_flag"] = job.route in ("standard", "risky")
+        runner_kwargs["diff_budget_required"] = True
+        runner_kwargs["regression_required"] = "fix" in f"{job.title} {job.task}".lower()
         if job.verify_command:
             runner_kwargs["verify_command"] = job.verify_command
         if job.verify_endpoints:

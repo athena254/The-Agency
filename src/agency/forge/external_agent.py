@@ -28,6 +28,7 @@ Reliability hardening (Windows + CI):
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -46,11 +47,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agency.core.sqlite_store import open_store
 from agency.forge.apprentice_policy import enforce_apprentice_policy
+from agency.forge.diff_budget import DiffBudgetReport, FileChange, check_diff_budget
 from agency.forge.env_config import discover_env_file, load_env_file
 from agency.forge.inspection import InspectionReport, inspect_changes
 from agency.forge.observability import PhaseTiming
+from agency.forge.parallel_gates import ParallelGateReport, run_parallel_gates
 from agency.forge.pipeline import CAVEATS as _PIPELINE_CAVEATS
 from agency.forge.planning import check_plan, path_allowed
+from agency.forge.regression_first import RegressionVerdict, check_regression_first
 from agency.forge.reviewer import (
     ReviewReport,
     build_review_llm,
@@ -138,6 +142,9 @@ class ExternalAgentReport(BaseModel):
     review_provider_mode: str = ""
     review_provider: str = ""
     runtime: RuntimeReport | None = None
+    diff_budget: DiffBudgetReport | None = None
+    regression: RegressionVerdict | None = None
+    parallel: ParallelGateReport | None = None
     phases: tuple[PhaseTiming, ...] = ()
     gate: ExternalAgentGate
     caveats: tuple[str, ...] = _BASE_CAVEATS
@@ -498,6 +505,26 @@ def _delete_branch_quiet(repo: Path, branch: str) -> None:
         )
 
 
+def _numstat_changes(root: Path, base_commit: str) -> list[FileChange]:
+    """Read per-file added/deleted counts from git; empty base means working tree."""
+    args = ["git", "-C", str(root), "diff", "--numstat"]
+    if base_commit:
+        args.append(f"{base_commit}..HEAD")
+    proc = subprocess.run(args, capture_output=True, text=True, check=False, timeout=GIT_TIMEOUT_S)
+    changes: list[FileChange] = []
+    for line in proc.stdout.splitlines():
+        parts = line.split("\t", 2)
+        if len(parts) != 3:
+            continue
+        try:
+            changes.append(
+                FileChange(path=parts[2], added=int(parts[0] or 0), deleted=int(parts[1] or 0))
+            )
+        except ValueError:
+            continue
+    return changes
+
+
 def run_external_agent(
     repo_root: str | Path,
     command: str | list[str],
@@ -525,6 +552,9 @@ def run_external_agent(
     verify_command: str | list[str] | None = None,
     verify_endpoints: list[str] | None = None,
     verify_timeout_s: int = 30,
+    regression_required: bool = False,
+    diff_budget_required: bool = False,
+    parallel_gates_flag: bool = False,
 ) -> ExternalAgentReport:
     """Run an external coding agent in an isolated worktree, then Forge gates.
 
@@ -634,55 +664,131 @@ def run_external_agent(
         policy = enforce_apprentice_policy(
             role, effective_route.job_class, tool_budget or effective_route.tool_budget
         )
+        diff_report = (
+            check_diff_budget(_numstat_changes(worktree_path, base_commit))
+            if diff_budget_required
+            else None
+        )
+        regression_verdict: RegressionVerdict | None = None
+        if regression_required:
+            proof_path = worktree_path / "REGRESSION.json"
+            try:
+                payload = json.loads(proof_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                payload = {}
+            regression_verdict = check_regression_first(payload)
         outside_plan = (
             tuple(p for p in changed if not path_allowed(p, plan_report.allowed_files))
             if plan_report is not None and plan_report.allowed_files
             else ()
         )
 
-        try:
-            inspection = inspect_changes(worktree_path, changed)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("forge.external_agent_inspect_error", error=str(exc))
-            inspection = inspect_changes(worktree_path, [])
+        parallel_report: ParallelGateReport | None = None
+        state: dict[str, Any] = {
+            "tests": None,
+            "review": None,
+            "review_error": False,
+            "review_provider": "not-run",
+        }
 
-        try:
-            security = scan_changes(worktree_path, changed)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("forge.external_agent_scan_error", error=str(exc))
-            security = scan_changes(worktree_path, [])
-
-        tests: TestReport | None = None
-        if run_tests_flag:
-            tp = test_paths or []
+        def _inspect_gate() -> object:
             try:
-                tests = run_tests(worktree_path, tp, timeout_s=test_timeout_s)
-            except Exception as exc:  # noqa: BLE001
-                logger.error("forge.external_agent_tests_error", error=str(exc))
-                tests = None
+                return inspect_changes(worktree_path, changed)
+            except Exception:  # noqa: BLE001
+                return inspect_changes(worktree_path, [])
 
-        review: ReviewReport | None = None
-        review_error = False
-        review_provider = "not-run"
-        if run_review_flag:
+        def _security_gate() -> object:
             try:
-                # Build once so evidence records the adapter that actually
-                # judged; run_review receives the same object below.
-                review_llm = llm if llm is not None else build_review_llm()
-                if review_llm is None:
-                    review_provider = "echo"
-                else:
-                    review_provider = str(getattr(review_llm, "provider", "") or "custom")
-                review = run_review(
+                return scan_changes(worktree_path, changed)
+            except Exception:  # noqa: BLE001
+                return scan_changes(worktree_path, [])
+
+        def _tests_gate() -> object:
+            if not run_tests_flag:
+                return None
+            try:
+                return run_tests(worktree_path, test_paths or [], timeout_s=test_timeout_s)
+            except Exception:  # noqa: BLE001
+                return None
+
+        def _review_gate() -> object:
+            review_llm = llm if llm is not None else build_review_llm()
+            state["review_provider"] = (
+                "echo"
+                if review_llm is None
+                else str(getattr(review_llm, "provider", "") or "custom")
+            )
+            try:
+                return run_review(
                     worktree_path,
                     changed,
                     use_llm=True,
                     llm=review_llm,
-                    tests_report=tests,
+                    tests_report=state["tests"],
                 )
             except Exception:  # noqa: BLE001
-                review_error = True
-                logger.error("forge.external_agent_review_error")
+                state["review_error"] = True
+                return None
+
+        if parallel_gates_flag:
+            cheap: dict[str, Any] = {"inspection": _inspect_gate, "security": _security_gate}
+            if run_tests_flag:
+                cheap["tests"] = _tests_gate
+            parallel_report = run_parallel_gates(
+                cheap, review=_review_gate if run_review_flag else None
+            )
+            inspection = parallel_report.outcomes.get("inspection") or inspect_changes(
+                worktree_path, []
+            )
+            security = parallel_report.outcomes.get("security") or scan_changes(worktree_path, [])
+            tests = parallel_report.outcomes.get("tests")
+            review = parallel_report.outcomes.get("review")
+            review_error = bool(state["review_error"]) or (
+                parallel_report.review is not None and parallel_report.review.gate != "PASS"
+            )
+            review_provider = str(state["review_provider"])
+        else:
+            try:
+                inspection = inspect_changes(worktree_path, changed)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("forge.external_agent_inspect_error", error=str(exc))
+                inspection = inspect_changes(worktree_path, [])
+
+            try:
+                security = scan_changes(worktree_path, changed)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("forge.external_agent_scan_error", error=str(exc))
+                security = scan_changes(worktree_path, [])
+
+            tests = None
+            if run_tests_flag:
+                tp = test_paths or []
+                try:
+                    tests = run_tests(worktree_path, tp, timeout_s=test_timeout_s)
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("forge.external_agent_tests_error", error=str(exc))
+                    tests = None
+
+            review = None
+            review_error = False
+            review_provider = "not-run"
+            if run_review_flag:
+                try:
+                    review_llm = llm if llm is not None else build_review_llm()
+                    if review_llm is None:
+                        review_provider = "echo"
+                    else:
+                        review_provider = str(getattr(review_llm, "provider", "") or "custom")
+                    review = run_review(
+                        worktree_path,
+                        changed,
+                        use_llm=True,
+                        llm=review_llm,
+                        tests_report=tests,
+                    )
+                except Exception:  # noqa: BLE001
+                    review_error = True
+                    logger.error("forge.external_agent_review_error")
 
         # Risky routes opt into the real runtime gate only when a caller
         # supplies both a start command and endpoints. Safe defaults keep every
@@ -723,6 +829,12 @@ def run_external_agent(
         if outside_plan:
             overall = "FAIL"
         if not policy.allowed:
+            overall = "FAIL"
+        if diff_report is not None and diff_report.gate != "PASS":
+            overall = "FAIL"
+        if regression_verdict is not None and not regression_verdict.ok:
+            overall = "FAIL"
+        if parallel_report is not None and parallel_report.gate != "PASS":
             overall = "FAIL"
         if exit_code not in (0, None):
             overall = "FAIL"
@@ -781,6 +893,10 @@ def run_external_agent(
             caveats.append("files_outside_plan")
         caveats.extend(policy.caveats)
         caveats.extend(policy.reasons)
+        if diff_report is not None:
+            caveats.extend(diff_report.caveats)
+        if regression_verdict is not None:
+            caveats.extend(regression_verdict.findings)
         if runtime is not None:
             if runtime.gate != "PASS":
                 caveats.append("runtime_gate_failed")
@@ -832,6 +948,9 @@ def run_external_agent(
             review_provider_mode=review_mode,
             review_provider=review_provider,
             runtime=runtime,
+            diff_budget=diff_report,
+            regression=regression_verdict,
+            parallel=parallel_report,
             phases=tuple(
                 PhaseTiming(name=name, duration_s=round(max(0.0, float(value)), 3))
                 for name, value in {
