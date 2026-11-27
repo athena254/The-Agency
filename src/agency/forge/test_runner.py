@@ -74,17 +74,20 @@ def build_test_command(
     """Return test command for language, or None if the tool is missing."""
     args = list(extra_args or [])
     if language == "node":
-        if shutil.which("npm") is None:
+        npm = shutil.which("npm")
+        if npm is None:
             return None
-        return ["npm", "test", *args]
+        return [npm, "test", *args]
     if language == "go":
-        if shutil.which("go") is None:
+        go = shutil.which("go")
+        if go is None:
             return None
-        return ["go", "test", "./...", *args]
+        return [go, "test", "./...", *args]
     if language == "rust":
-        if shutil.which("cargo") is None:
+        cargo = shutil.which("cargo")
+        if cargo is None:
             return None
-        return ["cargo", "test", *args]
+        return [cargo, "test", *args]
     return [sys.executable, "-m", "pytest", *test_paths, *args]
 
 
@@ -245,6 +248,22 @@ def run_tests(
     command = built
 
     tmpdir, workdir, copy_error = _prepare_workdir(real_root)
+    if copy_error is None and language == "node":
+        node_modules = real_root / "node_modules"
+        target = workdir / "node_modules"
+        if node_modules.is_dir() and not target.exists():
+            if os.name == "nt":
+                proc = subprocess.run(
+                    ["cmd", "/c", "mklink", "/J", str(target), str(node_modules)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=30,
+                )
+                if proc.returncode != 0:
+                    copy_error = f"node_modules junction failed: {proc.stderr[:200]}"
+            else:
+                target.symlink_to(node_modules, target_is_directory=True)
     if copy_error is not None:
         shutil.rmtree(tmpdir, ignore_errors=True)
         return TestReport(
