@@ -368,3 +368,18 @@ token budget); evidence `D:/agency-merge-backups/decomp-evidence.json`, script
 thread for the bounded LLM call (on the orchestrator's legacy `_execute_running` path that
 thread is the event loop), and subtasks still reuse whole-task prompts downstream
 (unchanged).
+
+## 22. Forge efficiency/autonomy gaps (2026-11-27)
+
+Recorded after main reached `ada31e8`, following the parallel-build proof and three CI-fix PRs (#98–#100).
+
+1. **Model routing is only partly wired.** `routing.py` selects a model, but the worker command receives it only if the command template contains `{model}`; default commands do not. Outcome: route model applied automatically and visible in evidence.
+2. **Review config is manual.** Without `--env-file` or a correctly launched MCP process, review falls back to echo. Outcome: repo-local `.env` discovered automatically, values never logged, provider actually used recorded in evidence.
+3. **Runtime verification is standalone.** `forge verify` exists but risky jobs do not run it automatically. Outcome: risky route runs a runtime gate when command/endpoints are supplied; FAIL blocks evidence.
+4. **Plans are checked for shape, not quality.** Allow-list catches scope creep but vague plans pass. Outcome: non-empty allow-list, named test command and risks required for code jobs; explicit caveat for legacy plans.
+5. **Apprentice is a label, not a worker path.** No distinct cheap path or enforced promotion gate. Outcome: bounded tool budget, risky classes refused, promotion evidence recorded.
+6. **Live state and cost are weak.** `UNCERTAIN` while running, no heartbeats or token estimates. Outcome: lease/heartbeat updates, watch shows real state, trace includes agent duration and estimated cost where available.
+7. **Integration stops early.** `forge integrate` combines disjoint work but runs no suite. Outcome: tests run after combination and branch reported ready; still no merge.
+8. **Self-improvement is not fed by CI failures.** `self_improve.py` exists but is disconnected. Outcome: bounded ingestion of gate/CI failures, idempotency keys, candidate jobs, human approval before action.
+
+Cross-cutting rule for all 22+: no secrets in files or logs, no push/merge/deploy from workers, focused tests plus Ruff/Mypy gates, commit on own branch.
