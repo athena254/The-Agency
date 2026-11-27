@@ -383,3 +383,5 @@ Recorded after main reached `ada31e8`, following the parallel-build proof and th
 8. **Self-improvement is not fed by CI failures.** `self_improve.py` exists but is disconnected. Outcome: bounded ingestion of gate/CI failures, idempotency keys, candidate jobs, human approval before action.
 
 Cross-cutting rule for all 22+: no secrets in files or logs, no push/merge/deploy from workers, focused tests plus Ruff/Mypy gates, commit on own branch.
+
+Resolution: all eight gaps above are closed on branch `factory/autonomy-loop` (commits `5a0bff1`, `0ee6691`, `185aed3`, `b91f09f`, `b72e7a2`) and documented as a closed loop in `docs/AUTONOMY_LOOP.md`. Verification: 579 Forge tests passed, 1 skipped; Ruff and Mypy clean. Merge to main is tracked by the PR created from this branch.
