@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 import structlog
@@ -57,6 +57,7 @@ class ParallelGateReport(BaseModel):
     results: tuple[GateResult, ...]
     review_permitted: bool = False
     review: GateResult | None = None
+    outcomes: dict[str, Any] = Field(default_factory=dict)
     caveats: tuple[str, ...] = CAVEATS
     note: str = "Cheap gates run first; review is gated on them. No merge/deploy authorization."
 
@@ -130,6 +131,13 @@ def run_parallel_gates(
         futures = {name: pool.submit(fn) for name, fn in gates.items()}
         finished, _pending = wait(futures.values(), timeout=budget_s)
         results = [_collect(name, futures[name], finished) for name in gates]
+        outcomes: dict[str, Any] = {}
+        for name, future in futures.items():
+            if future in finished:
+                try:
+                    outcomes[name] = future.result()
+                except Exception as exc:  # noqa: BLE001 - verdict already captured by _collect
+                    logger.debug("forge.parallel_outcome_skipped", error=type(exc).__name__)
         permitted = all(r.gate == "PASS" for r in results)
 
         if not permitted:
@@ -140,6 +148,11 @@ def run_parallel_gates(
             review_future = pool.submit(review)
             review_finished, _ = wait((review_future,), timeout=budget_s)
             review_result = _collect("review", review_future, review_finished)
+            if review_future in review_finished:
+                try:
+                    outcomes["review"] = review_future.result()
+                except Exception as exc:  # noqa: BLE001 - verdict already captured
+                    logger.debug("forge.parallel_review_outcome_skipped", error=type(exc).__name__)
     finally:
         # Never block on a timed-out/stalled gate; drop its result entirely.
         pool.shutdown(wait=False, cancel_futures=True)
@@ -164,6 +177,7 @@ def run_parallel_gates(
         results=tuple(results),
         review_permitted=permitted,
         review=review_result,
+        outcomes=outcomes,
         caveats=tuple(caveats),
     )
     logger.info(
