@@ -19,6 +19,10 @@ from typing import Literal  # noqa: F401
 from pydantic import BaseModel, Field, field_validator
 
 from agency.forge.agent_skills import skill_for
+from agency.forge.apprentice_policy import (
+    PromotionEvidence,
+    render_apprentice_policy,
+)
 from agency.forge.protected_paths import protected_paths
 
 MAX_TASK_CHARS = 8000
@@ -51,6 +55,10 @@ class WorkOrder(BaseModel):
     role: str = "striker"
     plan_required: bool = False
     plan_path: str = "PLAN.md"
+    # Apprentice-policy inputs; defaults keep existing striker orders unchanged.
+    job_class: str = ""
+    tool_budget: int = 0
+    promotion_evidence: PromotionEvidence | None = None
 
     @field_validator("repo")
     @classmethod
@@ -113,6 +121,14 @@ def render_work_order(order: WorkOrder) -> str:
     skill = skill_for(order.role)
     if skill:
         lines += ["", skill.rstrip()]
+    policy = render_apprentice_policy(
+        order.role,
+        order.job_class,
+        order.tool_budget,
+        order.promotion_evidence,
+    )
+    if policy:
+        lines += ["", policy]
     if order.plan_required:
         lines += [
             "",
