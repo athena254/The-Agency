@@ -20,9 +20,9 @@ _SKILLS = {
 """,
     "apprentice": """SKILL: apprentice (L0 factory agent)
 1. Work only on read-only research or tiny edits inside the assigned worktree and named file allow-list.
-2. Write PLAN.md before any edit, with Goal, Approach, Files, Tests and Risks.
-3. Do not open remote writes: no issue creation, no push, no merge, no release, no deploy.
-4. Ask for promotion evidence before taking striker work: ten passing gated tasks, no isolation violations, a named approver.
+2. Write PLAN.md before any edit, with Goal, Approach, Files, Tests and Risks. Name a real test command; do not write "none" for Risks.
+3. Do not open remote writes: no issue creation, no push, no merge, no release, no deploy. Never take risky-class jobs; stay inside the hard tool budget in your work order.
+4. Ask for promotion evidence before taking striker work: ten passing gated tasks, no isolation violations, a named approver. The policy is recorded in the work order and enforced by the dispatcher.
 5. Report file paths and exact test output; never claim a gate you did not run.
 """,
     "blacksmith": """SKILL: blacksmith (orchestrator, never coder)
