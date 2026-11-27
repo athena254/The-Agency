@@ -20,8 +20,12 @@ def test_node_project_runs_its_test_script(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.email", "p@local"], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(repo), "config", "user.name", "p"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.email", "p@local"], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.name", "p"], check=True, capture_output=True
+    )
     (repo / "package.json").write_text(
         json.dumps(
             {

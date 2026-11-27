@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 from agency.forge.external_agent import run_external_agent
@@ -24,7 +25,7 @@ def _repo(tmp_path: Path) -> Path:
 
 def test_missing_plan_fails_the_external_agent_gate(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    python = "C:/Users/PC/The-Agency/.venv/Scripts/python.exe"
+    python = sys.executable
     report = run_external_agent(
         repo,
         [python, "-c", "open('app.py','w').write('x = 1\\n')"],
@@ -42,7 +43,7 @@ def test_missing_plan_fails_the_external_agent_gate(tmp_path: Path) -> None:
 
 def test_committed_worker_changes_are_seen_by_the_gate(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    python = "C:/Users/PC/The-Agency/.venv/Scripts/python.exe"
+    python = sys.executable
     worker = tmp_path / "worker.py"
     worker.write_text(
         "import pathlib, subprocess\n"
@@ -70,7 +71,7 @@ def test_committed_worker_changes_are_seen_by_the_gate(tmp_path: Path) -> None:
 
 def test_files_outside_plan_fail_the_gate(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    python = "C:/Users/PC/The-Agency/.venv/Scripts/python.exe"
+    python = sys.executable
     worker = tmp_path / "worker_outside.py"
     worker.write_text(
         "import pathlib, subprocess\n"
