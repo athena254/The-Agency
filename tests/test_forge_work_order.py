@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -13,7 +15,7 @@ def _order(**over):
     base = {
         "title": "Add weather lookup tool",
         "task": "Implement a weather_lookup tool with tests.",
-        "repo": "D:/scratch/repo",
+        "repo": str(Path(__file__).resolve().parent / "scratch-repo"),
     }
     base.update(over)
     return WorkOrder(**base)
