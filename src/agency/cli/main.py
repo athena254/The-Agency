@@ -1173,6 +1173,15 @@ def forge_submit(
     verify_endpoint: list[str] = typer.Option(  # noqa: B008
         (), "--verify-endpoint", help="URL to poll for risky jobs; repeat for more."
     ),
+    critic: list[str] = typer.Option(  # noqa: B008
+        (),
+        "--critic",
+        help="Risky-job critic verdict (APPROVE/REJECT/UNCERTAIN); repeat for two families.",
+    ),
+    gold_file: str = typer.Option(
+        "", "--gold-file", help="Human-owned gold set JSON for risky jobs."
+    ),
+    results_file: str = typer.Option("", "--results-file", help="Gold-set prompt/output JSON."),
 ) -> None:
     """Submit one bounded job to the Blacksmith queue (QUEUED, not dispatched)."""
     from agency.forge.orchestration import BlacksmithOps
@@ -1196,6 +1205,9 @@ def forge_submit(
             tool_budget=chosen.tool_budget,
             verify_command=verify_command,
             verify_endpoints=tuple(verify_endpoint),
+            risky_critics=tuple(critic),
+            risky_gold_file=gold_file,
+            risky_results_file=results_file,
         )
     finally:
         ops.close()
@@ -1284,6 +1296,7 @@ def forge_jobs_cmd(
     watch: bool = typer.Option(False, "--watch", help="Keep polling until interrupted."),
     interval: float = typer.Option(2.0, "--interval", min=0.5, help="Seconds between polls."),
     ticks: int = typer.Option(5, "--ticks", min=1, help="Polls when --watch is set."),
+    view: bool = typer.Option(False, "--view", help="Render the read-only live job view."),
 ) -> None:
     """List queued/recent jobs, or watch their state change."""
     import time
@@ -1300,6 +1313,11 @@ def forge_jobs_cmd(
             recent = ops.status().recent
         finally:
             ops.close()
+        if view:
+            from agency.forge.live_view import render_jobs_view
+
+            console.print(render_jobs_view(recent))
+            continue
         console.print(f"-- poll {tick + 1}: {len(recent)} job(s) --")
         for job in recent:
             state = lease_state(job)
@@ -1388,7 +1406,8 @@ def forge_learn(
     """Capture CI failures as deduped candidate jobs; never dispatch or merge."""
     from pathlib import Path
 
-    from agency.forge.ci_feedback import authorize_candidate, ingest_ci_failures
+    from agency.forge.ci_feedback import ingest_ci_failures
+    from agency.forge.improvement_bridge import bridge_failures
 
     payload = Path(input_path).read_text(encoding="utf-8", errors="replace")
     report = ingest_ci_failures(
@@ -1400,23 +1419,30 @@ def forge_learn(
         f"CI feedback: received={report.received} failures={report.failures} "
         f"duplicates={report.duplicates} candidates={len(report.candidates)}"
     )
-    for candidate in report.candidates:
-        if approver:
-            proposal = authorize_candidate(candidate, approved_by=approver)
-            console.print(
-                f"PROPOSAL {proposal.candidate_key} {proposal.title} by {proposal.approved_by}"
-            )
-        else:
-            console.print(f"CANDIDATE {candidate.key} {candidate.title} (capture only)")
-    console.print("keys: " + ",".join(report.keys))
+    bridge = bridge_failures(
+        report.candidates,
+        approved_by=approver,
+        seen_keys=tuple(k.strip() for k in seen_keys.split(",") if k.strip()),
+    )
+    console.print(
+        f"bridge: {bridge.gate} approved={bridge.approved} "
+        f"proposals={len(bridge.proposals)} duplicates={bridge.duplicates}"
+    )
+    for proposal in bridge.proposals:
+        console.print(
+            f"PROPOSAL {proposal.candidate_key} {proposal.title} by {proposal.approved_by}"
+        )
+    for candidate in report.candidates[:5]:
+        console.print(f"CANDIDATE {candidate.key} {candidate.title} (capture only)")
+    console.print("keys: " + ",".join(bridge.keys))
 
 
 @forge_app.command("critic")
 def forge_critic_cmd(
     task_id: str = typer.Option(..., "--task-id", help="Bounded task identifier."),
     diff_file: str = typer.Option(..., "--diff-file", help="Diff text to review."),
-    verdict_a: str = typer.Option("PASS", "--verdict-a", help="First critic verdict."),
-    verdict_b: str = typer.Option("FAIL", "--verdict-b", help="Second critic verdict."),
+    verdict_a: str = typer.Option("APPROVE", "--verdict-a", help="First critic verdict."),
+    verdict_b: str = typer.Option("REJECT", "--verdict-b", help="Second critic verdict."),
     family_a: str = typer.Option("family-a", "--family-a", help="First model family."),
     family_b: str = typer.Option("family-b", "--family-b", help="Second model family."),
     author: str = typer.Option("", "--author", help="Optional author id; empty means independent."),
@@ -1517,6 +1543,35 @@ def forge_schedule_cmd(
     console.print("[timer]\n" + bundle.timer)
     console.print("[service]\n" + bundle.service)
     console.print("generate-only: " + bundle.provenance)
+
+
+@forge_app.command("load")
+def forge_load_cmd(
+    jobs: int = typer.Option(64, "--jobs", min=1, help="Bounded synthetic jobs to admit."),
+) -> None:
+    """Run a synthetic admission probe; never submits real jobs."""
+    from agency.forge.load_harness import Admission, format_load_report, run_load_probe
+
+    report = run_load_probe(lambda _job: Admission(accepted=True), max_jobs=jobs)
+    console.print(format_load_report(report))
+
+
+@forge_app.command("promote")
+def forge_promote_cmd(
+    apprentice: str = typer.Option(..., "--apprentice", help="Named apprentice to promote."),
+    approver: str = typer.Option(..., "--approver", help="Named human approver; never self."),
+    ledger: str = typer.Option("promotions.jsonl", "--ledger", help="Append-only ledger path."),
+    note: str = typer.Option("", "--note", help="Bounded promotion note."),
+) -> None:
+    """Record a human promotion for an apprentice; never auto-promote."""
+    from agency.forge.promotion_ledger import PromotionError, PromotionLedger
+
+    try:
+        record = PromotionLedger(ledger).record_promotion(apprentice, approver=approver, note=note)
+    except PromotionError as exc:
+        _fail(f"promotion refused: {exc}")
+        return
+    console.print(f"promoted {record.apprentice} by {record.approver} at {record.at}")
 
 
 @forge_app.command("metrics")
@@ -1705,6 +1760,12 @@ def forge_ship(
     approved: bool = typer.Option(False, "--approved", help="Explicit human approval."),
     proof_log: Path | None = typer.Option(None, "--proof-log"),  # noqa: B008
     repo_root: Path | None = typer.Option(None, "--repo-root"),  # noqa: B008
+    changed_path: list[str] = typer.Option(  # noqa: B008
+        (), "--changed-path", help="Changed path for human-gate attestation; repeat for more."
+    ),
+    approval_file: str = typer.Option(
+        "", "--approval-file", help="JSON approval records to attest."
+    ),
     output_json: bool = typer.Option(False, "--json"),
 ) -> None:
     """Locally fast-forward merge a PASS worktree branch (never releases)."""
@@ -1718,6 +1779,11 @@ def forge_ship(
     if pipeline_gate.upper() != "PASS" or smoke_gate.upper() != "PASS":
         _fail("ship requires both pipeline and smoke gates to be PASS")
 
+    approvals: object = None
+    if approval_file:
+        import json
+
+        approvals = json.loads(Path(approval_file).read_text(encoding="utf-8"))
     report = ship_branch(
         str(worktree_root),
         target_branch,
@@ -1726,6 +1792,8 @@ def forge_ship(
         approved=True,
         proof_log=str(proof_log) if proof_log else None,
         repo_root=str(repo_root) if repo_root else None,
+        changed_paths=tuple(changed_path),
+        approvals=approvals,
     )
     receipt = report.model_dump(mode="json")
     receipt["approval_source"] = approval_source
