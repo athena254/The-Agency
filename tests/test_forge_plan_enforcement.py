@@ -47,7 +47,7 @@ def test_committed_worker_changes_are_seen_by_the_gate(tmp_path: Path) -> None:
     worker = tmp_path / "worker.py"
     worker.write_text(
         "import pathlib, subprocess\n"
-        "lines = ['Goal: x', 'Approach: y', 'Files: app.py', 'Tests: pytest', 'Risks: none']\n"
+        "lines = ['Goal: x', 'Approach: y', 'Files: `app.py`, `PLAN.md`', 'Tests: pytest -q', 'Risks: low']\n"
         "pathlib.Path('PLAN.md').write_text('\\n'.join(lines))\n"
         "pathlib.Path('app.py').write_text('x = 1')\n"
         "subprocess.run(['git', 'add', '.'])\n"

@@ -45,6 +45,7 @@ import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
 from agency.core.sqlite_store import open_store
+from agency.forge.apprentice_policy import enforce_apprentice_policy
 from agency.forge.env_config import discover_env_file, load_env_file
 from agency.forge.inspection import InspectionReport, inspect_changes
 from agency.forge.observability import PhaseTiming
@@ -126,6 +127,10 @@ class ExternalAgentReport(BaseModel):
     plan_gate: str = "NOT_REQUIRED"
     plan_findings: tuple[str, ...] = ()
     route: str = "standard"
+    role: str = "striker"
+    policy_allowed: bool = True
+    effective_tool_budget: int = 0
+    policy_reasons: tuple[str, ...] = ()
     model: str = ""
     model_applied: str = ""
     model_mechanism: str = ""
@@ -512,6 +517,8 @@ def run_external_agent(
     plan_required: bool = False,
     plan_path: str = "PLAN.md",
     route: str = "standard",
+    role: str = "striker",
+    tool_budget: int = 0,
     model: str = "",
     cleanup: bool = False,
     protected_paths: Iterable[str] | None = None,
@@ -619,7 +626,14 @@ def run_external_agent(
         exit_code, stdout, stderr = _run_agent(cmd_list, str(worktree_path), timeout_s)
         violations = isolation_violations(real_repo, before_snapshot)
         changed = _changed_paths(worktree_path, base_commit)
-        plan_report = check_plan(worktree_path, plan_path) if plan_required else None
+        plan_report = (
+            check_plan(worktree_path, plan_path, job_class=effective_route.job_class)
+            if plan_required
+            else None
+        )
+        policy = enforce_apprentice_policy(
+            role, effective_route.job_class, tool_budget or effective_route.tool_budget
+        )
         outside_plan = (
             tuple(p for p in changed if not path_allowed(p, plan_report.allowed_files))
             if plan_report is not None and plan_report.allowed_files
@@ -708,6 +722,8 @@ def run_external_agent(
             overall = "FAIL"
         if outside_plan:
             overall = "FAIL"
+        if not policy.allowed:
+            overall = "FAIL"
         if exit_code not in (0, None):
             overall = "FAIL"
         if not changed:
@@ -763,6 +779,8 @@ def run_external_agent(
             caveats.append("plan_gate_failed")
         if outside_plan:
             caveats.append("files_outside_plan")
+        caveats.extend(policy.caveats)
+        caveats.extend(policy.reasons)
         if runtime is not None:
             if runtime.gate != "PASS":
                 caveats.append("runtime_gate_failed")
@@ -803,6 +821,10 @@ def run_external_agent(
             plan_gate=plan_report.gate if plan_report is not None else "NOT_REQUIRED",
             plan_findings=plan_report.findings if plan_report is not None else (),
             route=route,
+            role=role,
+            policy_allowed=policy.allowed,
+            effective_tool_budget=policy.effective_tool_budget,
+            policy_reasons=policy.reasons,
             model=model,
             model_applied=model_applied,
             model_mechanism=model_mechanism,

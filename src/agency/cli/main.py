@@ -1167,6 +1167,12 @@ def forge_submit(
     job_class: str = typer.Option("auto", "--class", help="auto, trivial, standard or risky."),
     acceptance: str = typer.Option("", "--acceptance", help="Comma-separated acceptance items."),
     test_paths: str = typer.Option("", "--test-paths", help="Comma-separated test paths."),
+    verify_command: str = typer.Option(
+        "", "--verify-command", help="Runtime start command for risky jobs."
+    ),
+    verify_endpoint: list[str] = typer.Option(  # noqa: B008
+        (), "--verify-endpoint", help="URL to poll for risky jobs; repeat for more."
+    ),
 ) -> None:
     """Submit one bounded job to the Blacksmith queue (QUEUED, not dispatched)."""
     from agency.forge.orchestration import BlacksmithOps
@@ -1188,6 +1194,8 @@ def forge_submit(
             route=chosen.job_class,
             model=chosen.model,
             tool_budget=chosen.tool_budget,
+            verify_command=verify_command,
+            verify_endpoints=tuple(verify_endpoint),
         )
     finally:
         ops.close()
@@ -1364,6 +1372,43 @@ def forge_integrate_cmd(
     if report.combined:
         console.print(f"combined: {', '.join(report.combined)}")
     console.print(report.note)
+
+
+@forge_app.command("learn")
+def forge_learn(
+    input_path: str = typer.Option(..., "--input", help="JSON or text file of CI gate failures."),
+    approver: str = typer.Option(
+        "", "--approver", help="Named human approver; empty means capture only."
+    ),
+    role: str = typer.Option("striker", "--role", help="Role for candidate jobs."),
+    seen_keys: str = typer.Option(
+        "", "--seen-keys", help="Comma-separated idempotency keys from a prior run."
+    ),
+) -> None:
+    """Capture CI failures as deduped candidate jobs; never dispatch or merge."""
+    from pathlib import Path
+
+    from agency.forge.ci_feedback import authorize_candidate, ingest_ci_failures
+
+    payload = Path(input_path).read_text(encoding="utf-8", errors="replace")
+    report = ingest_ci_failures(
+        payload,
+        role=role,
+        seen_keys=tuple(k.strip() for k in seen_keys.split(",") if k.strip()),
+    )
+    console.print(
+        f"CI feedback: received={report.received} failures={report.failures} "
+        f"duplicates={report.duplicates} candidates={len(report.candidates)}"
+    )
+    for candidate in report.candidates:
+        if approver:
+            proposal = authorize_candidate(candidate, approved_by=approver)
+            console.print(
+                f"PROPOSAL {proposal.candidate_key} {proposal.title} by {proposal.approved_by}"
+            )
+        else:
+            console.print(f"CANDIDATE {candidate.key} {candidate.title} (capture only)")
+    console.print("keys: " + ",".join(report.keys))
 
 
 @forge_app.command("metrics")

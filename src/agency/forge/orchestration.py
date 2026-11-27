@@ -83,6 +83,8 @@ class ForgeJob(BaseModel):
     route: str = Field(default="standard", max_length=32)
     model: str = Field(default="", max_length=120)
     tool_budget: int = Field(default=40, ge=1, le=200)
+    verify_command: str = Field(default="", max_length=512)
+    verify_endpoints: tuple[str, ...] = ()
     attempts: int = Field(default=0, ge=0)
     report_id: str = ""
     gate: str = ""
@@ -351,6 +353,8 @@ class BlacksmithOps:
         route: str = "standard",
         model: str = "",
         tool_budget: int = 40,
+        verify_command: str = "",
+        verify_endpoints: tuple[str, ...] = (),
     ) -> ForgeJob:
         if not isinstance(repo, str) or not Path(repo).is_absolute():
             raise ValueError(f"repo must be an absolute path, got {repo!r}.")
@@ -373,6 +377,10 @@ class BlacksmithOps:
             route=str(route or "standard").strip()[:32],
             model=str(model or "").strip()[:120],
             tool_budget=max(1, min(200, int(tool_budget))),
+            verify_command=str(verify_command or "").strip()[:512],
+            verify_endpoints=tuple(
+                str(x).strip()[:512] for x in verify_endpoints if str(x).strip()
+            )[:8],
             state=JobState.QUEUED,
             created_at=now,
             updated_at=now,
@@ -454,6 +462,12 @@ class BlacksmithOps:
         runner_kwargs["plan_required"] = True
         runner_kwargs["plan_path"] = "PLAN.md"
         runner_kwargs["route"] = job.route
+        runner_kwargs["role"] = job.role
+        runner_kwargs["tool_budget"] = job.tool_budget
+        if job.verify_command:
+            runner_kwargs["verify_command"] = job.verify_command
+        if job.verify_endpoints:
+            runner_kwargs["verify_endpoints"] = list(job.verify_endpoints)
         if job.model:
             runner_kwargs["model"] = job.model
         try:
