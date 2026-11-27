@@ -149,7 +149,13 @@ class MessageRouter:
             return list(self._agents.values())
 
     def detect_domain(self, message: str) -> str | None:
-        """Return the best-scoring domain for ``message``, or None on tie/empty."""
+        """Return the highest-scoring domain for ``message``.
+
+        Ties are resolved deterministically to the first domain declared in
+        :data:`DOMAIN_KEYWORDS` (the strict-greater comparison keeps the first
+        maximum). ``None`` is returned only for blank/whitespace-only input or
+        when no domain scores above zero -- a tie is never ``None``.
+        """
         text = message.strip().lower()
         if not text:
             return None

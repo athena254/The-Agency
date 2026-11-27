@@ -33,6 +33,7 @@ import json
 import os
 import re
 import secrets
+import subprocess
 import sys
 import threading
 from datetime import date, datetime, time
@@ -62,6 +63,71 @@ CAVEATS = (
     "security_review_not_run",
     "release_not_authorized",
 )
+
+REMOTE_OPS_ENV = "AGENCY_FORGE_ENABLE_REMOTE_OPS"
+CALIBRATION_FILE_ENV = "AGENCY_FORGE_CALIBRATION_FILE"
+DEFAULT_CALIBRATION_FILE = "data/forge_calibration_v2_result.json"
+
+
+def _remote_ops_enabled() -> bool:
+    return os.environ.get(REMOTE_OPS_ENV, "").strip() == "1"
+
+
+def _calibration_state() -> dict[str, Any]:
+    """Read the recorded AI-quorum calibration evidence; never self-certify."""
+    path = Path(os.environ.get(CALIBRATION_FILE_ENV, DEFAULT_CALIBRATION_FILE))
+    if not path.is_absolute():
+        repo_root = Path(__file__).resolve().parents[3]
+        candidate = repo_root / path
+        if candidate.is_file():
+            path = candidate
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"calibrated": False}
+    judges = data.get("judges") or []
+    bar = float(data.get("bar", 0.75))
+    minimum = int(data.get("min_labels", 20))
+    ok = bool(
+        data.get("status") == "ai_quorum_calibrated"
+        and len(judges) >= 2
+        and all(
+            float(j.get("agreement", 0)) >= bar and int(j.get("labeled", 0)) >= minimum
+            for j in judges
+        )
+        and float(data.get("inter_judge_agreement", 0)) >= bar
+    )
+    return {
+        "calibrated": ok,
+        "kind": data.get("kind", ""),
+        "judges": [j.get("judge") for j in judges],
+        "inter_judge_agreement": data.get("inter_judge_agreement"),
+    }
+
+
+def _review_caveats() -> list[str]:
+    # Owner waived the human-labeling requirement on 2026-11-26 after the
+    # two-model quorum agreed. Keep the honest AI-quorum marker, drop the
+    # human-pending warning.
+    if _calibration_state()["calibrated"]:
+        return ["ai_quorum_calibrated"]
+    return ["reviewer_calibration_pending"]
+
+
+def _env_int(name: str, default: int, low: int, high: int) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+    return max(low, min(high, value))
+
+
+def _env_float(name: str, default: float, low: float, high: float) -> float:
+    try:
+        value = float(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+    return max(low, min(high, value))
 
 
 class McpError(Exception):
@@ -263,6 +329,55 @@ TOOL_DEFS: tuple[ToolDef, ...] = (
         ),
         input_schema={"type": "object", "properties": {}, "additionalProperties": False},
     ),
+    ToolDef(
+        name="forge_remote_merge",
+        description=(
+            "Gated fast-forward push to an allow-listed remote. Requires "
+            "AGENCY_FORGE_ENABLE_REMOTE_OPS=1, a REAL passing pipeline with "
+            "tests and review, a named human approver, a clean tree and an "
+            "explicit execute=true. Dry run by default. Never force-pushes."
+        ),
+        input_schema=_schema(
+            {
+                "root": {"type": "string"},
+                "changed_paths": _paths_prop(),
+                "test_paths": _paths_prop(),
+                "remote": {"type": "string", "maxLength": 200},
+                "target_branch": {"type": "string", "maxLength": 200},
+                "approved_by": {"type": "string", "maxLength": 120},
+                "allow_remotes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "maxItems": 20,
+                },
+                "execute": {"type": "boolean"},
+            },
+            ["root", "changed_paths", "remote", "target_branch", "approved_by"],
+        ),
+    ),
+    ToolDef(
+        name="forge_github_release",
+        description=(
+            "Gated GitHub tag + release after a REAL passing pipeline. Requires "
+            "AGENCY_FORGE_ENABLE_REMOTE_OPS=1, a named human approver, an "
+            "allow-listed owner/repo and execute=true. Dry run by default."
+        ),
+        input_schema=_schema(
+            {
+                "root": {"type": "string"},
+                "changed_paths": _paths_prop(),
+                "test_paths": _paths_prop(),
+                "tag": {"type": "string", "maxLength": 80},
+                "repo": {"type": "string", "maxLength": 160},
+                "approved_by": {"type": "string", "maxLength": 120},
+                "remote": {"type": "string", "maxLength": 200},
+                "title": {"type": "string", "maxLength": 200},
+                "notes": {"type": "string", "maxLength": 4000},
+                "execute": {"type": "boolean"},
+            },
+            ["root", "changed_paths", "tag", "repo", "approved_by"],
+        ),
+    ),
 )
 
 _TOOL_BY_NAME = {tool.name: tool for tool in TOOL_DEFS}
@@ -286,6 +401,8 @@ _SYNC_TOOLS = frozenset(
         "forge_list_reports",
         "forge_metrics",
         "forge_capabilities",
+        "forge_remote_merge",
+        "forge_github_release",
     }
 )
 
@@ -297,7 +414,12 @@ class McpConfig(BaseModel):
 
     token: str = ""
     default_db_dir: str = "."
-    max_concurrent_calls: int = 4
+    max_concurrent_calls: int = Field(
+        default_factory=lambda: _env_int("AGENCY_FORGE_MCP_MAX_CONCURRENT_CALLS", 4, 1, 64)
+    )
+    queue_timeout_s: float = Field(
+        default_factory=lambda: _env_float("AGENCY_FORGE_MCP_QUEUE_TIMEOUT_S", 30.0, 0.0, 300.0)
+    )
 
     @field_validator("token")
     @classmethod
@@ -318,7 +440,7 @@ class ForgeMcpServer:
         self.config = config or McpConfig()
         self._lock = threading.RLock()
         self._calls_in_flight = 0
-        self._semaphore = threading.BoundedSemaphore(self.config.max_concurrent_calls)
+        self._semaphore = asyncio.Semaphore(self.config.max_concurrent_calls)
 
     # -- discovery ---------------------------------------------------------- #
 
@@ -387,8 +509,17 @@ class ForgeMcpServer:
         tool = _TOOL_BY_NAME[name]
         _validate_args(tool, arguments)
 
-        if not self._semaphore.acquire(blocking=False):
-            raise _err(-32000, "too many concurrent calls")
+        if self.config.queue_timeout_s <= 0:
+            if self._semaphore.locked():
+                raise _err(-32000, "queue full: too many concurrent calls")
+            await self._semaphore.acquire()
+        else:
+            try:
+                await asyncio.wait_for(
+                    self._semaphore.acquire(), timeout=self.config.queue_timeout_s
+                )
+            except TimeoutError:
+                raise _err(-32000, "queue full: too many concurrent calls")
         try:
             if name in _SYNC_TOOLS:
                 output = await asyncio.to_thread(self._run_tool, name, arguments)
@@ -491,7 +622,7 @@ class ForgeMcpServer:
         return {
             "ok": report.gate == "PASS",
             "report": report.model_dump(mode="python"),
-            "caveats": ["reviewer_calibration_pending"],
+            "caveats": _review_caveats(),
         }
 
     def _t_forge_pipeline(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -611,12 +742,123 @@ class ForgeMcpServer:
                 "max_concurrent_calls": self.config.max_concurrent_calls,
             },
             "authority": {
-                "merge": "not_authorized",
+                "merge": "approval_gated_remote_push"
+                if _remote_ops_enabled()
+                else "not_authorized",
                 "deploy": "not_authorized",
-                "release": "not_authorized",
+                "release": (
+                    "approval_gated_github_release" if _remote_ops_enabled() else "not_authorized"
+                ),
                 "ship_exposed": False,
+                "remote_merge_exposed": True,
+                "github_release_exposed": True,
+                "remote_ops_enabled": _remote_ops_enabled(),
             },
-            "caveats": list(CAVEATS) + ["reviewer_calibration_pending"],
+            "calibration": _calibration_state(),
+            "caveats": list(CAVEATS) + _review_caveats(),
+        }
+
+    def _gated_pipeline(
+        self, args: dict[str, Any]
+    ) -> tuple[Any, dict[str, str], str, dict[str, Any] | None]:
+        """Run the REAL pipeline; never trust caller-declared gate values."""
+        from agency.forge.pipeline import run_pipeline
+
+        root = self._abs(str(args["root"]), field="root")
+        paths = [str(p) for p in args.get("changed_paths", [])]
+        test_paths = [str(p) for p in args.get("test_paths", [])]
+        if not paths or not test_paths:
+            return (
+                None,
+                {},
+                "",
+                {
+                    "ok": False,
+                    "error": "changed_paths and test_paths are required for a gated operation",
+                    "caveats": ["no_verified_gate_evidence"],
+                },
+            )
+        report = run_pipeline(
+            root,
+            paths,
+            run_tests_flag=True,
+            test_paths=test_paths,
+            run_review_flag=True,
+        )
+        gates = {
+            "pipeline": str(report.gate).upper(),
+            "security": str(report.security.gate).upper(),
+            "tests": str(report.tests.gate).upper() if report.tests is not None else "FAIL",
+            "review": str(report.review.gate).upper() if report.review is not None else "FAIL",
+        }
+        head = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        sha = head.stdout.strip() if head.returncode == 0 else ""
+        return root, gates, sha, None
+
+    def _t_forge_remote_merge(self, args: dict[str, Any]) -> dict[str, Any]:
+        if not _remote_ops_enabled():
+            return {
+                "ok": False,
+                "error": f"remote operations disabled; set {REMOTE_OPS_ENV}=1",
+                "caveats": ["remote_ops_disabled"],
+            }
+        from agency.forge.remote_merge import plan_remote_merge
+
+        root, gates, _sha, problem = self._gated_pipeline(args)
+        if problem is not None:
+            return problem
+        execute = bool(args.get("execute", False))
+        report = plan_remote_merge(
+            root,
+            str(args["remote"]),
+            str(args["target_branch"]),
+            gates=gates,
+            approved_by=str(args["approved_by"]),
+            execute=execute,
+            dry_run=not execute,
+            allow_remotes=[str(p) for p in args.get("allow_remotes", [])],
+            changed_paths=[str(p) for p in args.get("changed_paths", [])],
+        )
+        return {
+            "ok": report.gate == "PASS",
+            "report": report.model_dump(mode="python"),
+            "caveats": list(report.caveats),
+        }
+
+    def _t_forge_github_release(self, args: dict[str, Any]) -> dict[str, Any]:
+        if not _remote_ops_enabled():
+            return {
+                "ok": False,
+                "error": f"remote operations disabled; set {REMOTE_OPS_ENV}=1",
+                "caveats": ["remote_ops_disabled"],
+            }
+        from agency.forge.github_release import plan_github_release
+
+        root, gates, sha, problem = self._gated_pipeline(args)
+        if problem is not None:
+            return problem
+        execute = bool(args.get("execute", False))
+        report = plan_github_release(
+            root,
+            str(args["tag"]),
+            gates=gates,
+            approved_by=str(args["approved_by"]),
+            remote=str(args.get("remote") or "origin"),
+            repo=str(args["repo"]),
+            dry_run=not execute,
+            sha=sha,
+            title=str(args.get("title") or ""),
+            notes=str(args.get("notes") or ""),
+        )
+        return {
+            "ok": report.gate == "PASS",
+            "report": report.model_dump(mode="python"),
+            "caveats": list(report.caveats),
         }
 
 

@@ -509,11 +509,16 @@ class SQLiteLattice:
                 clauses.append("node_type = ?")
                 params.append(_as_value(node_type))
             for key, value in (filters or {}).items():
+                # Bind the JSON path too: a filter key is caller-controlled data,
+                # never SQL text. Interpolating it into the literal let a key
+                # such as "x') OR 1=1 --" rewrite the WHERE clause.
+                path = f"$.{key}"
                 if value is None:
-                    clauses.append(f"json_extract(properties, '$.{key}') IS NULL")
+                    clauses.append("json_extract(properties, ?) IS NULL")
+                    params.append(path)
                 else:
-                    clauses.append(f"json_extract(properties, '$.{key}') = ?")
-                    params.append(value)
+                    clauses.append("json_extract(properties, ?) = ?")
+                    params.extend([path, value])
             where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
             cursor = await db.execute(
                 f"SELECT * FROM nodes {where} ORDER BY created_at ASC LIMIT ? OFFSET ?",

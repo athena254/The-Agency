@@ -316,7 +316,7 @@ export function ForgePage() {
               {canDispatch ? (
                 <Chip tone="green">owner token ready</Chip>
               ) : (
-                <Chip tone="amber">owner token required</Chip>
+                <Chip tone="amber">CSRF session required</Chip>
               )}
             </div>
             <button

@@ -26,6 +26,12 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from agency.api.admission import (
+    RETRY_AFTER_S,
+    AdmissionRejected,
+    check_admission,
+    max_pending_tasks,
+)
 from agency.api.auth import Principal, principal_dependency
 from agency.api.authority import intake_dependency
 from agency.kernel.registry import AgentRegistry
@@ -138,6 +144,15 @@ async def create_task(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=f"description exceeds {MAX_DESCRIPTION_CHARS} chars.",
         )
+    pending = await manager.list_tasks(status=TaskStatus.PENDING)
+    try:
+        check_admission(len(pending), max_pending_tasks())
+    except AdmissionRejected as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(exc),
+            headers={"Retry-After": str(RETRY_AFTER_S)},
+        ) from exc
     if payload.agent_id is not None:
         agent = (_registry(request) or AgentRegistry()).get(payload.agent_id)
         if agent is None or agent.revoked:

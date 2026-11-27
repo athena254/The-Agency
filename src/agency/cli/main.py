@@ -1032,6 +1032,12 @@ def forge_mcp(
     host: str = typer.Option("127.0.0.1", "--host", help="HTTP bind host (loopback only)."),
     port: int = typer.Option(8765, "--port", "-p", help="HTTP bind port."),
     token_file: str = typer.Option("", "--token-file", help="File holding the bearer token."),
+    max_concurrent: int = typer.Option(
+        0, "--max-concurrent", help="Concurrent MCP calls (0 = env/default, max 64)."
+    ),
+    queue_timeout: float = typer.Option(
+        -1.0, "--queue-timeout", help="Seconds to wait for a slot (-1 = env/default)."
+    ),
 ) -> None:
     """Serve the Forge over MCP so external agents can drive governed builds.
 
@@ -1053,6 +1059,11 @@ def forge_mcp(
             return
     elif os.environ.get("AGENCY_MCP_TOKEN"):
         token = os.environ["AGENCY_MCP_TOKEN"]
+    config = McpConfig(token=token)
+    if max_concurrent > 0:
+        config = config.model_copy(update={"max_concurrent_calls": max(1, min(64, max_concurrent))})
+    if queue_timeout >= 0:
+        config = config.model_copy(update={"queue_timeout_s": max(0.0, min(300.0, queue_timeout))})
     if transport == "http":
         if host not in ("127.0.0.1", "localhost", "::1"):
             _fail("HTTP transport binds loopback only")
@@ -1063,11 +1074,9 @@ def forge_mcp(
         console.print(f"[green]Forge MCP listening[/green] on http://{host}:{port}/mcp")
         import uvicorn
 
-        uvicorn.run(
-            create_http_app(McpConfig(token=token)), host=host, port=port, log_level="warning"
-        )
+        uvicorn.run(create_http_app(config), host=host, port=port, log_level="warning")
         return
-    raise typer.Exit(serve_stdio(McpConfig(token=token)))
+    raise typer.Exit(serve_stdio(config))
 
 
 @forge_app.command("status")
@@ -1093,6 +1102,58 @@ def forge_status(
         console.print("Blocked (escalate to human): " + ", ".join(status.blocked))
     for job in status.recent:
         console.print(f"  {job.job_id[:8]} {job.state.value} {job.title} gate={job.gate or '-'}")
+
+
+@forge_app.command("approvals")
+def forge_approvals(
+    db: str = typer.Option("forge_jobs.db", "--db", help="Blacksmith job database path."),
+    output_json: bool = typer.Option(False, "--json", help="Emit the briefs as JSON."),
+) -> None:
+    """List Forge jobs waiting for a human decision (read-only)."""
+    from agency.forge.approvals import list_briefs
+    from agency.forge.orchestration import BlacksmithOps
+
+    ops = BlacksmithOps(db)
+    try:
+        briefs = list_briefs(ops)
+    finally:
+        ops.close()
+    if output_json:
+        _print_json([brief.model_dump(mode="json") for brief in briefs])
+        return
+    if not briefs:
+        console.print("No jobs are awaiting a human decision.")
+    for brief in briefs:
+        console.print(
+            f"  {brief.job_id} {brief.title} gate={brief.gate or '-'} "
+            f"report={brief.report_id or '-'}"
+        )
+
+
+@forge_app.command("approve")
+def forge_approve(
+    job_id: str = typer.Argument(..., help="Job id awaiting a human decision."),
+    approver: str = typer.Option(..., "--approver", help="Named human approver."),
+    decision: str = typer.Option("approve", "--decision", help="approve or reject."),
+    note: str = typer.Option("", "--note", help="Bounded decision note."),
+    db: str = typer.Option("forge_jobs.db", "--db", help="Blacksmith job database path."),
+) -> None:
+    """Record a human decision. Never merges, releases or deploys."""
+    from agency.forge.approvals import ApprovalError, decide
+    from agency.forge.orchestration import BlacksmithOps
+
+    ops = BlacksmithOps(db)
+    try:
+        record = decide(ops, job_id, approver, decision, note=note)
+    except ApprovalError as exc:
+        _fail(str(exc))
+        return
+    finally:
+        ops.close()
+    console.print(
+        f"Recorded {record.decision} by {record.approver} for {record.job_id} "
+        f"(state={record.state_after}). No merge or release was performed."
+    )
 
 
 @forge_app.command("metrics")
