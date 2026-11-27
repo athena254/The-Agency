@@ -20,6 +20,23 @@ from agency.bridges.hermes.bridge import HermesBridge, HermesConfig
 from agency.bridges.openclaw.bridge import OpenClawBridge, OpenClawConfig
 
 
+class _FakeClock:
+    """Deterministic stand-in for ``agency.bridges.coordinator.monotonic``.
+
+    Lets circuit-breaker dwell tests advance virtual time instead of sleeping
+    on the wall clock, which was the source of CI timing flakiness.
+    """
+
+    def __init__(self, start: float = 1_000.0) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
 def test_bridge_usage_add():
     total = BridgeUsage(
         input_tokens=1, output_tokens=2, total_tokens=3, estimated_cost_usd=0.1
@@ -44,8 +61,10 @@ def test_bridge_config_backoff():
     assert cfg.backoff_for(2) == pytest.approx(4.0)
 
 
-async def test_circuit_breaker_closed_to_open_to_half_open():
-    cfg = CircuitBreakerConfig(failure_threshold=2, recovery_timeout_s=0.05)
+async def test_circuit_breaker_closed_to_open_to_half_open(monkeypatch):
+    clock = _FakeClock()
+    monkeypatch.setattr("agency.bridges.coordinator.monotonic", clock)
+    cfg = CircuitBreakerConfig(failure_threshold=2, recovery_timeout_s=0.1)
     breaker = CircuitBreaker(cfg)
     assert breaker.state is CircuitState.CLOSED
     assert await breaker.allow() is True
@@ -54,22 +73,20 @@ async def test_circuit_breaker_closed_to_open_to_half_open():
     await breaker.record_failure()
     assert breaker.state is CircuitState.OPEN
     assert await breaker.allow() is False
-    import asyncio
-
-    await asyncio.sleep(0.5)
+    clock.advance(1.0)  # dwell elapses deterministically (no wall-clock sleep)
     assert await breaker.allow() is True  # half-open probe admitted
     await breaker.record_success()
     assert breaker.state is CircuitState.CLOSED
 
 
-async def test_circuit_breaker_half_open_failure_reopens():
-    cfg = CircuitBreakerConfig(failure_threshold=1, recovery_timeout_s=0.02)
+async def test_circuit_breaker_half_open_failure_reopens(monkeypatch):
+    clock = _FakeClock()
+    monkeypatch.setattr("agency.bridges.coordinator.monotonic", clock)
+    cfg = CircuitBreakerConfig(failure_threshold=1, recovery_timeout_s=0.05)
     breaker = CircuitBreaker(cfg)
     await breaker.record_failure()
     assert breaker.state is CircuitState.OPEN
-    import asyncio
-
-    await asyncio.sleep(0.3)
+    clock.advance(1.0)  # dwell elapses deterministically (no wall-clock sleep)
     assert await breaker.allow() is True
     await breaker.record_failure()
     assert breaker.state is CircuitState.OPEN
