@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from agency.forge.concurrency import run_queue
@@ -75,7 +76,7 @@ def test_runtime_verify_polls_real_endpoint(tmp_path: Path) -> None:
     port = 8766
     server = subprocess.Popen(
         [
-            "C:/Users/PC/The-Agency/.venv/Scripts/python.exe",
+            sys.executable,
             "-m",
             "http.server",
             str(port),
@@ -90,7 +91,7 @@ def test_runtime_verify_polls_real_endpoint(tmp_path: Path) -> None:
     try:
         report = verify_runtime(
             tmp_path,
-            ["C:/Users/PC/The-Agency/.venv/Scripts/python.exe", "-m", "http.server", "9999"],
+            [sys.executable, "-m", "http.server", "9999"],
             [f"http://127.0.0.1:{port}/"],
             timeout_s=10,
         )
