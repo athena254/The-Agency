@@ -1238,6 +1238,13 @@ def forge_run(
     env_file: str = typer.Option("", "--env-file", help="Optional .env to load before review."),
     limit: int = typer.Option(2, "--limit", min=1, max=16, help="Workers to run at once."),
     max_jobs: int = typer.Option(10, "--max-jobs", min=1, help="Stop after this many dispatches."),
+    heartbeat_interval: float = typer.Option(
+        1.0,
+        "--heartbeat-interval",
+        min=0.0,
+        max=30.0,
+        help="Seconds between lease refreshes while a worker runs (0 disables).",
+    ),
 ) -> None:
     """Run a bounded number of Blacksmith dispatchers in parallel."""
     from agency.forge.concurrency import run_queue
@@ -1252,6 +1259,7 @@ def forge_run(
             db,
             command=tuple(shlex.split(command)),
             worktree_root=worktree_root or None,
+            heartbeat_interval_s=heartbeat_interval,
         )
 
     jobs = run_queue(factory, limit=limit, max_jobs=max_jobs)
@@ -1272,7 +1280,11 @@ def forge_jobs_cmd(
     """List queued/recent jobs, or watch their state change."""
     import time
 
-    from agency.forge.orchestration import BlacksmithOps
+    from agency.forge.orchestration import (
+        BlacksmithOps,
+        heartbeat_age_s,
+        lease_state,
+    )
 
     for tick in range(ticks if watch else 1):
         ops = BlacksmithOps(db)
@@ -1282,8 +1294,15 @@ def forge_jobs_cmd(
             ops.close()
         console.print(f"-- poll {tick + 1}: {len(recent)} job(s) --")
         for job in recent:
+            state = lease_state(job)
+            if state != "IDLE":
+                age = heartbeat_age_s(job.heartbeat_at)
+                state = f"{state}:{age:.0f}s" if age is not None else state
+            else:
+                state = "-"
             console.print(
-                f"{job.job_id[:8]} {job.state.value:16} {job.gate or '-':8} {job.title[:60]}"
+                f"{job.job_id[:8]} {job.state.value:16} {job.gate or '-':8} "
+                f"hb={state:14} {job.title[:52]}"
             )
         if watch and tick + 1 < ticks:
             time.sleep(interval)
@@ -1319,12 +1338,27 @@ def forge_integrate_cmd(
     output_branch: str = typer.Option(
         "parallel/integration", "--output-branch", help="Base/integration branch."
     ),
+    test: str = typer.Option("", "--test", help="Product test command (shell-quoted string)."),
+    test_timeout: int = typer.Option(
+        120, "--test-timeout", min=1, max=300, help="Bounded seconds for the test command."
+    ),
 ) -> None:
-    """Combine disjoint parallel branches without merging into main."""
+    """Combine disjoint branches, run a test gate, and never merge or push."""
     from agency.forge.integration import propose_integration
 
-    report = propose_integration(repo, list(branch), worktree=worktree, output_branch=output_branch)
+    report = propose_integration(
+        repo,
+        list(branch),
+        worktree=worktree,
+        output_branch=output_branch,
+        test_command=test,
+        test_timeout_s=test_timeout,
+    )
     console.print(f"integration gate: {report.gate}")
+    console.print(f"test gate: {report.test_gate}")
+    console.print(f"ready: {'yes' if report.ready else 'no'}")
+    if report.test_timed_out:
+        console.print(f"test command timed out after {test_timeout}s")
     if report.overlapping:
         console.print(f"overlaps: {', '.join(report.overlapping)}")
     if report.combined:

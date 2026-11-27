@@ -12,11 +12,13 @@ auto-resumed.
 from __future__ import annotations
 
 import hashlib
+import os
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 from uuid import uuid4
 
 import structlog
@@ -28,6 +30,7 @@ from agency.forge.cost import CostStore, record_cost
 from agency.forge.evidence import EvidenceReport, EvidenceStore
 from agency.forge.external_agent import ExternalAgentReport, run_external_agent
 from agency.forge.merge_queue import MergeQueueReport, MergeQueueStore, evaluate_merge
+from agency.forge.observability import JobTrace, make_trace
 from agency.forge.reviewer import ReviewReport
 from agency.forge.work_order import WorkOrder, render_work_order
 
@@ -46,6 +49,13 @@ MAX_ACCEPTANCE = 16
 MAX_TEST_PATHS = 16
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_COMMAND = ("opencode", "run", "--auto", "--dir", "{workdir}")
+# Bounded lease/heartbeat controls: a dispatched job refreshes its lease while
+# a worker is alive, so a watcher never mistakes a live job for a crashed one.
+MAX_LEASE_OWNER_CHARS = 64
+DEFAULT_HEARTBEAT_INTERVAL_S = 1.0
+MAX_HEARTBEAT_INTERVAL_S = 30.0
+DEFAULT_LEASE_TTL_S = 90.0
+MAX_HEARTBEAT_JOIN_S = 2.0
 
 
 class JobState(str, Enum):
@@ -81,6 +91,9 @@ class ForgeJob(BaseModel):
     merge_report_id: str = ""
     failure_detail: str = Field(default="", max_length=MAX_DETAIL_CHARS)
     cost_usd: float = Field(default=0.0, ge=0)
+    heartbeat_at: str = ""
+    lease_owner: str = Field(default="", max_length=MAX_LEASE_OWNER_CHARS)
+    trace: JobTrace | None = None
     created_at: str = ""
     updated_at: str = ""
 
@@ -119,6 +132,108 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _parse_ts(value: str) -> datetime | None:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def heartbeat_age_s(heartbeat_at: str, *, now: datetime | None = None) -> float | None:
+    """Age of a heartbeat in seconds; None if missing, invalid or in the future."""
+    parsed = _parse_ts(heartbeat_at)
+    if parsed is None:
+        return None
+    current = now or datetime.now(UTC)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=UTC)
+    age = (current - parsed).total_seconds()
+    return age if age >= 0 else None
+
+
+def lease_state(
+    job: ForgeJob,
+    *,
+    now: datetime | None = None,
+    ttl_s: float = DEFAULT_LEASE_TTL_S,
+) -> str:
+    """Liveness label: LIVE, STALE, NO_LEASE, or IDLE (not dispatched)."""
+    if job.state is not JobState.DISPATCHED:
+        return "IDLE"
+    age = heartbeat_age_s(job.heartbeat_at, now=now)
+    if age is None:
+        return "NO_LEASE"
+    return "LIVE" if age <= ttl_s else "STALE"
+
+
+def trace_from_report(report: Any, *, job_id: str) -> JobTrace:
+    """Build a trace from what the worker actually reported, nothing invented.
+
+    Agent duration comes from an explicitly reported field or an ``agent``
+    phase the worker supplied. Estimated cost is only read from a reported
+    cost field; Forge never computes tokens or prices from thin air.
+    """
+    timings = {p.name: p.duration_s for p in (getattr(report, "phases", ()) or ())}
+    agent_duration = getattr(report, "agent_duration_s", None)
+    if agent_duration is None:
+        agent_duration = timings.get("agent")
+    estimated_cost = getattr(report, "estimated_cost_usd", None)
+    if estimated_cost is None:
+        estimated_cost = getattr(report, "cost_usd", None)
+    return make_trace(
+        job_id,
+        timings,
+        caveats=("agent_output_unverified",),
+        agent_duration_s=agent_duration,
+        estimated_cost_usd=estimated_cost,
+    )
+
+
+class _LeaseHeartbeat:
+    """Bounded background refresher for one dispatched job's lease."""
+
+    def __init__(self, ops: Any, job_id: str, interval_s: float, owner: str) -> None:
+        self._ops = ops
+        self._job_id = job_id
+        self._interval = interval_s
+        self._owner = owner
+        self._stop: threading.Event | None = None
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self) -> Self:
+        if self._interval <= 0:
+            return self
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"forge-hb-{self._job_id[:8]}",
+            daemon=True,
+        )
+        self._thread.start()
+        return self
+
+    def _run(self) -> None:
+        assert self._stop is not None
+        while not self._stop.wait(self._interval):
+            try:
+                self._ops.heartbeat(self._job_id, owner=self._owner)
+            except Exception as exc:  # noqa: BLE001 - a missed beat must not kill the worker
+                logger.debug(
+                    "blacksmith.heartbeat_failed", job_id=self._job_id, error=str(exc)[:200]
+                )
+
+    def __exit__(self, *_exc: object) -> None:
+        if self._stop is not None:
+            self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=MAX_HEARTBEAT_JOIN_S)
+            if self._thread.is_alive():
+                logger.warning("blacksmith.heartbeat_thread_still_alive", job_id=self._job_id)
+
+
 class BlacksmithOps:
     """Manage Forge build jobs: submit, dispatch, gate, retry, escalate."""
 
@@ -137,9 +252,15 @@ class BlacksmithOps:
         max_retries: int = DEFAULT_MAX_RETRIES,
         worktree_root: str | Path | None = None,
         shadow_llm: Any = None,
+        heartbeat_interval_s: float = DEFAULT_HEARTBEAT_INTERVAL_S,
+        lease_ttl_s: float = DEFAULT_LEASE_TTL_S,
     ) -> None:
         if max_retries < 0 or max_retries > 5:
             raise ValueError("max_retries must be in [0, 5].")
+        if not 0 <= heartbeat_interval_s <= MAX_HEARTBEAT_INTERVAL_S:
+            raise ValueError(f"heartbeat_interval_s must be in [0, {MAX_HEARTBEAT_INTERVAL_S}].")
+        if not 1 <= lease_ttl_s <= 3600:
+            raise ValueError("lease_ttl_s must be in [1, 3600].")
         self._db_path = Path(db_path)
         self._conn = open_store(self._db_path, _SCHEMA)
         self._runner = runner if runner is not None else run_external_agent
@@ -150,6 +271,9 @@ class BlacksmithOps:
         self._max_attempts = max_retries + 1
         self._worktree_root = worktree_root
         self._shadow_llm = shadow_llm
+        self._heartbeat_interval_s = float(heartbeat_interval_s)
+        self._lease_ttl_s = float(lease_ttl_s)
+        self._worker_id = f"w{os.getpid()}-{uuid4().hex[:6]}"[:MAX_LEASE_OWNER_CHARS]
         self._audit_sink = audit_sink
         self._owned: list[Any] = []
         self.evidence = evidence if evidence is not None else self._own(EvidenceStore(":memory:"))
@@ -165,15 +289,52 @@ class BlacksmithOps:
         return store
 
     def _recover_uncertain(self) -> None:
+        """Reap only DISPATCHED jobs whose lease is missing or stale.
+
+        A job with a fresh heartbeat still has a live worker: it stays
+        DISPATCHED instead of being mislabelled UNCERTAIN at reopen.
+        """
         rows = self._conn.execute(
-            "SELECT job_id, document FROM forge_jobs WHERE state = ?",
+            "SELECT document FROM forge_jobs WHERE state = ?",
             (JobState.DISPATCHED.value,),
         ).fetchall()
-        for job_id, document in rows:
+        now = datetime.now(UTC)
+        for (document,) in rows:
             job = ForgeJob.model_validate_json(document)
+            age = heartbeat_age_s(job.heartbeat_at, now=now)
+            if age is not None and age <= self._lease_ttl_s:
+                continue
             self._transition(
-                job, JobState.UNCERTAIN, "job_uncertain", "crash recovery; not resumed"
+                job,
+                JobState.UNCERTAIN,
+                "job_uncertain",
+                "stale or missing lease; not resumed",
             )
+
+    def heartbeat(self, job_id: str, *, owner: str = "") -> ForgeJob | None:
+        """Refresh one DISPATCHED job's lease; a bounded, in-place update.
+
+        Validates the id, truncates the owner label, touches one row, and
+        emits no events. Non-dispatched or unknown jobs are a no-op.
+        """
+        if not isinstance(job_id, str) or not job_id.strip():
+            raise ValueError("job_id must be a nonblank string.")
+        row = self._conn.execute(
+            "SELECT document FROM forge_jobs WHERE job_id = ?", (job_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        job = ForgeJob.model_validate_json(row[0])
+        if job.state is not JobState.DISPATCHED:
+            return None
+        owner_text = str(owner or self._worker_id).strip()[:MAX_LEASE_OWNER_CHARS]
+        updated = job.model_copy(update={"heartbeat_at": _now(), "lease_owner": owner_text})
+        with self._conn:
+            self._conn.execute(
+                "UPDATE forge_jobs SET document = ? WHERE job_id = ?",
+                (updated.model_dump_json(), job_id),
+            )
+        return updated
 
     # ------------------------------------------------------------------ jobs
 
@@ -263,6 +424,10 @@ class BlacksmithOps:
             "job_dispatched",
             f"attempt {job.attempts + 1}",
         )
+        # Take the lease immediately: watchers see LIVE, not UNCERTAIN.
+        initial = self.heartbeat(job.job_id, owner=self._worker_id)
+        if initial is not None:
+            job = initial
         # The striker receives a rendered work order, not a bare task string:
         # boundaries, work rules, acceptance criteria, the test command, and —
         # on retries — the previous attempt's bounded failure tail.
@@ -292,16 +457,19 @@ class BlacksmithOps:
         if job.model:
             runner_kwargs["model"] = job.model
         try:
-            report = self._runner(
-                job.repo,
-                list(self._command),
-                render_work_order(order),
-                branch=f"blacksmith-{job.job_id[:8]}-a{job.attempts}",
-                worktree_root=self._worktree_root,
-                run_tests_flag=bool(job.test_paths),
-                test_paths=list(job.test_paths) or None,
-                **runner_kwargs,
-            )
+            # forge run workers refresh the lease while the runner is alive;
+            # the refresher stops before any verdict/cost write on this conn.
+            with _LeaseHeartbeat(self, job.job_id, self._heartbeat_interval_s, self._worker_id):
+                report = self._runner(
+                    job.repo,
+                    list(self._command),
+                    render_work_order(order),
+                    branch=f"blacksmith-{job.job_id[:8]}-a{job.attempts}",
+                    worktree_root=self._worktree_root,
+                    run_tests_flag=bool(job.test_paths),
+                    test_paths=list(job.test_paths) or None,
+                    **runner_kwargs,
+                )
         except Exception as exc:  # noqa: BLE001 - a worker crash must fail the job honestly
             detail = f"{type(exc).__name__}: {exc}"[:MAX_DETAIL_CHARS]
             job = self._transition(
@@ -331,6 +499,7 @@ class BlacksmithOps:
             "gate": str(report.gate),
             "changed_paths": tuple(report.changed_paths),
             "artifact_sha256": digest,
+            "trace": trace_from_report(report, job_id=job_id),
         }
         if report.isolation_violations:
             detail = "isolation violations: " + ", ".join(report.isolation_violations)
@@ -580,4 +749,7 @@ __all__ = [
     "BlacksmithStatus",
     "ForgeJob",
     "JobState",
+    "heartbeat_age_s",
+    "lease_state",
+    "trace_from_report",
 ]
