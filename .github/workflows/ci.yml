@@ -57,6 +57,8 @@ jobs:
   test:
     name: Test (Python ${{ matrix.python-version }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # Bound each matrix leg so a hung test/transport can never wedge CI forever.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
