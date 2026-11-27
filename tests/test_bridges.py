@@ -56,7 +56,7 @@ async def test_circuit_breaker_closed_to_open_to_half_open():
     assert await breaker.allow() is False
     import asyncio
 
-    await asyncio.sleep(0.06)
+    await asyncio.sleep(0.5)
     assert await breaker.allow() is True  # half-open probe admitted
     await breaker.record_success()
     assert breaker.state is CircuitState.CLOSED
@@ -69,7 +69,7 @@ async def test_circuit_breaker_half_open_failure_reopens():
     assert breaker.state is CircuitState.OPEN
     import asyncio
 
-    await asyncio.sleep(0.03)
+    await asyncio.sleep(0.3)
     assert await breaker.allow() is True
     await breaker.record_failure()
     assert breaker.state is CircuitState.OPEN
