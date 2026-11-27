@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -1154,6 +1155,181 @@ def forge_approve(
         f"Recorded {record.decision} by {record.approver} for {record.job_id} "
         f"(state={record.state_after}). No merge or release was performed."
     )
+
+
+@forge_app.command("submit")
+def forge_submit(
+    title: str = typer.Option(..., "--title", help="Short job title."),
+    task: str = typer.Option(..., "--task", help="Work order task text."),
+    repo: str = typer.Option(..., "--repo", help="Absolute repo path."),
+    db: str = typer.Option("forge_jobs.db", "--db", help="Job database path."),
+    role: str = typer.Option("", "--role", help="Worker role; defaults to the route role."),
+    job_class: str = typer.Option("auto", "--class", help="auto, trivial, standard or risky."),
+    acceptance: str = typer.Option("", "--acceptance", help="Comma-separated acceptance items."),
+    test_paths: str = typer.Option("", "--test-paths", help="Comma-separated test paths."),
+) -> None:
+    """Submit one bounded job to the Blacksmith queue (QUEUED, not dispatched)."""
+    from agency.forge.orchestration import BlacksmithOps
+    from agency.forge.routing import route_job
+
+    chosen = route_job(title, task) if job_class == "auto" else route_job(job_class)
+    if job_class != "auto" and job_class not in ("trivial", "standard", "risky"):
+        raise typer.BadParameter("--class must be auto, trivial, standard or risky")
+    effective_role = role or chosen.role
+    ops = BlacksmithOps(db)
+    try:
+        job = ops.submit(
+            title,
+            task,
+            repo,
+            acceptance=tuple(x.strip() for x in acceptance.split(",") if x.strip()),
+            test_paths=tuple(x.strip() for x in test_paths.split(",") if x.strip()),
+            role=effective_role,
+            route=chosen.job_class,
+            model=chosen.model,
+            tool_budget=chosen.tool_budget,
+        )
+    finally:
+        ops.close()
+    console.print(f"Submitted {job.job_id} ({job.role}) -> {job.state.value}")
+
+
+@forge_app.command("dispatch")
+def forge_dispatch(
+    db: str = typer.Option("forge_jobs.db", "--db", help="Job database path."),
+    command: str = typer.Option(
+        ..., "--command", help="Striker command; {workdir} and {task} are substituted."
+    ),
+    worktree_root: str = typer.Option("", "--worktree-root", help="Optional worktree root."),
+    env_file: str = typer.Option("", "--env-file", help="Optional .env to load before review."),
+) -> None:
+    """Dispatch one queued job through the Blacksmith. No auto-merge or release."""
+    from agency.forge.env_config import load_env_file
+    from agency.forge.orchestration import BlacksmithOps
+
+    if env_file:
+        loaded = load_env_file(env_file)
+        console.print(f"Loaded {len(loaded)} env keys (values hidden).")
+
+    ops = BlacksmithOps(
+        db,
+        command=tuple(shlex.split(command)),
+        worktree_root=worktree_root or None,
+    )
+    try:
+        job = ops.dispatch_next()
+    finally:
+        ops.close()
+    if job is None:
+        console.print("No queued job to dispatch.")
+        return
+    console.print(f"Job {job.job_id}: {job.state.value} gate={job.gate or '-'}")
+    if job.failure_detail:
+        console.print(job.failure_detail[:400])
+
+
+@forge_app.command("run")
+def forge_run(
+    db: str = typer.Option("forge_jobs.db", "--db", help="Job database path."),
+    command: str = typer.Option(
+        ..., "--command", help="Worker command; {workdir}, {task}, {model} are substituted."
+    ),
+    worktree_root: str = typer.Option("", "--worktree-root", help="Optional worktree root."),
+    env_file: str = typer.Option("", "--env-file", help="Optional .env to load before review."),
+    limit: int = typer.Option(2, "--limit", min=1, max=16, help="Workers to run at once."),
+    max_jobs: int = typer.Option(10, "--max-jobs", min=1, help="Stop after this many dispatches."),
+) -> None:
+    """Run a bounded number of Blacksmith dispatchers in parallel."""
+    from agency.forge.concurrency import run_queue
+    from agency.forge.env_config import load_env_file
+    from agency.forge.orchestration import BlacksmithOps
+
+    if env_file:
+        console.print(f"Loaded {len(load_env_file(env_file))} env keys (values hidden).")
+
+    def factory() -> BlacksmithOps:
+        return BlacksmithOps(
+            db,
+            command=tuple(shlex.split(command)),
+            worktree_root=worktree_root or None,
+        )
+
+    jobs = run_queue(factory, limit=limit, max_jobs=max_jobs)
+    if not jobs:
+        console.print("No queued jobs to run.")
+        return
+    for job in jobs:
+        console.print(f"{job.job_id}: {job.state.value} gate={job.gate or '-'}")
+
+
+@forge_app.command("jobs")
+def forge_jobs_cmd(
+    db: str = typer.Option("forge_jobs.db", "--db", help="Job database path."),
+    watch: bool = typer.Option(False, "--watch", help="Keep polling until interrupted."),
+    interval: float = typer.Option(2.0, "--interval", min=0.5, help="Seconds between polls."),
+    ticks: int = typer.Option(5, "--ticks", min=1, help="Polls when --watch is set."),
+) -> None:
+    """List queued/recent jobs, or watch their state change."""
+    import time
+
+    from agency.forge.orchestration import BlacksmithOps
+
+    for tick in range(ticks if watch else 1):
+        ops = BlacksmithOps(db)
+        try:
+            recent = ops.status().recent
+        finally:
+            ops.close()
+        console.print(f"-- poll {tick + 1}: {len(recent)} job(s) --")
+        for job in recent:
+            console.print(
+                f"{job.job_id[:8]} {job.state.value:16} {job.gate or '-':8} {job.title[:60]}"
+            )
+        if watch and tick + 1 < ticks:
+            time.sleep(interval)
+
+
+@forge_app.command("verify")
+def forge_verify_cmd(
+    root: str = typer.Option(..., "--root", help="Product root to serve."),
+    command: str = typer.Option(..., "--command", help="Command that starts the product."),
+    endpoint: list[str] = typer.Option(  # noqa: B008
+        ..., "--endpoint", help="URL to poll; repeat for more."
+    ),
+    timeout: int = typer.Option(30, "--timeout", min=1, help="Seconds to wait."),
+) -> None:
+    """Start a product and poll real endpoints before signing evidence."""
+    from agency.forge.runtime_verify import verify_runtime
+
+    report = verify_runtime(root, shlex.split(command), list(endpoint), timeout_s=timeout)
+    console.print(f"runtime gate: {report.gate}")
+    for url, status in report.statuses:
+        console.print(f"  {status} {url}")
+    if report.note:
+        console.print(report.note)
+
+
+@forge_app.command("integrate")
+def forge_integrate_cmd(
+    repo: str = typer.Option(..., "--repo", help="Repository holding the parallel branches."),
+    branch: list[str] = typer.Option(  # noqa: B008
+        ..., "--branch", help="Branch to integrate; repeat for more."
+    ),
+    worktree: str = typer.Option(..., "--worktree", help="Empty worktree to combine changes in."),
+    output_branch: str = typer.Option(
+        "parallel/integration", "--output-branch", help="Base/integration branch."
+    ),
+) -> None:
+    """Combine disjoint parallel branches without merging into main."""
+    from agency.forge.integration import propose_integration
+
+    report = propose_integration(repo, list(branch), worktree=worktree, output_branch=output_branch)
+    console.print(f"integration gate: {report.gate}")
+    if report.overlapping:
+        console.print(f"overlaps: {', '.join(report.overlapping)}")
+    if report.combined:
+        console.print(f"combined: {', '.join(report.combined)}")
+    console.print(report.note)
 
 
 @forge_app.command("metrics")

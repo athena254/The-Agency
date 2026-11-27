@@ -18,6 +18,7 @@ from typing import Literal  # noqa: F401
 
 from pydantic import BaseModel, Field, field_validator
 
+from agency.forge.agent_skills import skill_for
 from agency.forge.protected_paths import protected_paths
 
 MAX_TASK_CHARS = 8000
@@ -47,6 +48,9 @@ class WorkOrder(BaseModel):
     attempt: int = Field(default=1, ge=1)
     max_attempts: int = Field(default=3, ge=1)
     failure_tail: str = ""
+    role: str = "striker"
+    plan_required: bool = False
+    plan_path: str = "PLAN.md"
 
     @field_validator("repo")
     @classmethod
@@ -106,6 +110,17 @@ def render_work_order(order: WorkOrder) -> str:
         "- If blocked or a test will not pass, stop and return the exact error output.",
         "- Never claim a test or check you did not run; never fabricate success.",
     ]
+    skill = skill_for(order.role)
+    if skill:
+        lines += ["", skill.rstrip()]
+    if order.plan_required:
+        lines += [
+            "",
+            "PLAN GATE (hard):",
+            f"- Write `{order.plan_path}` before editing any code.",
+            "- Required headings: Goal, Approach, Files, Tests, Risks.",
+            "- Forge refuses the result if that file is missing or incomplete.",
+        ]
     if order.failure_tail:
         lines += [
             "",

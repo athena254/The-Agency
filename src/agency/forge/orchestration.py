@@ -69,6 +69,10 @@ class ForgeJob(BaseModel):
     test_paths: tuple[str, ...] = ()
     state: JobState = JobState.QUEUED
     language: str = Field(default="", max_length=32)
+    role: str = Field(default="striker", max_length=32)
+    route: str = Field(default="standard", max_length=32)
+    model: str = Field(default="", max_length=120)
+    tool_budget: int = Field(default=40, ge=1, le=200)
     attempts: int = Field(default=0, ge=0)
     report_id: str = ""
     gate: str = ""
@@ -182,6 +186,10 @@ class BlacksmithOps:
         acceptance: tuple[str, ...] | list[str] = (),
         test_paths: tuple[str, ...] | list[str] = (),
         language: str = "",
+        role: str = "striker",
+        route: str = "standard",
+        model: str = "",
+        tool_budget: int = 40,
     ) -> ForgeJob:
         if not isinstance(repo, str) or not Path(repo).is_absolute():
             raise ValueError(f"repo must be an absolute path, got {repo!r}.")
@@ -200,6 +208,10 @@ class BlacksmithOps:
             acceptance=acc,
             test_paths=tests,
             language=str(language or "").strip()[:32],
+            role=str(role or "striker").strip()[:32],
+            route=str(route or "standard").strip()[:32],
+            model=str(model or "").strip()[:120],
+            tool_budget=max(1, min(200, int(tool_budget))),
             state=JobState.QUEUED,
             created_at=now,
             updated_at=now,
@@ -263,6 +275,9 @@ class BlacksmithOps:
             attempt=job.attempts,
             max_attempts=self._max_attempts,
             failure_tail=job.failure_detail if job.attempts > 1 else "",
+            role=job.role or "striker",
+            plan_required=True,
+            plan_path="PLAN.md",
         )
         # Optional kwargs are only forwarded when set so custom runners with
         # fixed signatures keep working.
@@ -271,6 +286,11 @@ class BlacksmithOps:
             runner_kwargs["shadow_llm"] = self._shadow_llm
         if job.language:
             runner_kwargs["language"] = job.language
+        runner_kwargs["plan_required"] = True
+        runner_kwargs["plan_path"] = "PLAN.md"
+        runner_kwargs["route"] = job.route
+        if job.model:
+            runner_kwargs["model"] = job.model
         try:
             report = self._runner(
                 job.repo,
