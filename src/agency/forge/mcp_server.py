@@ -64,6 +64,15 @@ CAVEATS = (
     "release_not_authorized",
 )
 
+# The approval surface only records a human decision. It never authorizes a
+# merge, deploy or release, and an approved job is never auto-shipped.
+APPROVAL_CAVEATS = (
+    "no_auto_merge",
+    "no_merge_authorized",
+    "no_release_authorized",
+    "release_not_authorized",
+)
+
 REMOTE_OPS_ENV = "AGENCY_FORGE_ENABLE_REMOTE_OPS"
 CALIBRATION_FILE_ENV = "AGENCY_FORGE_CALIBRATION_FILE"
 DEFAULT_CALIBRATION_FILE = "data/forge_calibration_v2_result.json"
@@ -378,6 +387,34 @@ TOOL_DEFS: tuple[ToolDef, ...] = (
             ["root", "changed_paths", "tag", "repo", "approved_by"],
         ),
     ),
+    ToolDef(
+        name="forge_approvals_list",
+        description=(
+            "Read-only list of Forge jobs awaiting a human decision. Records no "
+            "decision and grants no authority: no merge, deploy or release is "
+            "authorized by listing the queue."
+        ),
+        input_schema=_schema({"db": {"type": "string"}}, []),
+    ),
+    ToolDef(
+        name="forge_approval_decide",
+        description=(
+            "Record one named human's approve/reject decision on a job awaiting "
+            "a human decision. Generic agent/bot approver names are refused. "
+            "Records intent only: no merge, deploy or release is authorized and "
+            "approval never auto-ships the job."
+        ),
+        input_schema=_schema(
+            {
+                "db": {"type": "string"},
+                "job_id": {"type": "string", "maxLength": 200},
+                "approver": {"type": "string", "maxLength": 120},
+                "decision": {"type": "string", "enum": ["approve", "reject"]},
+                "note": {"type": "string", "maxLength": 1000},
+            },
+            ["job_id", "approver", "decision"],
+        ),
+    ),
 )
 
 _TOOL_BY_NAME = {tool.name: tool for tool in TOOL_DEFS}
@@ -403,6 +440,8 @@ _SYNC_TOOLS = frozenset(
         "forge_capabilities",
         "forge_remote_merge",
         "forge_github_release",
+        "forge_approvals_list",
+        "forge_approval_decide",
     }
 )
 
@@ -728,6 +767,49 @@ class ForgeMcpServer:
         db = str(args.get("db") or "")
         metrics = compute_metrics(db) if db else compute_metrics(":memory:")
         return {"ok": True, "metrics": metrics.model_dump(mode="python")}
+
+    def _t_forge_approvals_list(self, args: dict[str, Any]) -> dict[str, Any]:
+        from agency.forge.approvals import list_briefs
+        from agency.forge.orchestration import BlacksmithOps
+
+        db = str(args.get("db") or "")
+        ops = BlacksmithOps(db) if db else BlacksmithOps(":memory:")
+        try:
+            briefs = list_briefs(ops)
+        finally:
+            ops.close()
+        return {
+            "ok": True,
+            "briefs": [brief.model_dump(mode="python") for brief in briefs],
+            "count": len(briefs),
+            "caveats": list(APPROVAL_CAVEATS),
+        }
+
+    def _t_forge_approval_decide(self, args: dict[str, Any]) -> dict[str, Any]:
+        from agency.forge.approvals import ApprovalError, decide
+        from agency.forge.orchestration import BlacksmithOps
+
+        db = str(args.get("db") or "")
+        ops = BlacksmithOps(db) if db else BlacksmithOps(":memory:")
+        try:
+            record = decide(
+                ops,
+                str(args["job_id"]),
+                str(args["approver"]),
+                str(args["decision"]),
+                note=str(args.get("note", "")),
+            )
+        except ApprovalError as exc:
+            # A refused decision is a normal, explicit result — never a partial
+            # state change and never an implicit approval.
+            return {"ok": False, "error": str(exc), "caveats": list(APPROVAL_CAVEATS)}
+        finally:
+            ops.close()
+        return {
+            "ok": True,
+            "record": record.model_dump(mode="python"),
+            "caveats": list(APPROVAL_CAVEATS),
+        }
 
     def _t_forge_capabilities(self, args: dict[str, Any]) -> dict[str, Any]:
         return {
