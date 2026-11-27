@@ -49,6 +49,7 @@ from agency.core.sqlite_store import open_store
 from agency.forge.apprentice_policy import enforce_apprentice_policy
 from agency.forge.diff_budget import DiffBudgetReport, FileChange, check_diff_budget
 from agency.forge.env_config import discover_env_file, load_env_file
+from agency.forge.gold_set import GoldSet
 from agency.forge.human_gates import required_human_gates
 from agency.forge.inspection import InspectionReport, inspect_changes
 from agency.forge.observability import PhaseTiming
@@ -62,7 +63,9 @@ from agency.forge.reviewer import (
     review_provider_mode,
     run_review,
 )
+from agency.forge.risky_review import RiskyReviewReport, apply_risky_review
 from agency.forge.routing import apply_route_model, resolve_route
+from agency.forge.runtime_specs import spec_for
 from agency.forge.runtime_verify import RuntimeReport, verify_runtime
 from agency.forge.security_scan import SecurityReport, scan_changes
 from agency.forge.test_runner import MAX_TEST_TIMEOUT_S, TestReport, run_tests
@@ -146,6 +149,7 @@ class ExternalAgentReport(BaseModel):
     diff_budget: DiffBudgetReport | None = None
     regression: RegressionVerdict | None = None
     parallel: ParallelGateReport | None = None
+    risky_review: RiskyReviewReport | None = None
     phases: tuple[PhaseTiming, ...] = ()
     gate: ExternalAgentGate
     caveats: tuple[str, ...] = _BASE_CAVEATS
@@ -556,6 +560,9 @@ def run_external_agent(
     regression_required: bool = False,
     diff_budget_required: bool = False,
     parallel_gates_flag: bool = False,
+    risky_critics: tuple[str, ...] = (),
+    risky_gold_file: str = "",
+    risky_results_file: str = "",
 ) -> ExternalAgentReport:
     """Run an external coding agent in an isolated worktree, then Forge gates.
 
@@ -569,6 +576,7 @@ def run_external_agent(
     them. The review configuration is discovered from the repo-local ``.env``
     at worker start; explicit environment variables always win.
     """
+    job_language = language
     del language
     real_repo = Path(repo_root)
     if not real_repo.is_absolute():
@@ -791,6 +799,16 @@ def run_external_agent(
                     review_error = True
                     logger.error("forge.external_agent_review_error")
 
+        caveats: list[str] = list(_BASE_CAVEATS)
+        if effective_route.job_class == "risky" and not verify_command:
+            default_spec = spec_for(job_language)
+            verify_command = list(default_spec.verify_command)
+            verify_endpoints = (
+                list(default_spec.endpoints) if not verify_endpoints else verify_endpoints
+            )
+            if verify_command and verify_endpoints:
+                caveats.append("default_runtime_spec_applied")
+
         # Risky routes opt into the real runtime gate only when a caller
         # supplies both a start command and endpoints. Safe defaults keep every
         # other run free of new processes and network calls.
@@ -819,6 +837,40 @@ def run_external_agent(
                     note=f"runtime verification error: {type(exc).__name__}",
                 )
 
+        risky_report: RiskyReviewReport | None = None
+        if effective_route.job_class == "risky" and risky_critics:
+            gold_set: GoldSet | None = None
+            if risky_gold_file:
+                try:
+                    payload = json.loads(Path(risky_gold_file).read_text(encoding="utf-8"))
+                    gold_set = GoldSet(
+                        set_id=str(payload.get("set_id", "gold")),
+                        owner=str(payload.get("owner", "")),
+                        tasks=payload.get("tasks", []),
+                        version=int(payload.get("version", 1)),
+                    )
+                except (OSError, ValueError):
+                    gold_set = None
+            observed = {}
+            if risky_results_file:
+                try:
+                    observed = json.loads(Path(risky_results_file).read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    observed = {}
+            critics = [
+                {"critic_id": f"critic-{i}", "model_family": f"family-{i}", "verdict": verdict}
+                for i, verdict in enumerate(risky_critics[:4], start=1)
+            ]
+            diff_text = "\n".join(changed)
+            risky_report = apply_risky_review(
+                branch,
+                diff_text,
+                critics=critics,
+                gold_set=gold_set,
+                run=observed,
+            )
+            caveats.extend(risky_report.caveats)
+
         post_repo_state = _tracked_changes(real_repo)
         baseline = set(pre_repo_state)
         main_repo_changes = tuple(p for p in post_repo_state if p not in baseline)
@@ -836,6 +888,8 @@ def run_external_agent(
         if regression_verdict is not None and not regression_verdict.ok:
             overall = "FAIL"
         if parallel_report is not None and parallel_report.gate != "PASS":
+            overall = "FAIL"
+        if risky_report is not None and not risky_report.allowed:
             overall = "FAIL"
         if exit_code not in (0, None):
             overall = "FAIL"
@@ -874,7 +928,6 @@ def run_external_agent(
                 paths=list(violations),
             )
 
-        caveats: list[str] = list(_BASE_CAVEATS)
         if protected_hits:
             caveats.append("protected_file_modified")
         if main_repo_changes:
@@ -954,6 +1007,7 @@ def run_external_agent(
             diff_budget=diff_report,
             regression=regression_verdict,
             parallel=parallel_report,
+            risky_review=risky_report,
             phases=tuple(
                 PhaseTiming(name=name, duration_s=round(max(0.0, float(value)), 3))
                 for name, value in {

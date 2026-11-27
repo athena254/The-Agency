@@ -85,6 +85,9 @@ class ForgeJob(BaseModel):
     tool_budget: int = Field(default=40, ge=1, le=200)
     verify_command: str = Field(default="", max_length=512)
     verify_endpoints: tuple[str, ...] = ()
+    risky_critics: tuple[str, ...] = ()
+    risky_gold_file: str = ""
+    risky_results_file: str = ""
     attempts: int = Field(default=0, ge=0)
     report_id: str = ""
     gate: str = ""
@@ -355,6 +358,9 @@ class BlacksmithOps:
         tool_budget: int = 40,
         verify_command: str = "",
         verify_endpoints: tuple[str, ...] = (),
+        risky_critics: tuple[str, ...] = (),
+        risky_gold_file: str = "",
+        risky_results_file: str = "",
     ) -> ForgeJob:
         if not isinstance(repo, str) or not Path(repo).is_absolute():
             raise ValueError(f"repo must be an absolute path, got {repo!r}.")
@@ -471,6 +477,12 @@ class BlacksmithOps:
             runner_kwargs["verify_command"] = job.verify_command
         if job.verify_endpoints:
             runner_kwargs["verify_endpoints"] = list(job.verify_endpoints)
+        if job.risky_critics:
+            runner_kwargs["risky_critics"] = job.risky_critics
+        if job.risky_gold_file:
+            runner_kwargs["risky_gold_file"] = job.risky_gold_file
+        if job.risky_results_file:
+            runner_kwargs["risky_results_file"] = job.risky_results_file
         if job.model:
             runner_kwargs["model"] = job.model
         try:

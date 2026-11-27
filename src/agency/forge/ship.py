@@ -26,6 +26,8 @@ from uuid import uuid4
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
+from agency.forge.gate_attestation import GateAttestation, attest_human_gates
+
 logger = structlog.get_logger(__name__)
 
 ShipGate = Literal["PASS", "FAIL"]
@@ -50,6 +52,7 @@ class ShipReport(BaseModel):
     stderr: str = ""
     proof_path: str = ""
     caveats: tuple[str, ...] = CAVEATS
+    gate_attestation: GateAttestation | None = None
     note: str = (
         "Local ship via git merge --ff-only; human approval required by default; "
         "requires pipeline PASS and smoke PASS."
@@ -136,6 +139,8 @@ def ship_branch(
     approved: bool = False,
     approval: bool = False,
     proof_log: str | Path | None = None,
+    changed_paths: tuple[str, ...] = (),
+    approvals: object = None,
     repo_root: str | Path | None = None,
     **kwargs: Any,
 ) -> ShipReport:
@@ -170,6 +175,9 @@ def ship_branch(
         blocked.append(f"smoke_gate_not_pass:{sg}")
     if require_human and not is_approved:
         blocked.append("human_approval_required")
+    attestation = attest_human_gates(changed_paths, approvals) if changed_paths else None
+    if attestation is not None and not attestation.allowed:
+        blocked.extend(f"human_gate_missing:{gate}" for gate in attestation.missing_gates)
 
     try:
         if repo_root is not None:
@@ -310,6 +318,7 @@ def ship_branch(
         target_branch=target_branch,
         gate=gate,
         merged=merged,
+        gate_attestation=attestation,
         blocked_reasons=tuple(blocked),
         stdout="\n".join(p for p in stdout_parts if p).strip(),
         stderr="\n".join(p for p in stderr_parts if p).strip(),
