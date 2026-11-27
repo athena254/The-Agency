@@ -1167,6 +1167,12 @@ def forge_submit(
     job_class: str = typer.Option("auto", "--class", help="auto, trivial, standard or risky."),
     acceptance: str = typer.Option("", "--acceptance", help="Comma-separated acceptance items."),
     test_paths: str = typer.Option("", "--test-paths", help="Comma-separated test paths."),
+    verify_command: str = typer.Option(
+        "", "--verify-command", help="Runtime start command for risky jobs."
+    ),
+    verify_endpoint: list[str] = typer.Option(  # noqa: B008
+        (), "--verify-endpoint", help="URL to poll for risky jobs; repeat for more."
+    ),
 ) -> None:
     """Submit one bounded job to the Blacksmith queue (QUEUED, not dispatched)."""
     from agency.forge.orchestration import BlacksmithOps
@@ -1188,6 +1194,8 @@ def forge_submit(
             route=chosen.job_class,
             model=chosen.model,
             tool_budget=chosen.tool_budget,
+            verify_command=verify_command,
+            verify_endpoints=tuple(verify_endpoint),
         )
     finally:
         ops.close()
@@ -1238,6 +1246,13 @@ def forge_run(
     env_file: str = typer.Option("", "--env-file", help="Optional .env to load before review."),
     limit: int = typer.Option(2, "--limit", min=1, max=16, help="Workers to run at once."),
     max_jobs: int = typer.Option(10, "--max-jobs", min=1, help="Stop after this many dispatches."),
+    heartbeat_interval: float = typer.Option(
+        1.0,
+        "--heartbeat-interval",
+        min=0.0,
+        max=30.0,
+        help="Seconds between lease refreshes while a worker runs (0 disables).",
+    ),
 ) -> None:
     """Run a bounded number of Blacksmith dispatchers in parallel."""
     from agency.forge.concurrency import run_queue
@@ -1252,6 +1267,7 @@ def forge_run(
             db,
             command=tuple(shlex.split(command)),
             worktree_root=worktree_root or None,
+            heartbeat_interval_s=heartbeat_interval,
         )
 
     jobs = run_queue(factory, limit=limit, max_jobs=max_jobs)
@@ -1272,7 +1288,11 @@ def forge_jobs_cmd(
     """List queued/recent jobs, or watch their state change."""
     import time
 
-    from agency.forge.orchestration import BlacksmithOps
+    from agency.forge.orchestration import (
+        BlacksmithOps,
+        heartbeat_age_s,
+        lease_state,
+    )
 
     for tick in range(ticks if watch else 1):
         ops = BlacksmithOps(db)
@@ -1282,8 +1302,15 @@ def forge_jobs_cmd(
             ops.close()
         console.print(f"-- poll {tick + 1}: {len(recent)} job(s) --")
         for job in recent:
+            state = lease_state(job)
+            if state != "IDLE":
+                age = heartbeat_age_s(job.heartbeat_at)
+                state = f"{state}:{age:.0f}s" if age is not None else state
+            else:
+                state = "-"
             console.print(
-                f"{job.job_id[:8]} {job.state.value:16} {job.gate or '-':8} {job.title[:60]}"
+                f"{job.job_id[:8]} {job.state.value:16} {job.gate or '-':8} "
+                f"hb={state:14} {job.title[:52]}"
             )
         if watch and tick + 1 < ticks:
             time.sleep(interval)
@@ -1319,17 +1346,69 @@ def forge_integrate_cmd(
     output_branch: str = typer.Option(
         "parallel/integration", "--output-branch", help="Base/integration branch."
     ),
+    test: str = typer.Option("", "--test", help="Product test command (shell-quoted string)."),
+    test_timeout: int = typer.Option(
+        120, "--test-timeout", min=1, max=300, help="Bounded seconds for the test command."
+    ),
 ) -> None:
-    """Combine disjoint parallel branches without merging into main."""
+    """Combine disjoint branches, run a test gate, and never merge or push."""
     from agency.forge.integration import propose_integration
 
-    report = propose_integration(repo, list(branch), worktree=worktree, output_branch=output_branch)
+    report = propose_integration(
+        repo,
+        list(branch),
+        worktree=worktree,
+        output_branch=output_branch,
+        test_command=test,
+        test_timeout_s=test_timeout,
+    )
     console.print(f"integration gate: {report.gate}")
+    console.print(f"test gate: {report.test_gate}")
+    console.print(f"ready: {'yes' if report.ready else 'no'}")
+    if report.test_timed_out:
+        console.print(f"test command timed out after {test_timeout}s")
     if report.overlapping:
         console.print(f"overlaps: {', '.join(report.overlapping)}")
     if report.combined:
         console.print(f"combined: {', '.join(report.combined)}")
     console.print(report.note)
+
+
+@forge_app.command("learn")
+def forge_learn(
+    input_path: str = typer.Option(..., "--input", help="JSON or text file of CI gate failures."),
+    approver: str = typer.Option(
+        "", "--approver", help="Named human approver; empty means capture only."
+    ),
+    role: str = typer.Option("striker", "--role", help="Role for candidate jobs."),
+    seen_keys: str = typer.Option(
+        "", "--seen-keys", help="Comma-separated idempotency keys from a prior run."
+    ),
+) -> None:
+    """Capture CI failures as deduped candidate jobs; never dispatch or merge."""
+    from pathlib import Path
+
+    from agency.forge.ci_feedback import authorize_candidate, ingest_ci_failures
+
+    payload = Path(input_path).read_text(encoding="utf-8", errors="replace")
+    report = ingest_ci_failures(
+        payload,
+        role=role,
+        seen_keys=tuple(k.strip() for k in seen_keys.split(",") if k.strip()),
+    )
+    console.print(
+        f"CI feedback: received={report.received} failures={report.failures} "
+        f"duplicates={report.duplicates} candidates={len(report.candidates)}"
+    )
+    for candidate in report.candidates:
+        if approver:
+            proposal = authorize_candidate(candidate, approved_by=approver)
+            console.print(
+                f"PROPOSAL {proposal.candidate_key} {proposal.title} by {proposal.approved_by}"
+            )
+        else:
+            console.print(f"CANDIDATE {candidate.key} {candidate.title} (capture only)")
+    console.print("keys: " + ",".join(report.keys))
 
 
 @forge_app.command("metrics")

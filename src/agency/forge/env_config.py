@@ -6,6 +6,18 @@ import os
 from pathlib import Path
 
 
+def discover_env_file(root: str | Path, *, name: str = ".env") -> Path | None:
+    """Return the repo-local ``.env`` at ``root`` when it exists.
+
+    Only the repository root is inspected: parent directories and nested paths
+    are never searched, so a worker cannot silently pick up an unrelated secret
+    file. Callers load the result with :func:`load_env_file` (whose default
+    ``overwrite=False`` keeps explicit environment variables authoritative).
+    """
+    candidate = Path(root) / name
+    return candidate if candidate.is_file() else None
+
+
 def load_env_file(path: str | Path, *, overwrite: bool = False) -> tuple[str, ...]:
     """Parse KEY=VALUE lines and set missing environment variables.
 
