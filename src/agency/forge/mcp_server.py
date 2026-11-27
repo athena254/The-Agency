@@ -33,7 +33,6 @@ import json
 import os
 import re
 import secrets
-import subprocess
 import sys
 import threading
 from datetime import date, datetime, time
@@ -121,6 +120,31 @@ def _review_caveats() -> list[str]:
     if _calibration_state()["calibrated"]:
         return ["ai_quorum_calibrated"]
     return ["reviewer_calibration_pending"]
+
+
+def _head_sha(root: Path) -> str:
+    """Read HEAD without a subprocess, so the file stays free of shell calls."""
+    git_dir = root / ".git"
+    if git_dir.is_file():
+        try:
+            pointer = git_dir.read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+        if not pointer.startswith("gitdir:"):
+            return ""
+        git_dir = Path(pointer.split(":", 1)[1].strip())
+    head_file = git_dir / "HEAD"
+    try:
+        content = head_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    if content.startswith("ref:"):
+        ref = content.split(":", 1)[1].strip()
+        try:
+            return (git_dir / ref).read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+    return content
 
 
 def _env_int(name: str, default: int, low: int, high: int) -> int:
@@ -873,13 +897,7 @@ class ForgeMcpServer:
             "tests": str(report.tests.gate).upper() if report.tests is not None else "FAIL",
             "review": str(report.review.gate).upper() if report.review is not None else "FAIL",
         }
-        head = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        sha = head.stdout.strip() if head.returncode == 0 else ""
+        sha = _head_sha(root)
         return root, gates, sha, None
 
     def _t_forge_remote_merge(self, args: dict[str, Any]) -> dict[str, Any]:
