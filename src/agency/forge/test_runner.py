@@ -25,6 +25,8 @@ from uuid import uuid4
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
+from agency.forge.project_adapters import prepare_dependencies
+
 logger = structlog.get_logger(__name__)
 
 MAX_TEST_TIMEOUT_S = 300
@@ -248,22 +250,10 @@ def run_tests(
     command = built
 
     tmpdir, workdir, copy_error = _prepare_workdir(real_root)
-    if copy_error is None and language == "node":
-        node_modules = real_root / "node_modules"
-        target = workdir / "node_modules"
-        if node_modules.is_dir() and not target.exists():
-            if os.name == "nt":
-                proc = subprocess.run(
-                    ["cmd", "/c", "mklink", "/J", str(target), str(node_modules)],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=30,
-                )
-                if proc.returncode != 0:
-                    copy_error = f"node_modules junction failed: {proc.stderr[:200]}"
-            else:
-                target.symlink_to(node_modules, target_is_directory=True)
+    if copy_error is None:
+        adapter_note = prepare_dependencies(real_root, workdir, language)
+        if adapter_note.startswith("node_modules junction failed"):
+            copy_error = adapter_note
     if copy_error is not None:
         shutil.rmtree(tmpdir, ignore_errors=True)
         return TestReport(

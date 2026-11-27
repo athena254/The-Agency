@@ -52,3 +52,16 @@ def test_dispatch_command_is_registered() -> None:
     result = CliRunner().invoke(app, ["forge", "dispatch", "--help"])
     assert result.exit_code == 0
     assert "--command" in result.output
+
+
+def test_new_efficiency_commands_are_registered() -> None:
+    runner = CliRunner()
+    for name, flag in (
+        ("run", "--limit"),
+        ("jobs", "--watch"),
+        ("verify", "--endpoint"),
+        ("integrate", "--branch"),
+    ):
+        result = runner.invoke(app, ["forge", name, "--help"])
+        assert result.exit_code == 0, (name, result.output)
+        assert flag in result.output

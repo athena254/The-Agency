@@ -46,9 +46,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agency.core.sqlite_store import open_store
 from agency.forge.inspection import InspectionReport, inspect_changes
+from agency.forge.observability import PhaseTiming
 from agency.forge.pipeline import CAVEATS as _PIPELINE_CAVEATS
-from agency.forge.planning import check_plan
+from agency.forge.planning import check_plan, path_allowed
 from agency.forge.reviewer import ReviewReport, run_review
+from agency.forge.routing import route_job
 from agency.forge.security_scan import SecurityReport, scan_changes
 from agency.forge.test_runner import MAX_TEST_TIMEOUT_S, TestReport, run_tests
 from agency.forge.worktree import (
@@ -116,6 +118,9 @@ class ExternalAgentReport(BaseModel):
     review: ReviewReport | None = None
     plan_gate: str = "NOT_REQUIRED"
     plan_findings: tuple[str, ...] = ()
+    route: str = "standard"
+    model: str = ""
+    phases: tuple[PhaseTiming, ...] = ()
     gate: ExternalAgentGate
     caveats: tuple[str, ...] = _BASE_CAVEATS
     note: str = "External coding agent run; Forge does not auto-merge or authorize release."
@@ -493,6 +498,8 @@ def run_external_agent(
     language: str = "",
     plan_required: bool = False,
     plan_path: str = "PLAN.md",
+    route: str = "standard",
+    model: str = "",
     cleanup: bool = False,
     protected_paths: Iterable[str] | None = None,
 ) -> ExternalAgentReport:
@@ -529,6 +536,7 @@ def run_external_agent(
     base_cmd[0] = _resolve_executable(base_cmd[0])
     has_task_placeholder = any("{task}" in str(x) for x in base_cmd)
     cmd_list = [str(x).replace("{task}", task) for x in base_cmd]
+    cmd_list = [str(x).replace("{model}", model or route_job("", task).model) for x in cmd_list]
     if not has_task_placeholder:
         cmd_list = cmd_list + [task]
 
@@ -574,6 +582,11 @@ def run_external_agent(
         violations = isolation_violations(real_repo, before_snapshot)
         changed = _changed_paths(worktree_path, base_commit)
         plan_report = check_plan(worktree_path, plan_path) if plan_required else None
+        outside_plan = (
+            tuple(p for p in changed if not path_allowed(p, plan_report.allowed_files))
+            if plan_report is not None and plan_report.allowed_files
+            else ()
+        )
 
         try:
             inspection = inspect_changes(worktree_path, changed)
@@ -614,6 +627,8 @@ def run_external_agent(
 
         overall: ExternalAgentGate = "PASS"
         if plan_report is not None and plan_report.gate != "PASS":
+            overall = "FAIL"
+        if outside_plan:
             overall = "FAIL"
         if exit_code not in (0, None):
             overall = "FAIL"
@@ -664,6 +679,8 @@ def run_external_agent(
             caveats.append("review_error")
         if plan_report is not None and plan_report.gate != "PASS":
             caveats.append("plan_gate_failed")
+        if outside_plan:
+            caveats.append("files_outside_plan")
 
         note = "External coding agent run; Forge does not auto-merge or authorize release."
         if violations:
@@ -694,6 +711,19 @@ def run_external_agent(
             review=review,
             plan_gate=plan_report.gate if plan_report is not None else "NOT_REQUIRED",
             plan_findings=plan_report.findings if plan_report is not None else (),
+            route=route,
+            model=model,
+            phases=tuple(
+                PhaseTiming(name=name, duration_s=round(max(0.0, float(value)), 3))
+                for name, value in {
+                    "inspection": getattr(inspection, "duration_s", 0.0) or 0.0,
+                    "security": getattr(security, "duration_s", 0.0) or 0.0,
+                    "tests": getattr(tests, "duration_s", 0.0) or 0.0 if tests is not None else 0.0,
+                    "review": getattr(review, "duration_s", 0.0) or 0.0
+                    if review is not None
+                    else 0.0,
+                }.items()
+            ),
             gate=overall,
             caveats=tuple(caveats),
             note=note,
