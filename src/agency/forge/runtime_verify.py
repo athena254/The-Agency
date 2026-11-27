@@ -7,6 +7,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -28,8 +29,16 @@ def verify_runtime(
     endpoints: list[str],
     *,
     timeout_s: int = 30,
+    urlopen: Any = None,
+    popen: Any = None,
+    sleep: Any = None,
 ) -> RuntimeReport:
-    """Start ``command``, poll each endpoint, then stop the process."""
+    """Start ``command``, poll each endpoint, then stop the process.
+
+    ``urlopen``, ``popen`` and ``sleep`` are injectable so callers and tests can
+    substitute harmless fakes; production defaults are the real stdlib
+    primitives. No credentials are read, logged or returned.
+    """
     if not command or not endpoints:
         return RuntimeReport(
             gate="FAIL",
@@ -39,7 +48,10 @@ def verify_runtime(
             duration_s=0.0,
             note="missing_command_or_endpoints",
         )
-    proc = subprocess.Popen(
+    opener = urlopen if urlopen is not None else urllib.request.urlopen
+    spawn = popen if popen is not None else subprocess.Popen
+    nap = sleep if sleep is not None else time.sleep
+    proc = spawn(
         command,
         cwd=str(root),
         stdout=subprocess.DEVNULL,
@@ -53,12 +65,12 @@ def verify_runtime(
                 if any(url == seen for seen, _ in statuses):
                     continue
                 try:
-                    with urllib.request.urlopen(url, timeout=2) as response:
+                    with opener(url, timeout=2) as response:
                         statuses.append((url, int(response.status)))
                 except (urllib.error.URLError, OSError, ValueError):
                     pass
             if len(statuses) < len(endpoints):
-                time.sleep(0.25)
+                nap(0.25)
     finally:
         proc.terminate()
         try:

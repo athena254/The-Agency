@@ -45,12 +45,19 @@ import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
 from agency.core.sqlite_store import open_store
+from agency.forge.env_config import discover_env_file, load_env_file
 from agency.forge.inspection import InspectionReport, inspect_changes
 from agency.forge.observability import PhaseTiming
 from agency.forge.pipeline import CAVEATS as _PIPELINE_CAVEATS
 from agency.forge.planning import check_plan, path_allowed
-from agency.forge.reviewer import ReviewReport, run_review
-from agency.forge.routing import route_job
+from agency.forge.reviewer import (
+    ReviewReport,
+    build_review_llm,
+    review_provider_mode,
+    run_review,
+)
+from agency.forge.routing import apply_route_model, resolve_route
+from agency.forge.runtime_verify import RuntimeReport, verify_runtime
 from agency.forge.security_scan import SecurityReport, scan_changes
 from agency.forge.test_runner import MAX_TEST_TIMEOUT_S, TestReport, run_tests
 from agency.forge.worktree import (
@@ -120,6 +127,12 @@ class ExternalAgentReport(BaseModel):
     plan_findings: tuple[str, ...] = ()
     route: str = "standard"
     model: str = ""
+    model_applied: str = ""
+    model_mechanism: str = ""
+    review_config_source: str = ""
+    review_provider_mode: str = ""
+    review_provider: str = ""
+    runtime: RuntimeReport | None = None
     phases: tuple[PhaseTiming, ...] = ()
     gate: ExternalAgentGate
     caveats: tuple[str, ...] = _BASE_CAVEATS
@@ -502,12 +515,21 @@ def run_external_agent(
     model: str = "",
     cleanup: bool = False,
     protected_paths: Iterable[str] | None = None,
+    verify_command: str | list[str] | None = None,
+    verify_endpoints: list[str] | None = None,
+    verify_timeout_s: int = 30,
 ) -> ExternalAgentReport:
     """Run an external coding agent in an isolated worktree, then Forge gates.
 
     ``language`` is the job's language tag (informational here — the work
     order text carries the actual contract); accepted so fleet callers can
     forward it uniformly.
+
+    ``verify_command``/``verify_endpoints`` opt a risky route into the real
+    runtime gate (see :func:`verify_runtime`); both default to ``None`` so no
+    process is started and no network call is made unless a caller supplies
+    them. The review configuration is discovered from the repo-local ``.env``
+    at worker start; explicit environment variables always win.
     """
     del language
     real_repo = Path(repo_root)
@@ -521,6 +543,8 @@ def run_external_agent(
         raise ValueError(
             f"test_timeout_s must be in [1, {MAX_TEST_TIMEOUT_S}], got {test_timeout_s}"
         )
+    if verify_timeout_s < 1:
+        raise ValueError(f"verify_timeout_s must be >= 1, got {verify_timeout_s}")
 
     if branch is None or not str(branch).strip():
         branch = DEFAULT_BRANCH
@@ -532,11 +556,25 @@ def run_external_agent(
     if not base_cmd:
         raise ValueError("command must not be empty")
 
+    # Discover review configuration at worker start: only the repo-local .env
+    # is read, and explicit environment variables win (overwrite=False). Keys
+    # are used for their side effect only — neither keys nor values are logged
+    # or echoed into evidence.
+    env_path = discover_env_file(real_repo)
+    env_keys_loaded = load_env_file(env_path) if env_path is not None else ()
+    review_config_source = (
+        env_path.name if env_path is not None and env_keys_loaded else "environment"
+    )
+    review_mode = review_provider_mode()
+
     # Resolve a bare executable name to a full path on Windows (e.g. opencode.cmd).
     base_cmd[0] = _resolve_executable(base_cmd[0])
     has_task_placeholder = any("{task}" in str(x) for x in base_cmd)
     cmd_list = [str(x).replace("{task}", task) for x in base_cmd]
-    cmd_list = [str(x).replace("{model}", model or route_job("", task).model) for x in cmd_list]
+    effective_route = resolve_route(route, task)
+    effective_model = model or effective_route.model
+    cmd_list, model_mechanism = apply_route_model(cmd_list, effective_model)
+    model_applied = effective_model if model_mechanism in ("placeholder", "flag") else ""
     if not has_task_placeholder:
         cmd_list = cmd_list + [task]
 
@@ -611,14 +649,54 @@ def run_external_agent(
 
         review: ReviewReport | None = None
         review_error = False
+        review_provider = "not-run"
         if run_review_flag:
             try:
+                # Build once so evidence records the adapter that actually
+                # judged; run_review receives the same object below.
+                review_llm = llm if llm is not None else build_review_llm()
+                if review_llm is None:
+                    review_provider = "echo"
+                else:
+                    review_provider = str(getattr(review_llm, "provider", "") or "custom")
                 review = run_review(
-                    worktree_path, changed, use_llm=True, llm=llm, tests_report=tests
+                    worktree_path,
+                    changed,
+                    use_llm=True,
+                    llm=review_llm,
+                    tests_report=tests,
                 )
             except Exception:  # noqa: BLE001
                 review_error = True
                 logger.error("forge.external_agent_review_error")
+
+        # Risky routes opt into the real runtime gate only when a caller
+        # supplies both a start command and endpoints. Safe defaults keep every
+        # other run free of new processes and network calls.
+        runtime: RuntimeReport | None = None
+        runtime_error = False
+        if effective_route.job_class == "risky" and verify_command and verify_endpoints:
+            if isinstance(verify_command, str):
+                verify_cmd = shlex.split(verify_command)
+            else:
+                verify_cmd = [str(x) for x in verify_command]
+            try:
+                runtime = verify_runtime(
+                    worktree_path,
+                    verify_cmd,
+                    list(verify_endpoints),
+                    timeout_s=verify_timeout_s,
+                )
+            except Exception as exc:  # noqa: BLE001 - fail closed on verifier error
+                runtime_error = True
+                runtime = RuntimeReport(
+                    gate="FAIL",
+                    command=tuple(verify_cmd),
+                    endpoints=tuple(verify_endpoints),
+                    statuses=(),
+                    duration_s=0.0,
+                    note=f"runtime verification error: {type(exc).__name__}",
+                )
 
         post_repo_state = _tracked_changes(real_repo)
         baseline = set(pre_repo_state)
@@ -643,6 +721,10 @@ def run_external_agent(
         if review is not None and review.gate != "PASS":
             overall = "FAIL"
         if review_error:
+            overall = "FAIL"
+        if runtime is not None and runtime.gate != "PASS":
+            overall = "FAIL"
+        if runtime_error:
             overall = "FAIL"
         if protected_hits:
             overall = "FAIL"
@@ -681,6 +763,11 @@ def run_external_agent(
             caveats.append("plan_gate_failed")
         if outside_plan:
             caveats.append("files_outside_plan")
+        if runtime is not None:
+            if runtime.gate != "PASS":
+                caveats.append("runtime_gate_failed")
+        elif effective_route.job_class == "risky":
+            caveats.append("runtime_verification_skipped")
 
         note = "External coding agent run; Forge does not auto-merge or authorize release."
         if violations:
@@ -688,7 +775,11 @@ def run_external_agent(
                 " ISOLATION VIOLATION: the agent left its isolated worktree and modified"
                 f" paths outside it: {', '.join(violations)}."
             )
+        if runtime is not None and runtime.gate != "PASS":
+            note += " Runtime verification FAILED; the overall gate is blocked."
         failure_detail = _failure_detail(stdout, stderr) if overall == "FAIL" else ""
+        if overall == "FAIL" and runtime is not None and runtime.gate != "PASS":
+            failure_detail = (failure_detail + " | " + runtime.note).strip(" |")
 
         report = ExternalAgentReport(
             report_id=report_id,
@@ -713,6 +804,12 @@ def run_external_agent(
             plan_findings=plan_report.findings if plan_report is not None else (),
             route=route,
             model=model,
+            model_applied=model_applied,
+            model_mechanism=model_mechanism,
+            review_config_source=review_config_source,
+            review_provider_mode=review_mode,
+            review_provider=review_provider,
+            runtime=runtime,
             phases=tuple(
                 PhaseTiming(name=name, duration_s=round(max(0.0, float(value)), 3))
                 for name, value in {
@@ -735,6 +832,8 @@ def run_external_agent(
             changed=len(changed),
             gate=overall,
             exit_code=exit_code,
+            model_applied=model_applied,
+            runtime_gate=runtime.gate if runtime is not None else "not-run",
         )
         return report
     finally:
