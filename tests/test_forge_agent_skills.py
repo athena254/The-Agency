@@ -36,11 +36,11 @@ def test_plan_gate_requires_sections(tmp_path: Path) -> None:
     assert check_plan(tmp_path).gate == "PASS"
 
 
-def test_work_order_carries_role_skill_and_plan_gate() -> None:
+def test_work_order_carries_role_skill_and_plan_gate(tmp_path: Path) -> None:
     order = WorkOrder(
         title="Build page",
         task="Build the page",
-        repo="C:/repo",
+        repo=str(tmp_path),
         role="apprentice",
         plan_required=True,
     )

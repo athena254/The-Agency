@@ -12,7 +12,7 @@ from agency.forge.orchestration import BlacksmithOps, JobState
 
 def _awaiting(tmp_path: Path) -> tuple[BlacksmithOps, str]:
     ops = BlacksmithOps(str(tmp_path / "jobs.db"))
-    job = ops.submit("build slice", "do the work", "C:/repo")
+    job = ops.submit("build slice", "do the work", str(tmp_path / "repo"))
     ops._transition(job, JobState.AWAITING_HUMAN, "test_setup")
     return ops, job.job_id
 
