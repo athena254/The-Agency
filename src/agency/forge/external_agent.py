@@ -49,6 +49,7 @@ from agency.core.sqlite_store import open_store
 from agency.forge.apprentice_policy import enforce_apprentice_policy
 from agency.forge.diff_budget import DiffBudgetReport, FileChange, check_diff_budget
 from agency.forge.env_config import discover_env_file, load_env_file
+from agency.forge.human_gates import required_human_gates
 from agency.forge.inspection import InspectionReport, inspect_changes
 from agency.forge.observability import PhaseTiming
 from agency.forge.parallel_gates import ParallelGateReport, run_parallel_gates
@@ -895,6 +896,8 @@ def run_external_agent(
         caveats.extend(policy.reasons)
         if diff_report is not None:
             caveats.extend(diff_report.caveats)
+        for gate in required_human_gates(changed):
+            caveats.append(f"human_gate_required:{gate}")
         if regression_verdict is not None:
             caveats.extend(regression_verdict.findings)
         if runtime is not None:

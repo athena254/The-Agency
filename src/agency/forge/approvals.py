@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agency.forge.human_gates import required_human_gates
 from agency.forge.orchestration import JobState
 
 if TYPE_CHECKING:
@@ -36,6 +37,7 @@ class ApprovalBrief(BaseModel):
     repo: str = ""
     updated_at: str = ""
     caveats: tuple[str, ...] = ("not_a_human_review", "no_auto_merge")
+    required_human_gates: tuple[str, ...] = ()
 
 
 class ApprovalRecord(BaseModel):
@@ -60,6 +62,7 @@ def _brief(job: ForgeJob) -> ApprovalBrief:
         changed_paths=job.changed_paths,
         repo=job.repo,
         updated_at=job.updated_at,
+        required_human_gates=required_human_gates(job.changed_paths),
     )
 
 
@@ -87,7 +90,9 @@ def decide(
 
     at = datetime.now(UTC).isoformat()
     bounded_note = str(note).strip()[:MAX_NOTE_CHARS]
-    detail = f"approver={approver}; note={bounded_note}"[:MAX_NOTE_CHARS]
+    gates = required_human_gates(job.changed_paths)
+    gate_note = f"human_gates={','.join(gates)}" if gates else "human_gates=none"
+    detail = f"approver={approver}; {gate_note}; note={bounded_note}"[:MAX_NOTE_CHARS]
     if decision == "approve":
         # Keep the state as AWAITING_HUMAN until a gated ship actually runs.
         ops._event(ops.get(job.job_id), "human_approval", job.state.value, job.state.value, detail)
@@ -102,4 +107,9 @@ def decide(
         at=at,
         note=bounded_note,
         state_after=state_after,
+        caveats=(
+            "no_auto_merge",
+            "no_release_authorization",
+            *[f"gate_reviewed:{g}" for g in gates],
+        ),
     )
