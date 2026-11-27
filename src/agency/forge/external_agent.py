@@ -362,10 +362,12 @@ def _run_agent(cmd_list: list[str], cwd: str, timeout_s: int) -> tuple[int | Non
     return exit_code, _decode_stream(stdout), stderr_text
 
 
-def _changed_paths(worktree: Path) -> list[str]:
-    """Return files changed relative to HEAD inside ``worktree``."""
+def _changed_paths(worktree: Path, base_commit: str = "") -> list[str]:
+    """Return files changed relative to the dispatch base, committed or not."""
     paths: set[str] = set()
+    base = base_commit or "HEAD"
     for git_args in (
+        ["diff", "--name-only", "-z", f"{base}..HEAD"],
         ["diff", "--name-only", "-z", "HEAD"],
         ["ls-files", "--others", "--exclude-standard", "-z"],
     ):
@@ -544,6 +546,14 @@ def run_external_agent(
         info: WorktreeInfo = create_worktree(
             real_repo, str(branch), base_ref=base_ref, worktree_root=worktree_root
         )
+        base_proc = subprocess.run(
+            ["git", "-C", str(real_repo), "rev-parse", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT_S,
+        )
+        base_commit = base_proc.stdout.strip() if base_proc.returncode == 0 else ""
     except WorktreeError as exc:
         _prune_worktrees(real_repo)
         raise ValueError(f"failed to create worktree: {exc}") from exc
@@ -562,7 +572,7 @@ def run_external_agent(
         pre_repo_state = _tracked_changes(real_repo)
         exit_code, stdout, stderr = _run_agent(cmd_list, str(worktree_path), timeout_s)
         violations = isolation_violations(real_repo, before_snapshot)
-        changed = _changed_paths(worktree_path)
+        changed = _changed_paths(worktree_path, base_commit)
         plan_report = check_plan(worktree_path, plan_path) if plan_required else None
 
         try:
