@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -43,9 +44,26 @@ def _caps(server: ForgeMcpServer) -> dict:
 
 
 def test_calibration_caveat_reflects_owner_waiver(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    result = Path("C:/Users/PC/The-Agency/data/forge_calibration_v2_result.json")
+    result = tmp_path / "calibration.json"
+    judges = [
+        {"judge": "model-a", "labeled": 20, "agreement": 1.0},
+        {"judge": "model-b", "labeled": 20, "agreement": 1.0},
+    ]
+    result.write_text(
+        json.dumps(
+            {
+                "status": "ai_quorum_calibrated",
+                "kind": "ai_quorum_not_human",
+                "bar": 0.75,
+                "min_labels": 20,
+                "judges": judges,
+                "inter_judge_agreement": 1.0,
+            }
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setenv("AGENCY_FORGE_CALIBRATION_FILE", str(result))
     caps = _caps(ForgeMcpServer())
     assert caps["calibration"]["calibrated"] is True
