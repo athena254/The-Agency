@@ -69,6 +69,7 @@ class ForgeJob(BaseModel):
     test_paths: tuple[str, ...] = ()
     state: JobState = JobState.QUEUED
     language: str = Field(default="", max_length=32)
+    role: str = Field(default="striker", max_length=32)
     attempts: int = Field(default=0, ge=0)
     report_id: str = ""
     gate: str = ""
@@ -182,6 +183,7 @@ class BlacksmithOps:
         acceptance: tuple[str, ...] | list[str] = (),
         test_paths: tuple[str, ...] | list[str] = (),
         language: str = "",
+        role: str = "striker",
     ) -> ForgeJob:
         if not isinstance(repo, str) or not Path(repo).is_absolute():
             raise ValueError(f"repo must be an absolute path, got {repo!r}.")
@@ -200,6 +202,7 @@ class BlacksmithOps:
             acceptance=acc,
             test_paths=tests,
             language=str(language or "").strip()[:32],
+            role=str(role or "striker").strip()[:32],
             state=JobState.QUEUED,
             created_at=now,
             updated_at=now,
@@ -263,6 +266,9 @@ class BlacksmithOps:
             attempt=job.attempts,
             max_attempts=self._max_attempts,
             failure_tail=job.failure_detail if job.attempts > 1 else "",
+            role=job.role or "striker",
+            plan_required=True,
+            plan_path="PLAN.md",
         )
         # Optional kwargs are only forwarded when set so custom runners with
         # fixed signatures keep working.
@@ -271,6 +277,8 @@ class BlacksmithOps:
             runner_kwargs["shadow_llm"] = self._shadow_llm
         if job.language:
             runner_kwargs["language"] = job.language
+        runner_kwargs["plan_required"] = True
+        runner_kwargs["plan_path"] = "PLAN.md"
         try:
             report = self._runner(
                 job.repo,

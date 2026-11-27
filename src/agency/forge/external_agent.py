@@ -47,6 +47,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from agency.core.sqlite_store import open_store
 from agency.forge.inspection import InspectionReport, inspect_changes
 from agency.forge.pipeline import CAVEATS as _PIPELINE_CAVEATS
+from agency.forge.planning import check_plan
 from agency.forge.reviewer import ReviewReport, run_review
 from agency.forge.security_scan import SecurityReport, scan_changes
 from agency.forge.test_runner import MAX_TEST_TIMEOUT_S, TestReport, run_tests
@@ -113,6 +114,8 @@ class ExternalAgentReport(BaseModel):
     security: SecurityReport
     tests: TestReport | None = None
     review: ReviewReport | None = None
+    plan_gate: str = "NOT_REQUIRED"
+    plan_findings: tuple[str, ...] = ()
     gate: ExternalAgentGate
     caveats: tuple[str, ...] = _BASE_CAVEATS
     note: str = "External coding agent run; Forge does not auto-merge or authorize release."
@@ -486,6 +489,8 @@ def run_external_agent(
     llm: Any = None,
     shadow_llm: Any = None,
     language: str = "",
+    plan_required: bool = False,
+    plan_path: str = "PLAN.md",
     cleanup: bool = False,
     protected_paths: Iterable[str] | None = None,
 ) -> ExternalAgentReport:
@@ -558,6 +563,7 @@ def run_external_agent(
         exit_code, stdout, stderr = _run_agent(cmd_list, str(worktree_path), timeout_s)
         violations = isolation_violations(real_repo, before_snapshot)
         changed = _changed_paths(worktree_path)
+        plan_report = check_plan(worktree_path, plan_path) if plan_required else None
 
         try:
             inspection = inspect_changes(worktree_path, changed)
@@ -597,6 +603,8 @@ def run_external_agent(
         protected_hits = tuple(p for p in changed if p in protected)
 
         overall: ExternalAgentGate = "PASS"
+        if plan_report is not None and plan_report.gate != "PASS":
+            overall = "FAIL"
         if exit_code not in (0, None):
             overall = "FAIL"
         if not changed:
@@ -644,6 +652,8 @@ def run_external_agent(
             caveats = [c for c in caveats if c != "review_not_run"]
         if review_error:
             caveats.append("review_error")
+        if plan_report is not None and plan_report.gate != "PASS":
+            caveats.append("plan_gate_failed")
 
         note = "External coding agent run; Forge does not auto-merge or authorize release."
         if violations:
@@ -672,6 +682,8 @@ def run_external_agent(
             security=security,
             tests=tests,
             review=review,
+            plan_gate=plan_report.gate if plan_report is not None else "NOT_REQUIRED",
+            plan_findings=plan_report.findings if plan_report is not None else (),
             gate=overall,
             caveats=tuple(caveats),
             note=note,

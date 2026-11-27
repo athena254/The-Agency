@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -1154,6 +1155,62 @@ def forge_approve(
         f"Recorded {record.decision} by {record.approver} for {record.job_id} "
         f"(state={record.state_after}). No merge or release was performed."
     )
+
+
+@forge_app.command("submit")
+def forge_submit(
+    title: str = typer.Option(..., "--title", help="Short job title."),
+    task: str = typer.Option(..., "--task", help="Work order task text."),
+    repo: str = typer.Option(..., "--repo", help="Absolute repo path."),
+    db: str = typer.Option("forge_jobs.db", "--db", help="Job database path."),
+    role: str = typer.Option("striker", "--role", help="Worker role: striker or apprentice."),
+    acceptance: str = typer.Option("", "--acceptance", help="Comma-separated acceptance items."),
+    test_paths: str = typer.Option("", "--test-paths", help="Comma-separated test paths."),
+) -> None:
+    """Submit one bounded job to the Blacksmith queue (QUEUED, not dispatched)."""
+    from agency.forge.orchestration import BlacksmithOps
+
+    ops = BlacksmithOps(db)
+    try:
+        job = ops.submit(
+            title,
+            task,
+            repo,
+            acceptance=tuple(x.strip() for x in acceptance.split(",") if x.strip()),
+            test_paths=tuple(x.strip() for x in test_paths.split(",") if x.strip()),
+            role=role,
+        )
+    finally:
+        ops.close()
+    console.print(f"Submitted {job.job_id} ({job.role}) -> {job.state.value}")
+
+
+@forge_app.command("dispatch")
+def forge_dispatch(
+    db: str = typer.Option("forge_jobs.db", "--db", help="Job database path."),
+    command: str = typer.Option(
+        ..., "--command", help="Striker command; {workdir} and {task} are substituted."
+    ),
+    worktree_root: str = typer.Option("", "--worktree-root", help="Optional worktree root."),
+) -> None:
+    """Dispatch one queued job through the Blacksmith. No auto-merge or release."""
+    from agency.forge.orchestration import BlacksmithOps
+
+    ops = BlacksmithOps(
+        db,
+        command=tuple(shlex.split(command)),
+        worktree_root=worktree_root or None,
+    )
+    try:
+        job = ops.dispatch_next()
+    finally:
+        ops.close()
+    if job is None:
+        console.print("No queued job to dispatch.")
+        return
+    console.print(f"Job {job.job_id}: {job.state.value} gate={job.gate or '-'}")
+    if job.failure_detail:
+        console.print(job.failure_detail[:400])
 
 
 @forge_app.command("metrics")
